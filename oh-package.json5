@@ -1,0 +1,12 @@
+{
+  "modelVersion": "6.1.0",
+  "name": "legado-harmony",
+  "version": "1.0.0",
+  "description": "Legado阅读鸿蒙版",
+  "main": "",
+  "author": "",
+  "license": "GPL-3.0",
+  "dependencies": {},
+  "devDependencies": {},
+  "scripts": {}
+}

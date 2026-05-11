@@ -1,0 +1,56 @@
+{
+  "app": {
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\apart\\.ohos\\config\\default_legado-harmony_PApShW1orkn7C3OskTgaa_gvU1tdKIoK6G30oro8DA0=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001AB4D5D3003BE85972C76B405FFF8B6DDF4CCAC67C15D60E74572A2A130B3AA621CA20057BE1CD",
+          "profile": "C:\\Users\\apart\\.ohos\\config\\default_legado-harmony_PApShW1orkn7C3OskTgaa_gvU1tdKIoK6G30oro8DA0=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\apart\\.ohos\\config\\default_legado-harmony_PApShW1orkn7C3OskTgaa_gvU1tdKIoK6G30oro8DA0=.p12",
+          "storePassword": "0000001A143B9A4FBC4E44626953BF6D875DCAB4124382B03D384ED673F9C654391B30A9FCA042B7C059"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "compatibleSdkVersion": "6.1.0(23)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        },
+        "targetSdkVersion": "6.1.0(23)"
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "src": [
+    "pages/Index",
+    "pages/ReadBook",
+    "pages/SearchBookDetail",
+    "pages/BookSource",
+    "pages/BookSourceEdit",
+    "pages/Search",
+    "pages/Settings",
+    "pages/About"
+  ]
+}

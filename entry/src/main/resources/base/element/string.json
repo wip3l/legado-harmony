@@ -1,0 +1,196 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Legado阅读鸿蒙版主模块"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Legado阅读鸿蒙版"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "阅读"
+    },
+    {
+      "name": "bookshelf",
+      "value": "书架"
+    },
+    {
+      "name": "explore",
+      "value": "发现"
+    },
+    {
+      "name": "search",
+      "value": "搜索"
+    },
+    {
+      "name": "settings",
+      "value": "我的"
+    },
+    {
+      "name": "book_source",
+      "value": "书源管理"
+    },
+    {
+      "name": "replace_rule",
+      "value": "替换净化"
+    },
+    {
+      "name": "backup_restore",
+      "value": "备份恢复"
+    },
+    {
+      "name": "theme_settings",
+      "value": "主题设置"
+    },
+    {
+      "name": "other_settings",
+      "value": "其他设置"
+    },
+    {
+      "name": "about",
+      "value": "关于"
+    },
+    {
+      "name": "loading",
+      "value": "加载中..."
+    },
+    {
+      "name": "no_books",
+      "value": "暂无书籍"
+    },
+    {
+      "name": "add_books_hint",
+      "value": "点击右下角添加书籍"
+    },
+    {
+      "name": "search_hint",
+      "value": "搜索书籍"
+    },
+    {
+      "name": "searching",
+      "value": "搜索中..."
+    },
+    {
+      "name": "no_results",
+      "value": "未找到相关书籍"
+    },
+    {
+      "name": "hot_search",
+      "value": "热门搜索"
+    },
+    {
+      "name": "search_history",
+      "value": "搜索历史"
+    },
+    {
+      "name": "clear_history",
+      "value": "清空"
+    },
+    {
+      "name": "previous_chapter",
+      "value": "上一章"
+    },
+    {
+      "name": "next_chapter",
+      "value": "下一章"
+    },
+    {
+      "name": "chapter_list",
+      "value": "目录"
+    },
+    {
+      "name": "font_size",
+      "value": "字体大小"
+    },
+    {
+      "name": "line_spacing",
+      "value": "行间距"
+    },
+    {
+      "name": "background_color",
+      "value": "背景颜色"
+    },
+    {
+      "name": "page_animation",
+      "value": "翻页动画"
+    },
+    {
+      "name": "no_animation",
+      "value": "无动画"
+    },
+    {
+      "name": "simulation_animation",
+      "value": "仿真翻页"
+    },
+    {
+      "name": "horizontal_animation",
+      "value": "左右平移"
+    },
+    {
+      "name": "vertical_animation",
+      "value": "上下滚动"
+    },
+    {
+      "name": "user_agent",
+      "value": "UserAgent"
+    },
+    {
+      "name": "proxy_settings",
+      "value": "代理设置"
+    },
+    {
+      "name": "timeout",
+      "value": "超时时间"
+    },
+    {
+      "name": "cache_size",
+      "value": "缓存大小"
+    },
+    {
+      "name": "clear_cache",
+      "value": "清除缓存"
+    },
+    {
+      "name": "backup_path",
+      "value": "备份路径"
+    },
+    {
+      "name": "check_update",
+      "value": "检查更新"
+    },
+    {
+      "name": "exit",
+      "value": "退出"
+    },
+    {
+      "name": "current",
+      "value": "当前"
+    },
+    {
+      "name": "unread_count",
+      "value": "章未读"
+    },
+    {
+      "name": "read_finished",
+      "value": "已读完"
+    },
+    {
+      "name": "just_now",
+      "value": "刚刚"
+    },
+    {
+      "name": "minutes_ago",
+      "value": "分钟前"
+    },
+    {
+      "name": "hours_ago",
+      "value": "小时前"
+    },
+    {
+      "name": "days_ago",
+      "value": "天前"
+    }
+  ]
+}

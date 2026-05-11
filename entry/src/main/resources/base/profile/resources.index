@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Legado阅读鸿蒙版主模块"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Legado阅读鸿蒙版"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "阅读"
+    },
+    {
+      "name": "app_name",
+      "value": "阅读"
+    }
+  ]
+}
