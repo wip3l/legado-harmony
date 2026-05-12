@@ -84,14 +84,12 @@ export class ReadBookEngine {
     if (idx < 0 || idx >= this.chapters.length || !this.book || !this.source) return '';
 
     const chapter = this.chapters[idx];
+    this.curIdx = idx;
     if (this.chapterCache.has(idx)) return this.chapterCache.get(idx)!;
 
     const text = await this.webBook.getContent(this.source, this.book, chapter);
     if (text) {
       this.chapterCache.set(idx, text);
-      this.curIdx = idx;
-      this.curPos = 0;
-      this.saveProgress();
     }
     return text;
   }

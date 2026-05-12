@@ -10,7 +10,7 @@ struct SettingsPage {
   @StorageLink('readerLineHeight') readerLineHeight: number = 32;
   @StorageLink('readerParagraphSpacing') readerParagraphSpacing: number = 10;
   @StorageLink('readerThemeIndex') readerThemeIndex: number = 0;
-  @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 0;
+  @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
   @StorageLink('readerTapTurnPage') readerTapTurnPage: boolean = true;
   @StorageLink('readerVolumeTurnPage') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;

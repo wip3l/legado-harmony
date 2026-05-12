@@ -1,4 +1,4 @@
-import { router } from '@kit.ArkUI';
+import { router, window } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
 import { Book, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
@@ -11,7 +11,15 @@ struct Index {
   @State currentIndex: number = 0;
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
-  @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appDarkMode') @Watch('onAppDarkModeChanged') appDarkMode: boolean = false;
+
+  aboutToAppear() {
+    this.syncHomeSystemBars();
+  }
+
+  onAppDarkModeChanged(): void {
+    this.syncHomeSystemBars();
+  }
 
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
@@ -64,6 +72,22 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  syncHomeSystemBars(): void {
+    window.getLastWindow(getContext(this)).then((mainWindow: window.Window) => {
+      mainWindow.setWindowSystemBarProperties({
+        statusBarColor: this.appDarkMode ? '#101113' : '#FFFFFF',
+        isStatusBarLightIcon: this.appDarkMode,
+        statusBarContentColor: this.appDarkMode ? '#FFFFFF' : '#1F1F1F',
+        navigationBarColor: this.appDarkMode ? '#101113' : '#F5F5F5',
+        isNavigationBarLightIcon: this.appDarkMode,
+        navigationBarContentColor: this.appDarkMode ? '#FFFFFF' : '#1F1F1F'
+      });
+    }).catch((err: Error) => {
+      console.error('同步首页系统栏颜色失败:', err);
+    });
   }
 
   @Builder
@@ -281,6 +305,7 @@ struct BookshelfPage {
           .width('100%')
           .layoutWeight(1)
           .padding({ left: 16, right: 16, bottom: 96 })
+          .backgroundColor(this.pageColor())
         }
       }
       .width('100%')
@@ -574,6 +599,7 @@ struct ExplorePage {
         .width('100%')
         .layoutWeight(1)
         .padding({ left: 16, right: 16, bottom: 96 })
+        .backgroundColor(this.pageColor())
       } else {
         Column() {
           Text('没有发现内容')
@@ -774,6 +800,7 @@ struct SearchPage {
         .width('100%')
         .layoutWeight(1)
         .padding({ left: 16, right: 16, bottom: 96 })
+        .backgroundColor(this.pageColor())
       } else if (this.isSearching) {
         Column() {
           LoadingProgress()
@@ -986,7 +1013,7 @@ struct SettingsPage {
       }
       .width('100%')
       .layoutWeight(1)
-      .backgroundColor(this.appDarkMode ? '#191B1F' : '#FFFFFF')
+      .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
       .padding({ bottom: 96 })
     }
     .width('100%')

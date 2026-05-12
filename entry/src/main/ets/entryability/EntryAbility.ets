@@ -7,6 +7,9 @@ export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onCreate');
     this.syncSystemColorMode(this.context.config);
+    if (AppStorage.get<number>('readerPageTurnMode') === undefined) {
+      AppStorage.setOrCreate('readerPageTurnMode', 1);
+    }
     appDb.init(this.context).then(() => {
       hilog.info(0x0000, 'testTag', '数据库初始化成功');
     }).catch((err: Error) => {
