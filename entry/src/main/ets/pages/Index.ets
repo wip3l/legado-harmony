@@ -1,5 +1,6 @@
 import { router, window } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
+import deviceInfo from '@ohos.deviceInfo';
 import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
 import { Book, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
@@ -24,44 +25,58 @@ struct Index {
   }
 
   build() {
+    if (this.supportsImmersiveTabs()) {
+      this.immersiveTabs()
+    } else {
+      this.compatTabs()
+    }
+  }
+
+  supportsImmersiveTabs(): boolean {
+    return deviceInfo.sdkApiVersion >= 23;
+  }
+
+  @Builder
+  immersiveTabs() {
     HdsTabs({ barPosition: BarPosition.End, index: this.currentIndex }) {
       TabContent() {
         BookshelfPage()
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.bottomTabStyle($r('app.media.ic_tab_bookshelf'), '书架'))
+      .tabBar(this.compatTabBar($r('app.media.ic_tab_bookshelf'), '书架', 0))
 
       TabContent() {
         ExplorePage()
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.bottomTabStyle($r('app.media.ic_tab_explore'), '发现'))
+      .tabBar(this.compatTabBar($r('app.media.ic_tab_explore'), '发现', 1))
 
       TabContent() {
         SearchPage()
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.bottomTabStyle($r('app.media.ic_tab_search'), '搜索'))
+      .tabBar(this.compatTabBar($r('app.media.ic_tab_search'), '搜索', 2))
 
       TabContent() {
         SettingsPage()
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.bottomTabStyle($r('app.media.ic_tab_mine'), '我的'))
+      .tabBar(this.compatTabBar($r('app.media.ic_tab_mine'), '我的', 3))
     }
+    .barMode(BarMode.Fixed)
     .barOverlap(true)
-    .barBackgroundColor(Color.Transparent)
     .barFloatingStyle({
-      lightColor: this.tabBarLightColor(),
       systemMaterialEffect: {
         materialType: hdsMaterial.MaterialType.IMMERSIVE,
         materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
       },
-      thermoCtrl: true
+      adaptToHandedness: true,
+      thermoCtrl: true,
+      barOpacity: 1
     })
     .scrollable(false)
     .onChange((index: number) => {
@@ -71,6 +86,65 @@ struct Index {
     .height('100%')
     .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  compatTabs() {
+    Tabs({ barPosition: BarPosition.End, index: this.currentIndex }) {
+      TabContent() {
+        BookshelfPage()
+      }
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .tabBar(this.compatTabBar($r('app.media.ic_tab_bookshelf'), '书架', 0))
+
+      TabContent() {
+        ExplorePage()
+      }
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .tabBar(this.compatTabBar($r('app.media.ic_tab_explore'), '发现', 1))
+
+      TabContent() {
+        SearchPage()
+      }
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .tabBar(this.compatTabBar($r('app.media.ic_tab_search'), '搜索', 2))
+
+      TabContent() {
+        SettingsPage()
+      }
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .tabBar(this.compatTabBar($r('app.media.ic_tab_mine'), '我的', 3))
+    }
+    .barMode(BarMode.Fixed)
+    .barBackgroundColor(this.appDarkMode ? '#191B1F' : '#FFFFFF')
+    .scrollable(false)
+    .onChange((index: number) => {
+      this.currentIndex = index;
+    })
+    .width('100%')
+    .height('100%')
+    .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  compatTabBar(icon: Resource, title: string, index: number) {
+    Column({ space: 2 }) {
+      Image(icon)
+        .width(22)
+        .height(22)
+        .fillColor(this.currentIndex === index ? this.tabBarActiveColor() : this.tabBarTextColor())
+      Text(title)
+        .fontSize(11)
+        .fontColor(this.currentIndex === index ? this.tabBarActiveColor() : this.tabBarTextColor())
+    }
+    .width('100%')
+    .height(56)
+    .justifyContent(FlexAlign.Center)
   }
 
   syncHomeSystemBars(): void {
@@ -88,21 +162,6 @@ struct Index {
     });
   }
 
-  bottomTabStyle(icon: Resource, title: string): BottomTabBarStyle {
-    return BottomTabBarStyle.of(icon, title)
-      .layoutMode(LayoutMode.AUTO)
-      .symmetricExtensible(true)
-      .padding({ left: 4, right: 4, top: 0, bottom: 0 })
-      .labelStyle({
-        selectedColor: this.tabBarActiveColor(),
-        unselectedColor: this.tabBarTextColor()
-      })
-      .iconStyle({
-        selectedColor: this.tabBarActiveColor(),
-        unselectedColor: this.tabBarTextColor()
-      });
-  }
-
   tabBarActiveColor(): string {
     return this.appDarkMode ? '#68D6C3' : '#007DFF';
   }
@@ -111,9 +170,6 @@ struct Index {
     return this.appDarkMode ? '#E7E9ED' : '#5F6670';
   }
 
-  tabBarLightColor(): string {
-    return this.appDarkMode ? '#66FFFFFF' : '#CCFFFFFF';
-  }
 }
 
 @Component
