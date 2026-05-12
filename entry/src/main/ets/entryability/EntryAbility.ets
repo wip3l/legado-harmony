@@ -10,6 +10,7 @@ export default class EntryAbility extends UIAbility {
     if (AppStorage.get<number>('readerPageTurnMode') === undefined) {
       AppStorage.setOrCreate('readerPageTurnMode', 1);
     }
+    PersistentStorage.persistProp('bookshelfSortMode', 'recentRead');
     appDb.init(this.context).then(() => {
       hilog.info(0x0000, 'testTag', '数据库初始化成功');
     }).catch((err: Error) => {

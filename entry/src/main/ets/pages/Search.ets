@@ -1,14 +1,16 @@
 import { router } from '@kit.ArkUI';
-import { SearchBook } from '../model/data/Book';
+import { Book, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { promptAction } from '@kit.ArkUI';
 import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
+import { WebBookService } from '../core/book/WebBookService';
 
 @Entry
 @Component
 struct SearchPage {
   @State keyword: string = '';
   @State searchResults: SearchBook[] = [];
+  @State shelfBookUrls: string[] = [];
   @State isSearching: boolean = false;
   @State searchHistory: string[] = [];
   @State hotKeywords: string[] = ['斗破苍穹', '完美世界', '遮天', '凡人修仙传', '诛仙'];
@@ -97,6 +99,17 @@ struct SearchPage {
                 }
                 .layoutWeight(1)
                 .alignItems(HorizontalAlign.Start)
+
+                Button(this.isSearchBookInShelf(book) ? '移除' : '加入')
+                  .height(32)
+                  .fontSize(13)
+                  .borderRadius(16)
+                  .backgroundColor(this.isSearchBookInShelf(book) ? '#E53935' : '#007DFF')
+                  .fontColor('#FFFFFF')
+                  .margin({ left: 12 })
+                  .onClick(() => {
+                    this.toggleSearchBookShelf(book);
+                  })
               }
               .width('100%')
               .padding(12)
@@ -244,6 +257,7 @@ struct SearchPage {
       const allBooks = await coordinator.search(keyword, (progress: SearchProgress) => {
         this.searchResults = progress.results;
         this.statusMessage = progress.status;
+        this.syncSearchShelfStatus(progress.results);
         if (progress.finished) {
           this.isSearching = false;
         }
@@ -261,6 +275,120 @@ struct SearchPage {
       this.statusMessage = '搜索失败';
     } finally {
       this.isSearching = false;
+    }
+  }
+
+  async syncSearchShelfStatus(books: SearchBook[]): Promise<void> {
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const urls: string[] = [];
+      for (const book of books) {
+        if (book.bookUrl && await db.getBook(book.bookUrl)) {
+          urls.push(book.bookUrl);
+        }
+      }
+      this.shelfBookUrls = urls;
+    } catch (e) {
+      console.error('同步搜索书架状态失败:', e);
+    }
+  }
+
+  isSearchBookInShelf(book: SearchBook): boolean {
+    return !!book.bookUrl && this.shelfBookUrls.includes(book.bookUrl);
+  }
+
+  async toggleSearchBookShelf(searchBook: SearchBook): Promise<void> {
+    if (this.isSearchBookInShelf(searchBook)) {
+      await this.removeSearchBookFromShelf(searchBook);
+    } else {
+      await this.addSearchBookToShelf(searchBook);
+    }
+  }
+
+  async addSearchBookToShelf(searchBook: SearchBook): Promise<void> {
+    if (!searchBook.bookUrl) {
+      promptAction.showToast({ message: '书籍地址为空' });
+      return;
+    }
+
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const existing = await db.getBook(searchBook.bookUrl);
+      if (existing) {
+        this.markSearchBookInShelf(searchBook.bookUrl);
+        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+        promptAction.showToast({ message: '已在书架' });
+        return;
+      }
+
+      const book = new Book();
+      book.bookUrl = searchBook.bookUrl;
+      book.tocUrl = searchBook.tocUrl;
+      book.origin = searchBook.origin;
+      book.originName = searchBook.originName;
+      book.name = searchBook.name;
+      book.author = searchBook.author;
+      book.kind = searchBook.kind;
+      book.coverUrl = searchBook.coverUrl;
+      book.intro = searchBook.intro;
+      book.latestChapterTitle = searchBook.latestChapterTitle;
+      book.wordCount = searchBook.wordCount;
+      book.variable = searchBook.variable;
+      book.group = -2147483645;
+      book.type = 0;
+      book.canUpdate = true;
+      book.lastCheckTime = Date.now();
+      book.latestChapterTime = Date.now();
+
+      const source = book.origin ? await db.getBookSource(book.origin) : null;
+      if (source) {
+        const service = new WebBookService();
+        const fullBook = await service.getBookInfo(source, book);
+        book.tocUrl = fullBook.tocUrl;
+        book.name = fullBook.name;
+        book.author = fullBook.author;
+        book.kind = fullBook.kind;
+        book.coverUrl = fullBook.coverUrl;
+        book.intro = fullBook.intro;
+        book.latestChapterTitle = fullBook.latestChapterTitle;
+        book.wordCount = fullBook.wordCount;
+        book.variable = fullBook.variable;
+      }
+
+      await db.insertBook(book);
+      this.markSearchBookInShelf(book.bookUrl);
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      promptAction.showToast({ message: '已加入书架' });
+    } catch (e) {
+      console.error('加入书架失败:', e);
+      promptAction.showToast({ message: '加入书架失败' });
+    }
+  }
+
+  async removeSearchBookFromShelf(searchBook: SearchBook): Promise<void> {
+    if (!searchBook.bookUrl) {
+      promptAction.showToast({ message: '书籍地址为空' });
+      return;
+    }
+
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      await db.deleteBook(searchBook.bookUrl);
+      this.shelfBookUrls = this.shelfBookUrls.filter(url => url !== searchBook.bookUrl);
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      promptAction.showToast({ message: '已移出书架' });
+    } catch (e) {
+      console.error('移出书架失败:', e);
+      promptAction.showToast({ message: '移出书架失败' });
+    }
+  }
+
+  markSearchBookInShelf(bookUrl: string): void {
+    if (bookUrl && !this.shelfBookUrls.includes(bookUrl)) {
+      this.shelfBookUrls = [...this.shelfBookUrls, bookUrl];
     }
   }
 

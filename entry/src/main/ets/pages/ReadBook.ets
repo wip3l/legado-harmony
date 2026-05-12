@@ -110,6 +110,7 @@ struct ReadBookPage {
         this.isLoading = false;
         return;
       }
+      await this.markBookRecentlyRead();
 
       const engine = ReadBookEngine.get();
       await engine.openBook(this.book);
@@ -772,14 +773,30 @@ struct ReadBookPage {
     this.book.durChapterPos = pageIndex;
     this.book.durChapterTitle = this.getChapterTitle();
     this.book.durChapterTime = Date.now();
+    this.book.putVariable('lastReadTime', `${this.book.durChapterTime}`);
     engine.curIdx = chapterIndex;
     engine.curPos = pageIndex;
     engine.book = this.book;
     try {
       const db = AppDatabase.getInstance();
       await db.updateBook(this.book);
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     } catch (e) {
       console.error('保存阅读进度失败:', e);
+    }
+  }
+
+  async markBookRecentlyRead() {
+    if (!this.book) {
+      return;
+    }
+    this.book.putVariable('lastReadTime', `${Date.now()}`);
+    try {
+      const db = AppDatabase.getInstance();
+      await db.updateBook(this.book);
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+    } catch (e) {
+      console.error('更新最近阅读时间失败:', e);
     }
   }
 

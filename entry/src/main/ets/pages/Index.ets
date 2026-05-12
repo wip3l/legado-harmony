@@ -1,9 +1,11 @@
 import { router, window } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
+import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
 import { Book, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { SearchCoordinator, SearchCallback, SearchProgress } from '../core/book/SearchCoordinator';
 import { ExploreCoordinator, ExploreEntry } from '../core/book/ExploreCoordinator';
+import { WebBookService } from '../core/book/WebBookService';
 
 @Entry
 @Component
@@ -22,53 +24,49 @@ struct Index {
   }
 
   build() {
-    Stack({ alignContent: Alignment.Bottom }) {
-      if (this.currentIndex === 0) {
+    HdsTabs({ barPosition: BarPosition.End, index: this.currentIndex }) {
+      TabContent() {
         BookshelfPage()
       }
-      if (this.currentIndex === 1) {
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .tabBar(this.bottomTabStyle($r('app.media.ic_tab_bookshelf'), '书架'))
+
+      TabContent() {
         ExplorePage()
       }
-      if (this.currentIndex === 2) {
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .tabBar(this.bottomTabStyle($r('app.media.ic_tab_explore'), '发现'))
+
+      TabContent() {
         SearchPage()
       }
-      if (this.currentIndex === 3) {
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .tabBar(this.bottomTabStyle($r('app.media.ic_tab_search'), '搜索'))
+
+      TabContent() {
         SettingsPage()
       }
-
-      Row() {
-        this.tabBarBuilder('书架', 0, '📖')
-        this.tabBarBuilder('发现', 1, '🌐')
-        this.tabBarBuilder('搜索', 2, '🔍')
-        this.tabBarBuilder('我的', 3, '👤')
-      }
-      .width('88%')
-      .height(64)
-      .margin({ bottom: Math.max(this.navBarHeight + 8, 16) })
-      .padding({ left: 6, right: 6, top: 6, bottom: 6 })
-      .borderRadius(32)
-      .clip(true)
-      .backgroundEffect({
-        radius: 28,
-        saturation: 1.2,
-        brightness: this.appDarkMode ? 0.9 : 1.08,
-        color: this.tabBarMaterialColor(),
-        adaptiveColor: AdaptiveColor.DEFAULT,
-        blurOptions: { grayscale: [0, 0] },
-        policy: BlurStyleActivePolicy.ALWAYS_ACTIVE,
-        inactiveColor: this.tabBarMaterialColor()
-      }, { disableSystemAdaptation: false })
-      .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
-        colorMode: ThemeColorMode.SYSTEM,
-        adaptiveColor: AdaptiveColor.DEFAULT,
-        scale: 0.85,
-        policy: BlurStyleActivePolicy.ALWAYS_ACTIVE,
-        blurOptions: { grayscale: [0, 0] }
-      }, { disableSystemAdaptation: false })
-      .backgroundColor(this.tabBarFallbackColor())
-      .border({ width: 0.8, color: this.tabBarBorderColor() })
-      .shadow({ radius: 24, color: this.appDarkMode ? '#66000000' : '#24000000', offsetX: 0, offsetY: 8 })
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .tabBar(this.bottomTabStyle($r('app.media.ic_tab_mine'), '我的'))
     }
+    .barOverlap(true)
+    .barBackgroundColor(Color.Transparent)
+    .barFloatingStyle({
+      lightColor: this.tabBarLightColor(),
+      systemMaterialEffect: {
+        materialType: hdsMaterial.MaterialType.IMMERSIVE,
+        materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+      },
+      thermoCtrl: true
+    })
+    .scrollable(false)
+    .onChange((index: number) => {
+      this.currentIndex = index;
+    })
     .width('100%')
     .height('100%')
     .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
@@ -90,37 +88,19 @@ struct Index {
     });
   }
 
-  @Builder
-  tabBarBuilder(title: string, index: number, icon: string) {
-    Column() {
-      Text(icon)
-        .fontSize(22)
-        .margin({ bottom: 2 })
-      Text(title)
-        .fontSize(11)
-        .fontWeight(this.currentIndex === index ? FontWeight.Medium : FontWeight.Normal)
-        .fontColor(this.currentIndex === index ? this.tabBarActiveColor() : this.tabBarTextColor())
-    }
-    .layoutWeight(1)
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .borderRadius(28)
-    .backgroundColor(this.currentIndex === index ? this.tabBarActiveBackgroundColor() : Color.Transparent)
-    .onClick(() => {
-      this.currentIndex = index;
-    })
-  }
-
-  tabBarMaterialColor(): string {
-    return this.appDarkMode ? '#A81B1D22' : '#B8FFFFFF';
-  }
-
-  tabBarFallbackColor(): string {
-    return this.appDarkMode ? '#731B1D22' : '#80FFFFFF';
-  }
-
-  tabBarBorderColor(): string {
-    return this.appDarkMode ? '#33FFFFFF' : '#99FFFFFF';
+  bottomTabStyle(icon: Resource, title: string): BottomTabBarStyle {
+    return BottomTabBarStyle.of(icon, title)
+      .layoutMode(LayoutMode.AUTO)
+      .symmetricExtensible(true)
+      .padding({ left: 4, right: 4, top: 0, bottom: 0 })
+      .labelStyle({
+        selectedColor: this.tabBarActiveColor(),
+        unselectedColor: this.tabBarTextColor()
+      })
+      .iconStyle({
+        selectedColor: this.tabBarActiveColor(),
+        unselectedColor: this.tabBarTextColor()
+      });
   }
 
   tabBarActiveColor(): string {
@@ -131,8 +111,8 @@ struct Index {
     return this.appDarkMode ? '#E7E9ED' : '#5F6670';
   }
 
-  tabBarActiveBackgroundColor(): string {
-    return this.appDarkMode ? '#2B68D6C3' : '#24007DFF';
+  tabBarLightColor(): string {
+    return this.appDarkMode ? '#66FFFFFF' : '#CCFFFFFF';
   }
 }
 
@@ -144,6 +124,7 @@ struct BookshelfPage {
   @State showDeleteDialog: boolean = false;
   @State pendingDeleteBook: Book | null = null;
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
+  @StorageLink('bookshelfSortMode') sortMode: string = 'recentRead';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
 
   aboutToAppear() {
@@ -159,7 +140,7 @@ struct BookshelfPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      this.books = await db.getAllBooks();
+      this.books = this.sortBooks(await db.getAllBooks());
     } catch (e) {
       console.error('加载书籍失败:', e);
     } finally {
@@ -193,6 +174,15 @@ struct BookshelfPage {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.primaryTextColor())
             .layoutWeight(1)
+
+          if (this.books.length > 0) {
+            Row({ space: 6 }) {
+              this.sortChip('新阅读', 'recentRead')
+              this.sortChip('新加入', 'recentAdd')
+              this.sortChip('名称', 'name')
+            }
+            .margin({ right: 10 })
+          }
 
           Text(this.books.length > 0 ? `${this.books.length}本` : '')
             .fontSize(14)
@@ -273,7 +263,7 @@ struct BookshelfPage {
                           .margin({ right: 8 })
                       }
 
-                      Text(book.getUnreadChapterNum() > 0 ? `${book.getUnreadChapterNum()}章未读` : '已读完')
+                      Text(this.getShelfProgressText(book))
                         .fontSize(12)
                         .fontColor(this.subTextColor())
                     }
@@ -304,13 +294,15 @@ struct BookshelfPage {
           }
           .width('100%')
           .layoutWeight(1)
-          .padding({ left: 16, right: 16, bottom: 96 })
+          .padding({ left: 16, right: 16, bottom: 12 })
           .backgroundColor(this.pageColor())
+          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         }
       }
       .width('100%')
       .height('100%')
       .backgroundColor(this.pageColor())
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
 
       // 删除确认弹窗
       if (this.showDeleteDialog && this.pendingDeleteBook) {
@@ -374,6 +366,7 @@ struct BookshelfPage {
     }
     .width('100%')
     .height('100%')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   getBookColor(name: string): string {
@@ -384,6 +377,66 @@ struct BookshelfPage {
       hash = name.charCodeAt(i) + ((hash << 5) - hash);
     }
     return colors[Math.abs(hash) % colors.length];
+  }
+
+  @Builder
+  sortChip(label: string, mode: string) {
+    Text(label)
+      .fontSize(13)
+      .fontColor(this.sortMode === mode ? '#FFFFFF' : this.secondaryTextColor())
+      .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+      .backgroundColor(this.sortMode === mode ? '#007DFF' : this.cardColor())
+      .borderRadius(16)
+      .onClick(() => {
+        this.sortMode = mode;
+        this.books = this.sortBooks(this.books);
+      })
+  }
+
+  sortBooks(books: Book[]): Book[] {
+    const sorted = [...books];
+    if (this.sortMode === 'recentRead') {
+      sorted.sort((a: Book, b: Book) => {
+        const readDiff = this.getBookReadTime(b) - this.getBookReadTime(a);
+        return readDiff !== 0 ? readDiff : this.getBookAddTime(b) - this.getBookAddTime(a);
+      });
+    } else if (this.sortMode === 'name') {
+      sorted.sort((a: Book, b: Book) => (a.name || '').localeCompare(b.name || ''));
+    } else {
+      sorted.sort((a: Book, b: Book) => this.getBookAddTime(b) - this.getBookAddTime(a));
+    }
+    return sorted;
+  }
+
+  getBookAddTime(book: Book): number {
+    return book.latestChapterTime || book.lastCheckTime || book.durChapterTime || 0;
+  }
+
+  getBookReadTime(book: Book): number {
+    const lastReadTime = this.parseBookTime(book.getVariable('lastReadTime'));
+    if (lastReadTime > 0) {
+      return lastReadTime;
+    }
+    if (!book.durChapterTitle && book.durChapterIndex <= 0 && book.durChapterPos <= 0) {
+      return 0;
+    }
+    return book.durChapterTime || 0;
+  }
+
+  parseBookTime(value: string): number {
+    const time = Number(value);
+    return time > 0 ? time : 0;
+  }
+
+  getShelfProgressText(book: Book): string {
+    if (!book.totalChapterNum || book.totalChapterNum <= 0) {
+      return '未读';
+    }
+    if (!book.durChapterTitle && book.durChapterIndex <= 0 && book.durChapterPos <= 0) {
+      return '未读';
+    }
+    const unread = book.getUnreadChapterNum();
+    return unread > 0 ? `${unread}章未读` : '已读完';
   }
 
   pageColor(): string {
@@ -585,6 +638,17 @@ struct ExplorePage {
                 }
                 .layoutWeight(1)
                 .alignItems(HorizontalAlign.Start)
+
+                Button('加入')
+                  .height(32)
+                  .fontSize(13)
+                  .borderRadius(16)
+                  .backgroundColor('#007DFF')
+                  .fontColor('#FFFFFF')
+                  .margin({ left: 12 })
+                  .onClick(() => {
+                    this.addSearchBookToShelf(book);
+                  })
               }
               .width('100%')
               .padding(12)
@@ -598,8 +662,9 @@ struct ExplorePage {
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ left: 16, right: 16, bottom: 96 })
+        .padding({ left: 16, right: 16, bottom: 12 })
         .backgroundColor(this.pageColor())
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       } else {
         Column() {
           Text('没有发现内容')
@@ -620,6 +685,7 @@ struct ExplorePage {
     .width('100%')
     .height('100%')
     .backgroundColor(this.pageColor())
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   openSearchBookDetail(book: SearchBook) {
@@ -639,6 +705,65 @@ struct ExplorePage {
         wordCount: book.wordCount
       }
     });
+  }
+
+  async addSearchBookToShelf(searchBook: SearchBook): Promise<void> {
+    if (!searchBook.bookUrl) {
+      promptAction.showToast({ message: '书籍地址为空' });
+      return;
+    }
+
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const existing = await db.getBook(searchBook.bookUrl);
+      if (existing) {
+        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+        promptAction.showToast({ message: '已在书架' });
+        return;
+      }
+
+      const book = new Book();
+      book.bookUrl = searchBook.bookUrl;
+      book.tocUrl = searchBook.tocUrl;
+      book.origin = searchBook.origin;
+      book.originName = searchBook.originName;
+      book.name = searchBook.name;
+      book.author = searchBook.author;
+      book.kind = searchBook.kind;
+      book.coverUrl = searchBook.coverUrl;
+      book.intro = searchBook.intro;
+      book.latestChapterTitle = searchBook.latestChapterTitle;
+      book.wordCount = searchBook.wordCount;
+      book.variable = searchBook.variable;
+      book.group = -2147483645;
+      book.type = 0;
+      book.canUpdate = true;
+      book.lastCheckTime = Date.now();
+      book.latestChapterTime = Date.now();
+
+      const source = book.origin ? await db.getBookSource(book.origin) : null;
+      if (source) {
+        const service = new WebBookService();
+        const fullBook = await service.getBookInfo(source, book);
+        book.tocUrl = fullBook.tocUrl;
+        book.name = fullBook.name;
+        book.author = fullBook.author;
+        book.kind = fullBook.kind;
+        book.coverUrl = fullBook.coverUrl;
+        book.intro = fullBook.intro;
+        book.latestChapterTitle = fullBook.latestChapterTitle;
+        book.wordCount = fullBook.wordCount;
+        book.variable = fullBook.variable;
+      }
+
+      await db.insertBook(book);
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      promptAction.showToast({ message: '已加入书架' });
+    } catch (e) {
+      console.error('加入书架失败:', e);
+      promptAction.showToast({ message: '加入书架失败' });
+    }
   }
 
   buildSourceNames(): string[] {
@@ -682,6 +807,7 @@ struct SearchPage {
   @Prop statusBarHeight: number = 0;
   @State keyword: string = '';
   @State searchResults: SearchBook[] = [];
+  @State shelfBookUrls: string[] = [];
   @State isSearching: boolean = false;
   @State showResult: boolean = false;
   @State statusMessage: string = '';
@@ -769,6 +895,17 @@ struct SearchPage {
                 }
                 .layoutWeight(1)
                 .alignItems(HorizontalAlign.Start)
+
+                Button(this.isSearchBookInShelf(book) ? '移除' : '加入')
+                  .height(32)
+                  .fontSize(13)
+                  .borderRadius(16)
+                  .backgroundColor(this.isSearchBookInShelf(book) ? '#E53935' : '#007DFF')
+                  .fontColor('#FFFFFF')
+                  .margin({ left: 12 })
+                  .onClick(() => {
+                    this.toggleSearchBookShelf(book);
+                  })
               }
               .width('100%')
               .padding(12)
@@ -799,8 +936,9 @@ struct SearchPage {
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ left: 16, right: 16, bottom: 96 })
+        .padding({ left: 16, right: 16, bottom: 12 })
         .backgroundColor(this.pageColor())
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       } else if (this.isSearching) {
         Column() {
           LoadingProgress()
@@ -837,6 +975,7 @@ struct SearchPage {
     .width('100%')
     .height('100%')
     .backgroundColor(this.pageColor())
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   async doSearch() {
@@ -858,6 +997,7 @@ struct SearchPage {
       const callback: SearchCallback = (p: SearchProgress) => {
         this.searchResults = p.results;
         this.statusMessage = p.status;
+        this.syncSearchShelfStatus(p.results);
         if (p.finished) {
           this.isSearching = false;
         }
@@ -870,6 +1010,120 @@ struct SearchPage {
       console.error('搜索失败:', e);
       this.isSearching = false;
       this.statusMessage = '搜索失败';
+    }
+  }
+
+  async syncSearchShelfStatus(books: SearchBook[]): Promise<void> {
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const urls: string[] = [];
+      for (const book of books) {
+        if (book.bookUrl && await db.getBook(book.bookUrl)) {
+          urls.push(book.bookUrl);
+        }
+      }
+      this.shelfBookUrls = urls;
+    } catch (e) {
+      console.error('同步搜索书架状态失败:', e);
+    }
+  }
+
+  isSearchBookInShelf(book: SearchBook): boolean {
+    return !!book.bookUrl && this.shelfBookUrls.includes(book.bookUrl);
+  }
+
+  async toggleSearchBookShelf(searchBook: SearchBook): Promise<void> {
+    if (this.isSearchBookInShelf(searchBook)) {
+      await this.removeSearchBookFromShelf(searchBook);
+    } else {
+      await this.addSearchBookToShelf(searchBook);
+    }
+  }
+
+  async addSearchBookToShelf(searchBook: SearchBook): Promise<void> {
+    if (!searchBook.bookUrl) {
+      promptAction.showToast({ message: '书籍地址为空' });
+      return;
+    }
+
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const existing = await db.getBook(searchBook.bookUrl);
+      if (existing) {
+        this.markSearchBookInShelf(searchBook.bookUrl);
+        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+        promptAction.showToast({ message: '已在书架' });
+        return;
+      }
+
+      const book = new Book();
+      book.bookUrl = searchBook.bookUrl;
+      book.tocUrl = searchBook.tocUrl;
+      book.origin = searchBook.origin;
+      book.originName = searchBook.originName;
+      book.name = searchBook.name;
+      book.author = searchBook.author;
+      book.kind = searchBook.kind;
+      book.coverUrl = searchBook.coverUrl;
+      book.intro = searchBook.intro;
+      book.latestChapterTitle = searchBook.latestChapterTitle;
+      book.wordCount = searchBook.wordCount;
+      book.variable = searchBook.variable;
+      book.group = -2147483645;
+      book.type = 0;
+      book.canUpdate = true;
+      book.lastCheckTime = Date.now();
+      book.latestChapterTime = Date.now();
+
+      const source = book.origin ? await db.getBookSource(book.origin) : null;
+      if (source) {
+        const service = new WebBookService();
+        const fullBook = await service.getBookInfo(source, book);
+        book.tocUrl = fullBook.tocUrl;
+        book.name = fullBook.name;
+        book.author = fullBook.author;
+        book.kind = fullBook.kind;
+        book.coverUrl = fullBook.coverUrl;
+        book.intro = fullBook.intro;
+        book.latestChapterTitle = fullBook.latestChapterTitle;
+        book.wordCount = fullBook.wordCount;
+        book.variable = fullBook.variable;
+      }
+
+      await db.insertBook(book);
+      this.markSearchBookInShelf(book.bookUrl);
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      promptAction.showToast({ message: '已加入书架' });
+    } catch (e) {
+      console.error('加入书架失败:', e);
+      promptAction.showToast({ message: '加入书架失败' });
+    }
+  }
+
+  async removeSearchBookFromShelf(searchBook: SearchBook): Promise<void> {
+    if (!searchBook.bookUrl) {
+      promptAction.showToast({ message: '书籍地址为空' });
+      return;
+    }
+
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      await db.deleteBook(searchBook.bookUrl);
+      this.shelfBookUrls = this.shelfBookUrls.filter(url => url !== searchBook.bookUrl);
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      promptAction.showToast({ message: '已移出书架' });
+    } catch (e) {
+      console.error('移出书架失败:', e);
+      promptAction.showToast({ message: '移出书架失败' });
+    }
+  }
+
+  markSearchBookInShelf(bookUrl: string): void {
+    if (bookUrl && !this.shelfBookUrls.includes(bookUrl)) {
+      this.shelfBookUrls = [...this.shelfBookUrls, bookUrl];
     }
   }
 
