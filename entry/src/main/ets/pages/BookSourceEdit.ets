@@ -6,6 +6,7 @@ import { promptAction } from '@kit.ArkUI';
 @Entry
 @Component
 struct BookSourceEditPage {
+  @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @State bookSourceUrl: string = '';
   @State source: BookSource = new BookSource();
   @State isLoading: boolean = false;
@@ -68,6 +69,7 @@ struct BookSourceEditPage {
       Row() {
         Text('<')
           .fontSize(24)
+          .fontColor(this.primaryTextColor())
           .width(40)
           .height(56)
           .textAlign(TextAlign.Center)
@@ -78,6 +80,7 @@ struct BookSourceEditPage {
         Text(this.bookSourceUrl ? '编辑书源' : '新建书源')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
           .layoutWeight(1)
 
         Text('保存')
@@ -92,14 +95,14 @@ struct BookSourceEditPage {
       }
       .width('100%')
       .height(56)
-      .backgroundColor('#FFFFFF')
+      .backgroundColor(this.cardColor())
       .alignItems(VerticalAlign.Center)
 
       // Tab栏
       Row() {
         Text('基本')
           .fontSize(14)
-          .fontColor(this.currentTab === 0 ? '#007DFF' : '#666')
+          .fontColor(this.currentTab === 0 ? '#007DFF' : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
@@ -111,7 +114,7 @@ struct BookSourceEditPage {
 
         Text('搜索')
           .fontSize(14)
-          .fontColor(this.currentTab === 1 ? '#007DFF' : '#666')
+          .fontColor(this.currentTab === 1 ? '#007DFF' : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
@@ -123,7 +126,7 @@ struct BookSourceEditPage {
 
         Text('发现')
           .fontSize(14)
-          .fontColor(this.currentTab === 2 ? '#007DFF' : '#666')
+          .fontColor(this.currentTab === 2 ? '#007DFF' : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
@@ -135,7 +138,7 @@ struct BookSourceEditPage {
 
         Text('详情')
           .fontSize(14)
-          .fontColor(this.currentTab === 3 ? '#007DFF' : '#666')
+          .fontColor(this.currentTab === 3 ? '#007DFF' : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
@@ -147,7 +150,7 @@ struct BookSourceEditPage {
 
         Text('目录')
           .fontSize(14)
-          .fontColor(this.currentTab === 4 ? '#007DFF' : '#666')
+          .fontColor(this.currentTab === 4 ? '#007DFF' : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
@@ -159,7 +162,7 @@ struct BookSourceEditPage {
 
         Text('正文')
           .fontSize(14)
-          .fontColor(this.currentTab === 5 ? '#007DFF' : '#666')
+          .fontColor(this.currentTab === 5 ? '#007DFF' : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
@@ -170,9 +173,9 @@ struct BookSourceEditPage {
           })
       }
       .width('100%')
-      .backgroundColor('#FFFFFF')
+      .backgroundColor(this.cardColor())
       .borderWidth({ bottom: 1 })
-      .borderColor('#E0E0E0')
+      .borderColor(this.dividerColor())
 
       // 内容区域
       Scroll() {
@@ -199,7 +202,7 @@ struct BookSourceEditPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F5F5')
+    .backgroundColor(this.pageColor())
   }
 
   @Builder
@@ -248,6 +251,7 @@ struct BookSourceEditPage {
       Row() {
         Text('启用书源')
           .fontSize(16)
+          .fontColor(this.primaryTextColor())
           .layoutWeight(1)
 
         Toggle({ type: ToggleType.Switch, isOn: this.source.enabled })
@@ -261,6 +265,7 @@ struct BookSourceEditPage {
       Row() {
         Text('启用发现')
           .fontSize(16)
+          .fontColor(this.primaryTextColor())
           .layoutWeight(1)
 
         Toggle({ type: ToggleType.Switch, isOn: this.source.enabledExplore })
@@ -283,6 +288,7 @@ struct BookSourceEditPage {
       Text('搜索规则')
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
 
       this.inputItemBuilder('书籍列表', this.source.searchRule.bookList, (value: string) => {
@@ -329,6 +335,7 @@ struct BookSourceEditPage {
       Text('发现规则')
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
 
       this.inputItemBuilder('书籍列表', this.source.exploreRule.bookList, (value: string) => {
@@ -375,6 +382,7 @@ struct BookSourceEditPage {
       Text('详情规则')
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
 
       this.inputItemBuilder('初始化', this.source.bookInfoRule.init, (value: string) => {
@@ -425,6 +433,7 @@ struct BookSourceEditPage {
       Text('目录规则')
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
 
       this.inputItemBuilder('章节列表', this.source.tocRule.chapterList, (value: string) => {
@@ -459,6 +468,7 @@ struct BookSourceEditPage {
       Text('正文规则')
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
 
       this.inputItemBuilder('正文内容', this.source.contentRule.content, (value: string) => {
@@ -488,7 +498,7 @@ struct BookSourceEditPage {
     Column() {
       Text(label)
         .fontSize(14)
-        .fontColor('#666')
+        .fontColor(this.secondaryTextColor())
         .width('100%')
         .margin({ bottom: 4 })
 
@@ -496,12 +506,38 @@ struct BookSourceEditPage {
         .width('100%')
         .height(44)
         .borderRadius(8)
-        .backgroundColor('#FFFFFF')
+        .backgroundColor(this.cardColor())
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.placeholderTextColor())
         .padding({ left: 12, right: 12 })
         .onChange((val: string) => {
           onChange(val);
         })
     }
     .width('100%')
+  }
+
+  pageColor(): string {
+    return this.appDarkMode ? '#101113' : '#F5F5F5';
+  }
+
+  cardColor(): string {
+    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+  }
+
+  primaryTextColor(): string {
+    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+  }
+
+  secondaryTextColor(): string {
+    return this.appDarkMode ? '#B8BDC7' : '#666666';
+  }
+
+  dividerColor(): string {
+    return this.appDarkMode ? '#2A2D33' : '#E0E0E0';
+  }
+
+  placeholderTextColor(): string {
+    return this.appDarkMode ? '#6F7480' : '#999999';
   }
 }

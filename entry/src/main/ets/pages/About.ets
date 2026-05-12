@@ -3,11 +3,14 @@ import { router } from '@kit.ArkUI';
 @Entry
 @Component
 struct AboutPage {
+  @StorageLink('appDarkMode') appDarkMode: boolean = false;
+
   build() {
     Column() {
       Row() {
         Text('<')
           .fontSize(24)
+          .fontColor(this.primaryTextColor())
           .width(40)
           .height(56)
           .textAlign(TextAlign.Center)
@@ -18,11 +21,12 @@ struct AboutPage {
         Text('关于')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
           .layoutWeight(1)
       }
       .width('100%')
       .height(56)
-      .backgroundColor('#FFFFFF')
+      .backgroundColor(this.cardColor())
       .alignItems(VerticalAlign.Center)
 
       Scroll() {
@@ -42,9 +46,10 @@ struct AboutPage {
           Text('Legado Harmony')
             .fontSize(22)
             .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
           Text('1.0.0')
             .fontSize(13)
-            .fontColor('#888')
+            .fontColor(this.subTextColor())
             .margin({ top: 6, bottom: 24 })
 
           this.infoCard('项目说明',
@@ -62,7 +67,7 @@ struct AboutPage {
           Column() {
             Text('仅用于学习与技术研究。请尊重版权，支持正版内容。')
               .fontSize(12)
-              .fontColor('#999')
+              .fontColor(this.subTextColor())
               .textAlign(TextAlign.Center)
           }
           .width('100%')
@@ -75,7 +80,7 @@ struct AboutPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F5F5')
+    .backgroundColor(this.pageColor())
   }
 
   @Builder
@@ -84,19 +89,40 @@ struct AboutPage {
       Text(title)
         .fontSize(16)
         .fontWeight(FontWeight.Medium)
+        .fontColor(this.primaryTextColor())
         .width('100%')
       Text(content)
         .fontSize(14)
-        .fontColor('#666')
+        .fontColor(this.secondaryTextColor())
         .lineHeight(22)
         .width('100%')
         .margin({ top: 8 })
     }
     .width('100%')
     .padding(16)
-    .backgroundColor('#FFFFFF')
+    .backgroundColor(this.cardColor())
     .borderRadius(10)
     .margin({ left: 16, right: 16, bottom: 12 })
     .alignItems(HorizontalAlign.Start)
+  }
+
+  pageColor(): string {
+    return this.appDarkMode ? '#101113' : '#F5F5F5';
+  }
+
+  cardColor(): string {
+    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+  }
+
+  primaryTextColor(): string {
+    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+  }
+
+  secondaryTextColor(): string {
+    return this.appDarkMode ? '#B8BDC7' : '#666666';
+  }
+
+  subTextColor(): string {
+    return this.appDarkMode ? '#8A8F98' : '#888888';
   }
 }

@@ -8,6 +8,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 @Entry
 @Component
 struct BookSourcePage {
+  @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @State sources: BookSource[] = [];
   @State isLoading: boolean = false;
   @State searchText: string = '';
@@ -38,6 +39,7 @@ struct BookSourcePage {
         Row() {
           Text('<')
             .fontSize(24)
+            .fontColor(this.primaryTextColor())
             .width(40)
             .height(56)
             .textAlign(TextAlign.Center)
@@ -48,10 +50,12 @@ struct BookSourcePage {
           Text('书源管理')
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
             .layoutWeight(1)
 
           Text('+')
             .fontSize(24)
+            .fontColor(this.primaryTextColor())
             .width(40)
             .height(56)
             .textAlign(TextAlign.Center)
@@ -61,7 +65,7 @@ struct BookSourcePage {
         }
         .width('100%')
         .height(56)
-        .backgroundColor('#FFFFFF')
+        .backgroundColor(this.cardColor())
         .alignItems(VerticalAlign.Center)
 
         Row() {
@@ -69,7 +73,9 @@ struct BookSourcePage {
             .layoutWeight(1)
             .height(40)
             .borderRadius(20)
-            .backgroundColor('#F5F5F5')
+            .backgroundColor(this.inputColor())
+            .fontColor(this.primaryTextColor())
+            .placeholderColor(this.placeholderTextColor())
             .padding({ left: 16, right: 16 })
             .onChange((value: string) => {
               this.searchText = value;
@@ -86,7 +92,7 @@ struct BookSourcePage {
               .height(40)
             Text('加载中...')
               .fontSize(14)
-              .fontColor('#999')
+              .fontColor(this.subTextColor())
               .margin({ top: 8 })
           }
           .width('100%')
@@ -96,10 +102,10 @@ struct BookSourcePage {
           Column() {
             Text('暂无书源')
               .fontSize(16)
-              .fontColor('#999')
+              .fontColor(this.subTextColor())
             Text('点击右上角"+"添加书源')
               .fontSize(14)
-              .fontColor('#999')
+              .fontColor(this.subTextColor())
               .margin({ top: 8 })
           }
           .width('100%')
@@ -114,12 +120,13 @@ struct BookSourcePage {
                     Text(source.bookSourceName)
                       .fontSize(16)
                       .fontWeight(FontWeight.Bold)
+                      .fontColor(this.primaryTextColor())
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
 
                     Text(source.bookSourceUrl)
                       .fontSize(12)
-                      .fontColor('#999')
+                      .fontColor(this.subTextColor())
                       .margin({ top: 4 })
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -127,7 +134,7 @@ struct BookSourcePage {
                     if (source.bookSourceGroup) {
                       Text(source.bookSourceGroup)
                         .fontSize(12)
-                        .fontColor('#666')
+                        .fontColor(this.secondaryTextColor())
                         .margin({ top: 4 })
                     }
                   }
@@ -156,7 +163,7 @@ struct BookSourcePage {
                 }
                 .width('100%')
                 .padding(12)
-                .backgroundColor('#FFFFFF')
+                .backgroundColor(this.cardColor())
                 .borderRadius(8)
                 .onClick(() => {
                   router.pushUrl({
@@ -174,7 +181,7 @@ struct BookSourcePage {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('#F5F5F5')
+      .backgroundColor(this.pageColor())
 
       if (this.showAddDialog) {
         Column() {
@@ -182,6 +189,7 @@ struct BookSourcePage {
             Text('添加书源')
               .fontSize(18)
               .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
               .width('100%')
               .textAlign(TextAlign.Center)
               .margin({ bottom: 16 })
@@ -219,15 +227,15 @@ struct BookSourcePage {
             Button('取消')
               .width('100%')
               .height(48)
-              .backgroundColor('#F5F5F5')
-              .fontColor('#333')
+              .backgroundColor(this.inputColor())
+              .fontColor(this.primaryTextColor())
               .onClick(() => {
                 this.showAddDialog = false;
               })
           }
           .width('90%')
           .padding(24)
-          .backgroundColor('#FFFFFF')
+          .backgroundColor(this.cardColor())
           .borderRadius(12)
         }
         .width('100%')
@@ -245,6 +253,7 @@ struct BookSourcePage {
             Text('从URL导入')
               .fontSize(18)
               .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
               .width('100%')
               .textAlign(TextAlign.Center)
               .margin({ bottom: 16 })
@@ -253,7 +262,9 @@ struct BookSourcePage {
               .width('100%')
               .height(48)
               .borderRadius(8)
-              .backgroundColor('#F5F5F5')
+              .backgroundColor(this.inputColor())
+              .fontColor(this.primaryTextColor())
+              .placeholderColor(this.placeholderTextColor())
               .padding({ left: 12, right: 12 })
               .margin({ bottom: 16 })
               .onChange((value: string) => {
@@ -264,8 +275,8 @@ struct BookSourcePage {
               Button('取消')
                 .width('45%')
                 .height(44)
-                .backgroundColor('#F5F5F5')
-                .fontColor('#333')
+                .backgroundColor(this.inputColor())
+                .fontColor(this.primaryTextColor())
                 .onClick(() => {
                   this.showImportUrlDialog = false;
                   this.importUrl = '';
@@ -283,7 +294,7 @@ struct BookSourcePage {
           }
           .width('90%')
           .padding(24)
-          .backgroundColor('#FFFFFF')
+          .backgroundColor(this.cardColor())
           .borderRadius(12)
         }
         .width('100%')
@@ -297,6 +308,34 @@ struct BookSourcePage {
     }
     .width('100%')
     .height('100%')
+  }
+
+  pageColor(): string {
+    return this.appDarkMode ? '#101113' : '#F5F5F5';
+  }
+
+  cardColor(): string {
+    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+  }
+
+  inputColor(): string {
+    return this.appDarkMode ? '#24272D' : '#F5F5F5';
+  }
+
+  primaryTextColor(): string {
+    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+  }
+
+  secondaryTextColor(): string {
+    return this.appDarkMode ? '#B8BDC7' : '#666666';
+  }
+
+  subTextColor(): string {
+    return this.appDarkMode ? '#8A8F98' : '#999999';
+  }
+
+  placeholderTextColor(): string {
+    return this.appDarkMode ? '#6F7480' : '#999999';
   }
 
   async searchSources() {
