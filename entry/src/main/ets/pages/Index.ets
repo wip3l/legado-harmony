@@ -20,6 +20,10 @@ struct Index {
     this.syncHomeSystemBars();
   }
 
+  onPageShow(): void {
+    this.syncHomeSystemBars();
+  }
+
   onAppDarkModeChanged(): void {
     this.syncHomeSystemBars();
   }
@@ -81,6 +85,7 @@ struct Index {
     .scrollable(false)
     .onChange((index: number) => {
       this.currentIndex = index;
+      this.syncHomeSystemBars();
     })
     .width('100%')
     .height('100%')
@@ -124,6 +129,7 @@ struct Index {
     .scrollable(false)
     .onChange((index: number) => {
       this.currentIndex = index;
+      this.syncHomeSystemBars();
     })
     .width('100%')
     .height('100%')
@@ -149,11 +155,15 @@ struct Index {
 
   syncHomeSystemBars(): void {
     window.getLastWindow(getContext(this)).then((mainWindow: window.Window) => {
+      const bg = this.appDarkMode ? '#101113' : '#F5F5F5';
+      mainWindow.setWindowBackgroundColor(bg);
+      mainWindow.setWindowLayoutFullScreen(false);
+      mainWindow.setWindowSystemBarEnable(['navigation', 'status']);
       mainWindow.setWindowSystemBarProperties({
-        statusBarColor: this.appDarkMode ? '#101113' : '#FFFFFF',
+        statusBarColor: bg,
         isStatusBarLightIcon: this.appDarkMode,
         statusBarContentColor: this.appDarkMode ? '#FFFFFF' : '#1F1F1F',
-        navigationBarColor: this.appDarkMode ? '#101113' : '#F5F5F5',
+        navigationBarColor: bg,
         isNavigationBarLightIcon: this.appDarkMode,
         navigationBarContentColor: this.appDarkMode ? '#FFFFFF' : '#1F1F1F'
       });
@@ -867,6 +877,8 @@ struct SearchPage {
   @State isSearching: boolean = false;
   @State showResult: boolean = false;
   @State statusMessage: string = '';
+  @State verificationUrl: string = '';
+  @State verificationTitle: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   private coordinator: SearchCoordinator | null = null;
 
@@ -917,13 +929,28 @@ struct SearchPage {
       .padding({ left: 16, right: 16, top: 16, bottom: 8 })
 
       if (this.statusMessage) {
-        Text(this.statusMessage)
-          .fontSize(14)
-          .fontColor(this.secondaryTextColor())
-          .width('100%')
-          .height(36)
-          .textAlign(TextAlign.Center)
-          .backgroundColor(this.statusMessageColor())
+        Row() {
+          Text(this.statusMessage)
+            .fontSize(14)
+            .fontColor(this.secondaryTextColor())
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+
+          if (this.verificationUrl) {
+            Button('去验证')
+              .height(28)
+              .fontSize(12)
+              .borderRadius(14)
+              .margin({ right: 12 })
+              .onClick(() => {
+                this.openVerification();
+              })
+          }
+        }
+        .width('100%')
+        .height(40)
+        .backgroundColor(this.statusMessageColor())
+        .alignItems(VerticalAlign.Center)
       }
 
       if (this.showResult && this.searchResults.length > 0) {
@@ -1049,10 +1076,14 @@ struct SearchPage {
       this.showResult = true;
       this.searchResults = [];
       this.statusMessage = '正在搜索...';
+      this.verificationUrl = '';
+      this.verificationTitle = '';
 
       const callback: SearchCallback = (p: SearchProgress) => {
         this.searchResults = p.results;
         this.statusMessage = p.status;
+        this.verificationUrl = p.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
+        this.verificationTitle = p.verificationTitle || AppStorage.get<string>('pendingVerificationTitle') || '网页验证';
         this.syncSearchShelfStatus(p.results);
         if (p.finished) {
           this.isSearching = false;
@@ -1198,6 +1229,21 @@ struct SearchPage {
         intro: book.intro,
         latestChapterTitle: book.latestChapterTitle,
         wordCount: book.wordCount
+      }
+    });
+  }
+
+  openVerification(): void {
+    const url = this.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
+    if (!url) {
+      promptAction.showToast({ message: '暂无需要验证的网页' });
+      return;
+    }
+    router.pushUrl({
+      url: 'pages/VerifyWeb',
+      params: {
+        url: url,
+        title: this.verificationTitle || '网页验证'
       }
     });
   }

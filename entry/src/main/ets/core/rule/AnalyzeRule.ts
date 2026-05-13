@@ -1,5 +1,6 @@
 import { JsRuntime } from './JsRuntime';
 import { RuleContext } from './RuleContext';
+import { VerificationSupport } from '../http/VerificationSupport';
 
 export class AnalyzeRule {
   private content: string = '';
@@ -174,6 +175,14 @@ export class AnalyzeRule {
 
   private evalJsTemplate(expr: string, sourceJson: string): string {
     if (!expr) return '';
+    expr = expr.trim();
+    if (expr.includes('startBrowserAwait') || expr.includes('getVerificationCode')) {
+      const verifyUrl = VerificationSupport.pickStartBrowserUrl(expr) || this.baseUrl;
+      VerificationSupport.requestVerification(verifyUrl, '网页验证');
+      if (VerificationSupport.isChallengeResponse(sourceJson)) return '';
+    }
+    const baseReplace = this.evalBaseUrlReplace(expr);
+    if (baseReplace) return baseReplace;
     if (expr.includes('vipreader.qidian.com/chapter')) {
       let bid = '';
       const bidMatch = this.baseUrl.match(/\d+/);
@@ -224,6 +233,23 @@ export class AnalyzeRule {
     return expr.replace(/\s*\+\s*/g, '').replace(/['"]/g, '').replace(/\{\{|\}\}/g, '').trim();
   }
 
+  private evalBaseUrlReplace(expr: string): string {
+    if (!expr.includes('baseUrl')) return '';
+    let value = this.baseUrl;
+    const replaceRe = /\.replace\s*\(\s*(['"])(.*?)\1\s*,\s*(['"])(.*?)\3\s*\)/g;
+    let matched = false;
+    let m: RegExpExecArray | null;
+    while ((m = replaceRe.exec(expr)) !== null) {
+      matched = true;
+      value = value.split(m[2]).join(m[4]);
+    }
+    if (matched) return value;
+
+    const concatMatch = expr.match(/baseUrl\s*\+\s*(['"])(.*?)\1/);
+    if (concatMatch) return value + concatMatch[2];
+    return '';
+  }
+
   // === JSONPath ===
 
   private evalJsonPath(rule: string): Object | string | undefined {
@@ -246,8 +272,8 @@ export class AnalyzeRule {
 
     // $..list[*] → 递归搜索
     if (path.startsWith('$..')) {
-      const key = path.substring(3).replace(/\[\*\]$/, '');
-      return this.deepFind(obj, key);
+      const selector = path.substring(3);
+      return this.deepFindBySelector(obj, selector);
     }
 
     // $.data[*] → 按层级
@@ -257,6 +283,14 @@ export class AnalyzeRule {
       if (p === '[*]' || p === '*') {
         if (Array.isArray(cur)) return cur.map(v => typeof v === 'string' ? v : JSON.stringify(v));
         return undefined;
+      }
+      if (p.includes('..')) {
+        const segs = p.split('..');
+        const first = segs[0];
+        if (first) {
+          cur = (cur as Record<string, Object>)[first] as Record<string, Object>;
+        }
+        return this.deepFindBySelector(cur, segs.slice(1).join('..'));
       }
       const bIdx = p.indexOf('[');
       if (bIdx > 0) {
@@ -272,6 +306,18 @@ export class AnalyzeRule {
       if (cur === undefined || cur === null) return undefined;
     }
     return cur;
+  }
+
+  private deepFindBySelector(obj: Object, selector: string): Object | string | undefined {
+    const clean = selector.replace(/\[\*\]$/, '');
+    const idxMatch = clean.match(/^([A-Za-z_][A-Za-z0-9_-]*)\[(\d+)\]$/);
+    const key = idxMatch ? idxMatch[1] : clean;
+    const found = this.deepFind(obj, key);
+    if (idxMatch && Array.isArray(found)) {
+      const idx = parseInt(idxMatch[2]);
+      return found[idx] as Object | string;
+    }
+    return found;
   }
 
   private deepFind(obj: Object, key: string): Object | string | undefined {
@@ -358,6 +404,13 @@ export class AnalyzeRule {
     if (pieces[0] === 'class' || pieces[0] === 'id' || pieces[0] === 'tag') {
       mode = pieces[0];
       name = pieces.length > 1 ? pieces[1] : '';
+      const rangeMatch = name.match(/^([A-Za-z0-9_-]+)\[(-?\d+)(?::(-?\d+))?\]$/);
+      if (rangeMatch) {
+        name = rangeMatch[1];
+        const matches = mode === 'class' ? this.matchByClass(html, name) :
+          mode === 'id' ? this.matchById(html, name) : this.matchByTag(html, name);
+        return this.pickRange(matches, parseInt(rangeMatch[2]), rangeMatch[3] !== undefined ? parseInt(rangeMatch[3]) : null);
+      }
       if (pieces.length > 2 && /^-?\d+$/.test(pieces[2])) index = parseInt(pieces[2]);
     } else if (selector.startsWith('.') || selector.startsWith('#') || /^[a-zA-Z][a-zA-Z0-9_-]*/.test(selector)) {
       return this.matchElements(selector);
@@ -480,10 +533,21 @@ export class AnalyzeRule {
 
   private stripJsWrapper(rule: string): string {
     let r = rule || '';
+    if (r.includes('<js>') && (r.includes('startBrowserAwait') || r.includes('getVerificationCode')) &&
+      VerificationSupport.isChallengeResponse(this.content)) {
+      const code = this.extractJsBlock(r);
+      const verifyUrl = VerificationSupport.pickStartBrowserUrl(code) || this.baseUrl;
+      VerificationSupport.requestVerification(verifyUrl, '网页验证');
+    }
     const end = r.lastIndexOf('</js>');
     if (end >= 0) r = r.substring(end + 5);
     r = r.replace(/<js>[\s\S]*?<\/js>/gi, '');
     return r;
+  }
+
+  private extractJsBlock(rule: string): string {
+    const match = rule.match(/<js>([\s\S]*?)<\/js>/i);
+    return match ? match[1] : rule;
   }
 
   private splitCssSelector(sel: string): string[] {
@@ -725,6 +789,16 @@ export class AnalyzeRule {
 
   private evalResultJs(jsCode: string, value: string): string {
     if (!jsCode) return value;
+    const putMatch = jsCode.match(/java\.put\(\s*['"]([^'"]+)['"]\s*,\s*result\s*\)/);
+    if (putMatch) {
+      this.ctx.put(putMatch[1], value);
+    }
+    const prefixConcat = jsCode.match(/['"](https?:\/\/[^'"]*)['"]\s*\+\s*result/);
+    if (prefixConcat) return prefixConcat[1] + value;
+    const suffixConcat = jsCode.match(/result\s*\+\s*['"]([^'"]*)['"]/);
+    if (suffixConcat) return value + suffixConcat[1];
+    const baseReplace = this.evalBaseUrlReplace(jsCode);
+    if (baseReplace) return baseReplace;
     if (jsCode.includes('result')) {
       const literal = jsCode
         .replace(/^\s*result\s*=\s*/, '')
@@ -748,6 +822,7 @@ export class AnalyzeRule {
       }
     }
     if (jsCode.includes('java.t2s')) return value;
+    if (/book\.origin\s*\+\s*result/.test(jsCode)) return this.resolveUrl(value);
     return value;
   }
 
@@ -818,11 +893,7 @@ export class AnalyzeRule {
         value = this.applyAesDecrypt(value, jsCode);
         if (!value) return '';
       } else {
-        // 其他 @js: 后缀：直接去除
-        const jsIdx = value.indexOf('@js:');
-        if (jsIdx > 0) {
-          value = value.substring(0, jsIdx);
-        }
+        value = this.evalResultJs(jsCode, value);
       }
     }
 

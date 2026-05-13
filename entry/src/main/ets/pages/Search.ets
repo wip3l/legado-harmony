@@ -18,6 +18,8 @@ struct SearchPage {
   @State hotKeywords: string[] = ['斗破苍穹', '完美世界', '遮天', '凡人修仙传', '诛仙'];
   @State showResult: boolean = false;
   @State statusMessage: string = '';
+  @State verificationUrl: string = '';
+  @State verificationTitle: string = '';
 
   aboutToAppear() {
     this.syncBars();
@@ -74,13 +76,28 @@ struct SearchPage {
 
       // 状态消息
       if (this.statusMessage) {
-        Text(this.statusMessage)
-          .fontSize(14)
-          .fontColor(this.secondaryTextColor())
-          .width('100%')
-          .height(36)
-          .textAlign(TextAlign.Center)
-          .backgroundColor(this.statusMessageColor())
+        Row() {
+          Text(this.statusMessage)
+            .fontSize(14)
+            .fontColor(this.secondaryTextColor())
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+
+          if (this.verificationUrl) {
+            Button('去验证')
+              .height(28)
+              .fontSize(12)
+              .borderRadius(14)
+              .margin({ right: 12 })
+              .onClick(() => {
+                this.openVerification();
+              })
+          }
+        }
+        .width('100%')
+        .height(40)
+        .backgroundColor(this.statusMessageColor())
+        .alignItems(VerticalAlign.Center)
       }
 
       // 内容区域
@@ -270,6 +287,8 @@ struct SearchPage {
       const allBooks = await coordinator.search(keyword, (progress: SearchProgress) => {
         this.searchResults = progress.results;
         this.statusMessage = progress.status;
+        this.verificationUrl = progress.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
+        this.verificationTitle = progress.verificationTitle || AppStorage.get<string>('pendingVerificationTitle') || '网页验证';
         this.syncSearchShelfStatus(progress.results);
         if (progress.finished) {
           this.isSearching = false;
@@ -420,6 +439,21 @@ struct SearchPage {
         intro: book.intro,
         latestChapterTitle: book.latestChapterTitle,
         wordCount: book.wordCount
+      }
+    });
+  }
+
+  openVerification(): void {
+    const url = this.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
+    if (!url) {
+      promptAction.showToast({ message: '暂无需要验证的网页' });
+      return;
+    }
+    router.pushUrl({
+      url: 'pages/VerifyWeb',
+      params: {
+        url: url,
+        title: this.verificationTitle || '网页验证'
       }
     });
   }

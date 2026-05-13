@@ -4,6 +4,7 @@ import { HttpClient } from '../http/HttpClient';
 import { AnalyzeUrl } from '../rule/AnalyzeUrl';
 import { AnalyzeRule } from '../rule/AnalyzeRule';
 import { JsRuntime } from '../rule/JsRuntime';
+import { VerificationSupport } from '../http/VerificationSupport';
 
 export interface SearchProgress {
   done: number;
@@ -11,6 +12,9 @@ export interface SearchProgress {
   results: SearchBook[];
   finished: boolean;
   status: string;
+  needVerification?: boolean;
+  verificationUrl?: string;
+  verificationTitle?: string;
 }
 
 export type SearchCallback = (progress: SearchProgress) => void;
@@ -31,6 +35,7 @@ export class SearchCoordinator {
 
   async search(keyword: string, callback: SearchCallback): Promise<SearchBook[]> {
     this.cancelled = false;
+    VerificationSupport.clearVerification();
     const sources = await appDb.getEnabledBookSources();
     if (sources.length === 0) {
       callback({ done: 0, total: 0, results: [], finished: true, status: '没有启用的书源' });
@@ -50,10 +55,15 @@ export class SearchCoordinator {
       for (const books of batchResults) {
         done++;
         all.push(...books);
+        const verifyUrl = AppStorage.get<string>('pendingVerificationUrl') || '';
         callback({
           done: done, total: sources.length, results: [...all],
           finished: done >= sources.length,
-          status: `已搜索 ${done}/${sources.length}，找到 ${all.length} 本`
+          status: verifyUrl ? `已搜索 ${done}/${sources.length}，找到 ${all.length} 本；有书源需要网页验证` :
+            `已搜索 ${done}/${sources.length}，找到 ${all.length} 本`,
+          needVerification: verifyUrl.length > 0,
+          verificationUrl: verifyUrl,
+          verificationTitle: AppStorage.get<string>('pendingVerificationTitle') || '网页验证'
         });
       }
     }
@@ -80,6 +90,13 @@ export class SearchCoordinator {
       const resp = await au.fetch(urlTemplate);
 
       console.log('[SC] response:', source.bookSourceName, resp.statusCode, 'len:', resp.body?.length || 0);
+      if (VerificationSupport.isChallengeResponse(resp.body) ||
+        resp.statusCode === 401 || resp.statusCode === 403) {
+        const verifyUrl = VerificationSupport.pickVerificationUrl(source, urlTemplate, source.searchUrl);
+        VerificationSupport.requestVerification(verifyUrl, `${source.bookSourceName} 验证`);
+        console.warn('[SC] source needs browser verification:', source.bookSourceName, verifyUrl);
+        return [];
+      }
       if (!resp.success || !resp.body) return [];
 
       // 防止超大响应导致 OOM
@@ -142,21 +159,46 @@ export class SearchCoordinator {
   private evalAndBuild(js: JsRuntime, searchUrl: string, baseUrl: string): string {
     if (!searchUrl) return `${baseUrl}/search?q={{key}}`;
     let url = searchUrl;
+    url = this.stripLeadingJsUrl(url);
     if (url.startsWith('@js:')) {
+      const fanqieMatch = url.match(/return\s+`([^`]*bookapi\/search\/page\/v\/[^`]*)`/);
+      if (fanqieMatch) {
+        url = fanqieMatch[1];
+      }
+      const assignMatch = url.match(/\burl\s*=\s*(["'])([\s\S]*?)\1\s*;/);
+      if (assignMatch) {
+        url = assignMatch[2];
+      }
       const baseJoin = url.match(/baseUrl\s*\+\s*(".*?"|'.*?')/);
       if (baseJoin) {
         url = baseUrl + baseJoin[1].substring(1, baseJoin[1].length - 1);
         const optionMatch = searchUrl.match(/,\{[\s\S]*\}/);
         if (optionMatch && !url.includes(',{')) url += optionMatch[0];
-      } else {
+      } else if (url.startsWith('@js:')) {
         const resultMatch = url.match(/result\s*=\s*["']([^"']+)["']/);
-        url = resultMatch ? resultMatch[1] : '';
+        const directUrlMatch = url.match(/["'](https?:\/\/[^"']+)["']/);
+        const relativeOptionMatch = url.match(/["'](\/[^"']+,\{[\s\S]*?\})["']/);
+        url = resultMatch ? resultMatch[1] : (relativeOptionMatch ? relativeOptionMatch[1] : (directUrlMatch ? directUrlMatch[1] : ''));
       }
     }
     url = js.evalTemplate(url);
     // 清理残留模板
     url = url.replace(/\{\{[^}]+\}\}/g, '');
     return url;
+  }
+
+  private stripLeadingJsUrl(url: string): string {
+    const end = url.lastIndexOf('</js>');
+    if (end >= 0) {
+      const tail = url.substring(end + 5).trim();
+      if (tail) return tail;
+      const head = url.substring(0, end);
+      const pathWithOption = head.match(/(\/[^"'`;]+,\{[\s\S]*?\})/);
+      if (pathWithOption) return pathWithOption[1];
+      const path = head.match(/(\/[A-Za-z0-9_./?=&%{}-]+)/);
+      if (path) return path[1];
+    }
+    return url.replace(/<js>[\s\S]*?<\/js>/gi, '').trim();
   }
 
   private resolve(url: string, base: string): string {

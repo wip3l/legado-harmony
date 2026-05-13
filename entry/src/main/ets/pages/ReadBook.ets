@@ -16,6 +16,8 @@ struct ReadBookPage {
   @State showToc: boolean = false;
   @State showSettings: boolean = false;
   @State loadStatus: string = '';
+  @State verificationUrl: string = '';
+  @State verificationTitle: string = '网页验证';
   @State contentPages: string[] = [];
   @State currentPageIndex: number = 0;
   @State pageViewWidth: number = 0;
@@ -36,7 +38,7 @@ struct ReadBookPage {
   @StorageLink('readerFontSize') @Watch('onReadLayoutChanged') readerFontSize: number = 20;
   @StorageLink('readerLineHeight') @Watch('onReadLayoutChanged') readerLineHeight: number = 32;
   @StorageLink('readerParagraphSpacing') @Watch('onReadLayoutChanged') readerParagraphSpacing: number = 10;
-  @StorageLink('readerThemeIndex') readerThemeIndex: number = 0;
+  @StorageLink('readerThemeIndex') @Watch('onReaderThemeChanged') readerThemeIndex: number = 0;
   @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
   @StorageLink('readerTapTurnPage') readerTapTurnPage: boolean = true;
   @StorageLink('readerVolumeTurnPage') readerVolumeTurnPage: boolean = false;
@@ -62,6 +64,16 @@ struct ReadBookPage {
 
   enterReaderImmersive() {
     window.getLastWindow(getContext(this)).then((mainWindow: window.Window) => {
+      const bg = this.getBackgroundColor();
+      mainWindow.setWindowBackgroundColor(bg);
+      mainWindow.setWindowSystemBarProperties({
+        statusBarColor: bg,
+        isStatusBarLightIcon: this.appDarkMode || this.readerThemeIndex === 3,
+        statusBarContentColor: (this.appDarkMode || this.readerThemeIndex === 3) ? '#D8D8D8' : '#2F261D',
+        navigationBarColor: bg,
+        isNavigationBarLightIcon: this.appDarkMode || this.readerThemeIndex === 3,
+        navigationBarContentColor: (this.appDarkMode || this.readerThemeIndex === 3) ? '#D8D8D8' : '#2F261D'
+      });
       if (this.readerExtendToStatusBar) {
         mainWindow.setWindowLayoutFullScreen(true);
         mainWindow.setWindowSystemBarEnable(['navigation']);
@@ -137,6 +149,8 @@ struct ReadBookPage {
       console.error('加载书籍失败:', e);
       this.content = '加载失败,请重试';
       this.isLoading = false;
+    } finally {
+      this.updatePendingVerification();
     }
   }
 
@@ -149,11 +163,13 @@ struct ReadBookPage {
         this.loadStatus = '';
         await this.loadContent();
       } else {
+        this.updatePendingVerification();
         this.content = this.buildBookPreview();
         this.isLoading = false;
       }
     } catch (e) {
       console.error('重试获取目录失败:', e);
+      this.updatePendingVerification();
       this.content = this.buildBookPreview();
       this.isLoading = false;
     }
@@ -174,15 +190,18 @@ struct ReadBookPage {
       if (body) {
         this.content = body;
       } else {
+        this.updatePendingVerification();
         const c = this.chapters[this.currentChapterIndex];
-        this.content = c ? `${c.title}\n\n章节内容加载失败，请稍后重试或尝试换源。` : '加载失败';
+        this.content = this.verificationUrl ? `${c ? c.title : '当前章节'}\n\n该书源需要先完成网页验证。请点击阅读菜单里的「验证」，完成后返回并重试。` :
+          (c ? `${c.title}\n\n章节内容加载失败，请稍后重试或尝试换源。` : '加载失败');
       }
       this.paginateContent();
     } catch (e) {
       console.error('加载内容失败:', e);
-    } finally {
+      } finally {
       this.isLoading = false;
       this.loadStatus = '';
+      this.updatePendingVerification();
     }
   }
 
@@ -361,6 +380,16 @@ struct ReadBookPage {
               .textOverflow({ overflow: TextOverflow.Ellipsis })
 
             // 重试按钮
+            if (this.verificationUrl) {
+              Button('验证')
+                .height(36)
+                .fontSize(14)
+                .margin({ right: 8 })
+                .onClick(() => {
+                  this.openVerificationPage();
+                })
+            }
+
             if (this.chapters.length === 0 && this.book?.origin !== 'local') {
               Button('重试')
                 .height(36)
@@ -654,6 +683,23 @@ struct ReadBookPage {
     return chapter ? chapter.title : '';
   }
 
+  updatePendingVerification(): void {
+    this.verificationUrl = AppStorage.get<string>('pendingVerificationUrl') || '';
+    this.verificationTitle = AppStorage.get<string>('pendingVerificationTitle') || '网页验证';
+  }
+
+  openVerificationPage(): void {
+    const url = this.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
+    if (!url) return;
+    router.pushUrl({
+      url: 'pages/VerifyWeb',
+      params: {
+        url: url,
+        title: this.verificationTitle || '网页验证'
+      }
+    });
+  }
+
   getProgressText(): string {
     if (this.chapters.length === 0) return '';
     if (this.readerPageTurnMode === 0 || this.contentPages.length === 0) {
@@ -720,6 +766,12 @@ struct ReadBookPage {
   }
 
   onReaderExtendToStatusBarChanged(): void {
+    this.enterReaderImmersive();
+    this.paginateContent();
+    this.saveReadingProgress();
+  }
+
+  onReaderThemeChanged(): void {
     this.enterReaderImmersive();
     this.paginateContent();
     this.saveReadingProgress();
@@ -1191,7 +1243,12 @@ struct ReadBookPage {
       text += `\n\n简介：${this.book.intro}`;
     }
     if (this.book.origin !== 'local') {
-      text += '\n\n⚠ 当前书源暂未解析出目录，可以尝试点击标题栏的「重试」按钮重新获取，或在书源管理中为该书源补充目录规则。';
+      this.updatePendingVerification();
+      if (this.verificationUrl) {
+        text += '\n\n当前书源需要先完成网页验证。请点击标题栏的「验证」按钮，完成后返回并点击「重试」。';
+      } else {
+        text += '\n\n当前书源暂未解析出目录，可以尝试点击标题栏的「重试」按钮重新获取，或在书源管理中为该书源补充目录规则。';
+      }
     }
     return text;
   }

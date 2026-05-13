@@ -5,6 +5,7 @@ export interface UrlConfig {
   url: string;
   method: string;
   body: string;
+  charset: string;
   headers: Record<string, string>;
   sourceHeaders: Record<string, string>;
 }
@@ -17,14 +18,15 @@ export class AnalyzeUrl {
   constructor(source: BookSource | null, client: HttpClient) {
     this.source = source;
     this.client = client;
-    this.config = { url: '', method: 'GET', body: '', headers: {}, sourceHeaders: {} };
+    this.config = { url: '', method: 'GET', body: '', charset: '', headers: {}, sourceHeaders: {} };
   }
 
   parse(urlTemplate: string): UrlConfig {
-    this.config = { url: urlTemplate, method: 'GET', body: '', headers: {}, sourceHeaders: {} };
+    this.config = { url: urlTemplate, method: 'GET', body: '', charset: '', headers: {}, sourceHeaders: {} };
     if (!urlTemplate) return this.config;
 
     let url = urlTemplate.trim();
+    url = this.stripLeadingJs(url);
 
     // 1. 解析 URL 选项 JSON: url,{"method":"POST","body":"...","headers":{...}}
     const optIndex = url.indexOf(',{');
@@ -70,6 +72,7 @@ export class AnalyzeUrl {
       const opt = JSON.parse(optStr.replace(/'/g, '"')) as Record<string, Object>;
       if (opt['method']) this.config.method = String(opt['method']).toUpperCase();
       if (opt['body']) this.config.body = String(opt['body']);
+      if (opt['charset']) this.config.charset = String(opt['charset']);
       if (opt['headers']) this.config.headers = opt['headers'] as Record<string, string>;
     } catch (e) {
       // 正则保底提取
@@ -77,7 +80,24 @@ export class AnalyzeUrl {
       if (m) this.config.method = m[1].toUpperCase();
       const b = optStr.match(/"body"\s*:\s*"([^"]*)"/);
       if (b) this.config.body = b[1];
+      const c = optStr.match(/"charset"\s*:\s*"([^"]*)"/);
+      if (c) this.config.charset = c[1];
     }
+  }
+
+  private stripLeadingJs(url: string): string {
+    let result = url;
+    const end = result.lastIndexOf('</js>');
+    if (end >= 0) {
+      const tail = result.substring(end + 5).trim();
+      if (tail) return tail;
+      const head = result.substring(0, end);
+      const pathWithOption = head.match(/(\/[^"'`;]+,\{[\s\S]*?\})/);
+      if (pathWithOption) return pathWithOption[1];
+      const path = head.match(/(\/[A-Za-z0-9_./?=&%{}-]+)/);
+      if (path) return path[1];
+    }
+    return result.replace(/<js>[\s\S]*?<\/js>/gi, '').trim();
   }
 
   private parseHeaders(hdr: string): void {
@@ -132,7 +152,8 @@ export class AnalyzeUrl {
       url: this.config.url,
       method: this.config.method,
       headers: merged,
-      body: this.config.body
+      body: this.config.body,
+      charset: this.config.charset
     };
   }
 

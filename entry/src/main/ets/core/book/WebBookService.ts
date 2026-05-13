@@ -3,6 +3,8 @@ import { HttpClient } from '../http/HttpClient';
 import { AnalyzeUrl } from '../rule/AnalyzeUrl';
 import { AnalyzeRule } from '../rule/AnalyzeRule';
 import { RuleContext } from '../rule/RuleContext';
+import { util } from '@kit.ArkTS';
+import { VerificationSupport } from '../http/VerificationSupport';
 
 export class WebBookService {
   private http: HttpClient;
@@ -16,10 +18,14 @@ export class WebBookService {
     const au = new AnalyzeUrl(source, this.http);
     const resp = await au.fetch(book.bookUrl);
     console.log('[WS] getBookInfo resp:', resp.success, 'len:', resp.body.length);
+    if (this.requestVerificationIfNeeded(source, book.bookUrl, resp.body, resp.statusCode, source.bookInfoRule.init)) {
+      return book;
+    }
     if (!resp.success || !resp.body) return book;
 
     const ctx = new RuleContext();
     ctx.loadFromJson(book.variable);
+    this.seedBookVariables(ctx, book.bookUrl);
 
     // init 规则
     let content = resp.body;
@@ -100,13 +106,22 @@ export class WebBookService {
     const tocUrl = book.tocUrl || book.bookUrl;
     const au = new AnalyzeUrl(source, this.http);
     const resp = await au.fetch(tocUrl);
+    if (this.requestVerificationIfNeeded(source, tocUrl, resp.body, resp.statusCode, source.tocRule.chapterList)) {
+      return [];
+    }
     if (!resp.success || !resp.body) return [];
 
     const ctx = new RuleContext();
     ctx.loadFromJson(book.variable);
+    this.seedBookVariables(ctx, book.bookUrl);
 
     const rule = new AnalyzeRule(resp.body, book.origin || source.bookSourceUrl, ctx);
     const tocRule = source.tocRule;
+    const specialChapters = await this.tryBuildSpecialChapterList(source, book, resp.body);
+    if (specialChapters.length > 0) {
+      book.variable = ctx.toJson();
+      return specialChapters;
+    }
     const items = rule.getElements(tocRule.chapterList || '');
     console.log('[WS] getChapterList items:', items.length, 'from resp:', resp.body.length);
 
@@ -163,18 +178,36 @@ export class WebBookService {
 
   async getContent(source: BookSource, book: Book, chapter: BookChapter): Promise<string> {
     console.log('[WS] getContent, url:', chapter.url);
+    const specialContent = await this.tryGetSpecialContent(source, chapter);
+    if (specialContent) {
+      return this.applyReplaceRegex(specialContent, source.contentRule.replaceRegex)
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    }
     const au = new AnalyzeUrl(source, this.http);
     const resp = await au.fetch(chapter.url);
     console.log('[WS] getContent resp:', resp.success, 'len:', resp.body.length);
+    if (this.requestVerificationIfNeeded(source, chapter.url, resp.body, resp.statusCode, source.contentRule.content)) {
+      return '';
+    }
     if (!resp.success || !resp.body) return '';
 
     const ctx = new RuleContext();
     ctx.loadFromJson(book.variable);
+    this.seedBookVariables(ctx, book.bookUrl);
 
     const rule = new AnalyzeRule(resp.body, book.origin || source.bookSourceUrl, ctx);
     const contentRule = source.contentRule;
 
     let content = rule.getString(contentRule.content);
+    if (this.isBadExtractedContent(content)) {
+      content = this.tryExtractSpecialContentFromHtml(source, resp.body);
+    }
     if (!content) return '';
 
     // 替换净化: contentRule.replaceRegex
@@ -204,6 +237,82 @@ export class WebBookService {
     return b + '/' + url;
   }
 
+  private requestVerificationIfNeeded(source: BookSource, requestUrl: string, body: string, statusCode: number, rule: string): boolean {
+    if (!VerificationSupport.isChallengeResponse(body) &&
+      !(statusCode === 401 || statusCode === 403) &&
+      !(statusCode === 403 && VerificationSupport.canBrowserVerify(rule))) {
+      return false;
+    }
+    const verifyUrl = VerificationSupport.pickVerificationUrl(source, requestUrl, rule);
+    VerificationSupport.requestVerification(verifyUrl, `${source.bookSourceName} 验证`);
+    console.warn('[WS] source needs browser verification:', source.bookSourceName, verifyUrl);
+    return true;
+  }
+
+  private isBadExtractedContent(content: string): boolean {
+    if (!content) return false;
+    const sample = content.substring(0, Math.min(content.length, 1200));
+    return sample.includes('font-family:') || sample.includes('-webkit-text-size-adjust') ||
+      sample.includes('.nuxt-progress') || sample.includes('box-sizing:border-box') ||
+      sample.includes('<!doctype html') || sample.includes('<html');
+  }
+
+  private tryExtractSpecialContentFromHtml(source: BookSource, body: string): string {
+    if (!body) return '';
+    const host = source.bookSourceUrl || '';
+    if (host.includes('ttkan.co')) {
+      return this.extractParagraphsFromContainer(body, 'content');
+    }
+    if (host.includes('50zw.')) {
+      return this.extractParagraphsFromContainer(body, 'word_read');
+    }
+    return '';
+  }
+
+  private extractParagraphsFromContainer(html: string, className: string): string {
+    const container = this.extractClassBlock(html, className);
+    if (!container) return '';
+    const paragraphs: string[] = [];
+    const re = /<p(?:\s[^>]*)?>([\s\S]*?)<\/p>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(container)) !== null) {
+      const text = m[1]
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .trim();
+      if (text && !text.includes('本章完') && !text.includes('武林中文网')) {
+        paragraphs.push(text);
+      }
+      if (paragraphs.length > 3000) break;
+    }
+    return paragraphs.join('\n\n');
+  }
+
+  private extractClassBlock(html: string, className: string): string {
+    const re = new RegExp(`<([a-zA-Z][\\w-]*)([^>]*\\sclass=["'][^"']*\\b${className}\\b[^"']*["'][^>]*)>`, 'i');
+    const m = re.exec(html);
+    if (!m) return '';
+    const start = m.index;
+    const tag = m[1];
+    const tagRe = new RegExp(`<\\/?${tag}(?:\\s[^>]*)?>`, 'gi');
+    tagRe.lastIndex = start;
+    let depth = 0;
+    let tm: RegExpExecArray | null;
+    while ((tm = tagRe.exec(html)) !== null) {
+      if (tm[0].startsWith('</')) {
+        depth--;
+        if (depth === 0) return html.substring(start, tagRe.lastIndex);
+      } else if (!tm[0].endsWith('/>')) {
+        depth++;
+      }
+    }
+    return html.substring(start);
+  }
+
   private applyReplaceRegex(content: string, replaceRegex: string): string {
     if (!content || !replaceRegex) return content;
     try {
@@ -225,6 +334,23 @@ export class WebBookService {
     return url.replace(/@get:\{(\w+)\}/g, (_: string, key: string) => {
       return ctx.get(key);
     });
+  }
+
+  private seedBookVariables(ctx: RuleContext, bookUrl: string): void {
+    if (!bookUrl) return;
+    const id = this.extractQueryParam(bookUrl, 'book_id') || this.extractQueryParam(bookUrl, 'bookid') ||
+      this.extractQueryParam(bookUrl, 'id') || this.extractBookId(bookUrl);
+    if (id) {
+      if (!ctx.get('book')) ctx.put('book', id);
+      if (!ctx.get('book_id')) ctx.put('book_id', id);
+      if (!ctx.get('id')) ctx.put('id', id);
+    }
+  }
+
+  private extractQueryParam(url: string, key: string): string {
+    const re = new RegExp(`[?&]${key}=([^&]+)`, 'i');
+    const m = url.match(re);
+    return m ? decodeURIComponent(m[1]) : '';
   }
 
   private resolveJsonKey(itemData: Record<string, Object> | null, tocData: Record<string, Object> | null, key: string, deep: boolean): string {
@@ -257,5 +383,95 @@ export class WebBookService {
       }
     }
     return '';
+  }
+
+  private async tryBuildSpecialChapterList(source: BookSource, book: Book, body: string): Promise<BookChapter[]> {
+    if (!source.tocRule.chapterList.includes('allItemIds') && !source.tocRule.chapterList.includes('directory/detail')) {
+      return [];
+    }
+    try {
+      const root = JSON.parse(body) as Record<string, Object>;
+      const data = root['data'] as Record<string, Object>;
+      const ids = data?.['allItemIds'] as Object[];
+      if (!Array.isArray(ids) || ids.length === 0) return [];
+
+      const chapters: BookChapter[] = [];
+      for (let i = 0; i < ids.length; i += 100) {
+        const part = ids.slice(i, Math.min(i + 100, ids.length)).map(v => String(v)).join(',');
+        const resp = await this.http.execute({
+          url: `https://novel.snssdk.com/api/novel/book/directory/detail/v1/?item_ids=${part}`,
+          method: 'GET',
+          headers: {}
+        });
+        if (this.requestVerificationIfNeeded(source, resp.url || source.bookSourceUrl, resp.body, resp.statusCode, source.tocRule.chapterList)) {
+          return [];
+        }
+        if (!resp.success || !resp.body) continue;
+        const detail = JSON.parse(resp.body) as Record<string, Object>;
+        const list = detail['data'] as Object[];
+        if (!Array.isArray(list)) continue;
+        for (const item of list) {
+          const rec = item as Record<string, Object>;
+          const itemId = String(rec['item_id'] || rec['id'] || '');
+          if (!itemId) continue;
+          const chapter = new BookChapter();
+          chapter.title = String(rec['title'] || `第${chapters.length + 1}章`);
+          chapter.url = `data:;base64,${this.base64Encode(itemId)},{"type":"pyfqc"}`;
+          chapter.bookUrl = book.bookUrl;
+          chapter.index = chapters.length;
+          chapters.push(chapter);
+        }
+      }
+      return chapters;
+    } catch (e) {
+      console.warn('[WS] 特殊目录拼装失败:', e);
+      return [];
+    }
+  }
+
+  private async tryGetSpecialContent(source: BookSource, chapter: BookChapter): Promise<string> {
+    if (!chapter.url.startsWith('data:;base64,') || !source.contentRule.content.includes('item_id')) {
+      return '';
+    }
+    try {
+      const idPart = chapter.url.substring('data:;base64,'.length).split(',')[0];
+      const itemId = this.base64Decode(idPart);
+      const resp = await this.http.execute({
+        url: `${source.bookSourceUrl.replace(/##[\s\S]*$/, '')}/content?item_id=${encodeURIComponent(itemId)}&key=`,
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json, text/plain, */*',
+          'Content-Type': 'application/json'
+        }
+      });
+      if (this.requestVerificationIfNeeded(source, resp.url || chapter.url, resp.body, resp.statusCode, source.contentRule.content)) {
+        return '';
+      }
+      if (!resp.success || !resp.body) return '';
+      const json = JSON.parse(resp.body) as Record<string, Object>;
+      const data = json['data'] as Record<string, Object>;
+      return String(data?.['content'] || '');
+    } catch (e) {
+      console.warn('[WS] 特殊正文获取失败:', e);
+      return '';
+    }
+  }
+
+  private base64Encode(input: string): string {
+    try {
+      const e = new util.TextEncoder();
+      return new util.Base64Helper().encodeToStringSync(e.encodeInto(input));
+    } catch (_) {
+      return input;
+    }
+  }
+
+  private base64Decode(input: string): string {
+    try {
+      const data = new util.Base64Helper().decodeSync(input);
+      return util.TextDecoder.create('utf-8').decodeWithStream(data, { stream: false });
+    } catch (_) {
+      return input;
+    }
   }
 }

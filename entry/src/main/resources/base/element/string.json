@@ -2,15 +2,15 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "Legado阅读鸿蒙版主模块"
+      "value": "开源阅读纯净版主模块"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "Legado阅读鸿蒙版"
+      "value": "开源阅读纯净版"
     },
     {
       "name": "EntryAbility_label",
-      "value": "开源阅读鸿蒙版"
+      "value": "开源阅读纯净版"
     },
     {
       "name": "bookshelf",

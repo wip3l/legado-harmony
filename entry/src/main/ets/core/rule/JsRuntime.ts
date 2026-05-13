@@ -1,5 +1,6 @@
 import { util } from '@kit.ArkTS';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
+import { CookieStore } from '../http/CookieStore';
 
 export class JsRuntime {
   private vars: Record<string, string> = {};
@@ -22,8 +23,21 @@ export class JsRuntime {
       expr = this.replaceFunctionCalls(expr, 'Math.ceil', (v: string) => String(Math.ceil(this.evalNumber(v))));
 
       expr = this.replaceFunctionCalls(expr, 'java.base64Encode', (v: string) => this.base64(this.evalStr(v)));
+      expr = this.replaceFunctionCalls(expr, 'java.base64Decode', (v: string) => this.base64Decode(this.evalStr(v)));
+      expr = this.replaceFunctionCalls(expr, 'java.hexDecodeToString', (v: string) => this.hexDecodeToString(this.evalStr(v)));
       expr = this.replaceFunctionCalls(expr, 'java.md5Encode', (v: string) => this.md5(this.evalStr(v)));
+      expr = this.replaceFunctionCalls(expr, 'java.getCookie', (v: string) => CookieStore.getCookie(this.evalStr(v)));
+      expr = this.replaceFunctionCalls(expr, 'cookie.getCookie', (v: string) => CookieStore.getCookie(this.evalStr(v)));
+      expr = this.replaceFunctionCalls(expr, 'java.getString', (_v: string) => '');
+      expr = this.replaceFunctionCalls(expr, 'java.getElement', (_v: string) => '');
+      expr = this.replaceFunctionCalls(expr, 'java.t2s', (v: string) => this.evalStr(v));
+      expr = this.replaceFunctionCalls(expr, 'String', (v: string) => this.evalStr(v));
       expr = this.replaceFunctionCalls(expr, 'encodeURIComponent', (v: string) => encodeURIComponent(this.evalStr(v)));
+      expr = this.replaceFunctionCalls(expr, 'encodeURI', (v: string) => encodeURI(this.evalStr(v)));
+      expr = this.replaceFunctionCalls(expr, 'java.encodeURI', (v: string) => encodeURIComponent(this.evalStr(this.splitArgs(v)[0] || v)));
+
+      expr = this.replaceNoArgCalls(expr);
+      this.applyCookieSideEffects(expr);
 
       for (const k in this.vars) {
         const value = this.vars[k];
@@ -92,6 +106,30 @@ export class JsRuntime {
     return result;
   }
 
+  private replaceNoArgCalls(expr: string): string {
+    return expr
+      .replace(/\bjava\.androidId\(\)/g, this.androidId())
+      .replace(/\bjava\.randomUUID\(\)/g, this.randomUuid())
+      .replace(/\bDate\.now\(\)/g, String(Date.now()));
+  }
+
+  private applyCookieSideEffects(expr: string): void {
+    const setRe = /\bcookie\.setCookie\(\s*([^,]+)\s*,\s*([^)]+)\)/g;
+    let setMatch: RegExpExecArray | null;
+    while ((setMatch = setRe.exec(expr)) !== null) {
+      CookieStore.setCookies(this.evalStr(setMatch[1]), this.evalStr(setMatch[2]));
+      CookieStore.saveAsync();
+    }
+
+    const removeRe = /\bcookie\.removeCookie\(\s*([^)]+)\)/g;
+    let removeMatch: RegExpExecArray | null;
+    while ((removeMatch = removeRe.exec(expr)) !== null) {
+      const url = this.evalStr(removeMatch[1]);
+      CookieStore.setCookies(url, 'removed=; Max-Age=0; Path=/');
+      CookieStore.saveAsync();
+    }
+  }
+
   private findMatchingParen(text: string, openIndex: number): number {
     let depth = 0;
     let quote = '';
@@ -132,6 +170,29 @@ export class JsRuntime {
     }
     parts.push(expr.substring(start).trim());
     return parts;
+  }
+
+  private splitArgs(args: string): string[] {
+    const result: string[] = [];
+    let depth = 0;
+    let quote = '';
+    let start = 0;
+    for (let i = 0; i < args.length; i++) {
+      const ch = args.charAt(i);
+      if (quote) {
+        if (ch === quote && args.charAt(i - 1) !== '\\') quote = '';
+        continue;
+      }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '(') depth++;
+      if (ch === ')') depth--;
+      if (ch === ',' && depth === 0) {
+        result.push(args.substring(start, i).trim());
+        start = i + 1;
+      }
+    }
+    result.push(args.substring(start).trim());
+    return result;
   }
 
   private stripQuotes(value: string): string {
@@ -199,6 +260,24 @@ export class JsRuntime {
     } catch (_) { return input; }
   }
 
+  private base64Decode(input: string): string {
+    try {
+      const data = new util.Base64Helper().decodeSync(input);
+      return util.TextDecoder.create('utf-8').decodeWithStream(data, { stream: false });
+    } catch (_) { return input; }
+  }
+
+  private hexDecodeToString(input: string): string {
+    try {
+      const clean = input.replace(/^0x/i, '').replace(/\s+/g, '');
+      const bytes: number[] = [];
+      for (let i = 0; i < clean.length; i += 2) {
+        bytes.push(parseInt(clean.substring(i, i + 2), 16));
+      }
+      return util.TextDecoder.create('utf-8').decodeWithStream(new Uint8Array(bytes), { stream: false });
+    } catch (_) { return input; }
+  }
+
   private md5(input: string): string {
     try {
       const md = cryptoFramework.createMd('MD5');
@@ -212,6 +291,16 @@ export class JsRuntime {
       }
       return hex;
     } catch (_) { return input; }
+  }
+
+  private androidId(): string {
+    return 'legado_harmony_' + this.md5('legado-harmony').substring(0, 16);
+  }
+
+  private randomUuid(): string {
+    const seed = `${Date.now()}${Math.random()}`;
+    const hex = this.md5(seed);
+    return `${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}`;
   }
 
   aesBase64DecodeToString(data: string, key: string, iv: string): string {
