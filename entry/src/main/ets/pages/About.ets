@@ -1,9 +1,18 @@
 import { router } from '@kit.ArkUI';
+import { syncSystemBars } from '../utils/SystemBars';
 
 @Entry
 @Component
 struct AboutPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+
+  aboutToAppear(): void {
+    this.syncBars();
+  }
+
+  onPageShow(): void {
+    this.syncBars();
+  }
 
   build() {
     Column() {
@@ -81,6 +90,7 @@ struct AboutPage {
     .width('100%')
     .height('100%')
     .backgroundColor(this.pageColor())
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   @Builder
@@ -124,5 +134,9 @@ struct AboutPage {
 
   subTextColor(): string {
     return this.appDarkMode ? '#8A8F98' : '#888888';
+  }
+
+  syncBars(): void {
+    syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
 }

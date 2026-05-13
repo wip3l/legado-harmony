@@ -2,6 +2,7 @@ import { router } from '@kit.ArkUI';
 import { BookSource } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { promptAction } from '@kit.ArkUI';
+import { syncSystemBars } from '../utils/SystemBars';
 
 @Entry
 @Component
@@ -13,6 +14,7 @@ struct BookSourceEditPage {
   @State currentTab: number = 0;
 
   aboutToAppear() {
+    this.syncBars();
     const params = router.getParams() as Record<string, string>;
     if (params && params['bookSourceUrl']) {
       this.bookSourceUrl = params['bookSourceUrl'];
@@ -20,6 +22,10 @@ struct BookSourceEditPage {
         this.loadSource();
       }
     }
+  }
+
+  onPageShow(): void {
+    this.syncBars();
   }
 
   async loadSource() {
@@ -203,6 +209,7 @@ struct BookSourceEditPage {
     .width('100%')
     .height('100%')
     .backgroundColor(this.pageColor())
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   @Builder
@@ -539,5 +546,9 @@ struct BookSourceEditPage {
 
   placeholderTextColor(): string {
     return this.appDarkMode ? '#6F7480' : '#999999';
+  }
+
+  syncBars(): void {
+    syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
 }

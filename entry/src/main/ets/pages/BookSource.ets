@@ -4,6 +4,7 @@ import { AppDatabase } from '../model/data/AppDatabase';
 import { httpHelper } from '../model/http/HttpHelper';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
+import { syncSystemBars } from '../utils/SystemBars';
 
 @Entry
 @Component
@@ -17,7 +18,12 @@ struct BookSourcePage {
   @State importUrl: string = '';
 
   aboutToAppear() {
+    this.syncBars();
     this.loadSources();
+  }
+
+  onPageShow(): void {
+    this.syncBars();
   }
 
   async loadSources() {
@@ -308,6 +314,12 @@ struct BookSourcePage {
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(this.pageColor())
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  syncBars(): void {
+    syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
 
   pageColor(): string {

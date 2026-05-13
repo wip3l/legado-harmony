@@ -28,6 +28,17 @@ export default class EntryAbility extends UIAbility {
     windowStage.getMainWindow().then((mainWindow) => {
       // 启用系统导航条以获得悬浮指示器效果
       mainWindow.setWindowSystemBarEnable(['navigation', 'status']);
+      const darkMode = AppStorage.get<boolean>('appDarkMode') || false;
+      const bg = darkMode ? '#101113' : '#F5F5F5';
+      mainWindow.setWindowBackgroundColor(bg);
+      mainWindow.setWindowSystemBarProperties({
+        statusBarColor: bg,
+        isStatusBarLightIcon: darkMode,
+        statusBarContentColor: darkMode ? '#FFFFFF' : '#1F1F1F',
+        navigationBarColor: bg,
+        isNavigationBarLightIcon: darkMode,
+        navigationBarContentColor: darkMode ? '#FFFFFF' : '#1F1F1F'
+      });
     });
 
     windowStage.loadContent('pages/Index', (err) => {

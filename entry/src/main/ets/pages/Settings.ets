@@ -1,5 +1,6 @@
 import { router } from '@kit.ArkUI';
 import { ConfigurationConstant } from '@kit.AbilityKit';
+import { syncSystemBars } from '../utils/SystemBars';
 
 @Entry
 @Component
@@ -21,6 +22,11 @@ struct SettingsPage {
 
   aboutToAppear() {
     this.applyThemeMode(this.appThemeMode);
+    this.syncBars();
+  }
+
+  onPageShow(): void {
+    this.syncBars();
   }
 
   build() {
@@ -120,6 +126,7 @@ struct SettingsPage {
     .width('100%')
     .height('100%')
     .backgroundColor(this.pageColor())
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   applyThemeMode(mode: string) {
@@ -133,6 +140,7 @@ struct SettingsPage {
     } else {
       getContext(this).getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     }
+    this.syncBars();
   }
 
   pageTurnModeText(): string {
@@ -171,6 +179,10 @@ struct SettingsPage {
 
   previewSubTextColor(): string {
     return this.readerThemeIndex === 3 ? '#9AA0A6' : '#776B5F';
+  }
+
+  syncBars(): void {
+    syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
 
   @Builder

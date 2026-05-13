@@ -373,7 +373,7 @@ struct BookshelfPage {
 
             Text(`确定要将《${this.pendingDeleteBook.name}》从书架移除吗？`)
               .fontSize(15)
-              .fontColor('#555')
+              .fontColor(this.secondaryTextColor())
               .width('100%')
               .textAlign(TextAlign.Center)
               .margin({ bottom: 20 })
@@ -382,8 +382,8 @@ struct BookshelfPage {
               Button('取消')
                 .width('45%')
                 .height(44)
-                .backgroundColor('#F5F5F5')
-                .fontColor('#333')
+                .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
+                .fontColor(this.primaryTextColor())
                 .onClick(() => {
                   this.showDeleteDialog = false;
                   this.pendingDeleteBook = null;
@@ -407,7 +407,7 @@ struct BookshelfPage {
           }
           .width('85%')
           .padding(24)
-          .backgroundColor('#FFFFFF')
+          .backgroundColor(this.cardColor())
           .borderRadius(12)
         }
         .width('100%')
@@ -923,7 +923,7 @@ struct SearchPage {
           .width('100%')
           .height(36)
           .textAlign(TextAlign.Center)
-          .backgroundColor('#E8F5E9')
+          .backgroundColor(this.statusMessageColor())
       }
 
       if (this.showResult && this.searchResults.length > 0) {
@@ -1220,6 +1220,10 @@ struct SearchPage {
 
   subTextColor(): string {
     return this.appDarkMode ? '#8A8F98' : '#999';
+  }
+
+  statusMessageColor(): string {
+    return this.appDarkMode ? '#14251B' : '#E8F5E9';
   }
 }
 

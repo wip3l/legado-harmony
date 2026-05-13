@@ -4,10 +4,12 @@ import { AppDatabase } from '../model/data/AppDatabase';
 import { promptAction } from '@kit.ArkUI';
 import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
 import { WebBookService } from '../core/book/WebBookService';
+import { syncSystemBars } from '../utils/SystemBars';
 
 @Entry
 @Component
 struct SearchPage {
+  @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @State keyword: string = '';
   @State searchResults: SearchBook[] = [];
   @State shelfBookUrls: string[] = [];
@@ -18,7 +20,12 @@ struct SearchPage {
   @State statusMessage: string = '';
 
   aboutToAppear() {
+    this.syncBars();
     this.initPage();
+  }
+
+  onPageShow(): void {
+    this.syncBars();
   }
 
   async initPage() {
@@ -41,7 +48,9 @@ struct SearchPage {
           .layoutWeight(1)
           .height(40)
           .borderRadius(20)
-          .backgroundColor('#F5F5F5')
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .placeholderColor(this.subTextColor())
           .padding({ left: 16, right: 16 })
           .onChange((value: string) => {
             this.keyword = value;
@@ -60,18 +69,18 @@ struct SearchPage {
       .width('100%')
       .height(56)
       .padding({ left: 16, right: 16 })
-      .backgroundColor('#FFFFFF')
+      .backgroundColor(this.pageColor())
       .alignItems(VerticalAlign.Center)
 
       // 状态消息
       if (this.statusMessage) {
         Text(this.statusMessage)
           .fontSize(14)
-          .fontColor('#666')
+          .fontColor(this.secondaryTextColor())
           .width('100%')
           .height(36)
           .textAlign(TextAlign.Center)
-          .backgroundColor('#E8F5E9')
+          .backgroundColor(this.statusMessageColor())
       }
 
       // 内容区域
@@ -84,17 +93,18 @@ struct SearchPage {
                   Text(book.name)
                     .fontSize(16)
                     .fontWeight(FontWeight.Bold)
+                    .fontColor(this.primaryTextColor())
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
 
                   Text(book.author)
                     .fontSize(14)
-                    .fontColor('#666')
+                    .fontColor(this.secondaryTextColor())
                     .margin({ top: 4 })
 
                   Text(book.originName)
                     .fontSize(12)
-                    .fontColor('#999')
+                    .fontColor(this.subTextColor())
                     .margin({ top: 4 })
                 }
                 .layoutWeight(1)
@@ -113,7 +123,7 @@ struct SearchPage {
               }
               .width('100%')
               .padding(12)
-              .backgroundColor('#FFFFFF')
+              .backgroundColor(this.cardColor())
               .borderRadius(8)
               .onClick(() => {
                 this.openSearchBookDetail(book);
@@ -129,7 +139,7 @@ struct SearchPage {
                   .height(20)
                 Text('继续搜索中...')
                   .fontSize(13)
-                  .fontColor('#999')
+                  .fontColor(this.subTextColor())
                   .margin({ left: 8 })
               }
               .width('100%')
@@ -148,7 +158,7 @@ struct SearchPage {
             .height(40)
           Text('搜索中...')
             .fontSize(14)
-            .fontColor('#999')
+            .fontColor(this.subTextColor())
             .margin({ top: 8 })
         }
         .width('100%')
@@ -158,7 +168,7 @@ struct SearchPage {
         Column() {
           Text('未找到相关书籍')
             .fontSize(16)
-            .fontColor('#999')
+            .fontColor(this.subTextColor())
         }
         .width('100%')
         .height('100%')
@@ -171,15 +181,16 @@ struct SearchPage {
               Text('搜索历史')
                 .fontSize(16)
                 .fontWeight(FontWeight.Bold)
+                .fontColor(this.primaryTextColor())
                 .width('100%')
 
               Flex({ wrap: FlexWrap.Wrap }) {
                 ForEach(this.searchHistory, (keyword: string) => {
                   Text(keyword)
                     .fontSize(14)
-                    .fontColor('#666')
+                    .fontColor(this.secondaryTextColor())
                     .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                    .backgroundColor('#FFFFFF')
+                    .backgroundColor(this.cardColor())
                     .borderRadius(16)
                     .margin({ right: 8, bottom: 8 })
                     .onClick(() => {
@@ -193,7 +204,7 @@ struct SearchPage {
             }
             .width('100%')
             .padding(16)
-            .backgroundColor('#FFFFFF')
+            .backgroundColor(this.cardColor())
             .borderRadius(8)
             .margin({ left: 16, right: 16, top: 16 })
           }
@@ -202,15 +213,16 @@ struct SearchPage {
             Text('热门搜索')
               .fontSize(16)
               .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
               .width('100%')
 
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(this.hotKeywords, (keyword: string) => {
                 Text(keyword)
                   .fontSize(14)
-                  .fontColor('#666')
+                  .fontColor(this.secondaryTextColor())
                   .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                  .backgroundColor('#FFFFFF')
+                  .backgroundColor(this.cardColor())
                   .borderRadius(16)
                   .margin({ right: 8, bottom: 8 })
                   .onClick(() => {
@@ -224,7 +236,7 @@ struct SearchPage {
           }
           .width('100%')
           .padding(16)
-          .backgroundColor('#FFFFFF')
+          .backgroundColor(this.cardColor())
           .borderRadius(8)
           .margin({ left: 16, right: 16, top: 16 })
         }
@@ -234,7 +246,8 @@ struct SearchPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F5F5')
+    .backgroundColor(this.pageColor())
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   async doSearch() {
@@ -409,5 +422,37 @@ struct SearchPage {
         wordCount: book.wordCount
       }
     });
+  }
+
+  pageColor(): string {
+    return this.appDarkMode ? '#101113' : '#F5F5F5';
+  }
+
+  cardColor(): string {
+    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+  }
+
+  inputColor(): string {
+    return this.appDarkMode ? '#24272D' : '#F5F5F5';
+  }
+
+  primaryTextColor(): string {
+    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+  }
+
+  secondaryTextColor(): string {
+    return this.appDarkMode ? '#C6CBD2' : '#666666';
+  }
+
+  subTextColor(): string {
+    return this.appDarkMode ? '#8A8F98' : '#999999';
+  }
+
+  statusMessageColor(): string {
+    return this.appDarkMode ? '#14251B' : '#E8F5E9';
+  }
+
+  syncBars(): void {
+    syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
 }
