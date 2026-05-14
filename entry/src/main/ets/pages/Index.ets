@@ -534,13 +534,19 @@ struct ExplorePage {
   @State selectedSourceName: string = '';
   @State selectedIndex: number = 0;
   @State books: SearchBook[] = [];
+  @State shelfBookUrls: string[] = [];
   @State isLoading: boolean = false;
   @State status: string = '';
+  @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   private coordinator: ExploreCoordinator = new ExploreCoordinator();
 
   aboutToAppear() {
     this.loadEntries();
+  }
+
+  onShelfChanged(): void {
+    this.syncExploreShelfStatus(this.books);
   }
 
   async loadEntries() {
@@ -575,6 +581,7 @@ struct ExplorePage {
     try {
       const entry = activeEntries[Math.min(this.selectedIndex, activeEntries.length - 1)];
       this.books = await this.coordinator.explore(entry, 1);
+      await this.syncExploreShelfStatus(this.books);
       this.status = this.books.length > 0 ? `${entry.sourceName} · ${entry.title} · ${this.books.length} 本` : '当前分类暂无结果';
     } catch (e) {
       console.error('获取发现内容失败:', e);
@@ -705,15 +712,15 @@ struct ExplorePage {
                 .layoutWeight(1)
                 .alignItems(HorizontalAlign.Start)
 
-                Button('加入')
+                Button(this.isSearchBookInShelf(book) ? '移除' : '加入')
                   .height(32)
                   .fontSize(13)
                   .borderRadius(16)
-                  .backgroundColor('#007DFF')
+                  .backgroundColor(this.isSearchBookInShelf(book) ? '#E53935' : '#007DFF')
                   .fontColor('#FFFFFF')
                   .margin({ left: 12 })
                   .onClick(() => {
-                    this.addSearchBookToShelf(book);
+                    this.toggleSearchBookShelf(book);
                   })
               }
               .width('100%')
@@ -784,6 +791,7 @@ struct ExplorePage {
       await db.initWithContext(getContext(this));
       const existing = await db.getBook(searchBook.bookUrl);
       if (existing) {
+        this.markSearchBookInShelf(searchBook.bookUrl);
         AppStorage.setOrCreate('shelfUpdateTime', Date.now());
         promptAction.showToast({ message: '已在书架' });
         return;
@@ -824,11 +832,65 @@ struct ExplorePage {
       }
 
       await db.insertBook(book);
+      this.markSearchBookInShelf(book.bookUrl);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       promptAction.showToast({ message: '已加入书架' });
     } catch (e) {
       console.error('加入书架失败:', e);
       promptAction.showToast({ message: '加入书架失败' });
+    }
+  }
+
+  async syncExploreShelfStatus(books: SearchBook[]): Promise<void> {
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const urls: string[] = [];
+      for (const book of books) {
+        if (book.bookUrl && await db.getBook(book.bookUrl)) {
+          urls.push(book.bookUrl);
+        }
+      }
+      this.shelfBookUrls = urls;
+    } catch (e) {
+      console.error('同步发现书架状态失败:', e);
+    }
+  }
+
+  isSearchBookInShelf(book: SearchBook): boolean {
+    return !!book.bookUrl && this.shelfBookUrls.includes(book.bookUrl);
+  }
+
+  async toggleSearchBookShelf(searchBook: SearchBook): Promise<void> {
+    if (this.isSearchBookInShelf(searchBook)) {
+      await this.removeSearchBookFromShelf(searchBook);
+    } else {
+      await this.addSearchBookToShelf(searchBook);
+    }
+  }
+
+  async removeSearchBookFromShelf(searchBook: SearchBook): Promise<void> {
+    if (!searchBook.bookUrl) {
+      promptAction.showToast({ message: '书籍地址为空' });
+      return;
+    }
+
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      await db.deleteBook(searchBook.bookUrl);
+      this.shelfBookUrls = this.shelfBookUrls.filter(url => url !== searchBook.bookUrl);
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      promptAction.showToast({ message: '已移出书架' });
+    } catch (e) {
+      console.error('移出书架失败:', e);
+      promptAction.showToast({ message: '移出书架失败' });
+    }
+  }
+
+  markSearchBookInShelf(bookUrl: string): void {
+    if (bookUrl && !this.shelfBookUrls.includes(bookUrl)) {
+      this.shelfBookUrls = [...this.shelfBookUrls, bookUrl];
     }
   }
 

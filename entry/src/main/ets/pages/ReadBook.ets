@@ -1,4 +1,5 @@
 import { router, window } from '@kit.ArkUI';
+import { inputConsumer, KeyCode, Action, KeyEvent } from '@kit.InputKit';
 import { Book, BookChapter } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
@@ -41,15 +42,18 @@ struct ReadBookPage {
   @StorageLink('readerThemeIndex') @Watch('onReaderThemeChanged') readerThemeIndex: number = 0;
   @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
   @StorageLink('readerTapTurnPage') readerTapTurnPage: boolean = true;
-  @StorageLink('readerVolumeTurnPage') readerVolumeTurnPage: boolean = false;
+  @StorageLink('readerVolumeTurnPage') @Watch('onReaderVolumeTurnPageChanged') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
   @StorageLink('readerExtendToStatusBar') @Watch('onReaderExtendToStatusBarChanged') readerExtendToStatusBar: boolean = false;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   private themeBackgrounds: string[] = ['#F6F0E5', '#F5F5F5', '#E8F1EA', '#1F1F1F'];
   private themeTextColors: string[] = ['#2F261D', '#333333', '#26352A', '#D8D8D8'];
+  private volumeUpCallback?: (event: KeyEvent) => void;
+  private volumeDownCallback?: (event: KeyEvent) => void;
 
   aboutToAppear() {
     this.enterReaderImmersive();
+    this.updateVolumeKeySubscription();
     const params = router.getParams() as Record<string, string>;
     if (params && params['bookUrl']) {
       this.bookUrl = params['bookUrl'];
@@ -59,6 +63,7 @@ struct ReadBookPage {
 
   aboutToDisappear() {
     this.saveReadingProgress();
+    this.unregisterVolumeKeyTurn();
     this.exitReaderImmersive();
   }
 
@@ -175,17 +180,20 @@ struct ReadBookPage {
     }
   }
 
-  async loadContent() {
+  async loadContent(silent: boolean = false) {
     if (this.chapters.length === 0) {
       this.content = this.buildBookPreview();
       this.isLoading = false;
       return;
     }
     
-    this.isLoading = true;
-    this.loadStatus = '正在加载章节内容...';
+    const engine = ReadBookEngine.get();
+    const showLoading = !silent && !engine.hasCachedContent(this.currentChapterIndex);
+    if (showLoading) {
+      this.isLoading = true;
+      this.loadStatus = '正在加载章节内容...';
+    }
     try {
-      const engine = ReadBookEngine.get();
       const body = await engine.loadContent(this.currentChapterIndex);
       if (body) {
         this.content = body;
@@ -196,11 +204,14 @@ struct ReadBookPage {
           (c ? `${c.title}\n\n章节内容加载失败，请稍后重试或尝试换源。` : '加载失败');
       }
       this.paginateContent();
+      this.preloadReaderContent();
     } catch (e) {
       console.error('加载内容失败:', e);
-      } finally {
-      this.isLoading = false;
-      this.loadStatus = '';
+    } finally {
+      if (showLoading) {
+        this.isLoading = false;
+        this.loadStatus = '';
+      }
       this.updatePendingVerification();
     }
   }
@@ -777,6 +788,76 @@ struct ReadBookPage {
     this.saveReadingProgress();
   }
 
+  onReaderVolumeTurnPageChanged(): void {
+    this.updateVolumeKeySubscription();
+  }
+
+  updateVolumeKeySubscription(): void {
+    this.unregisterVolumeKeyTurn();
+    if (!this.readerVolumeTurnPage) {
+      return;
+    }
+    this.registerVolumeKeyTurn();
+  }
+
+  registerVolumeKeyTurn(): void {
+    this.volumeUpCallback = (_event: KeyEvent) => {
+      this.handleVolumeKeyTurn(-1);
+    };
+    this.volumeDownCallback = (_event: KeyEvent) => {
+      this.handleVolumeKeyTurn(1);
+    };
+    try {
+      inputConsumer.on('keyPressed', {
+        key: KeyCode.KEYCODE_VOLUME_UP,
+        action: Action.DOWN,
+        isRepeat: false
+      }, this.volumeUpCallback);
+      inputConsumer.on('keyPressed', {
+        key: KeyCode.KEYCODE_VOLUME_DOWN,
+        action: Action.DOWN,
+        isRepeat: false
+      }, this.volumeDownCallback);
+    } catch (err) {
+      console.error('注册音量键翻页失败:', err);
+      this.volumeUpCallback = undefined;
+      this.volumeDownCallback = undefined;
+    }
+  }
+
+  unregisterVolumeKeyTurn(): void {
+    try {
+      if (this.volumeUpCallback) {
+        inputConsumer.off('keyPressed', this.volumeUpCallback);
+      }
+      if (this.volumeDownCallback) {
+        inputConsumer.off('keyPressed', this.volumeDownCallback);
+      }
+    } catch (err) {
+      console.error('取消音量键翻页失败:', err);
+    }
+    this.volumeUpCallback = undefined;
+    this.volumeDownCallback = undefined;
+  }
+
+  handleVolumeKeyTurn(direction: number): void {
+    if (!this.readerVolumeTurnPage || this.showMenu || this.showToc || this.showSettings || this.isLoading || this.chapters.length === 0) {
+      return;
+    }
+    if (this.readerPageTurnMode === 0) {
+      this.contentScroller.scrollPage({ next: direction > 0, animation: true });
+      setTimeout(() => {
+        this.saveReadingProgress();
+      }, 260);
+      return;
+    }
+    if (direction > 0) {
+      this.turnNext();
+    } else {
+      this.turnPrev();
+    }
+  }
+
   clampChapterIndex(index: number): number {
     if (this.chapters.length === 0) return 0;
     return Math.max(0, Math.min(index, this.chapters.length - 1));
@@ -1067,11 +1148,21 @@ struct ReadBookPage {
   }
 
   async turnNext() {
+    this.preloadReaderContent();
     await this.runPageTurnAnimation(1, this.readerPageTurnMode === 1 ? 'slide' : 'tap');
   }
 
   async turnPrev() {
+    this.preloadReaderContent();
     await this.runPageTurnAnimation(-1, this.readerPageTurnMode === 1 ? 'slide' : 'tap');
+  }
+
+  preloadReaderContent(): void {
+    if (this.chapters.length === 0) {
+      return;
+    }
+    const engine = ReadBookEngine.get();
+    engine.preloadAround(this.currentChapterIndex, 2, 1);
   }
 
   async loadNextChapterOnScrollEnd(): Promise<void> {
@@ -1132,6 +1223,9 @@ struct ReadBookPage {
     if (direction > 0) {
       if (this.currentPageIndex < this.contentPages.length - 1) {
         this.currentPageIndex++;
+        if (this.contentPages.length - this.currentPageIndex <= 3) {
+          this.preloadReaderContent();
+        }
         await this.saveReadingProgress();
       } else {
         await this.loadNextChapter();
@@ -1141,6 +1235,9 @@ struct ReadBookPage {
 
     if (this.currentPageIndex > 0) {
       this.currentPageIndex--;
+      if (this.currentPageIndex <= 2) {
+        this.preloadReaderContent();
+      }
       await this.saveReadingProgress();
     } else {
       await this.loadPrevChapter();
@@ -1260,7 +1357,7 @@ struct ReadBookPage {
       this.pendingRestorePageIndex = 0;
       this.currentScrollOffset = 0;
       this.pendingRestoreScrollOffset = 0;
-      await this.loadContent();
+      await this.loadContent(true);
       await this.saveReadingProgress();
     }
   }
@@ -1271,7 +1368,7 @@ struct ReadBookPage {
       this.pendingRestorePageIndex = Number.MAX_SAFE_INTEGER;
       this.currentScrollOffset = 0;
       this.pendingRestoreScrollOffset = 0;
-      await this.loadContent();
+      await this.loadContent(true);
       await this.saveReadingProgress();
     }
   }

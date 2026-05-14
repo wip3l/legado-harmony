@@ -82,7 +82,7 @@ struct SettingsPage {
           this.switchItem('点击区域翻页', '开启后点击阅读页左右区域切换上一章/下一章', this.readerTapTurnPage, (value: boolean) => {
             this.readerTapTurnPage = value;
           })
-          this.switchItem('音量键翻页', '预留给设备音量键翻页能力，后续接入系统按键事件', this.readerVolumeTurnPage, (value: boolean) => {
+          this.switchItem('音量键翻页', '阅读页获得焦点时使用音量上/下键切换上一页/下一页', this.readerVolumeTurnPage, (value: boolean) => {
             this.readerVolumeTurnPage = value;
           })
           this.switchItem('阅读时保持屏幕常亮', '进入阅读页后尽量避免自动息屏', this.readerKeepScreenOn, (value: boolean) => {

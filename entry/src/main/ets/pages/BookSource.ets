@@ -3,8 +3,10 @@ import { BookSource, BookListRule, SearchRule, ExploreRule, BookInfoRule, TocRul
 import { AppDatabase } from '../model/data/AppDatabase';
 import { httpHelper } from '../model/http/HttpHelper';
 import { promptAction } from '@kit.ArkUI';
-import { pasteboard } from '@kit.BasicServicesKit';
 import { syncSystemBars } from '../utils/SystemBars';
+import picker from '@ohos.file.picker';
+import fs from '@ohos.file.fs';
+import { util } from '@kit.ArkTS';
 
 @Entry
 @Component
@@ -15,6 +17,9 @@ struct BookSourcePage {
   @State searchText: string = '';
   @State showAddDialog: boolean = false;
   @State showImportUrlDialog: boolean = false;
+  @State selectionMode: boolean = false;
+  @State selectedSourceUrls: string[] = [];
+  @State showBatchDeleteDialog: boolean = false;
   @State importUrl: string = '';
 
   aboutToAppear() {
@@ -32,6 +37,7 @@ struct BookSourcePage {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
       this.sources = await db.getAllBookSources();
+      this.pruneSelectedSources();
     } catch (e) {
       console.error('加载书源失败:', e);
     } finally {
@@ -59,15 +65,31 @@ struct BookSourcePage {
             .fontColor(this.primaryTextColor())
             .layoutWeight(1)
 
-          Text('+')
-            .fontSize(24)
+          Text(this.selectionMode ? '取消' : '选择')
+            .fontSize(15)
             .fontColor(this.primaryTextColor())
-            .width(40)
+            .width(52)
             .height(56)
             .textAlign(TextAlign.Center)
             .onClick(() => {
-              this.showAddDialog = true;
+              if (this.selectionMode) {
+                this.exitSelectionMode();
+              } else {
+                this.enterSelectionMode();
+              }
             })
+
+          if (!this.selectionMode) {
+            Text('+')
+              .fontSize(24)
+              .fontColor(this.primaryTextColor())
+              .width(40)
+              .height(56)
+              .textAlign(TextAlign.Center)
+              .onClick(() => {
+                this.showAddDialog = true;
+              })
+          }
         }
         .width('100%')
         .height(56)
@@ -90,6 +112,39 @@ struct BookSourcePage {
         }
         .width('100%')
         .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+
+        if (this.selectionMode) {
+          Row() {
+            Toggle({ type: ToggleType.Checkbox, isOn: this.isAllSelected() })
+              .onChange((isOn: boolean) => {
+                if (isOn) {
+                  this.selectAllSources();
+                } else {
+                  this.clearSelection();
+                }
+              })
+
+            Text(`已选择 ${this.selectedSourceUrls.length}/${this.sources.length}`)
+              .fontSize(14)
+              .fontColor(this.secondaryTextColor())
+              .margin({ left: 8 })
+              .layoutWeight(1)
+
+            Text(this.isAllSelected() ? '取消全选' : '全选')
+              .fontSize(14)
+              .fontColor('#007DFF')
+              .onClick(() => {
+                if (this.isAllSelected()) {
+                  this.clearSelection();
+                } else {
+                  this.selectAllSources();
+                }
+              })
+          }
+          .width('100%')
+          .height(42)
+          .padding({ left: 16, right: 16 })
+        }
 
         if (this.isLoading) {
           Column() {
@@ -122,6 +177,14 @@ struct BookSourcePage {
             ForEach(this.sources, (source: BookSource) => {
               ListItem() {
                 Row() {
+                  if (this.selectionMode) {
+                    Toggle({ type: ToggleType.Checkbox, isOn: this.isSourceSelected(source.bookSourceUrl) })
+                      .margin({ right: 12 })
+                      .onChange((isOn: boolean) => {
+                        this.setSourceSelected(source.bookSourceUrl, isOn);
+                      })
+                  }
+
                   Column() {
                     Text(source.bookSourceName)
                       .fontSize(16)
@@ -148,22 +211,28 @@ struct BookSourcePage {
                   .alignItems(HorizontalAlign.Start)
 
                   Column() {
-                    Toggle({ type: ToggleType.Switch, isOn: source.enabled })
-                      .onChange((isOn: boolean) => {
-                        source.enabled = isOn;
-                        this.updateSource(source);
-                      })
+                    if (!this.selectionMode) {
+                      Toggle({ type: ToggleType.Switch, isOn: source.enabled })
+                        .onChange((isOn: boolean) => {
+                          source.enabled = isOn;
+                          this.updateSource(source);
+                        })
 
-                    Text('编辑')
-                      .fontSize(12)
-                      .fontColor('#007DFF')
-                      .margin({ top: 8 })
-                      .onClick(() => {
-                        router.pushUrl({
-                          url: 'pages/BookSourceEdit',
-                          params: { bookSourceUrl: source.bookSourceUrl }
-                        });
-                      })
+                      Text('编辑')
+                        .fontSize(12)
+                        .fontColor('#007DFF')
+                        .margin({ top: 8 })
+                        .onClick(() => {
+                          router.pushUrl({
+                            url: 'pages/BookSourceEdit',
+                            params: { bookSourceUrl: source.bookSourceUrl }
+                          });
+                        })
+                    } else {
+                      Text(source.enabled ? '已启用' : '已禁用')
+                        .fontSize(12)
+                        .fontColor(source.enabled ? '#1E8E3E' : this.subTextColor())
+                    }
                   }
                   .alignItems(HorizontalAlign.End)
                 }
@@ -172,10 +241,14 @@ struct BookSourcePage {
                 .backgroundColor(this.cardColor())
                 .borderRadius(8)
                 .onClick(() => {
-                  router.pushUrl({
-                    url: 'pages/BookSourceEdit',
-                    params: { bookSourceUrl: source.bookSourceUrl }
-                  });
+                  if (this.selectionMode) {
+                    this.toggleSourceSelected(source.bookSourceUrl);
+                  } else {
+                    router.pushUrl({
+                      url: 'pages/BookSourceEdit',
+                      params: { bookSourceUrl: source.bookSourceUrl }
+                    });
+                  }
                 })
               }
             })
@@ -183,6 +256,42 @@ struct BookSourcePage {
           .width('100%')
           .layoutWeight(1)
           .padding({ left: 16, right: 16 })
+        }
+
+        if (this.selectionMode) {
+          Row() {
+            Button('启用')
+              .layoutWeight(1)
+              .height(42)
+              .enabled(this.selectedSourceUrls.length > 0)
+              .onClick(() => {
+                this.batchSetEnabled(true);
+              })
+
+            Button('禁用')
+              .layoutWeight(1)
+              .height(42)
+              .margin({ left: 8 })
+              .enabled(this.selectedSourceUrls.length > 0)
+              .backgroundColor(this.inputColor())
+              .fontColor(this.primaryTextColor())
+              .onClick(() => {
+                this.batchSetEnabled(false);
+              })
+
+            Button('删除')
+              .layoutWeight(1)
+              .height(42)
+              .margin({ left: 8 })
+              .enabled(this.selectedSourceUrls.length > 0)
+              .backgroundColor('#E53935')
+              .onClick(() => {
+                this.showBatchDeleteDialog = true;
+              })
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 10, bottom: 12 })
+          .backgroundColor(this.cardColor())
         }
       }
       .width('100%')
@@ -221,13 +330,13 @@ struct BookSourcePage {
                 this.showImportUrlDialog = true;
               })
 
-            Button('从剪贴板导入')
+            Button('从文件导入')
               .width('100%')
               .height(48)
               .margin({ bottom: 8 })
               .onClick(() => {
                 this.showAddDialog = false;
-                this.importFromClipboard();
+                this.importFromFile();
               })
 
             Button('取消')
@@ -311,6 +420,60 @@ struct BookSourcePage {
           this.showImportUrlDialog = false;
         })
       }
+
+      if (this.showBatchDeleteDialog) {
+        Column() {
+          Column() {
+            Text('确认删除')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 12 })
+
+            Text(`确定删除已选择的 ${this.selectedSourceUrls.length} 个书源吗？删除后不可恢复。`)
+              .fontSize(15)
+              .fontColor(this.secondaryTextColor())
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 20 })
+
+            Row() {
+              Button('取消')
+                .width('45%')
+                .height(44)
+                .backgroundColor(this.inputColor())
+                .fontColor(this.primaryTextColor())
+                .onClick(() => {
+                  this.showBatchDeleteDialog = false;
+                })
+
+              Button('删除')
+                .width('45%')
+                .height(44)
+                .backgroundColor('#E53935')
+                .onClick(() => {
+                  this.showBatchDeleteDialog = false;
+                  this.batchDeleteSelectedSources();
+                })
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.SpaceBetween)
+          }
+          .width('85%')
+          .padding(24)
+          .backgroundColor(this.cardColor())
+          .borderRadius(12)
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#80000000')
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          this.showBatchDeleteDialog = false;
+        })
+      }
     }
     .width('100%')
     .height('100%')
@@ -359,8 +522,111 @@ struct BookSourcePage {
     try {
       const db = AppDatabase.getInstance();
       this.sources = await db.searchBookSources(this.searchText);
+      this.pruneSelectedSources();
     } catch (e) {
       console.error('搜索书源失败:', e);
+    }
+  }
+
+  enterSelectionMode(): void {
+    this.selectionMode = true;
+    this.selectedSourceUrls = [];
+  }
+
+  exitSelectionMode(): void {
+    this.selectionMode = false;
+    this.selectedSourceUrls = [];
+    this.showBatchDeleteDialog = false;
+  }
+
+  isSourceSelected(bookSourceUrl: string): boolean {
+    return this.selectedSourceUrls.includes(bookSourceUrl);
+  }
+
+  setSourceSelected(bookSourceUrl: string, selected: boolean): void {
+    if (selected) {
+      if (!this.isSourceSelected(bookSourceUrl)) {
+        this.selectedSourceUrls = this.selectedSourceUrls.concat([bookSourceUrl]);
+      }
+      return;
+    }
+    this.selectedSourceUrls = this.selectedSourceUrls.filter((url: string) => url !== bookSourceUrl);
+  }
+
+  toggleSourceSelected(bookSourceUrl: string): void {
+    this.setSourceSelected(bookSourceUrl, !this.isSourceSelected(bookSourceUrl));
+  }
+
+  isAllSelected(): boolean {
+    return this.sources.length > 0 && this.selectedSourceUrls.length === this.sources.length;
+  }
+
+  selectAllSources(): void {
+    this.selectedSourceUrls = this.sources.map((source: BookSource) => source.bookSourceUrl);
+  }
+
+  clearSelection(): void {
+    this.selectedSourceUrls = [];
+  }
+
+  pruneSelectedSources(): void {
+    if (this.selectedSourceUrls.length === 0) {
+      return;
+    }
+    const visibleUrls = this.sources.map((source: BookSource) => source.bookSourceUrl);
+    this.selectedSourceUrls = this.selectedSourceUrls.filter((url: string) => visibleUrls.includes(url));
+  }
+
+  getSelectedSources(): BookSource[] {
+    return this.sources.filter((source: BookSource) => this.isSourceSelected(source.bookSourceUrl));
+  }
+
+  async batchSetEnabled(enabled: boolean): Promise<void> {
+    const selectedSources = this.getSelectedSources();
+    if (selectedSources.length === 0) {
+      promptAction.showToast({ message: '请先选择书源' });
+      return;
+    }
+
+    try {
+      const db = AppDatabase.getInstance();
+      for (const source of selectedSources) {
+        source.enabled = enabled;
+        source.lastUpdateTime = Date.now();
+        await db.updateBookSource(source);
+      }
+      this.sources = this.sources.map((source: BookSource) => {
+        if (this.isSourceSelected(source.bookSourceUrl)) {
+          source.enabled = enabled;
+        }
+        return source;
+      });
+      promptAction.showToast({ message: `已${enabled ? '启用' : '禁用'} ${selectedSources.length} 个书源` });
+    } catch (e) {
+      console.error('批量更新书源失败:', e);
+      promptAction.showToast({ message: '批量操作失败' });
+    }
+  }
+
+  async batchDeleteSelectedSources(): Promise<void> {
+    const selectedUrls = this.selectedSourceUrls.slice();
+    if (selectedUrls.length === 0) {
+      promptAction.showToast({ message: '请先选择书源' });
+      return;
+    }
+
+    try {
+      const db = AppDatabase.getInstance();
+      for (const url of selectedUrls) {
+        await db.deleteBookSource(url);
+      }
+      this.selectedSourceUrls = [];
+      await this.loadSources();
+      this.selectionMode = false;
+      promptAction.showToast({ message: `已删除 ${selectedUrls.length} 个书源` });
+    } catch (e) {
+      console.error('批量删除书源失败:', e);
+      promptAction.showToast({ message: '批量删除失败' });
     }
   }
 
@@ -373,21 +639,51 @@ struct BookSourcePage {
     }
   }
 
-  async importFromClipboard() {
+  async importFromFile() {
     try {
-      const pasteboardData = pasteboard.getSystemPasteboard();
-      const data = await pasteboardData.getData();
-      const text = data.getPrimaryText();
+      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      options.maxSelectNumber = 1;
+      options.fileSuffixFilters = ['JSON|.json', '文本|.txt'];
+      const pickerResult: Array<string> = await new picker.DocumentViewPicker().select(options);
 
-      if (!text) {
-        promptAction.showToast({ message: '剪贴板为空' });
+      if (!pickerResult || pickerResult.length === 0) {
         return;
       }
 
-      await this.importSourcesFromJson(text);
+      promptAction.showToast({ message: '正在导入...' });
+      const content = await this.readTextFile(pickerResult[0]);
+      if (!content.trim()) {
+        promptAction.showToast({ message: '文件内容为空' });
+        return;
+      }
+      await this.importSourcesFromJson(content);
     } catch (e) {
-      console.error('从剪贴板导入失败:', e);
-      promptAction.showToast({ message: '导入失败' });
+      console.error('从文件导入失败:', e);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      promptAction.showToast({ message: `导入失败: ${errMsg}` });
+    }
+  }
+
+  async readTextFile(filePath: string): Promise<string> {
+    let file: fs.File | null = null;
+    try {
+      const stat = await fs.stat(filePath);
+      if (stat.size <= 0) {
+        return '';
+      }
+      if (stat.size > 5 * 1024 * 1024) {
+        throw new Error('文件过大，请选择 5MB 以内的书源文件');
+      }
+
+      file = await fs.open(filePath, fs.OpenMode.READ_ONLY);
+      const buffer = new ArrayBuffer(stat.size);
+      await fs.read(file.fd, buffer, { offset: 0, length: stat.size });
+      const text = util.TextDecoder.create('utf-8').decodeWithStream(new Uint8Array(buffer), { stream: false });
+      return text.replace(/^\uFEFF/, '');
+    } finally {
+      if (file) {
+        await fs.close(file);
+      }
     }
   }
 

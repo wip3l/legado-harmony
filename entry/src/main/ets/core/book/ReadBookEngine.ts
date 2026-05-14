@@ -15,6 +15,7 @@ export class ReadBookEngine {
   isLoading: boolean = false;
 
   private chapterCache: Map<number, string> = new Map();
+  private chapterLoading: Map<number, Promise<string>> = new Map();
 
   private constructor() { this.webBook = new WebBookService(); }
 
@@ -30,6 +31,7 @@ export class ReadBookEngine {
     this.curPos = book.durChapterPos;
     this.content = '';
     this.chapterCache.clear();
+    this.chapterLoading.clear();
     this.source = null;
 
     if (book.origin && book.origin !== 'local') {
@@ -71,6 +73,8 @@ export class ReadBookEngine {
         await appDb.deleteBookChapters(this.book.bookUrl);
         await appDb.insertBookChapters(chapters);
         this.chapters = chapters;
+        this.chapterCache.clear();
+        this.chapterLoading.clear();
         this.book.totalChapterNum = chapters.length;
         this.book.latestChapterTitle = chapters[chapters.length - 1].title;
         await appDb.updateBook(this.book);
@@ -83,15 +87,57 @@ export class ReadBookEngine {
   async loadContent(idx: number): Promise<string> {
     if (idx < 0 || idx >= this.chapters.length || !this.book || !this.source) return '';
 
-    const chapter = this.chapters[idx];
     this.curIdx = idx;
-    if (this.chapterCache.has(idx)) return this.chapterCache.get(idx)!;
+    return await this.fetchContent(idx);
+  }
 
-    const text = await this.webBook.getContent(this.source, this.book, chapter);
-    if (text) {
-      this.chapterCache.set(idx, text);
+  private async fetchContent(idx: number): Promise<string> {
+    if (idx < 0 || idx >= this.chapters.length || !this.book || !this.source) return '';
+
+    const chapter = this.chapters[idx];
+    if (this.chapterCache.has(idx)) return this.chapterCache.get(idx)!;
+    if (this.chapterLoading.has(idx)) return await this.chapterLoading.get(idx)!;
+
+    const task = this.webBook.getContent(this.source, this.book, chapter)
+      .then((text: string) => {
+        if (text) {
+          this.chapterCache.set(idx, text);
+        }
+        return text;
+      })
+      .finally(() => {
+        this.chapterLoading.delete(idx);
+      });
+    this.chapterLoading.set(idx, task);
+    return await task;
+  }
+
+  hasCachedContent(idx: number): boolean {
+    return this.chapterCache.has(idx);
+  }
+
+  preloadAround(idx: number, forwardCount: number = 2, backwardCount: number = 1): void {
+    if (this.chapters.length === 0 || !this.book || !this.source) {
+      return;
     }
-    return text;
+    for (let offset = 1; offset <= forwardCount; offset++) {
+      this.preloadContent(idx + offset);
+    }
+    for (let offset = 1; offset <= backwardCount; offset++) {
+      this.preloadContent(idx - offset);
+    }
+  }
+
+  private preloadContent(idx: number): void {
+    if (idx < 0 || idx >= this.chapters.length) {
+      return;
+    }
+    if (this.chapterCache.has(idx) || this.chapterLoading.has(idx)) {
+      return;
+    }
+    this.fetchContent(idx).catch((err: Error) => {
+      console.error('[RE] preload chapter failed:', idx, err);
+    });
   }
 
   async loadNextChapter(): Promise<string> {
