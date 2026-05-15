@@ -72,7 +72,7 @@ struct ReadBookPage {
       const bg = this.getBackgroundColor();
       mainWindow.setWindowBackgroundColor(bg);
       mainWindow.setWindowSystemBarProperties({
-        statusBarColor: bg,
+        statusBarColor: '#00000000',
         isStatusBarLightIcon: this.appDarkMode || this.readerThemeIndex === 3,
         statusBarContentColor: (this.appDarkMode || this.readerThemeIndex === 3) ? '#D8D8D8' : '#2F261D',
         navigationBarColor: bg,
@@ -95,7 +95,7 @@ struct ReadBookPage {
 
   exitReaderImmersive() {
     window.getLastWindow(getContext(this)).then((mainWindow: window.Window) => {
-      mainWindow.setWindowLayoutFullScreen(false);
+      mainWindow.setWindowLayoutFullScreen(true);
       mainWindow.setWindowSystemBarEnable(['navigation', 'status']);
       this.statusBarSafeHeight = 0;
     }).catch((err: Error) => {

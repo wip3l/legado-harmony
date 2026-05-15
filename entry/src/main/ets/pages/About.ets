@@ -5,6 +5,8 @@ import { syncSystemBars } from '../utils/SystemBars';
 @Component
 struct AboutPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
 
   aboutToAppear(): void {
     this.syncBars();
@@ -89,6 +91,7 @@ struct AboutPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }

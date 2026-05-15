@@ -2,6 +2,7 @@ import { AbilityConstant, UIAbility, Want, Configuration, ConfigurationConstant 
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { appDb } from '../model/data/AppDatabase';
+import { syncSystemSafeAreas } from '../utils/SystemBars';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -26,13 +27,14 @@ export default class EntryAbility extends UIAbility {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
 
     windowStage.getMainWindow().then((mainWindow) => {
-      // 启用系统导航条以获得悬浮指示器效果
-      mainWindow.setWindowSystemBarEnable(['navigation', 'status']);
       const darkMode = AppStorage.get<boolean>('appDarkMode') || false;
       const bg = darkMode ? '#101113' : '#F5F5F5';
       mainWindow.setWindowBackgroundColor(bg);
+      mainWindow.setWindowLayoutFullScreen(true);
+      mainWindow.setWindowSystemBarEnable(['navigation', 'status']);
+      syncSystemSafeAreas(mainWindow);
       mainWindow.setWindowSystemBarProperties({
-        statusBarColor: bg,
+        statusBarColor: '#00000000',
         isStatusBarLightIcon: darkMode,
         statusBarContentColor: darkMode ? '#FFFFFF' : '#1F1F1F',
         navigationBarColor: bg,

@@ -26,6 +26,12 @@
         "startWindowIcon": "$media:layered_image",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        "metadata": [
+          {
+            "name": "enable.remove.starting.window",
+            "value": "true"
+          }
+        ],
         "skills": [
           {
             "entities": [

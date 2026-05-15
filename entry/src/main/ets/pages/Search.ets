@@ -10,6 +10,8 @@ import { syncSystemBars } from '../utils/SystemBars';
 @Component
 struct SearchPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State keyword: string = '';
   @State searchResults: SearchBook[] = [];
   @State shelfBookUrls: string[] = [];
@@ -263,6 +265,7 @@ struct SearchPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }

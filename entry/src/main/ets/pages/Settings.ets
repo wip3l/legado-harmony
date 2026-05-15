@@ -7,6 +7,8 @@ import { syncSystemBars } from '../utils/SystemBars';
 struct SettingsPage {
   @StorageLink('appThemeMode') appThemeMode: string = 'system';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageLink('readerFontSize') readerFontSize: number = 20;
   @StorageLink('readerLineHeight') readerLineHeight: number = 32;
   @StorageLink('readerParagraphSpacing') readerParagraphSpacing: number = 10;
@@ -125,6 +127,7 @@ struct SettingsPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }

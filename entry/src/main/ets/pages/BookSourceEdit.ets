@@ -8,6 +8,8 @@ import { syncSystemBars } from '../utils/SystemBars';
 @Component
 struct BookSourceEditPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State bookSourceUrl: string = '';
   @State source: BookSource = new BookSource();
   @State isLoading: boolean = false;
@@ -208,6 +210,7 @@ struct BookSourceEditPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }

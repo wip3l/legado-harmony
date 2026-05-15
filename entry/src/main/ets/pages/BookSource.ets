@@ -12,6 +12,8 @@ import { util } from '@kit.ArkTS';
 @Component
 struct BookSourcePage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State sources: BookSource[] = [];
   @State isLoading: boolean = false;
   @State searchText: string = '';
@@ -93,7 +95,9 @@ struct BookSourcePage {
         }
         .width('100%')
         .height(56)
-        .backgroundColor(this.cardColor())
+        .backgroundColor(this.glassCardColor())
+        .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
+        .border({ width: 1, color: this.glassBorderColor() })
         .alignItems(VerticalAlign.Center)
 
         Row() {
@@ -101,7 +105,10 @@ struct BookSourcePage {
             .layoutWeight(1)
             .height(40)
             .borderRadius(20)
-            .backgroundColor(this.inputColor())
+            .backgroundColor(this.glassInputColor())
+            .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
+            .border({ width: 1, color: this.glassBorderColor() })
+            .shadow({ radius: 8, color: this.glassShadowColor(), offsetX: 0, offsetY: 3 })
             .fontColor(this.primaryTextColor())
             .placeholderColor(this.placeholderTextColor())
             .padding({ left: 16, right: 16 })
@@ -238,8 +245,11 @@ struct BookSourcePage {
                 }
                 .width('100%')
                 .padding(12)
-                .backgroundColor(this.cardColor())
+                .backgroundColor(this.glassCardColor())
+                .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
                 .borderRadius(8)
+                .border({ width: 1, color: this.glassBorderColor() })
+                .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
                 .onClick(() => {
                   if (this.selectionMode) {
                     this.toggleSourceSelected(source.bookSourceUrl);
@@ -291,7 +301,9 @@ struct BookSourcePage {
           }
           .width('100%')
           .padding({ left: 16, right: 16, top: 10, bottom: 12 })
-          .backgroundColor(this.cardColor())
+          .backgroundColor(this.glassCardColor())
+          .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
+          .border({ width: 1, color: this.glassBorderColor() })
         }
       }
       .width('100%')
@@ -477,6 +489,7 @@ struct BookSourcePage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
@@ -493,8 +506,24 @@ struct BookSourcePage {
     return this.appDarkMode ? '#191B1F' : '#FFFFFF';
   }
 
+  glassCardColor(): string {
+    return this.appDarkMode ? '#191B1F' : '#38FFFFFF';
+  }
+
   inputColor(): string {
     return this.appDarkMode ? '#24272D' : '#F5F5F5';
+  }
+
+  glassInputColor(): string {
+    return this.appDarkMode ? '#24272D' : '#2EFFFFFF';
+  }
+
+  glassBorderColor(): string {
+    return this.appDarkMode ? '#00000000' : '#99FFFFFF';
+  }
+
+  glassShadowColor(): string {
+    return this.appDarkMode ? '#00000000' : '#10000000';
   }
 
   primaryTextColor(): string {

@@ -7,6 +7,7 @@ import { AppDatabase } from '../model/data/AppDatabase';
 import { SearchCoordinator, SearchCallback, SearchProgress } from '../core/book/SearchCoordinator';
 import { ExploreCoordinator, ExploreEntry } from '../core/book/ExploreCoordinator';
 import { WebBookService } from '../core/book/WebBookService';
+import { syncSystemSafeAreas } from '../utils/SystemBars';
 
 @Entry
 @Component
@@ -44,32 +45,32 @@ struct Index {
   immersiveTabs() {
     HdsTabs({ barPosition: BarPosition.End, index: this.currentIndex }) {
       TabContent() {
-        BookshelfPage()
+        BookshelfPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.compatTabBar($r('app.media.ic_tab_bookshelf'), '书架', 0))
+      .tabBar(this.bottomTabBar($r('app.media.ic_tab_bookshelf'), '书架'))
 
       TabContent() {
-        ExplorePage()
+        ExplorePage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.compatTabBar($r('app.media.ic_tab_explore'), '发现', 1))
+      .tabBar(this.bottomTabBar($r('app.media.ic_tab_explore'), '发现'))
 
       TabContent() {
-        SearchPage()
+        SearchPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.compatTabBar($r('app.media.ic_tab_search'), '搜索', 2))
+      .tabBar(this.bottomTabBar($r('app.media.ic_tab_search'), '搜索'))
 
       TabContent() {
-        SettingsPage()
+        SettingsPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.compatTabBar($r('app.media.ic_tab_mine'), '我的', 3))
+      .tabBar(this.bottomTabBar($r('app.media.ic_tab_mine'), '我的'))
     }
     .barMode(BarMode.Fixed)
     .barOverlap(true)
@@ -77,6 +78,11 @@ struct Index {
       systemMaterialEffect: {
         materialType: hdsMaterial.MaterialType.IMMERSIVE,
         materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+      },
+      barBottomMargin: this.floatingBarBottomMargin(),
+      gradientMask: {
+        maskColor: '#00000000',
+        maskHeight: 96
       },
       adaptToHandedness: true,
       thermoCtrl: true,
@@ -97,34 +103,35 @@ struct Index {
   compatTabs() {
     Tabs({ barPosition: BarPosition.End, index: this.currentIndex }) {
       TabContent() {
-        BookshelfPage()
+        BookshelfPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.compatTabBar($r('app.media.ic_tab_bookshelf'), '书架', 0))
 
       TabContent() {
-        ExplorePage()
+        ExplorePage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.compatTabBar($r('app.media.ic_tab_explore'), '发现', 1))
 
       TabContent() {
-        SearchPage()
+        SearchPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.compatTabBar($r('app.media.ic_tab_search'), '搜索', 2))
 
       TabContent() {
-        SettingsPage()
+        SettingsPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.compatTabBar($r('app.media.ic_tab_mine'), '我的', 3))
     }
     .barMode(BarMode.Fixed)
+    .barHeight(56 + this.compatTabSafeHeight())
     .barBackgroundColor(this.appDarkMode ? '#191B1F' : '#FFFFFF')
     .scrollable(false)
     .onChange((index: number) => {
@@ -137,33 +144,67 @@ struct Index {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
+  bottomTabBar(icon: Resource, title: string): BottomTabBarStyle {
+    return BottomTabBarStyle.of(icon, title)
+      .labelStyle({
+        font: { size: 11 },
+        selectedColor: this.tabBarActiveColor(),
+        unselectedColor: this.tabBarTextColor()
+      })
+      .iconStyle({
+        selectedColor: this.tabBarActiveColor(),
+        unselectedColor: this.tabBarTextColor()
+      })
+      .padding({ left: 4, right: 4, top: 0, bottom: 0 })
+      .layoutMode(LayoutMode.VERTICAL)
+      .verticalAlign(VerticalAlign.Center);
+  }
+
   @Builder
   compatTabBar(icon: Resource, title: string, index: number) {
-    Column({ space: 2 }) {
-      Image(icon)
-        .width(22)
-        .height(22)
-        .fillColor(this.currentIndex === index ? this.tabBarActiveColor() : this.tabBarTextColor())
-      Text(title)
-        .fontSize(11)
-        .fontColor(this.currentIndex === index ? this.tabBarActiveColor() : this.tabBarTextColor())
+    Column() {
+      Column({ space: 2 }) {
+        Column() {
+          Image(icon)
+            .width(22)
+            .height(22)
+            .fillColor(this.currentIndex === index ? this.tabBarActiveColor() : this.tabBarTextColor())
+        }
+        .width(24)
+        .height(24)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+
+        Text(title)
+          .fontSize(11)
+          .lineHeight(14)
+          .height(14)
+          .fontColor(this.currentIndex === index ? this.tabBarActiveColor() : this.tabBarTextColor())
+      }
+      .width('100%')
+      .height(56)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center)
     }
     .width('100%')
-    .height(56)
-    .justifyContent(FlexAlign.Center)
+    .height(56 + this.compatTabSafeHeight())
+    .padding({ bottom: this.compatTabSafeHeight() })
+    .justifyContent(FlexAlign.End)
+    .alignItems(HorizontalAlign.Center)
   }
 
   syncHomeSystemBars(): void {
     window.getLastWindow(getContext(this)).then((mainWindow: window.Window) => {
       const bg = this.appDarkMode ? '#101113' : '#F5F5F5';
       mainWindow.setWindowBackgroundColor(bg);
-      mainWindow.setWindowLayoutFullScreen(false);
+      mainWindow.setWindowLayoutFullScreen(true);
       mainWindow.setWindowSystemBarEnable(['navigation', 'status']);
+      syncSystemSafeAreas(mainWindow);
       mainWindow.setWindowSystemBarProperties({
-        statusBarColor: bg,
+        statusBarColor: '#00000000',
         isStatusBarLightIcon: this.appDarkMode,
         statusBarContentColor: this.appDarkMode ? '#FFFFFF' : '#1F1F1F',
-        navigationBarColor: bg,
+        navigationBarColor: '#00000000',
         isNavigationBarLightIcon: this.appDarkMode,
         navigationBarContentColor: this.appDarkMode ? '#FFFFFF' : '#1F1F1F'
       });
@@ -173,11 +214,19 @@ struct Index {
   }
 
   tabBarActiveColor(): string {
-    return this.appDarkMode ? '#68D6C3' : '#007DFF';
+    return '#007DFF';
   }
 
   tabBarTextColor(): string {
     return this.appDarkMode ? '#E7E9ED' : '#5F6670';
+  }
+
+  floatingBarBottomMargin(): number {
+    return this.navBarHeight > 0 ? this.navBarHeight : 8;
+  }
+
+  compatTabSafeHeight(): number {
+    return this.navBarHeight > 0 ? this.navBarHeight : 24;
   }
 
 }
@@ -185,6 +234,7 @@ struct Index {
 @Component
 struct BookshelfPage {
   @Prop statusBarHeight: number = 0;
+  @Prop navBarHeight: number = 0;
   @State books: Book[] = [];
   @State isLoading: boolean = false;
   @State showDeleteDialog: boolean = false;
@@ -322,9 +372,9 @@ struct BookshelfPage {
                       if (book.origin !== 'local') {
                         Text(book.originName || book.origin)
                           .fontSize(12)
-                          .fontColor('#007DFF')
+                          .fontColor(this.sourceTagTextColor())
                           .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-                          .backgroundColor('#E8F0FE')
+                          .backgroundColor(this.sourceTagBackgroundColor())
                           .borderRadius(4)
                           .margin({ right: 8 })
                       }
@@ -341,8 +391,11 @@ struct BookshelfPage {
                 }
                 .width('100%')
                 .padding(12)
-                .backgroundColor(this.cardColor())
+                .backgroundColor(this.glassCardColor())
+                .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
                 .borderRadius(8)
+                .border({ width: 1, color: this.glassBorderColor() })
+                .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
                 .gesture(
                   LongPressGesture({ repeat: false })
                     .onAction(() => {
@@ -360,13 +413,14 @@ struct BookshelfPage {
           }
           .width('100%')
           .layoutWeight(1)
-          .padding({ left: 16, right: 16, bottom: 12 })
+          .padding({ left: 16, right: 16 })
           .backgroundColor(this.pageColor())
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         }
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.statusBarHeight })
       .backgroundColor(this.pageColor())
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
 
@@ -451,8 +505,10 @@ struct BookshelfPage {
       .fontSize(13)
       .fontColor(this.sortMode === mode ? '#FFFFFF' : this.secondaryTextColor())
       .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-      .backgroundColor(this.sortMode === mode ? '#007DFF' : this.cardColor())
+      .backgroundColor(this.sortMode === mode ? '#007DFF' : this.glassCardColor())
+      .backgroundBlurStyle(this.sortMode === mode ? BlurStyle.NONE : BlurStyle.COMPONENT_ULTRA_THIN)
       .borderRadius(16)
+      .border({ width: this.sortMode === mode ? 0 : 1, color: this.glassBorderColor() })
       .onClick(() => {
         this.sortMode = mode;
         this.books = this.sortBooks(this.books);
@@ -513,6 +569,26 @@ struct BookshelfPage {
     return this.appDarkMode ? '#191B1F' : '#FFFFFF';
   }
 
+  glassCardColor(): string {
+    return this.appDarkMode ? '#191B1F' : '#38FFFFFF';
+  }
+
+  glassBorderColor(): string {
+    return this.appDarkMode ? '#00000000' : '#99FFFFFF';
+  }
+
+  glassShadowColor(): string {
+    return this.appDarkMode ? '#00000000' : '#10000000';
+  }
+
+  sourceTagBackgroundColor(): string {
+    return this.appDarkMode ? '#24272D' : '#E8F0FE';
+  }
+
+  sourceTagTextColor(): string {
+    return this.appDarkMode ? '#8A8F98' : '#007DFF';
+  }
+
   primaryTextColor(): string {
     return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
   }
@@ -529,6 +605,7 @@ struct BookshelfPage {
 @Component
 struct ExplorePage {
   @Prop statusBarHeight: number = 0;
+  @Prop navBarHeight: number = 0;
   @State entries: ExploreEntry[] = [];
   @State sourceNames: string[] = [];
   @State selectedSourceName: string = '';
@@ -622,8 +699,10 @@ struct ExplorePage {
                 .fontSize(13)
                 .fontColor(this.selectedSourceName === name ? '#FFFFFF' : this.primaryTextColor())
                 .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                .backgroundColor(this.selectedSourceName === name ? '#007DFF' : this.cardColor())
+                .backgroundColor(this.selectedSourceName === name ? '#007DFF' : this.glassCardColor())
+                .backgroundBlurStyle(this.selectedSourceName === name ? BlurStyle.NONE : BlurStyle.COMPONENT_ULTRA_THIN)
                 .borderRadius(18)
+                .border({ width: this.selectedSourceName === name ? 0 : 1, color: this.glassBorderColor() })
                 .onClick(() => {
                   this.selectedSourceName = name;
                   this.selectedIndex = 0;
@@ -645,10 +724,12 @@ struct ExplorePage {
             ForEach(this.getActiveEntries(), (entry: ExploreEntry, index: number) => {
               Text(entry.title)
                 .fontSize(13)
-                .fontColor(this.selectedIndex === index ? '#007DFF' : this.secondaryTextColor())
+                .fontColor(this.selectedIndex === index ? '#FFFFFF' : this.secondaryTextColor())
                 .padding({ left: 12, right: 12, top: 7, bottom: 7 })
-                .backgroundColor(this.selectedIndex === index ? (this.appDarkMode ? '#1C3558' : '#E8F0FE') : this.cardColor())
+                .backgroundColor(this.selectedIndex === index ? '#007DFF' : this.glassCardColor())
+                .backgroundBlurStyle(this.selectedIndex === index ? BlurStyle.NONE : BlurStyle.COMPONENT_ULTRA_THIN)
                 .borderRadius(17)
+                .border({ width: this.selectedIndex === index ? 0 : 1, color: this.glassBorderColor() })
                 .onClick(() => {
                   this.selectedIndex = index;
                   this.loadBooks();
@@ -725,8 +806,11 @@ struct ExplorePage {
               }
               .width('100%')
               .padding(12)
-              .backgroundColor(this.cardColor())
+              .backgroundColor(this.glassCardColor())
+              .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
               .borderRadius(8)
+              .border({ width: 1, color: this.glassBorderColor() })
+              .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
               .onClick(() => {
                 this.openSearchBookDetail(book);
               })
@@ -757,6 +841,7 @@ struct ExplorePage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.statusBarHeight })
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
@@ -917,6 +1002,18 @@ struct ExplorePage {
     return this.appDarkMode ? '#191B1F' : '#FFFFFF';
   }
 
+  glassCardColor(): string {
+    return this.appDarkMode ? '#191B1F' : '#38FFFFFF';
+  }
+
+  glassBorderColor(): string {
+    return this.appDarkMode ? '#00000000' : '#99FFFFFF';
+  }
+
+  glassShadowColor(): string {
+    return this.appDarkMode ? '#00000000' : '#10000000';
+  }
+
   primaryTextColor(): string {
     return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
   }
@@ -933,6 +1030,7 @@ struct ExplorePage {
 @Component
 struct SearchPage {
   @Prop statusBarHeight: number = 0;
+  @Prop navBarHeight: number = 0;
   @State keyword: string = '';
   @State searchResults: SearchBook[] = [];
   @State shelfBookUrls: string[] = [];
@@ -964,7 +1062,10 @@ struct SearchPage {
           .layoutWeight(1)
           .height(40)
           .borderRadius(20)
-          .backgroundColor(this.cardColor())
+          .backgroundColor(this.glassCardColor())
+          .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
+          .border({ width: 1, color: this.glassBorderColor() })
+          .shadow({ radius: 8, color: this.glassShadowColor(), offsetX: 0, offsetY: 3 })
           .fontColor(this.primaryTextColor())
           .placeholderColor(this.subTextColor())
           .padding({ left: 16, right: 16 })
@@ -1054,8 +1155,11 @@ struct SearchPage {
               }
               .width('100%')
               .padding(12)
-              .backgroundColor(this.cardColor())
+              .backgroundColor(this.glassCardColor())
+              .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
               .borderRadius(8)
+              .border({ width: 1, color: this.glassBorderColor() })
+              .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
               .onClick(() => {
                 this.openSearchBookDetail(book);
               })
@@ -1119,6 +1223,7 @@ struct SearchPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.statusBarHeight })
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
@@ -1318,6 +1423,18 @@ struct SearchPage {
     return this.appDarkMode ? '#191B1F' : '#FFFFFF';
   }
 
+  glassCardColor(): string {
+    return this.appDarkMode ? '#191B1F' : '#38FFFFFF';
+  }
+
+  glassBorderColor(): string {
+    return this.appDarkMode ? '#00000000' : '#99FFFFFF';
+  }
+
+  glassShadowColor(): string {
+    return this.appDarkMode ? '#00000000' : '#10000000';
+  }
+
   primaryTextColor(): string {
     return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
   }
@@ -1338,6 +1455,7 @@ struct SearchPage {
 @Component
 struct SettingsPage {
   @Prop statusBarHeight: number = 0;
+  @Prop navBarHeight: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
 
   build() {
@@ -1375,7 +1493,9 @@ struct SettingsPage {
           .width('100%')
           .height(64)
           .padding({ left: 16, right: 16 })
-          .backgroundColor(this.appDarkMode ? '#191B1F' : '#FFFFFF')
+          .backgroundColor(this.glassCardColor())
+          .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
+          .border({ width: 1, color: this.glassBorderColor() })
           .onClick(() => {
             router.pushUrl({ url: 'pages/BookSource' });
           })
@@ -1401,7 +1521,9 @@ struct SettingsPage {
           .width('100%')
           .height(64)
           .padding({ left: 16, right: 16 })
-          .backgroundColor(this.appDarkMode ? '#191B1F' : '#FFFFFF')
+          .backgroundColor(this.glassCardColor())
+          .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
+          .border({ width: 1, color: this.glassBorderColor() })
           .onClick(() => {
             router.pushUrl({ url: 'pages/Settings' });
           })
@@ -1427,7 +1549,9 @@ struct SettingsPage {
           .width('100%')
           .height(64)
           .padding({ left: 16, right: 16 })
-          .backgroundColor(this.appDarkMode ? '#191B1F' : '#FFFFFF')
+          .backgroundColor(this.glassCardColor())
+          .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
+          .border({ width: 1, color: this.glassBorderColor() })
           .onClick(() => {
             router.pushUrl({ url: 'pages/About' });
           })
@@ -1440,6 +1564,15 @@ struct SettingsPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.statusBarHeight })
     .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
+  }
+
+  glassCardColor(): string {
+    return this.appDarkMode ? '#191B1F' : '#38FFFFFF';
+  }
+
+  glassBorderColor(): string {
+    return this.appDarkMode ? '#00000000' : '#99FFFFFF';
   }
 }
