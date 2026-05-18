@@ -11,7 +11,10 @@ interface ColumnMigration {
 export class AppDatabase {
   private static instance: AppDatabase | null = null;
   private store: relationalStore.RdbStore | null = null;
+  private initialized: boolean = false;
+  private initPromise: Promise<void> | null = null;
   private readonly DATABASE_NAME = 'legado.db';
+  private readonly SCHEMA_VERSION = 1;
 
   private constructor() {}
 
@@ -23,6 +26,23 @@ export class AppDatabase {
   }
 
   async init(context: Context): Promise<void> {
+    if (this.initialized && this.store) {
+      return;
+    }
+    if (this.initPromise) {
+      await this.initPromise;
+      return;
+    }
+
+    this.initPromise = this.initInternal(context);
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
+    }
+  }
+
+  private async initInternal(context: Context): Promise<void> {
     const config: relationalStore.StoreConfig = {
       name: this.DATABASE_NAME,
       securityLevel: relationalStore.SecurityLevel.S1
@@ -31,6 +51,7 @@ export class AppDatabase {
     this.store = await relationalStore.getRdbStore(context, config);
     await this.createTables();
     await this.initDefaultData();
+    this.initialized = true;
   }
 
   async initWithContext(context: Context): Promise<void> {
@@ -139,7 +160,41 @@ export class AppDatabase {
       )
     `);
 
-    await this.migrateTables();
+    await this.store.executeSql(`
+      CREATE TABLE IF NOT EXISTS schema_meta (
+        key TEXT PRIMARY KEY,
+        value INTEGER DEFAULT 0
+      )
+    `);
+
+    const schemaVersion = await this.getSchemaVersion();
+    if (schemaVersion < this.SCHEMA_VERSION) {
+      await this.migrateTables();
+      await this.setSchemaVersion(this.SCHEMA_VERSION);
+    }
+  }
+
+  private async getSchemaVersion(): Promise<number> {
+    if (!this.store) return 0;
+
+    try {
+      const resultSet = await this.store.querySql(`SELECT value FROM schema_meta WHERE key = 'schema_version'`);
+      if (resultSet.goToFirstRow()) {
+        return resultSet.getLong(resultSet.getColumnIndex('value'));
+      }
+    } catch (e) {
+    }
+    return 0;
+  }
+
+  private async setSchemaVersion(version: number): Promise<void> {
+    if (!this.store) return;
+
+    try {
+      await this.store.executeSql(`DELETE FROM schema_meta WHERE key = 'schema_version'`);
+      await this.store.executeSql(`INSERT INTO schema_meta (key, value) VALUES ('schema_version', ${version})`);
+    } catch (e) {
+    }
   }
 
   private async migrateTables(): Promise<void> {

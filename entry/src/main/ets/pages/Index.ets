@@ -1,5 +1,6 @@
 import { router, window } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import deviceInfo from '@ohos.deviceInfo';
 import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
 import { Book, SearchBook } from '../model/data/Book';
@@ -18,10 +19,12 @@ struct Index {
   @StorageLink('appDarkMode') @Watch('onAppDarkModeChanged') appDarkMode: boolean = false;
 
   aboutToAppear() {
+    hilog.info(0x0000, 'testTag', 'StartupTrace Index aboutToAppear %{public}d', Date.now());
     this.syncHomeSystemBars();
   }
 
   onPageShow(): void {
+    hilog.info(0x0000, 'testTag', 'StartupTrace Index onPageShow %{public}d', Date.now());
     this.syncHomeSystemBars();
   }
 
@@ -45,28 +48,52 @@ struct Index {
   immersiveTabs() {
     HdsTabs({ barPosition: BarPosition.End, index: this.currentIndex }) {
       TabContent() {
-        BookshelfPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        if (this.currentIndex === 0) {
+          BookshelfPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        } else {
+          BlankTabPage()
+        }
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.bottomTabBar($r('app.media.ic_tab_bookshelf'), '书架'))
 
       TabContent() {
-        ExplorePage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        if (this.currentIndex === 1) {
+          ExplorePage({
+            statusBarHeight: this.statusBarHeight,
+            navBarHeight: this.navBarHeight,
+            isActive: true
+          })
+        } else {
+          BlankTabPage()
+        }
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.bottomTabBar($r('app.media.ic_tab_explore'), '发现'))
 
       TabContent() {
-        SearchPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        if (this.currentIndex === 2) {
+          SearchPage({
+            statusBarHeight: this.statusBarHeight,
+            navBarHeight: this.navBarHeight,
+            isActive: true
+          })
+        } else {
+          BlankTabPage()
+        }
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.bottomTabBar($r('app.media.ic_tab_search'), '搜索'))
 
       TabContent() {
-        SettingsPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        if (this.currentIndex === 3) {
+          SettingsPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        } else {
+          BlankTabPage()
+        }
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
@@ -103,28 +130,52 @@ struct Index {
   compatTabs() {
     Tabs({ barPosition: BarPosition.End, index: this.currentIndex }) {
       TabContent() {
-        BookshelfPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        if (this.currentIndex === 0) {
+          BookshelfPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        } else {
+          BlankTabPage()
+        }
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.compatTabBar($r('app.media.ic_tab_bookshelf'), '书架', 0))
 
       TabContent() {
-        ExplorePage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        if (this.currentIndex === 1) {
+          ExplorePage({
+            statusBarHeight: this.statusBarHeight,
+            navBarHeight: this.navBarHeight,
+            isActive: true
+          })
+        } else {
+          BlankTabPage()
+        }
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.compatTabBar($r('app.media.ic_tab_explore'), '发现', 1))
 
       TabContent() {
-        SearchPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        if (this.currentIndex === 2) {
+          SearchPage({
+            statusBarHeight: this.statusBarHeight,
+            navBarHeight: this.navBarHeight,
+            isActive: true
+          })
+        } else {
+          BlankTabPage()
+        }
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.compatTabBar($r('app.media.ic_tab_search'), '搜索', 2))
 
       TabContent() {
-        SettingsPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        if (this.currentIndex === 3) {
+          SettingsPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+        } else {
+          BlankTabPage()
+        }
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
@@ -232,6 +283,99 @@ struct Index {
 }
 
 @Component
+struct FastBookshelfShell {
+  @Prop statusBarHeight: number = 0;
+  @StorageLink('appDarkMode') appDarkMode: boolean = false;
+
+  build() {
+    Column() {
+      Row() {
+        Text('书架')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .height(56)
+      .padding({ left: 16, right: 16 })
+      .alignItems(VerticalAlign.Center)
+
+      Column({ space: 10 }) {
+        this.placeholderCard(0.92)
+        this.placeholderCard(0.78)
+        this.placeholderCard(0.86)
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 8 })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ top: this.statusBarHeight })
+    .backgroundColor(this.pageColor())
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  placeholderCard(widthRatio: number) {
+    Row() {
+      Column()
+        .width(56)
+        .height(72)
+        .borderRadius(6)
+        .backgroundColor(this.appDarkMode ? '#24272D' : '#E6E9EE')
+
+      Column({ space: 8 }) {
+        Column()
+          .width(`${Math.floor(widthRatio * 100)}%`)
+          .height(16)
+          .borderRadius(8)
+          .backgroundColor(this.appDarkMode ? '#24272D' : '#E2E5EA')
+        Column()
+          .width('48%')
+          .height(12)
+          .borderRadius(6)
+          .backgroundColor(this.appDarkMode ? '#202329' : '#ECEEF2')
+        Column()
+          .width('34%')
+          .height(12)
+          .borderRadius(6)
+          .backgroundColor(this.appDarkMode ? '#202329' : '#ECEEF2')
+      }
+      .layoutWeight(1)
+      .margin({ left: 12 })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .padding(12)
+    .borderRadius(8)
+    .backgroundColor(this.appDarkMode ? '#191B1F' : '#FFFFFF')
+  }
+
+  pageColor(): string {
+    return this.appDarkMode ? '#101113' : '#F5F5F5';
+  }
+
+  primaryTextColor(): string {
+    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+  }
+}
+
+@Component
+struct BlankTabPage {
+  @StorageLink('appDarkMode') appDarkMode: boolean = false;
+
+  build() {
+    Column()
+      .width('100%')
+      .height('100%')
+      .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+}
+
+@Component
 struct BookshelfPage {
   @Prop statusBarHeight: number = 0;
   @Prop navBarHeight: number = 0;
@@ -242,13 +386,14 @@ struct BookshelfPage {
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('bookshelfSortMode') sortMode: string = 'recentRead';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  private loadTimer: number = -1;
 
   aboutToAppear() {
-    this.loadBooks();
+    this.scheduleLoadBooks();
   }
 
   onShelfChanged(): void {
-    this.loadBooks();
+    this.scheduleLoadBooks();
   }
 
   async loadBooks() {
@@ -262,6 +407,16 @@ struct BookshelfPage {
     } finally {
       this.isLoading = false;
     }
+  }
+
+  scheduleLoadBooks(): void {
+    if (this.loadTimer >= 0) {
+      clearTimeout(this.loadTimer);
+    }
+    this.loadTimer = setTimeout(() => {
+      this.loadTimer = -1;
+      this.loadBooks();
+    }, 80);
   }
 
   async deleteBook(book: Book) {
@@ -606,6 +761,7 @@ struct BookshelfPage {
 struct ExplorePage {
   @Prop statusBarHeight: number = 0;
   @Prop navBarHeight: number = 0;
+  @Prop @Watch('onActiveChanged') isActive: boolean = false;
   @State entries: ExploreEntry[] = [];
   @State sourceNames: string[] = [];
   @State selectedSourceName: string = '';
@@ -617,9 +773,24 @@ struct ExplorePage {
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   private coordinator: ExploreCoordinator = new ExploreCoordinator();
+  private hasLoaded: boolean = false;
 
   aboutToAppear() {
-    this.loadEntries();
+    if (this.isActive) {
+      this.ensureLoaded();
+    }
+  }
+
+  onActiveChanged(): void {
+    if (this.isActive) {
+      this.ensureLoaded();
+    }
+  }
+
+  ensureLoaded(): void {
+    if (!this.hasLoaded && !this.isLoading) {
+      this.loadEntries();
+    }
   }
 
   onShelfChanged(): void {
@@ -627,6 +798,7 @@ struct ExplorePage {
   }
 
   async loadEntries() {
+    this.hasLoaded = true;
     this.isLoading = true;
     this.status = '正在加载发现分类...';
     try {
@@ -1031,6 +1203,7 @@ struct ExplorePage {
 struct SearchPage {
   @Prop statusBarHeight: number = 0;
   @Prop navBarHeight: number = 0;
+  @Prop @Watch('onActiveChanged') isActive: boolean = false;
   @State keyword: string = '';
   @State searchResults: SearchBook[] = [];
   @State shelfBookUrls: string[] = [];
@@ -1041,12 +1214,25 @@ struct SearchPage {
   @State verificationTitle: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   private coordinator: SearchCoordinator | null = null;
+  private hasInitialized: boolean = false;
 
   aboutToAppear() {
-    this.initPage();
+    if (this.isActive) {
+      this.initPage();
+    }
+  }
+
+  onActiveChanged(): void {
+    if (this.isActive) {
+      this.initPage();
+    }
   }
 
   async initPage() {
+    if (this.hasInitialized) {
+      return;
+    }
+    this.hasInitialized = true;
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
