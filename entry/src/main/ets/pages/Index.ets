@@ -462,6 +462,7 @@ struct BookshelfPage {
         .width('100%')
         .height(56)
         .padding({ left: 16, right: 16 })
+        .backgroundColor(this.cardColor())
         .alignItems(VerticalAlign.Center)
 
         if (this.isLoading) {
@@ -547,7 +548,6 @@ struct BookshelfPage {
                 .width('100%')
                 .padding(12)
                 .backgroundColor(this.glassCardColor())
-                .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
                 .borderRadius(8)
                 .border({ width: 1, color: this.glassBorderColor() })
                 .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
@@ -661,7 +661,6 @@ struct BookshelfPage {
       .fontColor(this.sortMode === mode ? '#FFFFFF' : this.secondaryTextColor())
       .padding({ left: 9, right: 9, top: 5, bottom: 5 })
       .backgroundColor(this.sortMode === mode ? '#007DFF' : this.glassCardColor())
-      .backgroundBlurStyle(this.sortMode === mode ? BlurStyle.NONE : BlurStyle.COMPONENT_ULTRA_THIN)
       .borderRadius(16)
       .border({ width: this.sortMode === mode ? 0 : 1, color: this.glassBorderColor() })
       .onClick(() => {
@@ -725,15 +724,15 @@ struct BookshelfPage {
   }
 
   glassCardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#38FFFFFF';
+    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
   }
 
   glassBorderColor(): string {
-    return this.appDarkMode ? '#00000000' : '#99FFFFFF';
+    return this.appDarkMode ? '#262A31' : '#FFFFFF';
   }
 
   glassShadowColor(): string {
-    return this.appDarkMode ? '#00000000' : '#10000000';
+    return '#00000000';
   }
 
   sourceTagBackgroundColor(): string {
@@ -872,7 +871,6 @@ struct ExplorePage {
                 .fontColor(this.selectedSourceName === name ? '#FFFFFF' : this.primaryTextColor())
                 .padding({ left: 12, right: 12, top: 8, bottom: 8 })
                 .backgroundColor(this.selectedSourceName === name ? '#007DFF' : this.glassCardColor())
-                .backgroundBlurStyle(this.selectedSourceName === name ? BlurStyle.NONE : BlurStyle.COMPONENT_ULTRA_THIN)
                 .borderRadius(18)
                 .border({ width: this.selectedSourceName === name ? 0 : 1, color: this.glassBorderColor() })
                 .onClick(() => {
@@ -899,7 +897,6 @@ struct ExplorePage {
                 .fontColor(this.selectedIndex === index ? '#FFFFFF' : this.secondaryTextColor())
                 .padding({ left: 12, right: 12, top: 7, bottom: 7 })
                 .backgroundColor(this.selectedIndex === index ? '#007DFF' : this.glassCardColor())
-                .backgroundBlurStyle(this.selectedIndex === index ? BlurStyle.NONE : BlurStyle.COMPONENT_ULTRA_THIN)
                 .borderRadius(17)
                 .border({ width: this.selectedIndex === index ? 0 : 1, color: this.glassBorderColor() })
                 .onClick(() => {
@@ -979,7 +976,6 @@ struct ExplorePage {
               .width('100%')
               .padding(12)
               .backgroundColor(this.glassCardColor())
-              .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
               .borderRadius(8)
               .border({ width: 1, color: this.glassBorderColor() })
               .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
@@ -1175,15 +1171,15 @@ struct ExplorePage {
   }
 
   glassCardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#38FFFFFF';
+    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
   }
 
   glassBorderColor(): string {
-    return this.appDarkMode ? '#00000000' : '#99FFFFFF';
+    return this.appDarkMode ? '#262A31' : '#FFFFFF';
   }
 
   glassShadowColor(): string {
-    return this.appDarkMode ? '#00000000' : '#10000000';
+    return '#00000000';
   }
 
   primaryTextColor(): string {
@@ -1249,7 +1245,6 @@ struct SearchPage {
           .height(40)
           .borderRadius(20)
           .backgroundColor(this.glassCardColor())
-          .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
           .border({ width: 1, color: this.glassBorderColor() })
           .shadow({ radius: 8, color: this.glassShadowColor(), offsetX: 0, offsetY: 3 })
           .fontColor(this.primaryTextColor())
@@ -1342,7 +1337,6 @@ struct SearchPage {
               .width('100%')
               .padding(12)
               .backgroundColor(this.glassCardColor())
-              .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
               .borderRadius(8)
               .border({ width: 1, color: this.glassBorderColor() })
               .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
@@ -1610,15 +1604,15 @@ struct SearchPage {
   }
 
   glassCardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#38FFFFFF';
+    return this.cardColor();
   }
 
   glassBorderColor(): string {
-    return this.appDarkMode ? '#00000000' : '#99FFFFFF';
+    return this.appDarkMode ? '#262A31' : '#FFFFFF';
   }
 
   glassShadowColor(): string {
-    return this.appDarkMode ? '#00000000' : '#10000000';
+    return '#00000000';
   }
 
   primaryTextColor(): string {
@@ -1680,7 +1674,6 @@ struct SettingsPage {
           .height(64)
           .padding({ left: 16, right: 16 })
           .backgroundColor(this.glassCardColor())
-          .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
           .border({ width: 1, color: this.glassBorderColor() })
           .onClick(() => {
             router.pushUrl({ url: 'pages/BookSource' });
@@ -1708,7 +1701,6 @@ struct SettingsPage {
           .height(64)
           .padding({ left: 16, right: 16 })
           .backgroundColor(this.glassCardColor())
-          .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
           .border({ width: 1, color: this.glassBorderColor() })
           .onClick(() => {
             router.pushUrl({ url: 'pages/Settings' });
@@ -1736,7 +1728,6 @@ struct SettingsPage {
           .height(64)
           .padding({ left: 16, right: 16 })
           .backgroundColor(this.glassCardColor())
-          .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
           .border({ width: 1, color: this.glassBorderColor() })
           .onClick(() => {
             router.pushUrl({ url: 'pages/About' });
@@ -1755,10 +1746,10 @@ struct SettingsPage {
   }
 
   glassCardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#38FFFFFF';
+    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
   }
 
   glassBorderColor(): string {
-    return this.appDarkMode ? '#00000000' : '#99FFFFFF';
+    return this.appDarkMode ? '#262A31' : '#FFFFFF';
   }
 }

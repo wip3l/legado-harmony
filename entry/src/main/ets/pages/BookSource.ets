@@ -96,7 +96,6 @@ struct BookSourcePage {
         .width('100%')
         .height(56)
         .backgroundColor(this.glassCardColor())
-        .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
         .border({ width: 1, color: this.glassBorderColor() })
         .alignItems(VerticalAlign.Center)
 
@@ -106,7 +105,6 @@ struct BookSourcePage {
             .height(40)
             .borderRadius(20)
             .backgroundColor(this.glassInputColor())
-            .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
             .border({ width: 1, color: this.glassBorderColor() })
             .shadow({ radius: 8, color: this.glassShadowColor(), offsetX: 0, offsetY: 3 })
             .fontColor(this.primaryTextColor())
@@ -246,7 +244,6 @@ struct BookSourcePage {
                 .width('100%')
                 .padding(12)
                 .backgroundColor(this.glassCardColor())
-                .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
                 .borderRadius(8)
                 .border({ width: 1, color: this.glassBorderColor() })
                 .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
@@ -302,7 +299,6 @@ struct BookSourcePage {
           .width('100%')
           .padding({ left: 16, right: 16, top: 10, bottom: 12 })
           .backgroundColor(this.glassCardColor())
-          .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN)
           .border({ width: 1, color: this.glassBorderColor() })
         }
       }
@@ -507,7 +503,7 @@ struct BookSourcePage {
   }
 
   glassCardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#38FFFFFF';
+    return this.cardColor();
   }
 
   inputColor(): string {
@@ -515,15 +511,15 @@ struct BookSourcePage {
   }
 
   glassInputColor(): string {
-    return this.appDarkMode ? '#24272D' : '#2EFFFFFF';
+    return this.cardColor();
   }
 
   glassBorderColor(): string {
-    return this.appDarkMode ? '#00000000' : '#99FFFFFF';
+    return this.appDarkMode ? '#262A31' : '#FFFFFF';
   }
 
   glassShadowColor(): string {
-    return this.appDarkMode ? '#00000000' : '#10000000';
+    return '#00000000';
   }
 
   primaryTextColor(): string {

@@ -414,8 +414,7 @@ struct ReadBookPage {
           .width('100%')
           .height(this.getTopOverlayHeight())
           .padding({ left: 16, right: 16, top: this.getTopControlSafePadding() })
-          .backgroundColor('#66FFFFFF')
-          .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
+          .backgroundColor(this.readerSolidPanelColor())
           .alignItems(VerticalAlign.Center)
         }
         .width('100%')
@@ -490,8 +489,7 @@ struct ReadBookPage {
         }
         .width('100%')
         .padding(16)
-        .backgroundColor('#66FFFFFF')
-        .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
+        .backgroundColor(this.readerSolidPanelColor())
         .position({ x: 0, y: '100%' })
         .translate({ y: '-100%' })
       }
@@ -546,7 +544,7 @@ struct ReadBookPage {
           }
           .width('82%')
           .height('100%')
-          .backgroundColor('#FAFAFA')
+          .backgroundColor(this.readerSolidPanelColor())
 
           Blank()
             .layoutWeight(1)
@@ -676,8 +674,7 @@ struct ReadBookPage {
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 18, bottom: 24 })
-        .backgroundColor('#66FFFFFF')
-        .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
+        .backgroundColor(this.readerSolidPanelColor())
         .position({ x: 0, y: '100%' })
         .translate({ y: '-100%' })
       }
@@ -753,6 +750,14 @@ struct ReadBookPage {
 
   getSubTextColor(): string {
     return (this.appDarkMode || this.readerThemeIndex === 3) ? '#888888' : '#7A6F63';
+  }
+
+  readerGlassPanelColor(): string {
+    return this.readerSolidPanelColor();
+  }
+
+  readerSolidPanelColor(): string {
+    return (this.appDarkMode || this.readerThemeIndex === 3) ? '#191B1F' : '#FFFFFF';
   }
 
   getReaderSafeAreaEdges(): SafeAreaEdge[] {

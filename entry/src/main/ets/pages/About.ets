@@ -43,18 +43,18 @@ struct AboutPage {
       Scroll() {
         Column() {
           Column() {
-            Text('阅')
-              .fontSize(34)
-              .fontColor('#FFFFFF')
+            Image($r('app.media.icon'))
+              .width(72)
+              .height(72)
+              .borderRadius(18)
           }
           .width(72)
           .height(72)
           .borderRadius(18)
-          .backgroundColor('#007DFF')
           .justifyContent(FlexAlign.Center)
           .margin({ top: 28, bottom: 14 })
 
-          Text('开源阅读纯净版')
+          Text('开源轻页')
             .fontSize(22)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.primaryTextColor())
@@ -64,7 +64,7 @@ struct AboutPage {
             .margin({ top: 6, bottom: 24 })
 
           this.infoCard('项目说明',
-            '开源阅读纯净版是一款网络小说阅读工具，支持书源导入、搜索、发现、目录解析和正文阅读等核心能力。')
+            '开源轻页是一款轻量的网络小说阅读工具，支持书源导入、搜索、发现、目录解析和正文阅读等核心能力。')
 
           this.infoCard('当前状态',
             '项目仍处于兼容完善阶段。常见 CSS、JSONPath、基础 XPath、旧式链式规则和正则捕获已有基础支持；复杂 JS、反爬验证和部分动态正文仍会按书源继续适配。')
