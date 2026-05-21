@@ -677,11 +677,31 @@ struct BookshelfPage {
         return readDiff !== 0 ? readDiff : this.getBookAddTime(b) - this.getBookAddTime(a);
       });
     } else if (this.sortMode === 'name') {
-      sorted.sort((a: Book, b: Book) => (a.name || '').localeCompare(b.name || ''));
+      sorted.sort((a: Book, b: Book) => this.compareBookName(a, b));
     } else {
       sorted.sort((a: Book, b: Book) => this.getBookAddTime(b) - this.getBookAddTime(a));
     }
     return sorted;
+  }
+
+  compareBookName(a: Book, b: Book): number {
+    const nameA = this.normalizeBookName(a.name);
+    const nameB = this.normalizeBookName(b.name);
+    const nameDiff = nameA.localeCompare(nameB, 'zh-Hans-CN-u-co-pinyin');
+    if (nameDiff !== 0) {
+      return nameDiff;
+    }
+    return this.getBookAddTime(b) - this.getBookAddTime(a);
+  }
+
+  normalizeBookName(name?: string): string {
+    if (!name) {
+      return '';
+    }
+    return name
+      .trim()
+      .replace(/^[《〈「『“"'(\[【\s]+/g, '')
+      .replace(/[》〉」』”"')\]】\s]+$/g, '');
   }
 
   getBookAddTime(book: Book): number {
