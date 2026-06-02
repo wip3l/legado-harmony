@@ -14,9 +14,12 @@ struct VerifyWebPage {
   @State currentUrl: string = '';
   @State progress: number = 0;
   private controller: webview.WebviewController = new webview.WebviewController();
+  private readonly mobileUserAgent: string =
+    'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
   aboutToAppear(): void {
     this.syncBars();
+    this.controller.setCustomUserAgent(this.mobileUserAgent);
     const params = router.getParams() as Record<string, string>;
     this.url = params?.['url'] || AppStorage.get<string>('pendingVerificationUrl') || 'https://www.qidian.com';
     this.title = params?.['title'] || AppStorage.get<string>('pendingVerificationTitle') || '网页验证';

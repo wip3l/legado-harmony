@@ -262,7 +262,7 @@ struct ReadBookPage {
                 .fontSize(this.readerFontSize)
                 .lineHeight(this.readerLineHeight)
                 .fontColor(this.getTextColor())
-                .padding({ left: 18, right: 18, top: 18, bottom: 24 + this.readerParagraphSpacing })
+                .padding({ left: 18, right: 18, top: 18, bottom: 24 + this.readerParagraphSpacing + this.getReaderContentBottomReserve() })
             }
             .width('100%')
             }
@@ -291,10 +291,10 @@ struct ReadBookPage {
             Stack() {
               Column() {
                 Text(this.getCurrentPageText())
-                  .fontSize(this.readerFontSize)
-                  .lineHeight(this.readerLineHeight)
-                  .fontColor(this.getTextColor())
-                  .padding({ left: 18, right: 18, top: 18, bottom: 18 })
+                .fontSize(this.readerFontSize)
+                .lineHeight(this.readerLineHeight)
+                .fontColor(this.getTextColor())
+                  .padding({ left: 18, right: 18, top: 18, bottom: 18 + this.getReaderContentBottomReserve() })
                   .width('100%')
               }
               .width('100%')
@@ -798,6 +798,10 @@ struct ReadBookPage {
     return 56 + this.getTopControlSafePadding();
   }
 
+  getReaderContentBottomReserve(): number {
+    return Math.ceil(Math.max(12, this.readerLineHeight * 0.75));
+  }
+
   onReadLayoutChanged(): void {
     this.paginateContent();
     this.saveReadingProgress();
@@ -1140,7 +1144,7 @@ struct ReadBookPage {
     }
 
     const horizontalPadding = 36;
-    const verticalPadding = 36 + Math.ceil(Math.max(1, this.readerLineHeight) * 0.35);
+    const verticalPadding = 36 + this.getReaderContentBottomReserve() + Math.ceil(Math.max(1, this.readerLineHeight) * 0.35);
     const availableWidth = Math.max(1, this.pageViewWidth - horizontalPadding);
     const availableHeight = Math.max(1, this.pageViewHeight - verticalPadding);
     const charsPerLine = Math.max(8, Math.floor(availableWidth / Math.max(1, this.readerFontSize)));

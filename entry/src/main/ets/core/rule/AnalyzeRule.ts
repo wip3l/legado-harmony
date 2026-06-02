@@ -43,6 +43,7 @@ export class AnalyzeRule {
 
   analyze(rule: string): string[] {
     if (!rule) return [];
+    rule = this.applyJsBlocks(rule);
     const effective = this.stripProcessor(rule);
     if (!effective) return [];
 
@@ -108,6 +109,7 @@ export class AnalyzeRule {
 
   analyzeFirst(rule: string): string {
     if (!rule) return '';
+    rule = this.applyJsBlocks(rule);
 
     // 处理 @put:{key:value} - 存储变量（value 为 JSONPath 或字段名）
     const putMatch = rule.match(/@put:\{([^}]+)\}/);
@@ -273,7 +275,9 @@ export class AnalyzeRule {
     // $..list[*] → 递归搜索
     if (path.startsWith('$..')) {
       const selector = path.substring(3);
-      return this.deepFindBySelector(obj, selector);
+      const values = this.evalDeepSelector(obj, selector);
+      if (values.length === 0) return undefined;
+      return values.length === 1 ? values[0] as Object | string : values as Object[];
     }
 
     // $.data[*] → 按层级
@@ -320,6 +324,76 @@ export class AnalyzeRule {
     return found;
   }
 
+  private evalDeepSelector(obj: Object, selector: string): Object[] {
+    const parts = selector.split('.').map(part => part.trim()).filter(part => part.length > 0);
+    if (parts.length === 0) return [];
+
+    let current = this.findAllByToken(obj, parts[0], true);
+    for (let i = 1; i < parts.length; i++) {
+      const next: Object[] = [];
+      for (const item of current) {
+        next.push(...this.findAllByToken(item as Object, parts[i], false));
+      }
+      current = next;
+      if (current.length === 0) break;
+    }
+    return current;
+  }
+
+  private findAllByToken(obj: Object, token: string, deep: boolean): Object[] {
+    const parsed = this.parsePathToken(token);
+    const values = deep ? this.deepFindAll(obj, parsed.key) : this.directFindAll(obj, parsed.key);
+    return this.applyTokenIndex(values, parsed.index);
+  }
+
+  private parsePathToken(token: string): { key: string, index: string } {
+    const match = token.match(/^([A-Za-z_][A-Za-z0-9_-]*)(?:\[(\*|\d+)\])?$/);
+    if (!match) return { key: token.replace(/\[\*\]$/, ''), index: '' };
+    return { key: match[1], index: match[2] || '' };
+  }
+
+  private directFindAll(obj: Object, key: string): Object[] {
+    if (!obj || typeof obj !== 'object') return [];
+    if (Array.isArray(obj)) {
+      const values: Object[] = [];
+      for (const item of obj) {
+        if (item && typeof item === 'object' && (item as Record<string, Object>)[key] !== undefined) {
+          values.push((item as Record<string, Object>)[key]);
+        }
+      }
+      return values;
+    }
+    const value = (obj as Record<string, Object>)[key];
+    return value === undefined || value === null ? [] : [value];
+  }
+
+  private deepFindAll(obj: Object, key: string): Object[] {
+    const values: Object[] = [];
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        values.push(...this.deepFindAll(item as Object, key));
+      }
+    } else if (typeof obj === 'object' && obj !== null) {
+      const rec = obj as Record<string, Object>;
+      if (rec[key] !== undefined && rec[key] !== null) values.push(rec[key]);
+      for (const k in rec) {
+        values.push(...this.deepFindAll(rec[k] as Object, key));
+      }
+    }
+    return values;
+  }
+
+  private applyTokenIndex(values: Object[], index: string): Object[] {
+    const flattened: Object[] = [];
+    for (const value of values) {
+      if (Array.isArray(value)) flattened.push(...value as Object[]);
+      else flattened.push(value);
+    }
+    if (!index || index === '*') return flattened;
+    const idx = parseInt(index);
+    return idx >= 0 && idx < flattened.length ? [flattened[idx]] : [];
+  }
+
   private deepFind(obj: Object, key: string): Object | string | undefined {
     if (Array.isArray(obj)) {
       for (const item of obj) {
@@ -334,6 +408,81 @@ export class AnalyzeRule {
       }
     }
     return undefined;
+  }
+
+  private applyJsBlocks(rule: string): string {
+    if (!rule || !rule.includes('<js>')) return rule;
+    return rule.replace(/<js>([\s\S]*?)<\/js>/gi, (_: string, code: string) => {
+      const result = this.evalJsBlockSideEffects(code);
+      if (result) this.ctx.put('result', result);
+      return '';
+    }).trim();
+  }
+
+  private evalJsBlockSideEffects(code: string): string {
+    if (!code) return '';
+    let lastValue = '';
+    const putRe = /java\.put\(\s*([^,]+)\s*,\s*([^)]+(?:\)[^,;]*)?)\s*\)/g;
+    let putMatch: RegExpExecArray | null;
+    while ((putMatch = putRe.exec(code)) !== null) {
+      const key = this.stripQuotes(putMatch[1]);
+      const value = this.evalJsValue(putMatch[2]);
+      if (key) {
+        this.ctx.put(key, value);
+        lastValue = value;
+      }
+    }
+
+    const resultAssign = code.match(/\bresult\s*=\s*([^;]+);?/);
+    if (resultAssign) {
+      lastValue = this.evalJsValue(resultAssign[1]);
+      if (lastValue) this.ctx.put('result', lastValue);
+    }
+    return lastValue;
+  }
+
+  private evalJsValue(expr: string): string {
+    if (!expr) return '';
+    let text = expr.trim();
+    text = text.replace(/\{\{([^}]+)\}\}/g, (_: string, rule: string) => {
+      return this.resolveRuleValue(rule.trim());
+    });
+    text = text.replace(/\$\.\.(\w+)/g, (_: string, key: string) => {
+      const v = this.deepFind(this.parseContentObject(), key);
+      return v === undefined || v === null ? '' : String(v);
+    });
+    text = text.replace(/\$\.(\w+)/g, (_: string, key: string) => {
+      const data = this.parseContentObject() as Record<string, Object>;
+      const v = data ? data[key] : undefined;
+      return v === undefined || v === null ? '' : String(v);
+    });
+    text = text.replace(/\bresult\b/g, this.ctx.get('result'));
+    text = this.js.evalTemplate(`{{${text}}}`);
+    return this.stripQuotes(text);
+  }
+
+  private resolveRuleValue(rule: string): string {
+    if (!rule) return '';
+    if (rule.startsWith('@get:{')) {
+      const m = rule.match(/@get:\{(\w+)\}/);
+      return m ? this.ctx.get(m[1]) : '';
+    }
+    if (rule.startsWith('$') || rule.startsWith('@.')) {
+      const v = this.evalJsonPath(rule);
+      if (Array.isArray(v)) return v.map(item => String(item)).join(',');
+      return v === undefined || v === null ? '' : String(v);
+    }
+    const ctxVal = this.ctx.get(rule);
+    if (ctxVal) return ctxVal;
+    return this.js.evalTemplate(`{{${rule}}}`);
+  }
+
+  private parseContentObject(): Object {
+    try {
+      return JSON.parse(this.content) as Object;
+    } catch (_) {
+      return {};
+    }
   }
 
   // === CSS 选择器 ===

@@ -238,9 +238,7 @@ export class WebBookService {
   }
 
   private requestVerificationIfNeeded(source: BookSource, requestUrl: string, body: string, statusCode: number, rule: string): boolean {
-    if (!VerificationSupport.isChallengeResponse(body) &&
-      !(statusCode === 401 || statusCode === 403) &&
-      !(statusCode === 403 && VerificationSupport.canBrowserVerify(rule))) {
+    if (!VerificationSupport.shouldRequestBrowserVerification(source, body, statusCode, rule)) {
       return false;
     }
     const verifyUrl = VerificationSupport.pickVerificationUrl(source, requestUrl, rule);

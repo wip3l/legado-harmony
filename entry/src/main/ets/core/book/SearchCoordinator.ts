@@ -90,8 +90,7 @@ export class SearchCoordinator {
       const resp = await au.fetch(urlTemplate);
 
       console.log('[SC] response:', source.bookSourceName, resp.statusCode, 'len:', resp.body?.length || 0);
-      if (VerificationSupport.isChallengeResponse(resp.body) ||
-        resp.statusCode === 401 || resp.statusCode === 403) {
+      if (VerificationSupport.shouldRequestBrowserVerification(source, resp.body, resp.statusCode, source.searchUrl)) {
         const verifyUrl = VerificationSupport.pickVerificationUrl(source, urlTemplate, source.searchUrl);
         VerificationSupport.requestVerification(verifyUrl, `${source.bookSourceName} 验证`);
         console.warn('[SC] source needs browser verification:', source.bookSourceName, verifyUrl);
@@ -118,6 +117,7 @@ export class SearchCoordinator {
         book.kind = ir.analyzeFirst(searchRule.kind) || '';
         book.latestChapterTitle = ir.analyzeFirst(searchRule.lastChapter) || '';
         book.bookUrl = this.resolve(ir.analyzeFirst(searchRule.bookUrl), source.bookSourceUrl);
+        book.variable = ir.getContext().toJson();
         // 如果解析后仍含 JSONPath 表达式，直接从 item 提取
         if (!book.bookUrl || book.bookUrl.startsWith('$') || book.bookUrl.includes('$._id') || book.bookUrl.includes('$..')) {
           // 尝试常见字段

@@ -18,6 +18,19 @@ export class VerificationSupport {
       rule.includes('验证码') || rule.includes('cookie.setCookie') || rule.includes('cookie.getCookie'));
   }
 
+  static shouldRequestBrowserVerification(source: BookSource, body: string, statusCode: number, rule?: string): boolean {
+    if (this.isChallengeResponse(body)) {
+      return true;
+    }
+    if (!(statusCode === 401 || statusCode === 403)) {
+      return false;
+    }
+    if (this.hasBrowserVerifyHint(source, rule || '')) {
+      return true;
+    }
+    return !this.looksLikeApiSource(source);
+  }
+
   static requestVerification(url: string, title: string): void {
     const cleanUrl = this.cleanUrl(url);
     if (!cleanUrl) return;
@@ -53,6 +66,22 @@ export class VerificationSupport {
     const raw = match[1].trim();
     if (raw === 'baseUrl') return '';
     return raw.replace(/^['"]|['"]$/g, '');
+  }
+
+  private static hasBrowserVerifyHint(source: BookSource, rule: string): boolean {
+    return this.canBrowserVerify(rule) || this.canBrowserVerify(source.searchUrl || '') ||
+      this.canBrowserVerify(source.loginUrl || '') ||
+      this.canBrowserVerify(source.bookInfoRule?.init || '') ||
+      this.canBrowserVerify(source.tocRule?.chapterList || '') ||
+      this.canBrowserVerify(source.contentRule?.content || '');
+  }
+
+  private static looksLikeApiSource(source: BookSource): boolean {
+    const url = (source.bookSourceUrl || '').toLowerCase();
+    const header = (source.header || '').toLowerCase();
+    return url.includes('://api.') || url.includes('/api') ||
+      header.includes('authorization') || header.includes('client-name') ||
+      header.includes('client-version') || header.includes('okhttp');
   }
 
   private static cleanUrl(url: string): string {
