@@ -1,6 +1,7 @@
 import { AbilityConstant, UIAbility, Want, Configuration, ConfigurationConstant } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { RecentReadShortcut, RECENT_READ_SHORTCUT_ACTION, OPEN_BOOK_SHORTCUT_ACTION } from '../utils/RecentReadShortcut';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -18,6 +19,7 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate('navBarHeight', 0);
     }
     PersistentStorage.persistProp('bookshelfSortMode', 'recentRead');
+    this.handleLaunchWant(want);
   }
 
   onDestroy(): void {
@@ -47,6 +49,11 @@ export default class EntryAbility extends UIAbility {
     this.syncSystemColorMode(this.context.config);
   }
 
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    hilog.info(0x0000, 'testTag', 'Ability onNewWant %{public}s', JSON.stringify(launchParam));
+    this.handleLaunchWant(want);
+  }
+
   onBackground(): void {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onBackground');
   }
@@ -60,6 +67,56 @@ export default class EntryAbility extends UIAbility {
     if (mode === 'system') {
       AppStorage.setOrCreate('appDarkMode', config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
     }
+  }
+
+  private handleLaunchWant(want: Want): void {
+    const params = this.getLaunchParams(want);
+    const action = params['shortcutAction'];
+    if (action === RECENT_READ_SHORTCUT_ACTION) {
+      RecentReadShortcut.request();
+      return;
+    }
+    if (action === OPEN_BOOK_SHORTCUT_ACTION) {
+      const bookUrl = params['bookUrl'];
+      if (bookUrl) {
+        RecentReadShortcut.requestBook(bookUrl);
+      }
+    }
+  }
+
+  private getLaunchParams(want: Want): Record<string, string> {
+    const result: Record<string, string> = {};
+    const parameters = want.parameters;
+    if (!parameters) {
+      return result;
+    }
+
+    const shortcutAction = parameters['shortcutAction'];
+    if (typeof shortcutAction === 'string') {
+      result['shortcutAction'] = shortcutAction;
+    }
+    const bookUrl = parameters['bookUrl'];
+    if (typeof bookUrl === 'string') {
+      result['bookUrl'] = bookUrl;
+    }
+
+    const cardParams = parameters['params'];
+    if (typeof cardParams === 'string') {
+      try {
+        const parsed = JSON.parse(cardParams) as Record<string, Object>;
+        const parsedAction = parsed['shortcutAction'];
+        if (typeof parsedAction === 'string') {
+          result['shortcutAction'] = parsedAction;
+        }
+        const parsedBookUrl = parsed['bookUrl'];
+        if (typeof parsedBookUrl === 'string') {
+          result['bookUrl'] = parsedBookUrl;
+        }
+      } catch (e) {
+        hilog.warn(0x0000, 'testTag', 'Parse card params failed: %{public}s', JSON.stringify(e));
+      }
+    }
+    return result;
   }
 
   private syncStartupWindow(windowStage: window.WindowStage): void {

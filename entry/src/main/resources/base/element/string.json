@@ -13,6 +13,18 @@
       "value": "开源轻页"
     },
     {
+      "name": "shortcut_recent_read",
+      "value": "最近阅读"
+    },
+    {
+      "name": "recent_read_form_name",
+      "value": "最近阅读"
+    },
+    {
+      "name": "recent_read_form_desc",
+      "value": "显示最近阅读书籍并快速继续阅读"
+    },
+    {
       "name": "bookshelf",
       "value": "书架"
     },

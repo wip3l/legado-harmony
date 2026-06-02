@@ -9,6 +9,7 @@ import { SearchCoordinator, SearchCallback, SearchProgress } from '../core/book/
 import { ExploreCoordinator, ExploreEntry } from '../core/book/ExploreCoordinator';
 import { WebBookService } from '../core/book/WebBookService';
 import { syncSystemSafeAreas } from '../utils/SystemBars';
+import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 
 @Entry
 @Component
@@ -17,10 +18,12 @@ struct Index {
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageLink('appDarkMode') @Watch('onAppDarkModeChanged') appDarkMode: boolean = false;
+  @StorageLink('launchShortcutNonce') @Watch('onLaunchShortcutChanged') launchShortcutNonce: number = 0;
 
   aboutToAppear() {
     hilog.info(0x0000, 'testTag', 'StartupTrace Index aboutToAppear %{public}d', Date.now());
     this.syncHomeSystemBars();
+    this.openPendingShortcut();
   }
 
   onPageShow(): void {
@@ -30,6 +33,23 @@ struct Index {
 
   onAppDarkModeChanged(): void {
     this.syncHomeSystemBars();
+  }
+
+  onLaunchShortcutChanged(): void {
+    this.openPendingShortcut();
+  }
+
+  async openPendingShortcut(): Promise<void> {
+    if (!RecentReadShortcut.isPending()) {
+      return;
+    }
+    try {
+      await RecentReadShortcut.openPending(getContext(this));
+      RecentReadShortcut.consume();
+    } catch (e) {
+      RecentReadShortcut.consume();
+      console.error('打开最近阅读快捷项失败:', e);
+    }
   }
 
   build() {

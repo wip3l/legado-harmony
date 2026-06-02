@@ -1,5 +1,6 @@
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 
 @Entry
 @Component
@@ -16,8 +17,26 @@ struct StartupPage {
     this.jumpTimer = setTimeout(() => {
       this.jumpTimer = -1;
       hilog.info(0x0000, 'testTag', 'StartupTrace replace Index %{public}d', Date.now());
-      router.replaceUrl({ url: 'pages/Index' });
+      this.openStartupTarget();
     }, 650);
+  }
+
+  async openStartupTarget(): Promise<void> {
+    if (!RecentReadShortcut.isPending()) {
+      router.replaceUrl({ url: 'pages/Index' });
+      return;
+    }
+    try {
+      const opened = await RecentReadShortcut.openPending(getContext(this), true);
+      RecentReadShortcut.consume();
+      if (!opened) {
+        router.replaceUrl({ url: 'pages/Index' });
+      }
+    } catch (e) {
+      RecentReadShortcut.consume();
+      console.error('打开最近阅读快捷项失败:', e);
+      router.replaceUrl({ url: 'pages/Index' });
+    }
   }
 
   build() {

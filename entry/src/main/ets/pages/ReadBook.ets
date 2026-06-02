@@ -1,8 +1,11 @@
 import { router, window } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import { inputConsumer, KeyCode, Action, KeyEvent } from '@kit.InputKit';
 import { Book, BookChapter } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
+import { RecentReadShortcut } from '../utils/RecentReadShortcut';
+import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 
 @Entry
 @Component
@@ -46,6 +49,7 @@ struct ReadBookPage {
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
   @StorageLink('readerExtendToStatusBar') @Watch('onReaderExtendToStatusBarChanged') readerExtendToStatusBar: boolean = false;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('launchShortcutNonce') @Watch('onLaunchShortcutChanged') launchShortcutNonce: number = 0;
   private themeBackgrounds: string[] = ['#F6F0E5', '#F5F5F5', '#E8F1EA', '#1F1F1F'];
   private themeTextColors: string[] = ['#2F261D', '#333333', '#26352A', '#D8D8D8'];
   private volumeUpCallback?: (event: KeyEvent) => void;
@@ -65,6 +69,24 @@ struct ReadBookPage {
     this.saveReadingProgress();
     this.unregisterVolumeKeyTurn();
     this.exitReaderImmersive();
+  }
+
+  onLaunchShortcutChanged(): void {
+    this.openPendingShortcut();
+  }
+
+  async openPendingShortcut(): Promise<void> {
+    if (!RecentReadShortcut.isPending()) {
+      return;
+    }
+    await this.saveReadingProgress();
+    try {
+      await RecentReadShortcut.openPending(getContext(this));
+      RecentReadShortcut.consume();
+    } catch (e) {
+      RecentReadShortcut.consume();
+      console.error('打开最近阅读快捷项失败:', e);
+    }
   }
 
   enterReaderImmersive() {
@@ -919,6 +941,7 @@ struct ReadBookPage {
       const db = AppDatabase.getInstance();
       await db.updateBook(this.book);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      RecentReadCardUpdater.reload(getContext(this) as common.UIAbilityContext);
     } catch (e) {
       console.error('保存阅读进度失败:', e);
     }
@@ -933,6 +956,7 @@ struct ReadBookPage {
       const db = AppDatabase.getInstance();
       await db.updateBook(this.book);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      RecentReadCardUpdater.reload(getContext(this) as common.UIAbilityContext);
     } catch (e) {
       console.error('更新最近阅读时间失败:', e);
     }

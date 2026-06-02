@@ -1,0 +1,19 @@
+{
+  "shortcuts": [
+    {
+      "shortcutId": "recent_read",
+      "label": "$string:shortcut_recent_read",
+      "icon": "$media:layered_image",
+      "wants": [
+        {
+          "bundleName": "io.legado.read",
+          "moduleName": "entry",
+          "abilityName": "EntryAbility",
+          "parameters": {
+            "shortcutAction": "recent_read"
+          }
+        }
+      ]
+    }
+  ]
+}

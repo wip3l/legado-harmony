@@ -26,6 +26,12 @@
         "startWindowIcon": "$media:ic_startup_blank",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        "metadata": [
+          {
+            "name": "ohos.ability.shortcuts",
+            "resource": "$profile:shortcuts_config"
+          }
+        ],
         "skills": [
           {
             "entities": [
@@ -34,6 +40,22 @@
             "actions": [
               "action.system.home"
             ]
+          }
+        ]
+      }
+    ],
+    "extensionAbilities": [
+      {
+        "name": "RecentReadFormAbility",
+        "srcEntry": "./ets/entryformability/RecentReadFormAbility.ets",
+        "label": "$string:recent_read_form_name",
+        "description": "$string:recent_read_form_desc",
+        "type": "form",
+        "exported": true,
+        "metadata": [
+          {
+            "name": "ohos.extension.form",
+            "resource": "$profile:form_config"
           }
         ]
       }

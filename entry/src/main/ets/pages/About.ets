@@ -58,25 +58,25 @@ struct AboutPage {
             .fontSize(22)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.primaryTextColor())
-          Text('1.0.0')
+          Text('1.0.62')
             .fontSize(13)
             .fontColor(this.subTextColor())
             .margin({ top: 6, bottom: 24 })
 
           this.infoCard('项目说明',
-            '开源轻页是一款轻量的网络小说阅读工具，支持书源导入、搜索、发现、目录解析和正文阅读等核心能力。')
+            '开源轻页是一个本地阅读与书源规则兼容项目，用于验证用户自行提供且有合法使用权限的规则在移动端的导入、解析和阅读体验。')
 
-          this.infoCard('当前状态',
-            '项目仍处于兼容完善阶段。常见 CSS、JSONPath、基础 XPath、旧式链式规则和正则捕获已有基础支持；复杂 JS、反爬验证和部分动态正文仍会按书源继续适配。')
+          this.infoCard('合规说明',
+            '本项目不内置、不托管、不分发任何小说正文、章节内容、封面图片或付费资源；不提供书源订阅服务，也不推荐、维护或背书任何第三方内容站点。')
+
+          this.infoCard('使用提醒',
+            '导入书源前，请自行确认书源来源、目标站点协议、内容授权和所在地法律法规要求。项目仅按用户配置的规则发起访问和解析，不以破解付费内容、绕过访问控制、规避反爬机制或批量抓取受保护内容为目标。')
 
           this.infoCard('开源许可',
             '本项目采用 GPL-3.0 许可证。使用、修改和分发时请遵守对应开源协议。')
 
-          this.infoCard('致谢',
-            '感谢 Legado / 阅读项目及其书源生态。本项目用于学习、移植和兼容验证。')
-
           Column() {
-            Text('仅用于学习与技术研究。请尊重版权，支持正版内容。')
+            Text('请仅使用自有、授权或明确允许访问的内容与规则。')
               .fontSize(12)
               .fontColor(this.subTextColor())
               .textAlign(TextAlign.Center)

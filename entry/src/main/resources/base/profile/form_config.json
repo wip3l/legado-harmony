@@ -1,0 +1,20 @@
+{
+  "forms": [
+    {
+      "name": "RecentReadForm",
+      "displayName": "$string:recent_read_form_name",
+      "description": "$string:recent_read_form_desc",
+      "src": "./ets/widgets/RecentReadCard.ets",
+      "uiSyntax": "arkts",
+      "isDefault": true,
+      "colorMode": "auto",
+      "defaultDimension": "2*4",
+      "supportDimensions": [
+        "2*4"
+      ],
+      "updateEnabled": true,
+      "updateDuration": 1,
+      "scheduledUpdateTime": "06:00"
+    }
+  ]
+}
