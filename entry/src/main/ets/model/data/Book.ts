@@ -69,9 +69,34 @@ export class Book {
 
   getDisplayCover(): string {
     if (this.customCoverUrl && this.customCoverUrl.length > 0) {
+      const covers = this.parseCustomCovers(this.customCoverUrl);
+      if (covers.length > 0) {
+        return covers[Math.floor(Date.now() / 4000) % covers.length];
+      }
       return this.customCoverUrl;
     }
     return this.coverUrl;
+  }
+
+  private parseCustomCovers(raw: string): string[] {
+    const value = raw.trim();
+    if (!value.startsWith('{') && !value.startsWith('[')) {
+      return [value];
+    }
+    try {
+      const parsed = JSON.parse(value) as Record<string, Object> | string[];
+      const values = Array.isArray(parsed) ? parsed as string[] : (parsed['covers'] as string[] || []);
+      const covers: string[] = [];
+      for (const cover of values) {
+        const item = (cover || '').trim();
+        if (item && !covers.includes(item)) {
+          covers.push(item);
+        }
+      }
+      return covers;
+    } catch (e) {
+      return [];
+    }
   }
 
   getDisplayIntro(): string {

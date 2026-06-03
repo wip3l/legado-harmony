@@ -3,6 +3,7 @@ import { Book } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { WebBookService } from '../core/book/WebBookService';
 import { syncSystemBars } from '../utils/SystemBars';
+import { BookDisplayHelper } from '../utils/BookDisplayHelper';
 
 @Entry
 @Component
@@ -102,15 +103,9 @@ struct SearchBookDetailPage {
           .borderRadius(8)
 
           Flex({ wrap: FlexWrap.Wrap }) {
-            if (this.kind) {
-              Text(this.kind)
-                .fontSize(13)
-                .fontColor(this.appDarkMode ? '#8FB4FF' : '#3568D4')
-                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                .backgroundColor(this.appDarkMode ? '#1C3558' : '#EAF1FF')
-                .borderRadius(14)
-                .margin({ right: 8, bottom: 8 })
-            }
+            ForEach(this.getTags(), (tag: string, index: number) => {
+              this.tagChip(tag, index)
+            })
 
             if (this.wordCount) {
               Text(this.wordCount)
@@ -155,18 +150,26 @@ struct SearchBookDetailPage {
             .margin({ top: 12 })
           }
 
-          Column() {
-            Text('简介')
-              .fontSize(15)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .width('100%')
-            Text(this.intro || '暂无简介')
-              .fontSize(14)
-              .fontColor(this.secondaryTextColor())
-              .lineHeight(22)
-              .width('100%')
-              .margin({ top: 8 })
+          Row({ space: 14 }) {
+            this.coverView(this.name, this.coverUrl, 88, 118)
+
+            Column() {
+              Text('简介')
+                .fontSize(15)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.primaryTextColor())
+                .width('100%')
+              Text(this.intro || '暂无简介')
+                .fontSize(14)
+                .fontColor(this.secondaryTextColor())
+                .lineHeight(22)
+                .width('100%')
+                .maxLines(8)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .margin({ top: 8 })
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
           }
           .width('100%')
           .padding(16)
@@ -305,6 +308,48 @@ struct SearchBookDetailPage {
       url: 'pages/ReadBook',
       params: { bookUrl: this.bookUrl }
     });
+  }
+
+  getTags(): string[] {
+    return BookDisplayHelper.splitTags(this.kind, '');
+  }
+
+  @Builder
+  tagChip(tag: string, index: number) {
+    Text(tag)
+      .fontSize(13)
+      .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
+      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+      .backgroundColor(BookDisplayHelper.getTagBackgroundColor(index, this.appDarkMode))
+      .borderRadius(14)
+      .margin({ right: 8, bottom: 8 })
+  }
+
+  @Builder
+  coverView(name: string, coverUrl: string, width: number, height: number) {
+    Stack() {
+      Column() {
+        Text(name ? name.substring(0, 1) : '书')
+          .fontSize(30)
+          .fontColor('#FFFFFF')
+      }
+      .width(width)
+      .height(height)
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor('#6B50B6')
+
+      if (coverUrl) {
+        Image(coverUrl)
+          .width(width)
+          .height(height)
+          .objectFit(ImageFit.Cover)
+      }
+    }
+    .width(width)
+    .height(height)
+    .borderRadius(8)
+    .clip(true)
+    .backgroundColor(this.inputColor())
   }
 
   pageColor(): string {

@@ -1,6 +1,7 @@
 import { Context } from '@kit.AbilityKit';
 import { Book } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
+import { BookDisplayHelper } from './BookDisplayHelper';
 
 export const RECENT_READ_FORM_NAME = 'RecentReadForm';
 export const RECENT_READ_FORM_ABILITY = 'RecentReadFormAbility';
@@ -15,14 +16,33 @@ export class RecentReadCardData {
   book0Author: string = '';
   book0Progress: string = '';
   book0Url: string = '';
+  book0Cover0: string = '';
+  book0Cover1: string = '';
+  book0Cover2: string = '';
+  book0Cover0Raw: string = '';
+  book0Cover1Raw: string = '';
+  book0Cover2Raw: string = '';
   book1Name: string = '';
   book1Author: string = '';
   book1Progress: string = '';
   book1Url: string = '';
+  book1Cover0: string = '';
+  book1Cover1: string = '';
+  book1Cover2: string = '';
+  book1Cover0Raw: string = '';
+  book1Cover1Raw: string = '';
+  book1Cover2Raw: string = '';
   book2Name: string = '';
   book2Author: string = '';
   book2Progress: string = '';
   book2Url: string = '';
+  book2Cover0: string = '';
+  book2Cover1: string = '';
+  book2Cover2: string = '';
+  book2Cover0Raw: string = '';
+  book2Cover1Raw: string = '';
+  book2Cover2Raw: string = '';
+  formImages: Record<string, number> = {};
 }
 
 export class RecentReadCardDataProvider {
@@ -63,11 +83,13 @@ export class RecentReadCardDataProvider {
 
   private static fillBook(data: RecentReadCardData, index: number, book: Book): void {
     const progress = RecentReadCardDataProvider.progressText(book);
+    const covers = BookDisplayHelper.getCoverList(book);
     if (index === 0) {
       data.book0Name = book.name || '未命名书籍';
       data.book0Author = book.author || '作者未知';
       data.book0Progress = progress;
       data.book0Url = book.bookUrl;
+      RecentReadCardDataProvider.fillCovers(data, 0, covers);
       return;
     }
     if (index === 1) {
@@ -75,12 +97,48 @@ export class RecentReadCardDataProvider {
       data.book1Author = book.author || '作者未知';
       data.book1Progress = progress;
       data.book1Url = book.bookUrl;
+      RecentReadCardDataProvider.fillCovers(data, 1, covers);
       return;
     }
     data.book2Name = book.name || '未命名书籍';
     data.book2Author = book.author || '作者未知';
     data.book2Progress = progress;
     data.book2Url = book.bookUrl;
+    RecentReadCardDataProvider.fillCovers(data, 2, covers);
+  }
+
+  private static fillCovers(data: RecentReadCardData, index: number, covers: string[]): void {
+    const cover0 = covers.length > 0 ? covers[0] : '';
+    const cover1 = covers.length > 1 ? covers[1] : '';
+    const cover2 = covers.length > 2 ? covers[2] : '';
+    if (index === 0) {
+      data.book0Cover0 = RecentReadCardDataProvider.memoryCover(index, 0, cover0);
+      data.book0Cover1 = RecentReadCardDataProvider.memoryCover(index, 1, cover1);
+      data.book0Cover2 = RecentReadCardDataProvider.memoryCover(index, 2, cover2);
+      data.book0Cover0Raw = cover0;
+      data.book0Cover1Raw = cover1;
+      data.book0Cover2Raw = cover2;
+      return;
+    }
+    if (index === 1) {
+      data.book1Cover0 = RecentReadCardDataProvider.memoryCover(index, 0, cover0);
+      data.book1Cover1 = RecentReadCardDataProvider.memoryCover(index, 1, cover1);
+      data.book1Cover2 = RecentReadCardDataProvider.memoryCover(index, 2, cover2);
+      data.book1Cover0Raw = cover0;
+      data.book1Cover1Raw = cover1;
+      data.book1Cover2Raw = cover2;
+      return;
+    }
+    data.book2Cover0 = RecentReadCardDataProvider.memoryCover(index, 0, cover0);
+    data.book2Cover1 = RecentReadCardDataProvider.memoryCover(index, 1, cover1);
+    data.book2Cover2 = RecentReadCardDataProvider.memoryCover(index, 2, cover2);
+    data.book2Cover0Raw = cover0;
+    data.book2Cover1Raw = cover1;
+    data.book2Cover2Raw = cover2;
+  }
+
+  private static memoryCover(bookIndex: number, coverIndex: number, raw: string): string {
+    return raw ? `memory://book${bookIndex}Cover${coverIndex}` : '';
   }
 
   private static progressText(book: Book): string {

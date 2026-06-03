@@ -40,14 +40,23 @@ struct RecentReadCard {
   @LocalStorageProp('book0Author') book0Author: string = '';
   @LocalStorageProp('book0Progress') book0Progress: string = '';
   @LocalStorageProp('book0Url') book0Url: string = '';
+  @LocalStorageProp('book0Cover0') book0Cover0: string = '';
+  @LocalStorageProp('book0Cover1') book0Cover1: string = '';
+  @LocalStorageProp('book0Cover2') book0Cover2: string = '';
   @LocalStorageProp('book1Name') book1Name: string = '';
   @LocalStorageProp('book1Author') book1Author: string = '';
   @LocalStorageProp('book1Progress') book1Progress: string = '';
   @LocalStorageProp('book1Url') book1Url: string = '';
+  @LocalStorageProp('book1Cover0') book1Cover0: string = '';
+  @LocalStorageProp('book1Cover1') book1Cover1: string = '';
+  @LocalStorageProp('book1Cover2') book1Cover2: string = '';
   @LocalStorageProp('book2Name') book2Name: string = '';
   @LocalStorageProp('book2Author') book2Author: string = '';
   @LocalStorageProp('book2Progress') book2Progress: string = '';
   @LocalStorageProp('book2Url') book2Url: string = '';
+  @LocalStorageProp('book2Cover0') book2Cover0: string = '';
+  @LocalStorageProp('book2Cover1') book2Cover1: string = '';
+  @LocalStorageProp('book2Cover2') book2Cover2: string = '';
 
   build() {
     Column() {
@@ -97,13 +106,16 @@ struct RecentReadCard {
       } else {
         Row({ space: 10 }) {
           if (this.book0Url) {
-            this.bookCover(this.book0Name, this.book0Progress, this.book0Url, 0)
+            this.bookCover(this.book0Name, this.book0Progress, this.book0Url, 0,
+              this.book0Cover0, this.book0Cover1, this.book0Cover2)
           }
           if (this.book1Url) {
-            this.bookCover(this.book1Name, this.book1Progress, this.book1Url, 1)
+            this.bookCover(this.book1Name, this.book1Progress, this.book1Url, 1,
+              this.book1Cover0, this.book1Cover1, this.book1Cover2)
           }
           if (this.book2Url) {
-            this.bookCover(this.book2Name, this.book2Progress, this.book2Url, 2)
+            this.bookCover(this.book2Name, this.book2Progress, this.book2Url, 2,
+              this.book2Cover0, this.book2Cover1, this.book2Cover2)
           }
         }
         .width('100%')
@@ -119,19 +131,10 @@ struct RecentReadCard {
   }
 
   @Builder
-  bookCover(name: string, progress: string, bookUrl: string, index: number) {
+  bookCover(name: string, progress: string, bookUrl: string, index: number,
+    cover0: string, cover1: string, cover2: string) {
     Stack({ alignContent: Alignment.BottomStart }) {
-      Column() {
-        Text('阅读')
-          .fontSize(10)
-          .fontColor('#DDEBFF')
-          .opacity(0.8)
-          .margin({ top: 9, left: 9 })
-      }
-      .width('100%')
-      .height('100%')
-      .alignItems(HorizontalAlign.Start)
-      .backgroundColor(this.coverColor(index))
+      this.coverBackground(index, cover0, cover1, cover2)
 
       Column() {
         Text(name || '未命名书籍')
@@ -159,6 +162,51 @@ struct RecentReadCard {
     .onClick(() => {
       postCardAction(this, new CardRouteAction(bookUrl));
     })
+  }
+
+  @Builder
+  coverBackground(index: number, cover0: string, cover1: string, cover2: string) {
+    if (cover1 || cover2) {
+      Swiper() {
+        if (cover0) {
+          this.coverImage(cover0)
+        }
+        if (cover1) {
+          this.coverImage(cover1)
+        }
+        if (cover2) {
+          this.coverImage(cover2)
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .autoPlay(true)
+      .interval(3500)
+      .indicator(false)
+      .loop(true)
+    } else if (cover0) {
+      this.coverImage(cover0)
+    } else {
+      Column() {
+        Text('阅读')
+          .fontSize(10)
+          .fontColor('#DDEBFF')
+          .opacity(0.8)
+          .margin({ top: 9, left: 9 })
+      }
+      .width('100%')
+      .height('100%')
+      .alignItems(HorizontalAlign.Start)
+      .backgroundColor(this.coverColor(index))
+    }
+  }
+
+  @Builder
+  coverImage(cover: string) {
+    Image(cover)
+      .width('100%')
+      .height('100%')
+      .objectFit(ImageFit.Cover)
   }
 
   private coverColor(index: number): string {

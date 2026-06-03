@@ -1,6 +1,7 @@
 import { router, window, promptAction, MeasureOptions } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { inputConsumer, KeyCode, Action, KeyEvent } from '@kit.InputKit';
+import graphicsText from '@ohos.graphics.text';
 import { Book, BookChapter } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
@@ -837,6 +838,10 @@ struct ReadBookPage {
       if (clampedOffset >= this.contentPageStarts[i] && clampedOffset < this.contentPageEnds[i]) {
         return i;
       }
+      if (i < this.contentPageStarts.length - 1 &&
+        clampedOffset >= this.contentPageEnds[i] && clampedOffset < this.contentPageStarts[i + 1]) {
+        return i + 1;
+      }
     }
     return Math.max(0, this.contentPageStarts.length - 1);
   }
@@ -1369,6 +1374,11 @@ struct ReadBookPage {
       return source.length;
     }
 
+    const paragraphEnd = this.findParagraphLayoutPageEnd(source, safeStart, availableWidth, availableHeight);
+    if (paragraphEnd > safeStart) {
+      return paragraphEnd;
+    }
+
     let low = safeStart + 1;
     let high = source.length;
     let best = low;
@@ -1385,6 +1395,75 @@ struct ReadBookPage {
 
     const end = this.chooseReaderPageBreak(source, safeStart, best);
     return Math.max(safeStart + 1, end);
+  }
+
+  findParagraphLayoutPageEnd(source: string, start: number, availableWidth: number, availableHeight: number): number {
+    const windowEnd = Math.min(source.length, start + this.getReaderLayoutWindowSize(availableWidth, availableHeight));
+    const layoutText = source.substring(start, windowEnd);
+    if (!layoutText) {
+      return -1;
+    }
+
+    try {
+      const fontSizePx = this.toMeasurePx(this.readerFontSize);
+      const lineHeightPx = this.toMeasurePx(Math.max(this.readerLineHeight, this.readerFontSize));
+      const textStyle: graphicsText.TextStyle = {
+        fontSize: fontSizePx,
+        fontWeight: graphicsText.FontWeight.W400,
+        lineHeightMinimum: lineHeightPx,
+        lineHeightMaximum: lineHeightPx,
+        halfLeading: true,
+        heightOnly: false,
+        locale: 'zh-Hans'
+      };
+      const paragraphStyle: graphicsText.ParagraphStyle = {
+        textStyle: textStyle,
+        align: graphicsText.TextAlign.START,
+        textDirection: graphicsText.TextDirection.LTR,
+        wordBreak: graphicsText.WordBreak.BREAK_ALL,
+        breakStrategy: graphicsText.BreakStrategy.GREEDY,
+        trailingSpaceOptimized: true,
+        includeFontPadding: false
+      };
+      const builder = new graphicsText.ParagraphBuilder(paragraphStyle, graphicsText.FontCollection.getGlobalInstance());
+      builder.pushStyle(textStyle);
+      builder.addText(layoutText);
+      builder.popStyle();
+      const paragraph = builder.build();
+      paragraph.layoutSync(this.toMeasurePx(availableWidth));
+      const metrics = paragraph.getLineMetrics();
+      if (metrics.length === 0) {
+        return -1;
+      }
+
+      const safeHeight = Math.max(1, availableHeight - 1);
+      let end = -1;
+      for (let i = 0; i < metrics.length; i++) {
+        const metric = metrics[i];
+        if (metric.topHeight + metric.height > safeHeight) {
+          break;
+        }
+        end = Math.max(end, metric.endIndex);
+      }
+
+      if (end <= 0) {
+        const firstRange = paragraph.getActualTextRange(0, true);
+        end = Math.max(1, firstRange.end);
+      }
+      if (end >= layoutText.length && windowEnd < source.length) {
+        return -1;
+      }
+      return Math.max(start + 1, Math.min(source.length, start + end));
+    } catch (error) {
+      console.error('官方段落布局分页失败，回退到文本测量分页:', error);
+      return -1;
+    }
+  }
+
+  getReaderLayoutWindowSize(availableWidth: number, availableHeight: number): number {
+    const charsPerLine = Math.max(8, Math.floor(availableWidth / Math.max(1, this.readerFontSize * 0.95)));
+    const visibleLines = Math.max(1, Math.ceil(availableHeight / Math.max(1, this.readerLineHeight)));
+    return Math.min(12000, Math.max(800, charsPerLine * (visibleLines + 6) * 2));
   }
 
   measureReaderTextHeight(text: string, availableWidth: number): number {
@@ -1426,7 +1505,7 @@ struct ReadBookPage {
     if (best >= source.length) {
       return source.length;
     }
-    const minBreak = start + Math.max(24, Math.floor((best - start) * 0.88));
+    const minBreak = start + Math.max(24, Math.floor((best - start) * 0.96));
     let newline = source.lastIndexOf('\n', best);
     if (newline >= minBreak) {
       return newline + 1;

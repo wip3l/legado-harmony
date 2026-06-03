@@ -10,6 +10,12 @@ import { ExploreCoordinator, ExploreEntry } from '../core/book/ExploreCoordinato
 import { WebBookService } from '../core/book/WebBookService';
 import { syncSystemSafeAreas } from '../utils/SystemBars';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
+import { BookDisplayHelper } from '../utils/BookDisplayHelper';
+import { BookCoverCache } from '../utils/BookCoverCache';
+import picker from '@ohos.file.picker';
+import fs from '@ohos.file.fs';
+import fileUri from '@ohos.file.fileuri';
+import zlib from '@ohos.zlib';
 
 @Entry
 @Component
@@ -402,7 +408,14 @@ struct BookshelfPage {
   @State books: Book[] = [];
   @State isLoading: boolean = false;
   @State showDeleteDialog: boolean = false;
+  @State showActionDialog: boolean = false;
+  @State showCoverDialog: boolean = false;
+  @State showTagDialog: boolean = false;
   @State pendingDeleteBook: Book | null = null;
+  @State pendingActionBook: Book | null = null;
+  @State editingTags: string[] = [];
+  @State tagInput: string = '';
+  @State shelfCoverMap: Map<string, string> = new Map();
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('bookshelfSortMode') sortMode: string = 'recentRead';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
@@ -422,6 +435,7 @@ struct BookshelfPage {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
       this.books = this.sortBooks(await db.getAllBooks());
+      this.refreshShelfCoverCache(this.books);
     } catch (e) {
       console.error('加载书籍失败:', e);
     } finally {
@@ -444,6 +458,7 @@ struct BookshelfPage {
       const db = AppDatabase.getInstance();
       await db.deleteBook(book.bookUrl);
       promptAction.showToast({ message: `已删除《${book.name}》` });
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       await this.loadBooks();
     } catch (e) {
       console.error('删除书籍失败:', e);
@@ -454,6 +469,44 @@ struct BookshelfPage {
   showDeleteConfirm(book: Book) {
     this.pendingDeleteBook = book;
     this.showDeleteDialog = true;
+  }
+
+  showBookActions(book: Book): void {
+    this.pendingActionBook = book;
+    this.showActionDialog = true;
+  }
+
+  closeBookActions(): void {
+    this.showActionDialog = false;
+    this.pendingActionBook = null;
+  }
+
+  async refreshShelfCoverCache(books: Book[]): Promise<void> {
+    const context = getContext(this);
+    const nextMap: Map<string, string> = new Map(this.shelfCoverMap);
+    let changed = false;
+    for (const book of books) {
+      const covers = BookDisplayHelper.getCoverList(book);
+      for (let i = 0; i < covers.length; i++) {
+        const raw = covers[i];
+        if (!raw || (!raw.startsWith('http://') && !raw.startsWith('https://'))) {
+          continue;
+        }
+          const key = this.shelfCoverKey(book, i);
+        try {
+          const cached = await BookCoverCache.resolveCover(context, raw);
+          if (cached && cached !== raw && nextMap.get(key) !== cached) {
+            nextMap.set(key, cached);
+            changed = true;
+          }
+        } catch (e) {
+          console.warn('缓存书架封面失败:', e);
+        }
+      }
+    }
+    if (changed) {
+      this.shelfCoverMap = nextMap;
+    }
   }
 
   build() {
@@ -518,17 +571,7 @@ struct BookshelfPage {
             ForEach(this.books, (book: Book) => {
               ListItem() {
                 Row() {
-                  // 封面占位
-                  Column() {
-                    Text(book.name ? book.name.substring(0, 1) : '书')
-                      .fontSize(28)
-                      .fontColor('#FFFFFF')
-                  }
-                  .width(56)
-                  .height(72)
-                  .borderRadius(6)
-                  .backgroundColor(this.getBookColor(book.name))
-                  .justifyContent(FlexAlign.Center)
+                  this.coverView(book, 56, 72)
 
                   Column() {
                     Text(book.name)
@@ -563,6 +606,16 @@ struct BookshelfPage {
                   .layoutWeight(1)
                   .margin({ left: 12 })
                   .alignItems(HorizontalAlign.Start)
+
+                  if (this.getDisplayTags(book).length > 0) {
+                    Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.End }) {
+                      ForEach(this.getDisplayTags(book), (tag: string, index: number) => {
+                        this.tagChip(tag, index, 11)
+                      })
+                    }
+                    .width(108)
+                    .margin({ left: 8 })
+                  }
                 }
                 .width('100%')
                 .padding(12)
@@ -573,7 +626,7 @@ struct BookshelfPage {
                 .gesture(
                   LongPressGesture({ repeat: false })
                     .onAction(() => {
-                      this.showDeleteConfirm(book);
+                      this.showBookActions(book);
                     })
                 )
                 .onClick(() => {
@@ -597,6 +650,198 @@ struct BookshelfPage {
       .padding({ top: this.statusBarHeight })
       .backgroundColor(this.pageColor())
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+
+      if (this.showActionDialog && this.pendingActionBook) {
+        Column() {
+          Blank()
+            .layoutWeight(1)
+            .onClick(() => {
+              this.closeBookActions();
+            })
+
+          Column() {
+            Text(this.pendingActionBook.name)
+              .fontSize(17)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 12 })
+
+            this.actionItem('移出书架', '#E53935', () => {
+              if (this.pendingActionBook) {
+                const book = this.pendingActionBook;
+                this.closeBookActions();
+                this.showDeleteConfirm(book);
+              }
+            })
+            this.actionItem('自定义封面', this.primaryTextColor(), () => {
+              this.showActionDialog = false;
+              this.showCoverDialog = true;
+            })
+            this.actionItem('自定义标签', this.primaryTextColor(), () => {
+              if (this.pendingActionBook) {
+                this.editingTags = BookDisplayHelper.getBookTags(this.pendingActionBook);
+                this.tagInput = '';
+              }
+              this.showActionDialog = false;
+              this.showTagDialog = true;
+            })
+
+            Button('取消')
+              .width('100%')
+              .height(44)
+              .margin({ top: 10 })
+              .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
+              .fontColor(this.primaryTextColor())
+              .onClick(() => {
+                this.closeBookActions();
+              })
+          }
+          .width('100%')
+          .padding({ left: 18, right: 18, top: 18, bottom: 18 })
+          .backgroundColor(this.cardColor())
+          .borderRadius({ topLeft: 18, topRight: 18 })
+          .margin({ bottom: this.actionSheetBottomMargin() })
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#66000000')
+      }
+
+      if (this.showCoverDialog && this.pendingActionBook) {
+        Column() {
+          Column() {
+            Text('自定义封面')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 16 })
+
+            this.actionItem('选择本地图片', this.primaryTextColor(), () => {
+              this.pickCoverImages();
+            })
+            this.actionItem('选择 ZIP 压缩包', this.primaryTextColor(), () => {
+              this.pickCoverZip();
+            })
+            this.actionItem('恢复书源封面', this.primaryTextColor(), () => {
+              this.clearCustomCover();
+            })
+
+            Button('取消')
+              .width('100%')
+              .height(44)
+              .margin({ top: 10 })
+              .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
+              .fontColor(this.primaryTextColor())
+              .onClick(() => {
+                this.showCoverDialog = false;
+                this.pendingActionBook = null;
+              })
+          }
+          .width('85%')
+          .padding(22)
+          .backgroundColor(this.cardColor())
+          .borderRadius(12)
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#80000000')
+        .justifyContent(FlexAlign.Center)
+      }
+
+      if (this.showTagDialog && this.pendingActionBook) {
+        Column() {
+          Column() {
+            Text('自定义标签')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 14 })
+
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(this.editingTags, (tag: string, index: number) => {
+                Row() {
+                  Text(tag)
+                    .fontSize(13)
+                    .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
+                  Text('×')
+                    .fontSize(14)
+                    .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
+                    .margin({ left: 6 })
+                }
+                .padding({ left: 10, right: 8, top: 5, bottom: 5 })
+                .backgroundColor(BookDisplayHelper.getTagBackgroundColor(index, this.appDarkMode))
+                .borderRadius(14)
+                .margin({ right: 8, bottom: 8 })
+                .onClick(() => {
+                  this.removeEditingTag(tag);
+                })
+              })
+            }
+            .width('100%')
+            .height(40)
+            .margin({ bottom: 12 })
+
+            Row() {
+              TextInput({ placeholder: '输入标签', text: this.tagInput })
+                .height(40)
+                .layoutWeight(1)
+                .backgroundColor(this.inputColor())
+                .fontColor(this.primaryTextColor())
+                .placeholderColor(this.subTextColor())
+                .borderRadius(8)
+                .onChange((value: string) => {
+                  this.tagInput = value;
+                })
+
+              Button('添加')
+                .height(40)
+                .margin({ left: 8 })
+                .onClick(() => {
+                  this.addEditingTag();
+                })
+            }
+            .width('100%')
+            .margin({ bottom: 18 })
+
+            Row() {
+              Button('取消')
+                .width('45%')
+                .height(44)
+                .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
+                .fontColor(this.primaryTextColor())
+                .onClick(() => {
+                  this.showTagDialog = false;
+                  this.pendingActionBook = null;
+                })
+
+              Button('保存')
+                .width('45%')
+                .height(44)
+                .onClick(() => {
+                  this.saveCustomTags();
+                })
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.SpaceBetween)
+          }
+          .width('85%')
+          .padding(22)
+          .backgroundColor(this.cardColor())
+          .borderRadius(12)
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#80000000')
+        .justifyContent(FlexAlign.Center)
+      }
 
       // 删除确认弹窗
       if (this.showDeleteDialog && this.pendingDeleteBook) {
@@ -671,6 +916,287 @@ struct BookshelfPage {
       hash = name.charCodeAt(i) + ((hash << 5) - hash);
     }
     return colors[Math.abs(hash) % colors.length];
+  }
+
+  getDisplayTags(book: Book): string[] {
+    const tags = BookDisplayHelper.getBookTags(book);
+    return tags.slice(0, 4);
+  }
+
+  @Builder
+  coverView(book: Book, width: number, height: number) {
+    Stack() {
+      Column() {
+        Text(book.name ? book.name.substring(0, 1) : '书')
+          .fontSize(28)
+          .fontColor('#FFFFFF')
+      }
+      .width(width)
+      .height(height)
+      .backgroundColor(this.getBookColor(book.name))
+      .justifyContent(FlexAlign.Center)
+
+      if (this.getShelfCoverList(book).length > 1) {
+        Swiper() {
+          ForEach(this.getShelfCoverList(book), (cover: string) => {
+            Image(cover)
+              .width(width)
+              .height(height)
+              .objectFit(ImageFit.Cover)
+          }, (cover: string) => cover)
+        }
+        .width(width)
+        .height(height)
+        .autoPlay(true)
+        .interval(3500)
+        .indicator(false)
+        .loop(true)
+      } else if (this.getShelfCoverList(book).length === 1) {
+        Image(this.getShelfCover(book))
+          .width(width)
+          .height(height)
+          .objectFit(ImageFit.Cover)
+      }
+    }
+    .width(width)
+    .height(height)
+    .borderRadius(6)
+    .clip(true)
+    .backgroundColor(this.inputColor())
+  }
+
+  getShelfCover(book: Book): string {
+    const covers = this.getShelfCoverList(book);
+    return covers.length > 0 ? BookDisplayHelper.pickCover(covers) : '';
+  }
+
+  getShelfCoverList(book: Book): string[] {
+    const covers = BookDisplayHelper.getCoverList(book);
+    const displayCovers: string[] = [];
+    for (let i = 0; i < covers.length; i++) {
+      displayCovers.push(this.shelfCoverMap.get(this.shelfCoverKey(book, i)) || covers[i]);
+    }
+    return displayCovers;
+  }
+
+  shelfCoverKey(book: Book, index: number): string {
+    return `${book.bookUrl}#${index}`;
+  }
+
+  @Builder
+  tagChip(tag: string, index: number, fontSize: number) {
+    Text(tag)
+      .fontSize(fontSize)
+      .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
+      .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+      .backgroundColor(BookDisplayHelper.getTagBackgroundColor(index, this.appDarkMode))
+      .borderRadius(12)
+      .margin({ left: 4, bottom: 6 })
+      .maxLines(1)
+      .textOverflow({ overflow: TextOverflow.Ellipsis })
+  }
+
+  @Builder
+  actionItem(label: string, color: string, action: () => void) {
+    Button(label)
+      .width('100%')
+      .height(44)
+      .margin({ top: 6 })
+      .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
+      .fontColor(color)
+      .onClick(action)
+  }
+
+  async pickCoverImages(): Promise<void> {
+    if (!this.pendingActionBook) return;
+    try {
+      const options: picker.PhotoSelectOptions = new picker.PhotoSelectOptions();
+      options.MIMEType = picker.PhotoViewMIMETypes.IMAGE_TYPE;
+      options.maxSelectNumber = 20;
+      const result = await new picker.PhotoViewPicker(getContext(this)).select(options);
+      if (!result || result.photoUris.length === 0) {
+        return;
+      }
+      await this.saveCustomCovers(this.pendingActionBook, result.photoUris);
+      const message = result.photoUris.length > 1 ? `已选择 ${result.photoUris.length} 张，封面将自动轮播` : '已设置自定义封面';
+      promptAction.showToast({ message });
+    } catch (e) {
+      console.error('选择封面失败:', e);
+      promptAction.showToast({ message: '选择封面失败' });
+    }
+  }
+
+  async pickCoverZip(): Promise<void> {
+    if (!this.pendingActionBook) return;
+    try {
+      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      options.fileSuffixFilters = ['ZIP 压缩包|.zip'];
+      options.maxSelectNumber = 1;
+      const result = await new picker.DocumentViewPicker(getContext(this)).select(options);
+      if (!result || result.length === 0) {
+        return;
+      }
+      const imagePaths = await this.extractImagesFromZip(result[0]);
+      if (imagePaths.length === 0) {
+        promptAction.showToast({ message: '压缩包中未找到图片' });
+        return;
+      }
+      const imageUris = imagePaths.map((path: string) => fileUri.getUriFromPath(path));
+      await this.saveCustomCovers(this.pendingActionBook, imageUris);
+      const message = imageUris.length > 1 ? `已从压缩包导入 ${imageUris.length} 张封面，封面将自动轮播` : '已从压缩包设置封面';
+      promptAction.showToast({ message });
+    } catch (e) {
+      console.error('选择压缩包封面失败:', e);
+      promptAction.showToast({ message: '读取压缩包失败' });
+    }
+  }
+
+  async clearCustomCover(): Promise<void> {
+    if (!this.pendingActionBook) return;
+    const book = this.pendingActionBook;
+    book.customCoverUrl = '';
+    await this.updateShelfBook(book);
+    this.showCoverDialog = false;
+    this.pendingActionBook = null;
+    promptAction.showToast({ message: '已恢复书源封面' });
+  }
+
+  async saveCustomCover(book: Book, sourceUri: string): Promise<void> {
+    await this.saveCustomCovers(book, [sourceUri]);
+  }
+
+  async saveCustomCovers(book: Book, sourceUris: string[]): Promise<void> {
+    const context = getContext(this);
+    const dir = `${context.filesDir}/covers`;
+    await this.ensureDir(dir);
+    const savedUris: string[] = [];
+    for (let i = 0; i < sourceUris.length; i++) {
+      const sourceUri = sourceUris[i];
+      if (!sourceUri) {
+        continue;
+      }
+      const destPath = `${dir}/${this.safeFileName(book.bookUrl)}_${Date.now()}_${i}${this.coverExt(sourceUri)}`;
+      const destUri = fileUri.getUriFromPath(destPath);
+      try {
+        await fs.copy(sourceUri, destUri);
+        savedUris.push(destUri);
+      } catch (e) {
+        console.warn('复制封面失败，使用原始URI:', e);
+        savedUris.push(sourceUri);
+      }
+    }
+    if (savedUris.length === 0) {
+      promptAction.showToast({ message: '未找到可用封面' });
+      return;
+    }
+    book.customCoverUrl = BookDisplayHelper.encodeCustomCovers(savedUris);
+    await this.updateShelfBook(book);
+    this.showCoverDialog = false;
+    this.pendingActionBook = null;
+  }
+
+  async extractImagesFromZip(zipUri: string): Promise<string[]> {
+    const context = getContext(this);
+    const zipDir = `${context.tempDir}/cover_zip_${Date.now()}`;
+    const zipPath = `${zipDir}/source.zip`;
+    const outDir = `${zipDir}/out`;
+    await this.ensureDir(zipDir);
+    await this.ensureDir(outDir);
+    await fs.copy(zipUri, fileUri.getUriFromPath(zipPath));
+    await zlib.decompressFile(zipPath, outDir);
+    return await this.findImages(outDir);
+  }
+
+  async findImages(dir: string): Promise<string[]> {
+    const images: string[] = [];
+    let names: string[] = [];
+    try {
+      names = await fs.listFile(dir);
+    } catch (e) {
+      return images;
+    }
+    names.sort();
+    for (const name of names) {
+      const path = `${dir}/${name}`;
+      const stat = await fs.stat(path);
+      if (stat.isDirectory()) {
+        images.push(...await this.findImages(path));
+      } else if (this.isImageFile(name)) {
+        images.push(path);
+      }
+    }
+    return images;
+  }
+
+  isImageFile(name: string): boolean {
+    return /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(name);
+  }
+
+  async ensureDir(path: string): Promise<void> {
+    try {
+      await fs.mkdir(path, true);
+    } catch (e) {
+    }
+  }
+
+  safeFileName(value: string): string {
+    return (value || 'book').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 48) || 'book';
+  }
+
+  coverExt(uri: string): string {
+    const lower = uri.toLowerCase();
+    if (lower.includes('.png')) return '.png';
+    if (lower.includes('.webp')) return '.webp';
+    if (lower.includes('.bmp')) return '.bmp';
+    if (lower.includes('.gif')) return '.gif';
+    return '.jpg';
+  }
+
+  actionSheetBottomMargin(): number {
+    return 82 + (this.navBarHeight > 0 ? this.navBarHeight : 0);
+  }
+
+  addEditingTag(): void {
+    const tag = this.tagInput.trim();
+    if (!tag || this.editingTags.includes(tag)) {
+      this.tagInput = '';
+      return;
+    }
+    this.editingTags = [...this.editingTags, tag];
+    this.tagInput = '';
+  }
+
+  removeEditingTag(tag: string): void {
+    this.editingTags = this.editingTags.filter(item => item !== tag);
+  }
+
+  async saveCustomTags(): Promise<void> {
+    if (!this.pendingActionBook) return;
+    this.addEditingTag();
+    const book = this.pendingActionBook;
+    const sourceTags = BookDisplayHelper.splitTags(book.kind, '');
+    const customTags = this.editingTags.filter(tag => !sourceTags.includes(tag));
+    const hiddenTags = sourceTags
+      .filter(tag => !this.editingTags.includes(tag))
+      .map(tag => `!${tag}`);
+    book.customTag = BookDisplayHelper.joinTags([...customTags, ...hiddenTags]);
+    await this.updateShelfBook(book);
+    this.showTagDialog = false;
+    this.pendingActionBook = null;
+    promptAction.showToast({ message: '标签已保存' });
+  }
+
+  async updateShelfBook(book: Book): Promise<void> {
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      await db.updateBook(book);
+      this.books = this.books.map((item: Book) => item.bookUrl === book.bookUrl ? book : item);
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+    } catch (e) {
+      console.error('更新书籍失败:', e);
+      promptAction.showToast({ message: '保存失败' });
+    }
   }
 
   @Builder
@@ -760,6 +1286,10 @@ struct BookshelfPage {
 
   cardColor(): string {
     return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+  }
+
+  inputColor(): string {
+    return this.appDarkMode ? '#24272D' : '#F2F2F2';
   }
 
   glassCardColor(): string {
