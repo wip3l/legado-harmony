@@ -1,4 +1,4 @@
-import { router, window } from '@kit.ArkUI';
+import { router, window, promptAction, MeasureOptions } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { inputConsumer, KeyCode, Action, KeyEvent } from '@kit.InputKit';
 import { Book, BookChapter } from '../model/data/Book';
@@ -6,6 +6,15 @@ import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
+import { SystemTtsReader, TtsChunk } from '../utils/SystemTtsReader';
+
+interface ReadTextSlice {
+  text: string;
+  start: number;
+  end: number;
+  highlighted: boolean;
+  key: string;
+}
 
 @Entry
 @Component
@@ -24,13 +33,29 @@ struct ReadBookPage {
   @State verificationTitle: string = '网页验证';
   @State contentPages: string[] = [];
   @State currentPageIndex: number = 0;
+  @State currentPageText: string = '';
+  @State pageRenderVersion: number = 0;
   @State pageViewWidth: number = 0;
   @State pageViewHeight: number = 0;
   @State statusBarSafeHeight: number = 0;
+  @State isTtsSpeaking: boolean = false;
+  @State ttsDisplayText: string = '';
+  @State ttsHighlightStart: number = -1;
+  @State ttsHighlightEnd: number = -1;
   private pendingRestorePageIndex: number = -1;
   private pendingRestoreScrollOffset: number = -1;
   private currentScrollOffset: number = 0;
   private contentScroller: Scroller = new Scroller();
+  private ttsReader: SystemTtsReader = new SystemTtsReader();
+  private ttsAutoContinue: boolean = false;
+  private ttsReadToken: number = 0;
+  private ttsTextStartOffset: number = 0;
+  private ttsAutoTurningPage: boolean = false;
+  private ttsPendingTargetPageIndex: number = -1;
+  private ttsPendingHighlightChunk: TtsChunk | null = null;
+  private contentPageStarts: number[] = [];
+  private contentPageEnds: number[] = [];
+  private pagedContentText: string = '';
   @State pageTransitionX: number = 0;
   @State pageTransitionOpacity: number = 1;
   @State pageFlipOffsetX: number = 0;
@@ -66,6 +91,8 @@ struct ReadBookPage {
   }
 
   aboutToDisappear() {
+    this.stopTtsReading();
+    this.ttsReader.shutdown();
     this.saveReadingProgress();
     this.unregisterVolumeKeyTurn();
     this.exitReaderImmersive();
@@ -258,11 +285,7 @@ struct ReadBookPage {
           Column() {
             Scroll(this.contentScroller) {
             Column() {
-              Text(this.content)
-                .fontSize(this.readerFontSize)
-                .lineHeight(this.readerLineHeight)
-                .fontColor(this.getTextColor())
-                .padding({ left: 18, right: 18, top: 18, bottom: 24 + this.readerParagraphSpacing + this.getReaderContentBottomReserve() })
+              this.readingText(this.content, 24 + this.readerParagraphSpacing + this.getReaderContentBottomReserve())
             }
             .width('100%')
             }
@@ -290,12 +313,23 @@ struct ReadBookPage {
           Column() {
             Stack() {
               Column() {
-                Text(this.getCurrentPageText())
-                .fontSize(this.readerFontSize)
-                .lineHeight(this.readerLineHeight)
-                .fontColor(this.getTextColor())
-                  .padding({ left: 18, right: 18, top: 18, bottom: 18 + this.getReaderContentBottomReserve() })
-                  .width('100%')
+                if (this.hasActiveTtsHighlight(this.currentPageText || this.getCurrentPageText())) {
+                  this.readingText(this.currentPageText || this.getCurrentPageText(), 18 + this.getReaderContentBottomReserve())
+                } else if (this.pageRenderVersion % 2 === 0) {
+                  Text(this.currentPageText || this.getCurrentPageText())
+                    .fontSize(this.readerFontSize)
+                    .lineHeight(this.readerLineHeight)
+                    .fontColor(this.getTextColor())
+                    .padding({ left: 18, right: 18, top: 18, bottom: 18 + this.getReaderContentBottomReserve() })
+                    .width('100%')
+                } else {
+                  Text(this.currentPageText || this.getCurrentPageText())
+                    .fontSize(this.readerFontSize)
+                    .lineHeight(this.readerLineHeight)
+                    .fontColor(this.getTextColor())
+                    .padding({ left: 18, right: 18, top: 18, bottom: 18 + this.getReaderContentBottomReserve() })
+                    .width('100%')
+                }
               }
               .width('100%')
               .height('100%')
@@ -496,6 +530,14 @@ struct ReadBookPage {
               .onClick(() => {
                 this.showSettings = true;
                 this.showMenu = false;
+              })
+
+            Button(this.isTtsSpeaking ? '停止朗读' : '朗读')
+              .fontSize(14)
+              .layoutWeight(1)
+              .margin({ right: 8 })
+              .onClick(() => {
+                this.toggleTtsReading();
               })
 
             Button('刷新目录')
@@ -760,6 +802,45 @@ struct ReadBookPage {
     return this.contentPages[pageIndex];
   }
 
+  syncCurrentPageText(): void {
+    this.currentPageText = this.getCurrentPageText();
+    this.pageRenderVersion++;
+  }
+
+  getCurrentPageStartOffset(): number {
+    return this.getPageStartOffset(this.currentPageIndex);
+  }
+
+  getPageStartOffset(pageIndex: number): number {
+    if (this.contentPageStarts.length === 0) {
+      return 0;
+    }
+    const index = Math.max(0, Math.min(pageIndex, this.contentPageStarts.length - 1));
+    return Math.max(0, this.contentPageStarts[index]);
+  }
+
+  getPageEndOffset(pageIndex: number): number {
+    if (this.contentPageEnds.length === 0) {
+      return this.content.length;
+    }
+    const index = Math.max(0, Math.min(pageIndex, this.contentPageEnds.length - 1));
+    return Math.max(this.getPageStartOffset(index), this.contentPageEnds[index]);
+  }
+
+  findPageIndexByOffset(offset: number): number {
+    if (this.contentPageStarts.length === 0) {
+      return Math.max(0, Math.min(this.currentPageIndex, Math.max(0, this.contentPages.length - 1)));
+    }
+    const sourceLength = this.pagedContentText ? this.pagedContentText.length : this.content.length;
+    const clampedOffset = Math.max(0, Math.min(offset, Math.max(0, sourceLength - 1)));
+    for (let i = 0; i < this.contentPageStarts.length; i++) {
+      if (clampedOffset >= this.contentPageStarts[i] && clampedOffset < this.contentPageEnds[i]) {
+        return i;
+      }
+    }
+    return Math.max(0, this.contentPageStarts.length - 1);
+  }
+
   getBackgroundColor(): string {
     const index = this.appDarkMode ? 3 : this.readerThemeIndex;
     return this.themeBackgrounds[index] || this.themeBackgrounds[0];
@@ -901,6 +982,7 @@ struct ReadBookPage {
     const maxPage = Math.max(0, this.contentPages.length - 1);
     this.currentPageIndex = Math.max(0, Math.min(this.pendingRestorePageIndex, maxPage));
     this.pendingRestorePageIndex = -1;
+    this.syncCurrentPageText();
   }
 
   canSaveReadingProgress(): boolean {
@@ -1095,6 +1177,7 @@ struct ReadBookPage {
     if (this.readerPageTurnMode === mode) {
       return;
     }
+    this.stopTtsReading();
     this.readerPageTurnMode = mode;
     this.currentPageIndex = 0;
     this.currentScrollOffset = 0;
@@ -1102,6 +1185,523 @@ struct ReadBookPage {
     this.pendingRestoreScrollOffset = 0;
     this.paginateContent();
     this.saveReadingProgress();
+  }
+
+  async toggleTtsReading(): Promise<void> {
+    if (this.isTtsSpeaking) {
+      this.stopTtsReading();
+      promptAction.showToast({ message: '已停止朗读' });
+      return;
+    }
+    await this.startTtsReadingFromCurrentPosition(true);
+  }
+
+  async startTtsReadingFromCurrentPosition(showToast: boolean): Promise<void> {
+    const text = this.getTtsReadingText();
+    if (!text) {
+      this.finishTtsReading();
+      if (showToast) {
+        promptAction.showToast({ message: '当前没有可朗读内容' });
+      }
+      return;
+    }
+    const token = ++this.ttsReadToken;
+    this.ttsAutoContinue = true;
+    this.ttsDisplayText = this.getCurrentPageText();
+    this.ttsHighlightStart = -1;
+    this.ttsHighlightEnd = -1;
+    try {
+      await this.ttsReader.start(text, {
+        onFinished: () => {
+          this.continueTtsReading(token);
+        },
+        onError: (message: string) => {
+          if (token !== this.ttsReadToken) {
+            return;
+          }
+          this.finishTtsReading();
+          promptAction.showToast({ message: message || '系统朗读失败' });
+        },
+        onChunkStart: (chunk: TtsChunk) => {
+          if (token !== this.ttsReadToken) {
+            return;
+          }
+          this.followTtsChunk(chunk);
+        }
+      });
+      this.isTtsSpeaking = true;
+      if (showToast) {
+        promptAction.showToast({ message: this.readerPageTurnMode === 0 ? '开始连续朗读' : '开始连续朗读' });
+      }
+    } catch (error) {
+      if (token !== this.ttsReadToken) {
+        return;
+      }
+      this.finishTtsReading();
+      promptAction.showToast({ message: '当前系统不支持朗读或 TTS 初始化失败' });
+      console.error('启动系统 TTS 失败:', error);
+    }
+  }
+
+  stopTtsReading(userCancelled: boolean = true): void {
+    if (userCancelled) {
+      this.ttsAutoContinue = false;
+      this.ttsReadToken++;
+    }
+    this.ttsAutoTurningPage = false;
+    this.ttsPendingTargetPageIndex = -1;
+    this.ttsPendingHighlightChunk = null;
+    if (!this.isTtsSpeaking && !this.ttsReader.isSpeaking()) {
+      this.clearTtsHighlight();
+      return;
+    }
+    this.ttsReader.stop();
+    this.isTtsSpeaking = false;
+    this.clearTtsHighlight();
+  }
+
+  async continueTtsReading(token: number): Promise<void> {
+    if (token !== this.ttsReadToken || !this.ttsAutoContinue) {
+      return;
+    }
+    const advanced = await this.advanceTtsReadingTarget();
+    if (token !== this.ttsReadToken || !this.ttsAutoContinue) {
+      return;
+    }
+    if (!advanced) {
+      this.finishTtsReading();
+      return;
+    }
+    await this.startTtsReadingFromCurrentPosition(false);
+  }
+
+  async advanceTtsReadingTarget(): Promise<boolean> {
+    if (this.chapters.length === 0) {
+      return false;
+    }
+    if (this.readerPageTurnMode === 0) {
+      if (this.currentChapterIndex >= this.chapters.length - 1) {
+        return false;
+      }
+      await this.loadNextChapter();
+      setTimeout(() => {
+        this.contentScroller.scrollTo({ xOffset: 0, yOffset: 0 });
+      }, 0);
+      return true;
+    }
+
+    if (this.currentPageIndex < this.contentPages.length - 1) {
+      await this.runTtsPageTurnAnimation(1);
+      return true;
+    }
+    if (this.currentChapterIndex < this.chapters.length - 1) {
+      await this.runTtsPageTurnAnimation(1);
+      return true;
+    }
+    return false;
+  }
+
+  finishTtsReading(): void {
+    this.ttsAutoContinue = false;
+    this.isTtsSpeaking = false;
+    this.clearTtsHighlight();
+  }
+
+  clearTtsHighlight(): void {
+    this.ttsDisplayText = '';
+    this.ttsHighlightStart = -1;
+    this.ttsHighlightEnd = -1;
+    this.ttsTextStartOffset = 0;
+  }
+
+  getTtsReadingText(): string {
+    if (this.readerPageTurnMode !== 0) {
+      const start = this.getCurrentPageStartOffset();
+      this.ttsTextStartOffset = start;
+      const source = this.pagedContentText || this.getPagedSourceText();
+      return source.substring(start);
+    }
+    this.ttsTextStartOffset = 0;
+    return this.getPagedSourceText();
+  }
+
+  normalizeReaderText(text: string): string {
+    return (text || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  getPagedSourceText(): string {
+    return (this.content || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n');
+  }
+
+  isReaderTrimChar(value: string): boolean {
+    return value === ' ' || value === '\t' || value === '\n' || value === '\r';
+  }
+
+  pushReaderPage(source: string, rawStart: number, rawEnd: number, pages: string[], starts: number[], ends: number[]): void {
+    let pageStart = Math.max(0, Math.min(rawStart, source.length));
+    let pageEnd = Math.max(pageStart, Math.min(rawEnd, source.length));
+    while (pageStart < pageEnd && this.isReaderTrimChar(source.charAt(pageStart))) {
+      pageStart++;
+    }
+    while (pageEnd > pageStart && this.isReaderTrimChar(source.charAt(pageEnd - 1))) {
+      pageEnd--;
+    }
+    const pageText = source.substring(pageStart, pageEnd);
+    if (!pageText) {
+      return;
+    }
+    pages.push(pageText);
+    starts.push(pageStart);
+    ends.push(pageEnd);
+  }
+
+  findMeasuredPageEnd(source: string, start: number, availableWidth: number, availableHeight: number): number {
+    let safeStart = Math.max(0, Math.min(start, source.length));
+    while (safeStart < source.length && this.isReaderTrimChar(source.charAt(safeStart))) {
+      safeStart++;
+    }
+    if (safeStart >= source.length) {
+      return source.length;
+    }
+
+    let low = safeStart + 1;
+    let high = source.length;
+    let best = low;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const candidate = source.substring(safeStart, mid);
+      if (this.measureReaderTextHeight(candidate, availableWidth) <= availableHeight) {
+        best = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    const end = this.chooseReaderPageBreak(source, safeStart, best);
+    return Math.max(safeStart + 1, end);
+  }
+
+  measureReaderTextHeight(text: string, availableWidth: number): number {
+    if (!text) {
+      return 0;
+    }
+    const options: MeasureOptions = {
+      textContent: text,
+      constraintWidth: Math.max(1, availableWidth),
+      fontSize: this.readerFontSize,
+      lineHeight: this.readerLineHeight,
+      fontWeight: FontWeight.Normal,
+      textAlign: TextAlign.Start,
+      wordBreak: WordBreak.BREAK_ALL
+    };
+    try {
+      const size = this.getUIContext().getMeasureUtils().measureTextSize(options);
+      const height = Number(size.height);
+      if (height > 0) {
+        return height;
+      }
+    } catch (error) {
+      console.error('测量阅读文本高度失败:', error);
+    }
+    const charsPerLine = Math.max(8, Math.floor(availableWidth / Math.max(1, this.readerFontSize * 1.08)));
+    const lines = Math.max(1, Math.ceil(text.length / charsPerLine));
+    return this.toMeasurePx(lines * Math.max(1, this.readerLineHeight));
+  }
+
+  toMeasurePx(value: number): number {
+    try {
+      return Math.max(1, vp2px(value));
+    } catch (_) {
+      return Math.max(1, value);
+    }
+  }
+
+  chooseReaderPageBreak(source: string, start: number, best: number): number {
+    if (best >= source.length) {
+      return source.length;
+    }
+    const minBreak = start + Math.max(24, Math.floor((best - start) * 0.88));
+    let newline = source.lastIndexOf('\n', best);
+    if (newline >= minBreak) {
+      return newline + 1;
+    }
+    let sentence = Math.max(
+      source.lastIndexOf('。', best),
+      source.lastIndexOf('！', best),
+      source.lastIndexOf('？', best),
+      source.lastIndexOf('；', best),
+      source.lastIndexOf(';', best)
+    );
+    if (sentence >= minBreak) {
+      return sentence + 1;
+    }
+    return best;
+  }
+
+  followTtsChunk(chunk: TtsChunk): void {
+    if (this.readerPageTurnMode === 0) {
+      this.ttsDisplayText = this.getPagedSourceText();
+      this.ttsHighlightStart = chunk.start;
+      this.ttsHighlightEnd = chunk.end;
+      return;
+    }
+
+    const absoluteStart = this.ttsTextStartOffset + chunk.start;
+    const absoluteEnd = this.ttsTextStartOffset + chunk.end;
+    const currentPageEnd = this.getPageEndOffset(this.currentPageIndex);
+    const targetOffset = absoluteEnd > currentPageEnd ? absoluteEnd - 1 : absoluteStart;
+    const pageIndex = this.findPageIndexByOffset(targetOffset);
+    if (pageIndex !== this.currentPageIndex) {
+      this.animateTtsToPage(pageIndex, chunk);
+      return;
+    }
+    this.updateTtsChunkHighlight(chunk, pageIndex);
+  }
+
+  updateTtsChunkHighlight(chunk: TtsChunk, pageIndex: number): void {
+    const absoluteStart = this.ttsTextStartOffset + chunk.start;
+    const absoluteEnd = this.ttsTextStartOffset + chunk.end;
+    const pageStart = this.getPageStartOffset(pageIndex);
+    const pageEnd = this.getPageEndOffset(pageIndex);
+    const pageText = this.getCurrentPageText();
+    this.ttsDisplayText = pageText;
+    this.ttsHighlightStart = Math.max(0, Math.min(absoluteStart - pageStart, pageText.length));
+    this.ttsHighlightEnd = Math.max(this.ttsHighlightStart, Math.min(absoluteEnd, pageEnd) - pageStart);
+  }
+
+  animateTtsToPage(targetPageIndex: number, chunk: TtsChunk): void {
+    const target = Math.max(0, Math.min(targetPageIndex, Math.max(0, this.contentPages.length - 1)));
+    if (target <= this.currentPageIndex) {
+      this.updateTtsChunkHighlight(chunk, this.currentPageIndex);
+      return;
+    }
+    this.ttsPendingTargetPageIndex = Math.max(this.ttsPendingTargetPageIndex, target);
+    this.ttsPendingHighlightChunk = chunk;
+    if (this.ttsAutoTurningPage) {
+      return;
+    }
+    this.runPendingTtsPageTurn();
+  }
+
+  async runPendingTtsPageTurn(): Promise<void> {
+    this.ttsAutoTurningPage = true;
+    try {
+      while (this.isTtsSpeaking && this.ttsAutoContinue &&
+        this.ttsPendingTargetPageIndex > this.currentPageIndex && this.canTurnPage(1)) {
+        await this.runTtsPageTurnAnimation(1);
+      }
+      if (this.isTtsSpeaking && this.ttsPendingHighlightChunk) {
+        this.updateTtsChunkHighlight(this.ttsPendingHighlightChunk, this.currentPageIndex);
+      }
+    } finally {
+      this.ttsAutoTurningPage = false;
+      this.ttsPendingTargetPageIndex = -1;
+      this.ttsPendingHighlightChunk = null;
+    }
+  }
+
+  async runTtsPageTurnAnimation(direction: number): Promise<void> {
+    if (this.isPageTurning || !this.canTurnPage(direction)) {
+      return;
+    }
+    this.isPageTurning = true;
+    if (this.readerPageTurnMode === 1) {
+      await this.runTtsSlidePageTurn(direction);
+    } else {
+      await this.runTtsTapPageTurn(direction);
+    }
+  }
+
+  async runTtsTapPageTurn(direction: number): Promise<void> {
+    animateTo({ duration: 110, curve: Curve.EaseOut }, () => {
+      this.pageTransitionX = direction > 0 ? -44 : 44;
+      this.pageTransitionOpacity = 0.12;
+    });
+    await this.delay(115);
+    await this.applyTtsPageTurn(direction);
+    this.pageTransitionX = direction > 0 ? 44 : -44;
+    this.pageTransitionOpacity = 0.12;
+    animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+      this.pageTransitionX = 0;
+      this.pageTransitionOpacity = 1;
+    });
+    await this.delay(190);
+    this.isPageTurning = false;
+  }
+
+  async runTtsSlidePageTurn(direction: number): Promise<void> {
+    const width = this.getPageTurnWidth();
+    animateTo({ duration: 150, curve: Curve.EaseIn }, () => {
+      this.pageFlipOffsetX = direction > 0 ? -width : width;
+      this.pageFlipAngle = direction > 0 ? -28 : 28;
+      this.pageTransitionOpacity = 0.22;
+      this.pageFlipShadeOpacity = 0.32;
+    });
+    await this.delay(155);
+    await this.applyTtsPageTurn(direction);
+    this.pageFlipOffsetX = direction > 0 ? width * 0.2 : -width * 0.2;
+    this.pageFlipAngle = direction > 0 ? 12 : -12;
+    this.pageTransitionOpacity = 0.58;
+    this.pageFlipShadeOpacity = 0.12;
+    animateTo({ duration: 190, curve: Curve.EaseOut }, () => {
+      this.pageFlipOffsetX = 0;
+      this.pageFlipAngle = 0;
+      this.pageTransitionOpacity = 1;
+      this.pageFlipShadeOpacity = 0;
+    });
+    await this.delay(200);
+    this.isPageTurning = false;
+  }
+
+  async applyTtsPageTurn(direction: number): Promise<void> {
+    if (direction > 0) {
+      if (this.currentPageIndex < this.contentPages.length - 1) {
+        this.currentPageIndex++;
+        this.syncCurrentPageText();
+        if (this.contentPages.length - this.currentPageIndex <= 3) {
+          this.preloadReaderContent();
+        }
+        await this.saveReadingProgress();
+      } else {
+        await this.loadNextChapter();
+      }
+      return;
+    }
+
+    if (this.currentPageIndex > 0) {
+      this.currentPageIndex--;
+      this.syncCurrentPageText();
+      await this.saveReadingProgress();
+    } else {
+      await this.loadPrevChapter();
+    }
+  }
+
+  delay(ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      setTimeout(() => resolve(), ms);
+    });
+  }
+
+  @Builder
+  readingText(text: string, bottomPadding: number) {
+    if (this.hasActiveTtsHighlight(text)) {
+      Text() {
+        ForEach(this.getReadingTextSlices(text), (slice: ReadTextSlice) => {
+          Span(slice.text)
+            .fontColor(slice.highlighted ? this.getTtsHighlightTextColor() : this.getTextColor())
+            .textBackgroundStyle(slice.highlighted ? {
+              color: this.getTtsHighlightColor(),
+              radius: 4
+            } : {})
+        }, (slice: ReadTextSlice) => slice.key)
+      }
+      .fontSize(this.readerFontSize)
+      .lineHeight(this.readerLineHeight)
+      .fontColor(this.getTextColor())
+      .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
+      .width('100%')
+    } else {
+      Text(this.getReadingRenderText(text))
+        .fontSize(this.readerFontSize)
+        .lineHeight(this.readerLineHeight)
+        .fontColor(this.getTextColor())
+        .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
+        .width('100%')
+    }
+  }
+
+  getReadingTextSlices(text: string): ReadTextSlice[] {
+    const displayText = this.getReadingRenderText(text);
+    const start = this.ttsHighlightStart;
+    const end = this.ttsHighlightEnd;
+    if (!this.isTtsSpeaking || !this.ttsDisplayText || start < 0 || end <= start || displayText !== this.ttsDisplayText) {
+      return [{
+        text: displayText,
+        start: 0,
+        end: displayText.length,
+        highlighted: false,
+        key: `plain_${this.buildTextSliceKey(displayText)}`
+      }];
+    }
+    const clampedStart = Math.max(0, Math.min(start, displayText.length));
+    const clampedEnd = Math.max(clampedStart, Math.min(end, displayText.length));
+    const slices: ReadTextSlice[] = [];
+    if (clampedStart > 0) {
+      slices.push({
+        text: displayText.substring(0, clampedStart),
+        start: 0,
+        end: clampedStart,
+        highlighted: false,
+        key: `before_${clampedStart}_${this.buildTextSliceKey(displayText.substring(0, clampedStart))}`
+      });
+    }
+    const highlightedText = displayText.substring(clampedStart, clampedEnd);
+    slices.push({
+      text: highlightedText,
+      start: clampedStart,
+      end: clampedEnd,
+      highlighted: true,
+      key: `highlight_${clampedStart}_${clampedEnd}_${this.buildTextSliceKey(highlightedText)}`
+    });
+    if (clampedEnd < displayText.length) {
+      const afterText = displayText.substring(clampedEnd);
+      slices.push({
+        text: afterText,
+        start: clampedEnd,
+        end: displayText.length,
+        highlighted: false,
+        key: `after_${clampedEnd}_${this.buildTextSliceKey(afterText)}`
+      });
+    }
+    return slices;
+  }
+
+  hasActiveTtsHighlight(text: string): boolean {
+    const displayText = this.getReadingRenderText(text);
+    return this.isTtsSpeaking && !!this.ttsDisplayText &&
+      this.ttsHighlightStart >= 0 && this.ttsHighlightEnd > this.ttsHighlightStart &&
+      displayText === this.ttsDisplayText;
+  }
+
+  getReadingRenderText(text: string): string {
+    const normalized = (text || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    if (this.isTtsSpeaking && this.ttsDisplayText && normalized === this.ttsDisplayText) {
+      return this.ttsDisplayText;
+    }
+    return text || '';
+  }
+
+  buildTextSliceKey(text: string): string {
+    const value = text || '';
+    const first = value.substring(0, Math.min(12, value.length));
+    const last = value.substring(Math.max(0, value.length - 12));
+    return `${value.length}_${this.hashText(first + last)}`;
+  }
+
+  hashText(text: string): number {
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      hash = ((hash * 31) + text.charCodeAt(i)) & 0x7fffffff;
+    }
+    return hash;
+  }
+
+  getTtsHighlightColor(): string {
+    return this.readerThemeIndex === 3 || this.appDarkMode ? '#5A4A24' : '#FFE58A';
+  }
+
+  getTtsHighlightTextColor(): string {
+    return this.readerThemeIndex === 3 || this.appDarkMode ? '#FFF4BF' : '#2F261D';
   }
 
   @Builder
@@ -1129,17 +1729,25 @@ struct ReadBookPage {
   paginateContent() {
     if (!this.content || this.pageViewWidth <= 0 || this.pageViewHeight <= 0) {
       this.contentPages = this.content ? [this.content] : [];
+      this.pagedContentText = this.content || '';
+      this.contentPageStarts = this.content ? [0] : [];
+      this.contentPageEnds = this.content ? [this.content.length] : [];
       if (this.readerPageTurnMode === 0) {
         this.currentPageIndex = 0;
         this.restorePendingScrollOffset();
       }
+      this.syncCurrentPageText();
       return;
     }
 
     if (this.readerPageTurnMode === 0) {
       this.contentPages = this.content ? [this.content] : [];
+      this.pagedContentText = this.content || '';
+      this.contentPageStarts = this.content ? [0] : [];
+      this.contentPageEnds = this.content ? [this.content.length] : [];
       this.currentPageIndex = 0;
       this.restorePendingScrollOffset();
+      this.syncCurrentPageText();
       return;
     }
 
@@ -1147,45 +1755,45 @@ struct ReadBookPage {
     const verticalPadding = 36 + this.getReaderContentBottomReserve() + Math.ceil(Math.max(1, this.readerLineHeight) * 0.35);
     const availableWidth = Math.max(1, this.pageViewWidth - horizontalPadding);
     const availableHeight = Math.max(1, this.pageViewHeight - verticalPadding);
-    const charsPerLine = Math.max(8, Math.floor(availableWidth / Math.max(1, this.readerFontSize)));
-    const linesPerPage = Math.max(1, Math.floor(availableHeight / Math.max(1, this.readerLineHeight)));
-    const charsPerPage = Math.max(60, charsPerLine * linesPerPage);
-    const source = this.content.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+    const measuredAvailableHeight = this.toMeasurePx(availableHeight);
+    const source = this.getPagedSourceText();
+    this.pagedContentText = source;
     const pages: string[] = [];
-    let start = 0;
+    const starts: number[] = [];
+    const ends: number[] = [];
+    let cursor = 0;
 
-    while (start < source.length) {
-      let end = Math.min(source.length, start + charsPerPage);
-      if (end < source.length) {
-        const newline = source.lastIndexOf('\n', end);
-        const sentence = Math.max(
-          source.lastIndexOf('。', end),
-          source.lastIndexOf('！', end),
-          source.lastIndexOf('？', end)
-        );
-        if (newline > start + Math.floor(charsPerPage * 0.65)) {
-          end = newline + 1;
-        } else if (sentence > start + Math.floor(charsPerPage * 0.75)) {
-          end = sentence + 1;
-        }
+    while (cursor < source.length) {
+      const end = this.findMeasuredPageEnd(source, cursor, availableWidth, measuredAvailableHeight);
+      if (end <= cursor) {
+        break;
       }
-      pages.push(source.substring(start, end).trim());
-      start = end;
+      this.pushReaderPage(source, cursor, end, pages, starts, ends);
+      cursor = end;
     }
 
     this.contentPages = pages.length > 0 ? pages : [this.content];
+    this.contentPageStarts = starts.length > 0 ? starts : [0];
+    this.contentPageEnds = ends.length > 0 ? ends : [this.pagedContentText.length];
     this.restorePendingPageIndex();
     if (this.currentPageIndex >= this.contentPages.length) {
       this.currentPageIndex = Math.max(0, this.contentPages.length - 1);
     }
+    this.syncCurrentPageText();
   }
 
   async turnNext() {
+    if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
+      this.stopTtsReading();
+    }
     this.preloadReaderContent();
     await this.runPageTurnAnimation(1, this.readerPageTurnMode === 1 ? 'slide' : 'tap');
   }
 
   async turnPrev() {
+    if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
+      this.stopTtsReading();
+    }
     this.preloadReaderContent();
     await this.runPageTurnAnimation(-1, this.readerPageTurnMode === 1 ? 'slide' : 'tap');
   }
@@ -1253,9 +1861,11 @@ struct ReadBookPage {
   }
 
   async applyPageTurn(direction: number): Promise<void> {
+    this.stopTtsReading();
     if (direction > 0) {
       if (this.currentPageIndex < this.contentPages.length - 1) {
         this.currentPageIndex++;
+        this.syncCurrentPageText();
         if (this.contentPages.length - this.currentPageIndex <= 3) {
           this.preloadReaderContent();
         }
@@ -1268,6 +1878,7 @@ struct ReadBookPage {
 
     if (this.currentPageIndex > 0) {
       this.currentPageIndex--;
+      this.syncCurrentPageText();
       if (this.currentPageIndex <= 2) {
         this.preloadReaderContent();
       }
@@ -1278,7 +1889,7 @@ struct ReadBookPage {
   }
 
   async runPageTurnAnimation(direction: number, style: string): Promise<void> {
-    if (this.isPageTurning || !this.canTurnPage(direction)) {
+    if (this.ttsAutoTurningPage || this.isPageTurning || !this.canTurnPage(direction)) {
       this.resetSlidePageEffect();
       return;
     }

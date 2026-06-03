@@ -482,7 +482,6 @@ struct BookshelfPage {
         .width('100%')
         .height(56)
         .padding({ left: 16, right: 16 })
-        .backgroundColor(this.cardColor())
         .alignItems(VerticalAlign.Center)
 
         if (this.isLoading) {
