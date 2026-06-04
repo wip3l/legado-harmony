@@ -420,6 +420,7 @@ struct BookshelfPage {
   @State cacheChapters: BookChapter[] = [];
   @State cacheStatus: string = '';
   @State isCaching: boolean = false;
+  @State isCacheTocLoading: boolean = false;
   @State editingTags: string[] = [];
   @State tagInput: string = '';
   @State shelfCoverMap: Map<string, string> = new Map();
@@ -427,6 +428,9 @@ struct BookshelfPage {
   @StorageLink('bookshelfSortMode') sortMode: string = 'recentRead';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   private loadTimer: number = -1;
+  private cacheTocLoadToken: number = 0;
+  private cacheTocLoadBookUrl: string = '';
+  private cacheTocLoadPromise: Promise<boolean> | null = null;
 
   aboutToAppear() {
     this.scheduleLoadBooks();
@@ -463,6 +467,7 @@ struct BookshelfPage {
   async deleteBook(book: Book) {
     try {
       const db = AppDatabase.getInstance();
+      this.deleteBookCoverCache(book);
       await db.deleteBook(book.bookUrl);
       promptAction.showToast({ message: `已删除《${book.name}》` });
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
@@ -486,6 +491,23 @@ struct BookshelfPage {
   closeBookActions(): void {
     this.showActionDialog = false;
     this.pendingActionBook = null;
+  }
+
+  deleteBookCoverCache(book: Book): void {
+    const context = getContext(this);
+    const covers = [
+      ...BookDisplayHelper.decodeCoverList(book.customCoverUrl),
+      ...BookDisplayHelper.decodeCoverList(book.coverUrl)
+    ];
+    for (const cover of covers) {
+      BookCoverCache.deleteCachedCover(context, cover);
+    }
+    const nextMap: Map<string, string> = new Map(this.shelfCoverMap);
+    const coverCount = Math.max(1, BookDisplayHelper.getCoverList(book).length);
+    for (let i = 0; i < coverCount; i++) {
+      nextMap.delete(this.shelfCoverKey(book, i));
+    }
+    this.shelfCoverMap = nextMap;
   }
 
   async refreshShelfCoverCache(books: Book[]): Promise<void> {
@@ -644,6 +666,11 @@ struct BookshelfPage {
                 })
               }
             })
+
+            ListItem() {
+              Column()
+                .height(this.bookshelfListBottomInset())
+            }
           }
           .width('100%')
           .layoutWeight(1)
@@ -1069,6 +1096,15 @@ struct BookshelfPage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
+  bookshelfListBottomInset(): number {
+    const comfortableGap = 20;
+    if (deviceInfo.sdkApiVersion < 23) {
+      return comfortableGap;
+    }
+    const floatingTabHeight = 56;
+    return floatingTabHeight + Math.max(this.navBarHeight, 8) + comfortableGap;
+  }
+
   getBookColor(name: string): string {
     if (!name) return '#007DFF';
     const colors = ['#007DFF', '#E53935', '#43A047', '#EF6C00', '#8E24AA', '#00ACC1', '#D81B60', '#5E35B1'];
@@ -1352,7 +1388,7 @@ struct BookshelfPage {
     this.cacheChapters = [];
     this.cacheStatus = '正在加载目录...';
     this.showCacheDialog = true;
-    await this.loadCacheChapters(book);
+    this.loadCacheChapters(book);
   }
 
   closeCacheDialog(): void {
@@ -1362,22 +1398,63 @@ struct BookshelfPage {
     this.cacheChapters = [];
     this.cacheStatus = '';
     this.isCaching = false;
+    this.isCacheTocLoading = false;
+    this.cacheTocLoadToken++;
+    this.cacheTocLoadBookUrl = '';
+    this.cacheTocLoadPromise = null;
     this.pendingActionBook = null;
   }
 
-  async loadCacheChapters(book: Book): Promise<void> {
+  async loadCacheChapters(book: Book, forceRefresh: boolean = false): Promise<boolean> {
+    if (!book.bookUrl) {
+      this.cacheStatus = '书籍地址为空';
+      return false;
+    }
+    if (!forceRefresh && this.cacheTocLoadPromise && this.cacheTocLoadBookUrl === book.bookUrl) {
+      return await this.cacheTocLoadPromise;
+    }
+    if (!forceRefresh && this.cacheTargetBook?.bookUrl === book.bookUrl && this.cacheChapters.length > 0) {
+      return true;
+    }
+    const token = ++this.cacheTocLoadToken;
+    this.cacheTocLoadBookUrl = book.bookUrl;
+    this.isCacheTocLoading = true;
+    if (this.cacheChapters.length === 0) {
+      this.cacheStatus = '正在加载目录...';
+    }
+    const task = this.loadCacheChaptersInternal(book, token);
+    this.cacheTocLoadPromise = task;
+    try {
+      return await task;
+    } finally {
+      if (token === this.cacheTocLoadToken) {
+        this.isCacheTocLoading = false;
+        this.cacheTocLoadPromise = null;
+      }
+    }
+  }
+
+  async loadCacheChaptersInternal(book: Book, token: number): Promise<boolean> {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
       const engine = ReadBookEngine.get();
       await engine.openBook(book);
       await engine.syncChapterCacheDates();
-      this.cacheChapters = [...engine.chapters];
-      this.cacheStatus = this.cacheChapters.length > 0 ? `${this.cacheChapters.length} 章可缓存` : '暂未获取到目录';
+      if (token !== this.cacheTocLoadToken || this.cacheTargetBook?.bookUrl !== book.bookUrl) {
+        return false;
+      }
+      const chapters = [...engine.chapters];
+      this.cacheChapters = chapters;
+      this.cacheStatus = chapters.length > 0 ? `${chapters.length} 章可缓存` : '暂未获取到目录';
+      return chapters.length > 0;
     } catch (e) {
       console.error('加载缓存目录失败:', e);
-      this.cacheStatus = '目录加载失败';
-      promptAction.showToast({ message: '目录加载失败' });
+      if (token === this.cacheTocLoadToken && this.cacheTargetBook?.bookUrl === book.bookUrl) {
+        this.cacheStatus = '目录加载失败，请稍后重试';
+        promptAction.showToast({ message: '目录加载失败' });
+      }
+      return false;
     }
   }
 
@@ -1391,7 +1468,9 @@ struct BookshelfPage {
     }
     this.isCaching = true;
     try {
-      await this.loadCacheChapters(this.cacheTargetBook);
+      if (!await this.loadCacheChapters(this.cacheTargetBook)) {
+        return;
+      }
       const engine = ReadBookEngine.get();
       const total = this.cacheChapters.length;
       if (total === 0) {
@@ -1967,6 +2046,10 @@ struct ExplorePage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
+      const existing = await db.getBook(searchBook.bookUrl);
+      if (existing) {
+        this.deleteBookCoverCache(existing);
+      }
       await db.deleteBook(searchBook.bookUrl);
       this.shelfBookUrls = this.shelfBookUrls.filter(url => url !== searchBook.bookUrl);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
@@ -1980,6 +2063,17 @@ struct ExplorePage {
   markSearchBookInShelf(bookUrl: string): void {
     if (bookUrl && !this.shelfBookUrls.includes(bookUrl)) {
       this.shelfBookUrls = [...this.shelfBookUrls, bookUrl];
+    }
+  }
+
+  deleteBookCoverCache(book: Book): void {
+    const context = getContext(this);
+    const covers = [
+      ...BookDisplayHelper.decodeCoverList(book.customCoverUrl),
+      ...BookDisplayHelper.decodeCoverList(book.coverUrl)
+    ];
+    for (const cover of covers) {
+      BookCoverCache.deleteCachedCover(context, cover);
     }
   }
 
@@ -2381,6 +2475,10 @@ struct SearchPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
+      const existing = await db.getBook(searchBook.bookUrl);
+      if (existing) {
+        this.deleteBookCoverCache(existing);
+      }
       await db.deleteBook(searchBook.bookUrl);
       this.shelfBookUrls = this.shelfBookUrls.filter(url => url !== searchBook.bookUrl);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
@@ -2394,6 +2492,17 @@ struct SearchPage {
   markSearchBookInShelf(bookUrl: string): void {
     if (bookUrl && !this.shelfBookUrls.includes(bookUrl)) {
       this.shelfBookUrls = [...this.shelfBookUrls, bookUrl];
+    }
+  }
+
+  deleteBookCoverCache(book: Book): void {
+    const context = getContext(this);
+    const covers = [
+      ...BookDisplayHelper.decodeCoverList(book.customCoverUrl),
+      ...BookDisplayHelper.decodeCoverList(book.coverUrl)
+    ];
+    for (const cover of covers) {
+      BookCoverCache.deleteCachedCover(context, cover);
     }
   }
 

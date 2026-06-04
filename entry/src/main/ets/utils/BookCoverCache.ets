@@ -30,10 +30,25 @@ export class BookCoverCache {
     return localPath && BookCoverCache.exists(localPath) ? localPath : '';
   }
 
+  static deleteCachedCover(context: Context, raw: string): void {
+    if (!raw) {
+      return;
+    }
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      BookCoverCache.deletePath(BookCoverCache.cachedCoverPath(context, raw));
+      return;
+    }
+    const localPath = BookCoverCache.localPathFromUri(raw);
+    if (!localPath || !BookCoverCache.isAppOwnedPath(context, localPath)) {
+      return;
+    }
+    BookCoverCache.deletePath(localPath);
+  }
+
   private static async downloadCover(context: Context, url: string): Promise<string> {
     const dir = `${context.cacheDir}/book_covers`;
     BookCoverCache.ensureDir(dir);
-    const path = `${dir}/${BookCoverCache.hashText(url)}${BookCoverCache.coverExt(url)}`;
+    const path = BookCoverCache.cachedCoverPath(context, url);
     if (BookCoverCache.exists(path)) {
       return path;
     }
@@ -86,6 +101,24 @@ export class BookCoverCache {
     try {
       fs.mkdirSync(path, true);
     } catch (e) {
+    }
+  }
+
+  private static cachedCoverPath(context: Context, url: string): string {
+    return `${context.cacheDir}/book_covers/${BookCoverCache.hashText(url)}${BookCoverCache.coverExt(url)}`;
+  }
+
+  private static isAppOwnedPath(context: Context, path: string): boolean {
+    return path.startsWith(`${context.filesDir}/covers/`) || path.startsWith(`${context.cacheDir}/book_covers/`);
+  }
+
+  private static deletePath(path: string): void {
+    try {
+      if (path && BookCoverCache.exists(path)) {
+        fs.unlinkSync(path);
+      }
+    } catch (e) {
+      console.warn('删除书籍封面缓存失败:', e);
     }
   }
 
