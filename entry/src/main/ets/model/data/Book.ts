@@ -189,6 +189,7 @@ export class BookChapter {
   start: number = 0;
   end: number = 0;
   variable: string = '';
+  cacheDate: number = 0;
 
   getDisplayTitle(replaceRules: ReplaceRule[], useReplace: boolean): string {
     if (!useReplace || !replaceRules || replaceRules.length === 0) {

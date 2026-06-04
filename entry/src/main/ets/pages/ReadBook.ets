@@ -247,6 +247,7 @@ struct ReadBookPage {
       const body = await engine.loadContent(this.currentChapterIndex);
       if (body) {
         this.content = body;
+        this.chapters = [...engine.chapters];
       } else {
         this.updatePendingVerification();
         const c = this.chapters[this.currentChapterIndex];
@@ -286,7 +287,7 @@ struct ReadBookPage {
           Column() {
             Scroll(this.contentScroller) {
             Column() {
-              this.readingText(this.content, 24 + this.readerParagraphSpacing + this.getReaderContentBottomReserve())
+              this.readingText(this.getPagedSourceText(), 24 + this.readerParagraphSpacing + this.getReaderContentBottomReserve())
             }
             .width('100%')
             }
@@ -582,14 +583,26 @@ struct ReadBookPage {
             List({ space: 2 }) {
               ForEach(this.chapters, (chapter: BookChapter, index: number) => {
                 ListItem() {
-                  Text(chapter.title)
-                    .fontSize(15)
-                    .fontColor(index === this.currentChapterIndex ? '#007DFF' : '#333333')
-                    .maxLines(2)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .width('100%')
-                    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-                    .backgroundColor(index === this.currentChapterIndex ? '#11007DFF' : '#00000000')
+                  Row({ space: 8 }) {
+                    Text(chapter.title)
+                      .fontSize(15)
+                      .fontColor(this.getTocTitleColor(chapter, index))
+                      .maxLines(2)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .layoutWeight(1)
+
+                    if (chapter.cacheDate > 0) {
+                      Text('已缓存')
+                        .fontSize(11)
+                        .fontColor(this.readerThemeIndex === 3 || this.appDarkMode ? '#7CC7A0' : '#1F8F55')
+                        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                        .backgroundColor(this.readerThemeIndex === 3 || this.appDarkMode ? '#24382F' : '#E6F4EC')
+                        .borderRadius(4)
+                    }
+                  }
+                  .width('100%')
+                  .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+                  .backgroundColor(index === this.currentChapterIndex ? '#11007DFF' : '#00000000')
                     .onClick(async () => {
                       this.currentChapterIndex = index;
                       this.currentPageIndex = 0;
@@ -854,6 +867,16 @@ struct ReadBookPage {
   getTextColor(): string {
     const index = this.appDarkMode ? 3 : this.readerThemeIndex;
     return this.themeTextColors[index] || this.themeTextColors[0];
+  }
+
+  getTocTitleColor(chapter: BookChapter, index: number): string {
+    if (index === this.currentChapterIndex) {
+      return '#007DFF';
+    }
+    if (chapter.cacheDate > 0) {
+      return (this.appDarkMode || this.readerThemeIndex === 3) ? '#DDEFE5' : '#244B35';
+    }
+    return (this.appDarkMode || this.readerThemeIndex === 3) ? '#B8BDC7' : '#333333';
   }
 
   getSubTextColor(): string {
@@ -1338,9 +1361,53 @@ struct ReadBookPage {
   }
 
   getPagedSourceText(): string {
-    return (this.content || '')
+    const title = this.getChapterTitle().trim();
+    const sourceBody = this.stripDuplicatedChapterTitle(this.normalizeChapterBody(this.content || ''), title);
+    const body = this.buildIndentedChapterBody(sourceBody);
+    if (!title) {
+      return body;
+    }
+    return `${title}\n\n${body}`;
+  }
+
+  normalizeChapterBody(text: string): string {
+    return (text || '')
       .replace(/\r\n/g, '\n')
-      .replace(/\n{3,}/g, '\n\n');
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  buildIndentedChapterBody(text: string): string {
+    const normalized = this.normalizeChapterBody(text);
+    if (!normalized) {
+      return '';
+    }
+    return normalized
+      .split('\n')
+      .map((line: string) => this.indentReaderLine(line))
+      .join('\n');
+  }
+
+  indentReaderLine(line: string): string {
+    if (!line || line.trim().length === 0) {
+      return line;
+    }
+    if (line.startsWith('　　')) {
+      return line;
+    }
+    return `　　${line.replace(/^[　\s]+/g, '')}`;
+  }
+
+  stripDuplicatedChapterTitle(body: string, title: string): string {
+    if (!body || !title) {
+      return body;
+    }
+    const lines = body.split('\n');
+    const firstLine = (lines[0] || '').replace(/^[　\s]+/g, '').trim();
+    if (firstLine !== title) {
+      return body;
+    }
+    return lines.slice(1).join('\n').replace(/^\n+/, '').trim();
   }
 
   isReaderTrimChar(value: string): boolean {

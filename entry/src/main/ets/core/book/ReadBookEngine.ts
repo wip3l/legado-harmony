@@ -75,6 +75,7 @@ export class ReadBookEngine {
         this.chapters = chapters;
         this.chapterCache.clear();
         this.chapterLoading.clear();
+        await this.syncChapterCacheDates();
         this.book.totalChapterNum = chapters.length;
         this.book.latestChapterTitle = chapters[chapters.length - 1].title;
         await appDb.updateBook(this.book);
@@ -85,23 +86,38 @@ export class ReadBookEngine {
   }
 
   async loadContent(idx: number): Promise<string> {
-    if (idx < 0 || idx >= this.chapters.length || !this.book || !this.source) return '';
+    if (idx < 0 || idx >= this.chapters.length || !this.book) return '';
 
     this.curIdx = idx;
     return await this.fetchContent(idx);
   }
 
   private async fetchContent(idx: number): Promise<string> {
-    if (idx < 0 || idx >= this.chapters.length || !this.book || !this.source) return '';
+    if (idx < 0 || idx >= this.chapters.length || !this.book) return '';
 
     const chapter = this.chapters[idx];
     if (this.chapterCache.has(idx)) return this.chapterCache.get(idx)!;
     if (this.chapterLoading.has(idx)) return await this.chapterLoading.get(idx)!;
 
+    const cached = await appDb.getCachedChapterContent(this.book.bookUrl, idx);
+    if (cached) {
+      this.chapterCache.set(idx, cached);
+      chapter.cacheDate = chapter.cacheDate || Date.now();
+      return cached;
+    }
+
+    if (!this.source) {
+      return '';
+    }
+
     const task = this.webBook.getContent(this.source, this.book, chapter)
       .then((text: string) => {
         if (text) {
           this.chapterCache.set(idx, text);
+          chapter.cacheDate = Date.now();
+          appDb.saveCachedChapterContent(this.book!.bookUrl, chapter, text).catch((err: Error) => {
+            console.error('[RE] save chapter cache failed:', idx, err);
+          });
         }
         return text;
       })
@@ -114,6 +130,21 @@ export class ReadBookEngine {
 
   hasCachedContent(idx: number): boolean {
     return this.chapterCache.has(idx);
+  }
+
+  async cacheChapter(idx: number): Promise<boolean> {
+    const text = await this.fetchContent(idx);
+    return !!text;
+  }
+
+  async syncChapterCacheDates(): Promise<void> {
+    if (!this.book || this.chapters.length === 0) {
+      return;
+    }
+    const cacheDates = await appDb.getBookChapterCacheDateMap(this.book.bookUrl);
+    for (const chapter of this.chapters) {
+      chapter.cacheDate = cacheDates.get(chapter.index) || 0;
+    }
   }
 
   preloadAround(idx: number, forwardCount: number = 2, backwardCount: number = 1): void {

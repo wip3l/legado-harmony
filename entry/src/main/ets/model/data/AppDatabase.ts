@@ -143,6 +143,18 @@ export class AppDatabase {
     `);
 
     await this.store.executeSql(`
+      CREATE TABLE IF NOT EXISTS book_contents (
+        bookUrl TEXT DEFAULT '',
+        chapterIndex INTEGER DEFAULT 0,
+        chapterUrl TEXT DEFAULT '',
+        chapterName TEXT DEFAULT '',
+        content TEXT DEFAULT '',
+        cacheDate INTEGER DEFAULT 0,
+        PRIMARY KEY (bookUrl, chapterIndex)
+      )
+    `);
+
+    await this.store.executeSql(`
       CREATE TABLE IF NOT EXISTS book_groups (
         groupId INTEGER PRIMARY KEY,
         groupName TEXT DEFAULT '',
@@ -347,6 +359,8 @@ export class AppDatabase {
     const predicates = new relationalStore.RdbPredicates('books');
     predicates.equalTo('bookUrl', bookUrl);
     await this.store.delete(predicates);
+    await this.deleteBookChapters(bookUrl);
+    await this.deleteBookCachedContent(bookUrl);
   }
 
   async getBook(bookUrl: string): Promise<Book | null> {
@@ -629,6 +643,10 @@ export class AppDatabase {
     while (resultSet.goToNextRow()) {
       chapters.push(this.resultSetToBookChapter(resultSet));
     }
+    const cacheDates = await this.getBookChapterCacheDateMap(bookUrl);
+    for (const chapter of chapters) {
+      chapter.cacheDate = cacheDates.get(chapter.index) || 0;
+    }
     return chapters;
   }
 
@@ -638,6 +656,71 @@ export class AppDatabase {
     predicates.equalTo('bookUrl', bookUrl);
     const resultSet = await this.store.query(predicates, []);
     return resultSet.rowCount;
+  }
+
+  async getCachedChapterContent(bookUrl: string, chapterIndex: number): Promise<string> {
+    if (!this.store) return '';
+    const predicates = new relationalStore.RdbPredicates('book_contents');
+    predicates.equalTo('bookUrl', bookUrl);
+    predicates.equalTo('chapterIndex', chapterIndex);
+    const resultSet = await this.store.query(predicates, ['content']);
+    if (resultSet.rowCount === 0) return '';
+    resultSet.goToFirstRow();
+    return resultSet.getString(resultSet.getColumnIndex('content')) || '';
+  }
+
+  async saveCachedChapterContent(bookUrl: string, chapter: BookChapter, content: string): Promise<void> {
+    if (!this.store || !bookUrl || !content) return;
+    const cacheDate = Date.now();
+    const bucket: relationalStore.ValuesBucket = {
+      bookUrl: bookUrl,
+      chapterIndex: chapter.index,
+      chapterUrl: chapter.url,
+      chapterName: chapter.title,
+      content: content,
+      cacheDate: cacheDate
+    };
+    const predicates = new relationalStore.RdbPredicates('book_contents');
+    predicates.equalTo('bookUrl', bookUrl);
+    predicates.equalTo('chapterIndex', chapter.index);
+    const resultSet = await this.store.query(predicates, []);
+    if (resultSet.rowCount > 0) {
+      await this.store.update(bucket, predicates);
+    } else {
+      await this.store.insert('book_contents', bucket);
+    }
+    chapter.cacheDate = cacheDate;
+  }
+
+  async deleteBookCachedContent(bookUrl: string): Promise<void> {
+    if (!this.store) return;
+    const predicates = new relationalStore.RdbPredicates('book_contents');
+    predicates.equalTo('bookUrl', bookUrl);
+    await this.store.delete(predicates);
+  }
+
+  async getBookChapterCacheDateMap(bookUrl: string): Promise<Map<number, number>> {
+    const cacheDates: Map<number, number> = new Map();
+    if (!this.store) return cacheDates;
+    const predicates = new relationalStore.RdbPredicates('book_contents');
+    predicates.equalTo('bookUrl', bookUrl);
+    const resultSet = await this.store.query(predicates, ['chapterIndex', 'cacheDate']);
+    while (resultSet.goToNextRow()) {
+      cacheDates.set(
+        resultSet.getLong(resultSet.getColumnIndex('chapterIndex')),
+        resultSet.getLong(resultSet.getColumnIndex('cacheDate'))
+      );
+    }
+    return cacheDates;
+  }
+
+  async getBookCachedChapterIndices(bookUrl: string): Promise<number[]> {
+    const indices: number[] = [];
+    const cacheDates = await this.getBookChapterCacheDateMap(bookUrl);
+    cacheDates.forEach((_cacheDate: number, index: number) => {
+      indices.push(index);
+    });
+    return indices;
   }
 
   private resultSetToBookChapter(resultSet: relationalStore.ResultSet): BookChapter {

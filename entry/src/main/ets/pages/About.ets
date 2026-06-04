@@ -1,3 +1,4 @@
+import { bundleManager } from '@kit.AbilityKit';
 import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 
@@ -7,9 +8,11 @@ struct AboutPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
+  @State appVersionName: string = '';
 
   aboutToAppear(): void {
     this.syncBars();
+    this.loadAppVersion();
   }
 
   onPageShow(): void {
@@ -58,7 +61,7 @@ struct AboutPage {
             .fontSize(22)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.primaryTextColor())
-          Text('1.0.62')
+          Text(this.appVersionName || '-')
             .fontSize(13)
             .fontColor(this.subTextColor())
             .margin({ top: 6, bottom: 24 })
@@ -141,5 +144,15 @@ struct AboutPage {
 
   syncBars(): void {
     syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
+  }
+
+  loadAppVersion(): void {
+    try {
+      const info = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+      this.appVersionName = info.versionName || '';
+    } catch (error) {
+      console.error('获取应用版本信息失败:', error);
+      this.appVersionName = '';
+    }
   }
 }

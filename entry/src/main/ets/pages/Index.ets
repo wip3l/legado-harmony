@@ -3,11 +3,12 @@ import { promptAction } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import deviceInfo from '@ohos.deviceInfo';
 import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
-import { Book, SearchBook } from '../model/data/Book';
+import { Book, BookChapter, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { SearchCoordinator, SearchCallback, SearchProgress } from '../core/book/SearchCoordinator';
 import { ExploreCoordinator, ExploreEntry } from '../core/book/ExploreCoordinator';
 import { WebBookService } from '../core/book/WebBookService';
+import { ReadBookEngine } from '../core/book/ReadBookEngine';
 import { syncSystemSafeAreas } from '../utils/SystemBars';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
@@ -411,8 +412,14 @@ struct BookshelfPage {
   @State showActionDialog: boolean = false;
   @State showCoverDialog: boolean = false;
   @State showTagDialog: boolean = false;
+  @State showCacheDialog: boolean = false;
+  @State showChapterCacheDialog: boolean = false;
   @State pendingDeleteBook: Book | null = null;
   @State pendingActionBook: Book | null = null;
+  @State cacheTargetBook: Book | null = null;
+  @State cacheChapters: BookChapter[] = [];
+  @State cacheStatus: string = '';
+  @State isCaching: boolean = false;
   @State editingTags: string[] = [];
   @State tagInput: string = '';
   @State shelfCoverMap: Map<string, string> = new Map();
@@ -677,6 +684,13 @@ struct BookshelfPage {
                 this.showDeleteConfirm(book);
               }
             })
+            this.actionItem('缓存', this.primaryTextColor(), () => {
+              if (this.pendingActionBook) {
+                const book = this.pendingActionBook;
+                this.showActionDialog = false;
+                this.openCacheDialog(book);
+              }
+            })
             this.actionItem('自定义封面', this.primaryTextColor(), () => {
               this.showActionDialog = false;
               this.showCoverDialog = true;
@@ -699,6 +713,153 @@ struct BookshelfPage {
               .onClick(() => {
                 this.closeBookActions();
               })
+          }
+          .width('100%')
+          .padding({ left: 18, right: 18, top: 18, bottom: 18 })
+          .backgroundColor(this.cardColor())
+          .borderRadius({ topLeft: 18, topRight: 18 })
+          .margin({ bottom: this.actionSheetBottomMargin() })
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#66000000')
+      }
+
+      if (this.showCacheDialog && this.cacheTargetBook) {
+        Column() {
+          Blank()
+            .layoutWeight(1)
+            .onClick(() => {
+              if (!this.isCaching) {
+                this.closeCacheDialog();
+              }
+            })
+
+          Column() {
+            Text(`缓存《${this.cacheTargetBook.name}》`)
+              .fontSize(17)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 8 })
+
+            if (this.cacheStatus) {
+              Text(this.cacheStatus)
+                .fontSize(13)
+                .fontColor(this.subTextColor())
+                .width('100%')
+                .textAlign(TextAlign.Center)
+                .margin({ bottom: 8 })
+            }
+
+            this.actionItem(this.isCaching ? '正在缓存...' : '缓存全文', this.primaryTextColor(), () => {
+              this.cacheWholeBook();
+            })
+            this.actionItem('缓存指定章节', this.primaryTextColor(), () => {
+              if (!this.isCaching) {
+                this.showCacheDialog = false;
+                this.showChapterCacheDialog = true;
+                if (this.cacheTargetBook) {
+                  this.loadCacheChapters(this.cacheTargetBook);
+                }
+              }
+            })
+
+            Button('取消')
+              .width('100%')
+              .height(44)
+              .margin({ top: 10 })
+              .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
+              .fontColor(this.primaryTextColor())
+              .onClick(() => {
+                if (!this.isCaching) {
+                  this.closeCacheDialog();
+                }
+              })
+          }
+          .width('100%')
+          .padding({ left: 18, right: 18, top: 18, bottom: 18 })
+          .backgroundColor(this.cardColor())
+          .borderRadius({ topLeft: 18, topRight: 18 })
+          .margin({ bottom: this.actionSheetBottomMargin() })
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#66000000')
+      }
+
+      if (this.showChapterCacheDialog && this.cacheTargetBook) {
+        Column() {
+          Blank()
+            .layoutWeight(1)
+            .onClick(() => {
+              if (!this.isCaching) {
+                this.closeCacheDialog();
+              }
+            })
+
+          Column() {
+            Row() {
+              Text('选择章节缓存')
+                .fontSize(18)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.primaryTextColor())
+                .layoutWeight(1)
+              Button('关闭')
+                .height(34)
+                .fontSize(13)
+                .borderRadius(17)
+                .onClick(() => {
+                  if (!this.isCaching) {
+                    this.closeCacheDialog();
+                  }
+                })
+            }
+            .width('100%')
+            .height(46)
+
+            if (this.cacheStatus) {
+              Text(this.cacheStatus)
+                .fontSize(13)
+                .fontColor(this.subTextColor())
+                .width('100%')
+                .margin({ bottom: 8 })
+            }
+
+            List({ space: 2 }) {
+              ForEach(this.cacheChapters, (chapter: BookChapter, index: number) => {
+                ListItem() {
+                  Row({ space: 8 }) {
+                    Text(chapter.title)
+                      .fontSize(15)
+                      .fontColor(chapter.cacheDate > 0 ? this.cachedChapterTextColor() : this.primaryTextColor())
+                      .maxLines(2)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .layoutWeight(1)
+                    if (chapter.cacheDate > 0) {
+                      Text('已缓存')
+                        .fontSize(11)
+                        .fontColor(this.appDarkMode ? '#7CC7A0' : '#1F8F55')
+                        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                        .backgroundColor(this.appDarkMode ? '#24382F' : '#E6F4EC')
+                        .borderRadius(4)
+                    }
+                  }
+                  .width('100%')
+                  .padding({ left: 2, right: 2, top: 12, bottom: 12 })
+                  .onClick(() => {
+                    if (!this.isCaching) {
+                      this.cacheSingleChapter(index);
+                    }
+                  })
+                }
+              })
+            }
+            .width('100%')
+            .height(420)
           }
           .width('100%')
           .padding({ left: 18, right: 18, top: 18, bottom: 18 })
@@ -1186,6 +1347,108 @@ struct BookshelfPage {
     promptAction.showToast({ message: '标签已保存' });
   }
 
+  async openCacheDialog(book: Book): Promise<void> {
+    this.cacheTargetBook = book;
+    this.cacheChapters = [];
+    this.cacheStatus = '正在加载目录...';
+    this.showCacheDialog = true;
+    await this.loadCacheChapters(book);
+  }
+
+  closeCacheDialog(): void {
+    this.showCacheDialog = false;
+    this.showChapterCacheDialog = false;
+    this.cacheTargetBook = null;
+    this.cacheChapters = [];
+    this.cacheStatus = '';
+    this.isCaching = false;
+    this.pendingActionBook = null;
+  }
+
+  async loadCacheChapters(book: Book): Promise<void> {
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const engine = ReadBookEngine.get();
+      await engine.openBook(book);
+      await engine.syncChapterCacheDates();
+      this.cacheChapters = [...engine.chapters];
+      this.cacheStatus = this.cacheChapters.length > 0 ? `${this.cacheChapters.length} 章可缓存` : '暂未获取到目录';
+    } catch (e) {
+      console.error('加载缓存目录失败:', e);
+      this.cacheStatus = '目录加载失败';
+      promptAction.showToast({ message: '目录加载失败' });
+    }
+  }
+
+  async cacheWholeBook(): Promise<void> {
+    if (!this.cacheTargetBook || this.isCaching) {
+      return;
+    }
+    if (this.cacheTargetBook.origin === 'local') {
+      promptAction.showToast({ message: '本地书籍无需缓存' });
+      return;
+    }
+    this.isCaching = true;
+    try {
+      await this.loadCacheChapters(this.cacheTargetBook);
+      const engine = ReadBookEngine.get();
+      const total = this.cacheChapters.length;
+      if (total === 0) {
+        this.cacheStatus = '暂无可缓存章节';
+        return;
+      }
+      let success = 0;
+      for (let i = 0; i < total; i++) {
+        this.cacheStatus = `正在缓存 ${i + 1}/${total}`;
+        try {
+          if (await engine.cacheChapter(i)) {
+            success++;
+          }
+        } catch (e) {
+          console.error('缓存章节失败:', i, e);
+        }
+        this.cacheChapters = [...engine.chapters];
+      }
+      this.cacheStatus = `缓存完成：${success}/${total}`;
+      promptAction.showToast({ message: `缓存完成 ${success}/${total}` });
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+    } finally {
+      this.isCaching = false;
+    }
+  }
+
+  async cacheSingleChapter(index: number): Promise<void> {
+    if (!this.cacheTargetBook || this.isCaching) {
+      return;
+    }
+    if (this.cacheTargetBook.origin === 'local') {
+      promptAction.showToast({ message: '本地书籍无需缓存' });
+      return;
+    }
+    this.isCaching = true;
+    try {
+      const engine = ReadBookEngine.get();
+      if (engine.book?.bookUrl !== this.cacheTargetBook.bookUrl) {
+        await engine.openBook(this.cacheTargetBook);
+      }
+      const chapter = this.cacheChapters[index];
+      this.cacheStatus = chapter ? `正在缓存：${chapter.title}` : '正在缓存章节...';
+      const ok = await engine.cacheChapter(index);
+      await engine.syncChapterCacheDates();
+      this.cacheChapters = [...engine.chapters];
+      this.cacheStatus = ok ? '章节已缓存' : '章节缓存失败';
+      promptAction.showToast({ message: ok ? '章节已缓存' : '章节缓存失败' });
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+    } catch (e) {
+      console.error('缓存指定章节失败:', e);
+      this.cacheStatus = '章节缓存失败';
+      promptAction.showToast({ message: '章节缓存失败' });
+    } finally {
+      this.isCaching = false;
+    }
+  }
+
   async updateShelfBook(book: Book): Promise<void> {
     try {
       const db = AppDatabase.getInstance();
@@ -1197,6 +1460,10 @@ struct BookshelfPage {
       console.error('更新书籍失败:', e);
       promptAction.showToast({ message: '保存失败' });
     }
+  }
+
+  cachedChapterTextColor(): string {
+    return this.appDarkMode ? '#DDEFE5' : '#244B35';
   }
 
   @Builder
