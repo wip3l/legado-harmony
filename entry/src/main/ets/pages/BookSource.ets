@@ -1,8 +1,7 @@
-import { router } from '@kit.ArkUI';
+import { router, promptAction } from '@kit.ArkUI';
 import { BookSource, BookListRule, SearchRule, ExploreRule, BookInfoRule, TocRule, ContentRule } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
-import { httpHelper } from '../model/http/HttpHelper';
-import { promptAction } from '@kit.ArkUI';
+import { HttpClient } from '../core/http/HttpClient';
 import { syncSystemBars } from '../utils/SystemBars';
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
@@ -713,17 +712,15 @@ struct BookSourcePage {
   }
 
   async importFromUrl() {
-    if (!this.importUrl) {
+    const url = this.importUrl.trim();
+    if (!url) {
       promptAction.showToast({ message: '请输入URL' });
       return;
     }
 
     try {
       promptAction.showToast({ message: '正在导入...' });
-      console.log('开始从URL导入:', this.importUrl);
-      const content = await httpHelper.getBody(this.importUrl);
-      console.log('获取到内容长度:', content.length);
-      console.log('内容前100字符:', content.substring(0, 100));
+      const content = await this.fetchImportUrlBody(url);
       await this.importSourcesFromJson(content);
       this.showImportUrlDialog = false;
       this.importUrl = '';
@@ -732,6 +729,20 @@ struct BookSourcePage {
       const errMsg = e instanceof Error ? e.message : String(e);
       promptAction.showToast({ message: `导入失败: ${errMsg}` });
     }
+  }
+
+  async fetchImportUrlBody(url: string): Promise<string> {
+    const response = await new HttpClient(10000).execute({
+      url,
+      method: 'GET',
+      headers: {},
+      connectTimeout: 10000,
+      readTimeout: 10000
+    });
+    if (!response.success) {
+      throw new Error(response.error || `HTTP ${response.statusCode}`);
+    }
+    return response.body;
   }
 
   async importSourcesFromJson(json: string) {

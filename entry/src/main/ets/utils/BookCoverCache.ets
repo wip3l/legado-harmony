@@ -2,6 +2,7 @@ import { Context } from '@kit.AbilityKit';
 import fs from '@ohos.file.fs';
 import fileUri from '@ohos.file.fileuri';
 import http from '@ohos.net.http';
+import { CoverUrlNormalizer } from './CoverUrlNormalizer';
 
 export class BookCoverCache {
   static resolveCachedCover(context: Context, raw: string): string {
@@ -68,36 +69,39 @@ export class BookCoverCache {
     if (BookCoverCache.exists(path)) {
       return path;
     }
-    const request = http.createHttp();
-    try {
-      const response = await request.request(url, {
-        method: http.RequestMethod.GET,
-        connectTimeout: 10000,
-        readTimeout: 10000,
-        expectDataType: http.HttpDataType.ARRAY_BUFFER,
-        header: {
-          'User-Agent': 'Mozilla/5.0 (Linux; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-          'Referer': BookCoverCache.refererFromUrl(url),
-          'Origin': BookCoverCache.originFromUrl(url)
-        }
-      });
-      if (response.responseCode < 200 || response.responseCode >= 300 || !(response.result instanceof ArrayBuffer)) {
-        return '';
-      }
-      const file = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+    const candidates = CoverUrlNormalizer.downloadCandidates(url);
+    for (const requestUrl of candidates) {
+      const request = http.createHttp();
       try {
-        fs.writeSync(file.fd, response.result);
+        const response = await request.request(requestUrl, {
+          method: http.RequestMethod.GET,
+          connectTimeout: 10000,
+          readTimeout: 10000,
+          expectDataType: http.HttpDataType.ARRAY_BUFFER,
+          header: {
+            'User-Agent': 'Mozilla/5.0 (Linux; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+            'Referer': BookCoverCache.refererFromUrl(requestUrl),
+            'Origin': BookCoverCache.originFromUrl(requestUrl)
+          }
+        });
+        if (response.responseCode < 200 || response.responseCode >= 300 || !(response.result instanceof ArrayBuffer)) {
+          continue;
+        }
+        const file = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+        try {
+          fs.writeSync(file.fd, response.result);
+        } finally {
+          fs.closeSync(file);
+        }
+        return path;
+      } catch (e) {
+        console.warn('下载书籍封面失败:', e);
       } finally {
-        fs.closeSync(file);
+        request.destroy();
       }
-      return path;
-    } catch (e) {
-      console.warn('下载书籍封面失败:', e);
-      return '';
-    } finally {
-      request.destroy();
     }
+    return '';
   }
 
   private static localPathFromUri(raw: string): string {

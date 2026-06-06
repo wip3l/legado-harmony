@@ -1,4 +1,5 @@
 import { Book } from '../model/data/Book';
+import { CoverUrlNormalizer } from './CoverUrlNormalizer';
 
 class CoverData {
   covers: string[] = [];
@@ -61,7 +62,7 @@ export class BookDisplayHelper {
     if (covers.length > 0) {
       return BookDisplayHelper.pickCover(covers);
     }
-    return book.coverUrl || '';
+    return CoverUrlNormalizer.normalize(book.coverUrl);
   }
 
   static getCoverList(book: Book): string[] {
@@ -69,7 +70,7 @@ export class BookDisplayHelper {
     if (customCovers.length > 0) {
       return customCovers;
     }
-    return book.coverUrl ? [book.coverUrl] : [];
+    return BookDisplayHelper.cleanCoverList(book.coverUrl ? [book.coverUrl] : []);
   }
 
   static encodeCustomCovers(covers: string[]): string {
@@ -91,7 +92,7 @@ export class BookDisplayHelper {
       return [];
     }
     if (!value.startsWith('{') && !value.startsWith('[')) {
-      return [value];
+      return BookDisplayHelper.cleanCoverList([value]);
     }
     try {
       const parsed = JSON.parse(value) as CoverData | string[];
@@ -100,7 +101,7 @@ export class BookDisplayHelper {
       }
       return BookDisplayHelper.cleanCoverList((parsed as CoverData).covers || []);
     } catch (e) {
-      return [value];
+      return BookDisplayHelper.cleanCoverList([value]);
     }
   }
 
@@ -170,7 +171,7 @@ export class BookDisplayHelper {
   private static cleanCoverList(covers: string[]): string[] {
     const cleaned: string[] = [];
     for (const cover of covers) {
-      const value = (cover || '').trim();
+      const value = CoverUrlNormalizer.normalize(cover);
       if (value && !cleaned.includes(value)) {
         cleaned.push(value);
       }

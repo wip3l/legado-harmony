@@ -4,6 +4,7 @@ import { VerificationSupport } from '../http/VerificationSupport';
 import { JsRuntime } from '../rule/JsRuntime';
 import { EncodedJsonMap, EncodedSourcePayload, EncodedSourceUrl } from './EncodedSourceUrl';
 import { BookUrlResolver } from './BookUrlResolver';
+import { CoverUrlNormalizer } from '../../utils/CoverUrlNormalizer';
 
 class DataUrlMeta {
   host: string = '';
@@ -554,7 +555,7 @@ export class BookSourceDataUrlSupport {
   }
 
   private static normalizeMirroredAssetUrl(source: BookSource, url: string): string {
-    const value = (url || '').trim();
+    const value = CoverUrlNormalizer.normalize(url);
     if (!value) return '';
     if (value.includes('/bx/files/')) {
       const assetOrigin = BookSourceDataUrlSupport.preferredAssetOrigin(source);

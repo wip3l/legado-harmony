@@ -4,6 +4,8 @@ import { AppDatabase } from '../model/data/AppDatabase';
 import { WebBookService } from '../core/book/WebBookService';
 import { syncSystemBars } from '../utils/SystemBars';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
+import { BookIdentity } from '../utils/BookIdentity';
+import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 
 @Entry
 @Component
@@ -222,11 +224,18 @@ struct SearchBookDetailPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      const existing = await db.getBook(this.bookUrl);
-      if (existing && !existing.coverUrl && this.coverUrl) {
-        existing.coverUrl = this.coverUrl;
-        await db.updateBook(existing);
-        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      const existing = await db.getBook(this.bookUrl) ||
+        await this.findShelfBookByKey(BookIdentity.keyOfUrl(this.bookUrl));
+      if (existing) {
+        const nextCoverUrl = CoverUrlNormalizer.prefer(this.coverUrl, existing.coverUrl);
+        if (nextCoverUrl && existing.coverUrl !== nextCoverUrl) {
+          existing.coverUrl = nextCoverUrl;
+          await db.updateBook(existing);
+          AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+        }
+      }
+      if (existing) {
+        this.syncStateFromBook(existing);
       }
       this.isInShelf = existing !== null;
     } catch (e) {
@@ -245,13 +254,16 @@ struct SearchBookDetailPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      const existing = await db.getBook(this.bookUrl);
+      const requestKey = BookIdentity.keyOfUrl(this.bookUrl);
+      const existing = await db.getBook(this.bookUrl) || await this.findShelfBookByKey(requestKey);
       if (existing) {
-        if (!existing.coverUrl && this.coverUrl) {
-          existing.coverUrl = this.coverUrl;
+        const nextCoverUrl = CoverUrlNormalizer.prefer(this.coverUrl, existing.coverUrl);
+        if (nextCoverUrl && existing.coverUrl !== nextCoverUrl) {
+          existing.coverUrl = nextCoverUrl;
           await db.updateBook(existing);
           AppStorage.setOrCreate('shelfUpdateTime', Date.now());
         }
+        this.syncStateFromBook(existing);
         this.isInShelf = true;
         return true;
       }
@@ -264,7 +276,7 @@ struct SearchBookDetailPage {
       book.name = this.name;
       book.author = this.author;
       book.kind = this.kind;
-      book.coverUrl = this.coverUrl;
+      book.coverUrl = CoverUrlNormalizer.normalize(this.coverUrl);
       book.intro = this.intro;
       book.latestChapterTitle = this.latestChapterTitle;
       book.wordCount = this.wordCount;
@@ -278,27 +290,33 @@ struct SearchBookDetailPage {
       if (source) {
         const service = new WebBookService();
         const fullBook = await service.getBookInfo(source, book);
-        book.tocUrl = fullBook.tocUrl;
-        book.name = fullBook.name;
-        book.author = fullBook.author;
-        book.kind = fullBook.kind;
-        book.coverUrl = fullBook.coverUrl || fallbackCoverUrl;
-        book.intro = fullBook.intro;
-        book.latestChapterTitle = fullBook.latestChapterTitle;
-        book.wordCount = fullBook.wordCount;
-        book.variable = fullBook.variable;
+        book.bookUrl = fullBook.bookUrl || book.bookUrl;
+        book.tocUrl = fullBook.tocUrl || book.tocUrl;
+        book.name = fullBook.name || book.name;
+        book.author = fullBook.author || book.author;
+        book.kind = fullBook.kind || book.kind;
+        book.coverUrl = CoverUrlNormalizer.prefer(fallbackCoverUrl, fullBook.coverUrl || book.coverUrl);
+        book.intro = fullBook.intro || book.intro;
+        book.latestChapterTitle = fullBook.latestChapterTitle || book.latestChapterTitle;
+        book.wordCount = fullBook.wordCount || book.wordCount;
+        book.variable = fullBook.variable || book.variable;
+      }
 
-        this.tocUrl = book.tocUrl;
-        this.name = book.name;
-        this.author = book.author;
-        this.kind = book.kind;
-        this.coverUrl = book.coverUrl;
-        this.intro = book.intro;
-        this.latestChapterTitle = book.latestChapterTitle;
-        this.wordCount = book.wordCount;
+      const resolvedExisting = await this.findShelfBookByKey(BookIdentity.keyOfBook(book));
+      if (resolvedExisting) {
+        const nextCoverUrl = CoverUrlNormalizer.prefer(book.coverUrl, resolvedExisting.coverUrl);
+        if (nextCoverUrl && resolvedExisting.coverUrl !== nextCoverUrl) {
+          resolvedExisting.coverUrl = nextCoverUrl;
+          await db.updateBook(resolvedExisting);
+          AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+        }
+        this.syncStateFromBook(resolvedExisting);
+        this.isInShelf = true;
+        return true;
       }
 
       await db.insertBook(book);
+      this.syncStateFromBook(book);
 
       this.isInShelf = true;
       this.isSaving = false;
@@ -312,6 +330,34 @@ struct SearchBookDetailPage {
     } finally {
       this.isSaving = false;
     }
+  }
+
+  async findShelfBookByKey(bookKey: string): Promise<Book | null> {
+    if (!bookKey) {
+      return null;
+    }
+    const db = AppDatabase.getInstance();
+    const books = await db.getAllBooks();
+    for (const book of books) {
+      if (BookIdentity.keyOfBook(book) === bookKey) {
+        return book;
+      }
+    }
+    return null;
+  }
+
+  syncStateFromBook(book: Book): void {
+    this.bookUrl = book.bookUrl || this.bookUrl;
+    this.tocUrl = book.tocUrl || this.tocUrl;
+    this.origin = book.origin || this.origin;
+    this.originName = book.originName || this.originName;
+    this.name = book.name || this.name;
+    this.author = book.author || this.author;
+    this.kind = book.kind || this.kind;
+    this.coverUrl = CoverUrlNormalizer.prefer(book.coverUrl, this.coverUrl);
+    this.intro = book.intro || this.intro;
+    this.latestChapterTitle = book.latestChapterTitle || this.latestChapterTitle;
+    this.wordCount = book.wordCount || this.wordCount;
   }
 
   async startRead() {

@@ -6,6 +6,7 @@ import { WebBookService } from '../core/book/WebBookService';
 import { BookCoverCache } from './BookCoverCache';
 import { BookDisplayHelper } from './BookDisplayHelper';
 import { BookIdentity } from './BookIdentity';
+import { CoverUrlNormalizer } from './CoverUrlNormalizer';
 
 export class SearchBookShelfChange {
   requestKey: string = '';
@@ -86,8 +87,9 @@ export class SearchBookShelfHelper {
     const searchKey = SearchBookShelfHelper.keyOf(searchBook);
     const existing = await SearchBookShelfHelper.findShelfBookByKey(searchKey);
     if (existing) {
-      if (!existing.coverUrl && searchBook.coverUrl) {
-        existing.coverUrl = searchBook.coverUrl;
+      const nextCoverUrl = CoverUrlNormalizer.prefer(searchBook.coverUrl, existing.coverUrl);
+      if (nextCoverUrl && existing.coverUrl !== nextCoverUrl) {
+        existing.coverUrl = nextCoverUrl;
         await db.updateBook(existing);
       }
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
@@ -101,19 +103,35 @@ export class SearchBookShelfHelper {
     if (source) {
       const service = new WebBookService();
       const fullBook = await service.getBookInfo(source, book);
-      book.tocUrl = fullBook.tocUrl;
-      book.name = fullBook.name;
-      book.author = fullBook.author;
-      book.kind = fullBook.kind;
-      book.coverUrl = fullBook.coverUrl || fallbackCoverUrl;
-      book.intro = fullBook.intro;
-      book.latestChapterTitle = fullBook.latestChapterTitle;
-      book.wordCount = fullBook.wordCount;
-      book.variable = fullBook.variable;
+      book.bookUrl = fullBook.bookUrl || book.bookUrl;
+      book.tocUrl = fullBook.tocUrl || book.tocUrl;
+      book.name = fullBook.name || book.name;
+      book.author = fullBook.author || book.author;
+      book.kind = fullBook.kind || book.kind;
+      book.coverUrl = CoverUrlNormalizer.prefer(fallbackCoverUrl, fullBook.coverUrl || book.coverUrl);
+      book.intro = fullBook.intro || book.intro;
+      book.latestChapterTitle = fullBook.latestChapterTitle || book.latestChapterTitle;
+      book.wordCount = fullBook.wordCount || book.wordCount;
+      book.variable = fullBook.variable || book.variable;
+    }
+
+    const resolvedKey = BookIdentity.keyOfBook(book);
+    if (resolvedKey && resolvedKey !== searchKey) {
+      const resolvedExisting = await SearchBookShelfHelper.findShelfBookByKey(resolvedKey);
+      if (resolvedExisting) {
+        const nextCoverUrl = CoverUrlNormalizer.prefer(book.coverUrl, resolvedExisting.coverUrl);
+        if (nextCoverUrl && resolvedExisting.coverUrl !== nextCoverUrl) {
+          resolvedExisting.coverUrl = nextCoverUrl;
+          await db.updateBook(resolvedExisting);
+        }
+        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+        promptAction.showToast({ message: '已在书架' });
+        return new SearchBookShelfChange(searchKey, resolvedKey);
+      }
     }
 
     await db.insertBook(book);
-    const shelfKey = BookIdentity.keyOfBook(book) || searchKey;
+    const shelfKey = resolvedKey || searchKey;
     AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     promptAction.showToast({ message: '已加入书架' });
     return new SearchBookShelfChange(searchKey, shelfKey);
@@ -147,7 +165,7 @@ export class SearchBookShelfHelper {
     book.name = searchBook.name;
     book.author = searchBook.author;
     book.kind = searchBook.kind;
-    book.coverUrl = searchBook.coverUrl;
+    book.coverUrl = CoverUrlNormalizer.normalize(searchBook.coverUrl);
     book.intro = searchBook.intro;
     book.latestChapterTitle = searchBook.latestChapterTitle;
     book.wordCount = searchBook.wordCount;
