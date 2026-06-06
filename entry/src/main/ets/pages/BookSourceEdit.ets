@@ -14,6 +14,7 @@ struct BookSourceEditPage {
   @State source: BookSource = new BookSource();
   @State isLoading: boolean = false;
   @State currentTab: number = 0;
+  @State sourceLoadedVersion: number = 0;
 
   aboutToAppear() {
     this.syncBars();
@@ -38,6 +39,8 @@ struct BookSourceEditPage {
       const source = await db.getBookSource(this.bookSourceUrl);
       if (source) {
         this.source = source;
+        this.currentTab = 0;
+        this.sourceLoadedVersion++;
       }
     } catch (e) {
       console.error('加载书源失败:', e);
@@ -185,28 +188,43 @@ struct BookSourceEditPage {
       .borderWidth({ bottom: 1 })
       .borderColor(this.dividerColor())
 
-      // 内容区域
-      Scroll() {
+      if (this.isLoading) {
         Column() {
-          if (this.currentTab === 0) {
-            this.basicTabBuilder()
-          } else if (this.currentTab === 1) {
-            this.searchTabBuilder()
-          } else if (this.currentTab === 2) {
-            this.exploreTabBuilder()
-          } else if (this.currentTab === 3) {
-            this.infoTabBuilder()
-          } else if (this.currentTab === 4) {
-            this.tocTabBuilder()
-          } else if (this.currentTab === 5) {
-            this.contentTabBuilder()
-          }
+          LoadingProgress()
+            .width(40)
+            .height(40)
+          Text('加载书源中...')
+            .fontSize(14)
+            .fontColor(this.secondaryTextColor())
+            .margin({ top: 8 })
         }
+        .layoutWeight(1)
         .width('100%')
-        .padding(16)
+        .justifyContent(FlexAlign.Center)
+      } else {
+        // 内容区域
+        Scroll() {
+          Column() {
+            if (this.currentTab === 0) {
+              this.basicTabBuilder()
+            } else if (this.currentTab === 1) {
+              this.searchTabBuilder()
+            } else if (this.currentTab === 2) {
+              this.exploreTabBuilder()
+            } else if (this.currentTab === 3) {
+              this.infoTabBuilder()
+            } else if (this.currentTab === 4) {
+              this.tocTabBuilder()
+            } else if (this.currentTab === 5) {
+              this.contentTabBuilder()
+            }
+          }
+          .width('100%')
+          .padding(16)
+        }
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
       }
-      .layoutWeight(1)
-      .scrollBar(BarState.Off)
     }
     .width('100%')
     .height('100%')
@@ -218,6 +236,11 @@ struct BookSourceEditPage {
   @Builder
   basicTabBuilder() {
     Column({ space: 12 }) {
+      Text(`${this.sourceLoadedVersion}`)
+        .fontSize(0.1)
+        .height(0)
+        .opacity(0)
+
       this.inputItemBuilder('书源名称', this.source.bookSourceName, (value: string) => {
         this.source.bookSourceName = value;
       })
@@ -252,6 +275,10 @@ struct BookSourceEditPage {
 
       this.inputItemBuilder('发现地址', this.source.exploreUrl, (value: string) => {
         this.source.exploreUrl = value;
+      })
+
+      this.inputItemBuilder('JS库', this.source.jsLib, (value: string) => {
+        this.source.jsLib = value;
       })
 
       this.inputItemBuilder('请求头', this.source.header, (value: string) => {

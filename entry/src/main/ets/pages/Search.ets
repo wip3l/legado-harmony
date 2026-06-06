@@ -5,6 +5,7 @@ import { promptAction } from '@kit.ArkUI';
 import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
 import { WebBookService } from '../core/book/WebBookService';
 import { syncSystemBars } from '../utils/SystemBars';
+import { BookIdentity } from '../utils/BookIdentity';
 
 @Entry
 @Component
@@ -14,7 +15,7 @@ struct SearchPage {
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State keyword: string = '';
   @State searchResults: SearchBook[] = [];
-  @State shelfBookUrls: string[] = [];
+  @State shelfBookKeys: string[] = [];
   @State isSearching: boolean = false;
   @State searchHistory: string[] = [];
   @State hotKeywords: string[] = ['斗破苍穹', '完美世界', '遮天', '凡人修仙传', '诛仙'];
@@ -22,6 +23,8 @@ struct SearchPage {
   @State statusMessage: string = '';
   @State verificationUrl: string = '';
   @State verificationTitle: string = '';
+  @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
+  private shelfStatusVersion: number = 0;
 
   aboutToAppear() {
     this.syncBars();
@@ -30,6 +33,7 @@ struct SearchPage {
 
   onPageShow(): void {
     this.syncBars();
+    this.refreshSearchShelfStatus();
   }
 
   async initPage() {
@@ -65,6 +69,7 @@ struct SearchPage {
           .margin({ left: 8 })
           .borderRadius(20)
           .onClick(() => {
+            this.hideKeyboard();
             console.log('搜索按钮被点击, keyword:', this.keyword);
             promptAction.showToast({ message: `搜索: ${this.keyword}` });
             this.doSearch();
@@ -298,7 +303,9 @@ struct SearchPage {
         }
       });
 
-      this.statusMessage = allBooks.length > 0 ? `搜索完成，共找到 ${allBooks.length} 本书` : '搜索完成，未找到相关书籍';
+      const verifyUrl = this.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
+      this.statusMessage = verifyUrl ? `搜索完成，共找到 ${allBooks.length} 本书；有书源需要网页验证` :
+        allBooks.length > 0 ? `搜索完成，共找到 ${allBooks.length} 本书` : '搜索完成，未找到相关书籍';
       console.log('搜索完成, 总结果:', allBooks.length);
 
       // 保存搜索历史
@@ -313,24 +320,48 @@ struct SearchPage {
     }
   }
 
+  hideKeyboard(): void {
+    try {
+      this.getUIContext().getFocusController().clearFocus();
+    } catch (e) {
+    }
+  }
+
+  onShelfChanged(): void {
+    this.refreshSearchShelfStatus();
+  }
+
+  refreshSearchShelfStatus(): void {
+    if (this.searchResults.length > 0) {
+      this.syncSearchShelfStatus(this.searchResults);
+    }
+  }
+
   async syncSearchShelfStatus(books: SearchBook[]): Promise<void> {
     try {
+      const version = this.shelfStatusVersion;
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      const urls: string[] = [];
+      const shelfBooks = await db.getAllBooks();
+      const shelfKeys = shelfBooks.map((book: Book) => BookIdentity.keyOfBook(book));
+      const keys: string[] = [];
       for (const book of books) {
-        if (book.bookUrl && await db.getBook(book.bookUrl)) {
-          urls.push(book.bookUrl);
+        const key = BookIdentity.keyOfSearchBook(book);
+        if (key && shelfKeys.includes(key)) {
+          keys.push(key);
         }
       }
-      this.shelfBookUrls = urls;
+      if (version === this.shelfStatusVersion) {
+        this.shelfBookKeys = keys;
+      }
     } catch (e) {
       console.error('同步搜索书架状态失败:', e);
     }
   }
 
   isSearchBookInShelf(book: SearchBook): boolean {
-    return !!book.bookUrl && this.shelfBookUrls.includes(book.bookUrl);
+    const key = BookIdentity.keyOfSearchBook(book);
+    return !!key && this.shelfBookKeys.includes(key);
   }
 
   async toggleSearchBookShelf(searchBook: SearchBook): Promise<void> {
@@ -350,9 +381,10 @@ struct SearchPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      const existing = await db.getBook(searchBook.bookUrl);
+      const searchKey = BookIdentity.keyOfSearchBook(searchBook);
+      const existing = await this.findShelfBookByKey(searchKey);
       if (existing) {
-        this.markSearchBookInShelf(searchBook.bookUrl);
+        this.markSearchBookInShelf(searchKey);
         AppStorage.setOrCreate('shelfUpdateTime', Date.now());
         promptAction.showToast({ message: '已在书架' });
         return;
@@ -393,7 +425,7 @@ struct SearchPage {
       }
 
       await db.insertBook(book);
-      this.markSearchBookInShelf(book.bookUrl);
+      this.markSearchBookInShelf(BookIdentity.keyOfBook(book) || searchKey);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       promptAction.showToast({ message: '已加入书架' });
     } catch (e) {
@@ -411,8 +443,11 @@ struct SearchPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      await db.deleteBook(searchBook.bookUrl);
-      this.shelfBookUrls = this.shelfBookUrls.filter(url => url !== searchBook.bookUrl);
+      const key = BookIdentity.keyOfSearchBook(searchBook);
+      const existing = await this.findShelfBookByKey(key);
+      await db.deleteBook(existing?.bookUrl || searchBook.bookUrl);
+      this.shelfStatusVersion++;
+      this.shelfBookKeys = this.shelfBookKeys.filter(item => item !== key);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       promptAction.showToast({ message: '已移出书架' });
     } catch (e) {
@@ -421,10 +456,21 @@ struct SearchPage {
     }
   }
 
-  markSearchBookInShelf(bookUrl: string): void {
-    if (bookUrl && !this.shelfBookUrls.includes(bookUrl)) {
-      this.shelfBookUrls = [...this.shelfBookUrls, bookUrl];
+  markSearchBookInShelf(bookKey: string): void {
+    if (bookKey && !this.shelfBookKeys.includes(bookKey)) {
+      this.shelfStatusVersion++;
+      this.shelfBookKeys = [...this.shelfBookKeys, bookKey];
     }
+  }
+
+  async findShelfBookByKey(bookKey: string): Promise<Book | null> {
+    if (!bookKey) return null;
+    const db = AppDatabase.getInstance();
+    const books = await db.getAllBooks();
+    for (const book of books) {
+      if (BookIdentity.keyOfBook(book) === bookKey) return book;
+    }
+    return null;
   }
 
   openSearchBookDetail(book: SearchBook) {

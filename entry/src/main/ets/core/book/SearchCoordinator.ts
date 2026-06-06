@@ -5,6 +5,9 @@ import { AnalyzeUrl } from '../rule/AnalyzeUrl';
 import { AnalyzeRule } from '../rule/AnalyzeRule';
 import { JsRuntime } from '../rule/JsRuntime';
 import { VerificationSupport } from '../http/VerificationSupport';
+import { EncodedSourceUrl } from './EncodedSourceUrl';
+import { BookSourceDataUrlSupport } from './BookSourceDataUrlSupport';
+import { BookUrlResolver } from './BookUrlResolver';
 
 export interface SearchProgress {
   done: number;
@@ -73,6 +76,12 @@ export class SearchCoordinator {
 
   private async searchOne(source: BookSource, keyword: string): Promise<SearchBook[]> {
     try {
+      if (BookSourceDataUrlSupport.sourceUsesMyBxSearch(source)) {
+        return await BookSourceDataUrlSupport.searchMyBx(this.http, source, keyword);
+      }
+      if (BookSourceDataUrlSupport.sourceUsesGySearch(source)) {
+        return await BookSourceDataUrlSupport.search(this.http, source, keyword);
+      }
       if (!source.searchUrl || !source.searchRule?.bookList || !source.searchRule?.name || !source.searchRule?.bookUrl) {
         console.warn('[SC] skip source without search rules:', source.bookSourceName);
         return [];
@@ -85,9 +94,13 @@ export class SearchCoordinator {
       js.setVar('page', '1');
 
       const au = new AnalyzeUrl(source, this.http);
-      const urlTemplate = this.evalAndBuild(js, source.searchUrl, source.bookSourceUrl);
+      let urlTemplate = this.evalAndBuild(js, source, keyword);
+      if (!urlTemplate && source.searchUrl.includes('gysearch')) {
+        urlTemplate = EncodedSourceUrl.buildSearchUrl(keyword);
+      }
       console.log('[SC] search source:', source.bookSourceName, 'url:', urlTemplate);
-      const resp = await au.fetch(urlTemplate);
+      const resp = EncodedSourceUrl.canHandle(urlTemplate) ?
+        await this.fetchEncodedDataUrl(urlTemplate) : await au.fetch(urlTemplate);
 
       console.log('[SC] response:', source.bookSourceName, resp.statusCode, 'len:', resp.body?.length || 0);
       if (VerificationSupport.shouldRequestBrowserVerification(source, resp.body, resp.statusCode, source.searchUrl)) {
@@ -101,22 +114,27 @@ export class SearchCoordinator {
       // 防止超大响应导致 OOM
       if (resp.body.length > 500000) return [];
 
-      const rule = new AnalyzeRule(resp.body, source.bookSourceUrl);
+      const baseUrl = BookUrlResolver.effectiveBase(resp, urlTemplate, source.bookSourceUrl);
+      const rule = new AnalyzeRule(resp.body, baseUrl);
+      rule.setJsVar('key', encodeURIComponent(keyword));
+      rule.setJsVar('searchKey', encodeURIComponent(keyword));
+      rule.setJsVar('keyword', encodeURIComponent(keyword));
+      rule.setJsVar('page', '1');
       const searchRule = source.searchRule;
       const items = rule.getElements(searchRule.bookList || '');
       console.log('[SC] parsed list:', source.bookSourceName, 'rule:', searchRule.bookList, 'count:', items.length);
 
       const books: SearchBook[] = [];
       for (const item of items) {
-        const ir = new AnalyzeRule(item, source.bookSourceUrl);
+        const ir = new AnalyzeRule(item, baseUrl);
         const book = new SearchBook();
         book.name = ir.analyzeFirst(searchRule.name) || '';
         book.author = ir.analyzeFirst(searchRule.author) || '';
-        book.coverUrl = ir.analyzeFirst(searchRule.coverUrl) || '';
+        book.coverUrl = BookSourceDataUrlSupport.normalizeCoverUrl(source, ir.analyzeFirst(searchRule.coverUrl), baseUrl);
         book.intro = ir.analyzeFirst(searchRule.intro) || '';
         book.kind = ir.analyzeFirst(searchRule.kind) || '';
         book.latestChapterTitle = ir.analyzeFirst(searchRule.lastChapter) || '';
-        book.bookUrl = this.resolve(ir.analyzeFirst(searchRule.bookUrl), source.bookSourceUrl);
+        book.bookUrl = BookUrlResolver.resolve(ir.analyzeFirst(searchRule.bookUrl), baseUrl);
         book.variable = ir.getContext().toJson();
         // 如果解析后仍含 JSONPath 表达式，直接从 item 提取
         if (!book.bookUrl || book.bookUrl.startsWith('$') || book.bookUrl.includes('$._id') || book.bookUrl.includes('$..')) {
@@ -130,9 +148,7 @@ export class SearchCoordinator {
               book.bookUrl = String(raw['url'] || raw['bookUrl'] || raw['link'] || raw['href'] || raw['nid'] || '');
             } catch (_) {}
           }
-          if (book.bookUrl && book.bookUrl.startsWith('/')) {
-            book.bookUrl = this.resolve(book.bookUrl, source.bookSourceUrl);
-          }
+          book.bookUrl = BookUrlResolver.resolve(book.bookUrl, baseUrl);
         }
         book.origin = source.bookSourceUrl;
         book.originName = source.bookSourceName;
@@ -156,8 +172,14 @@ export class SearchCoordinator {
     }
   }
 
-  private evalAndBuild(js: JsRuntime, searchUrl: string, baseUrl: string): string {
+  private evalAndBuild(js: JsRuntime, source: BookSource, keyword: string): string {
+    const searchUrl = source.searchUrl;
+    const baseUrl = source.bookSourceUrl;
     if (!searchUrl) return `${baseUrl}/search?q={{key}}`;
+    const buildRequestUrl = BookSourceDataUrlSupport.buildRequestUrl(source, searchUrl, '1', keyword);
+    if (buildRequestUrl) return buildRequestUrl;
+    const qingtianUrl = this.buildQingtianSearchUrl(source, keyword, '1');
+    if (qingtianUrl) return qingtianUrl;
     let url = searchUrl;
     url = this.stripLeadingJsUrl(url);
     if (url.startsWith('@js:')) {
@@ -187,6 +209,66 @@ export class SearchCoordinator {
     return url;
   }
 
+  private buildQingtianSearchUrl(source: BookSource, keyword: string, page: string): string {
+    const searchUrl = source.searchUrl || '';
+    if (!searchUrl.includes('/search?title=${key}') || !searchUrl.includes('getArguments(source.getVariable()')) {
+      return '';
+    }
+    const hosts = this.parseHostList(source.jsLib || searchUrl);
+    const baseUrl = hosts.length > 0 ? hosts[0] : 'http://219.154.201.122:5006';
+    const parsed = this.parseQingtianKeyword(keyword);
+    const disabled = '0';
+    return `${baseUrl}/search?title=${encodeURIComponent(parsed.title)}&tab=${encodeURIComponent(parsed.tab)}` +
+      `&source=${encodeURIComponent(parsed.source)}&page=${encodeURIComponent(page)}&disabled_sources=${encodeURIComponent(disabled)}`;
+  }
+
+  private parseQingtianKeyword(keyword: string): { title: string, tab: string, source: string } {
+    let title = keyword || '';
+    let tab = '小说';
+    let source = '全部';
+    const prefix = title.length >= 2 ? title.substring(0, 2) : '';
+    if (prefix === 'm:' || prefix === 'm：') {
+      tab = '漫画';
+      title = title.substring(2);
+    } else if (prefix === 't:' || prefix === 't：') {
+      tab = '听书';
+      title = title.substring(2);
+    } else if (prefix === 'd:' || prefix === 'd：') {
+      tab = '短剧';
+      title = title.substring(2);
+    } else if (prefix === 'x:' || prefix === 'x：') {
+      tab = '小说';
+      title = title.substring(2);
+    }
+    const at = title.indexOf('@');
+    if (at >= 0) {
+      const nextSource = title.substring(at + 1).trim();
+      title = title.substring(0, at);
+      if (nextSource) source = nextSource;
+    }
+    return { title: title.trim(), tab: tab, source: source };
+  }
+
+  private parseHostList(jsLib: string): string[] {
+    const hosts: string[] = [];
+    const hostBlock = (jsLib || '').match(/\bhost\s*=\s*\[([\s\S]*?)\]/);
+    const body = hostBlock ? hostBlock[1] : jsLib;
+    const re = /["'](https?:\/\/[^"']+)["']/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(body)) !== null) {
+      if (!hosts.includes(m[1])) hosts.push(m[1]);
+    }
+    return hosts;
+  }
+
+  private async fetchEncodedDataUrl(url: string): Promise<{ url: string, statusCode: number, headers: Record<string, string>, body: string, success: boolean, error?: string }> {
+    const root = await EncodedSourceUrl.requestJsonForDataUrl(this.http, url);
+    if (!root) {
+      return { url: url, statusCode: 0, headers: {}, body: '', success: false, error: 'encoded data url request failed' };
+    }
+    return { url: url, statusCode: 200, headers: {}, body: JSON.stringify(root), success: true };
+  }
+
   private stripLeadingJsUrl(url: string): string {
     const end = url.lastIndexOf('</js>');
     if (end >= 0) {
@@ -201,13 +283,4 @@ export class SearchCoordinator {
     return url.replace(/<js>[\s\S]*?<\/js>/gi, '').trim();
   }
 
-  private resolve(url: string, base: string): string {
-    if (!url || url.startsWith('http')) return url;
-    if (url.startsWith('/')) {
-      const m = base.match(/^(https?:\/\/[^/]+)/);
-      return m ? m[0] + url : base + url;
-    }
-    const b = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
-    return b + '/' + url;
-  }
 }

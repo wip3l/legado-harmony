@@ -163,10 +163,49 @@ export class AnalyzeUrl {
     if (!req.url) {
       return { url: urlTemplate, statusCode: 0, headers: {}, body: '', success: false, error: 'empty url' };
     }
-    return this.client.execute(req);
+    const resp = await this.client.execute(req);
+    if (this.isUsableResponse(resp)) return resp;
+
+    const fallbackUrls = this.buildFallbackUrls(req.url);
+    for (const url of fallbackUrls) {
+      const fallbackResp = await this.client.execute({ ...req, url: url });
+      if (this.isUsableResponse(fallbackResp)) {
+        return fallbackResp;
+      }
+    }
+    return resp;
   }
 
   getConfig(): UrlConfig {
     return this.config;
+  }
+
+  private buildFallbackUrls(url: string): string[] {
+    const urls: string[] = [];
+    if (!url.startsWith('http://') && !url.startsWith('https://')) return urls;
+
+    if (url.startsWith('https://')) {
+      urls.push('http://' + url.substring('https://'.length));
+    }
+
+    const mirror = url.replace(/^(https?:\/\/)www\.([^/]+)/, (_: string, scheme: string, host: string) => {
+      return `${scheme}www.x${host}`;
+    });
+    if (mirror !== url && !urls.includes(mirror)) urls.push(mirror);
+
+    if (mirror.startsWith('https://')) {
+      const httpMirror = 'http://' + mirror.substring('https://'.length);
+      if (!urls.includes(httpMirror)) urls.push(httpMirror);
+    }
+    return urls;
+  }
+
+  private isUsableResponse(resp: HttpResponse): boolean {
+    if (!resp.success || !resp.body) return false;
+    if (resp.statusCode >= 300 && resp.statusCode < 400) return false;
+    const sample = resp.body.substring(0, Math.min(resp.body.length, 1200)).toLowerCase();
+    if (sample.includes('301 moved permanently') || sample.includes('302 found')) return false;
+    if (sample.includes('sedoparking.com') || sample.includes('resources and information')) return false;
+    return true;
   }
 }

@@ -4,11 +4,23 @@ import fileUri from '@ohos.file.fileuri';
 import http from '@ohos.net.http';
 
 export class BookCoverCache {
+  static resolveCachedCover(context: Context, raw: string): string {
+    if (!raw || (!raw.startsWith('http://') && !raw.startsWith('https://'))) {
+      return '';
+    }
+    const cachedPath = BookCoverCache.cachedCoverPath(context, raw);
+    return BookCoverCache.exists(cachedPath) ? fileUri.getUriFromPath(cachedPath) : '';
+  }
+
   static async resolveCover(context: Context, raw: string): Promise<string> {
     if (!raw) {
       return '';
     }
     if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      const cachedPath = BookCoverCache.cachedCoverPath(context, raw);
+      if (BookCoverCache.exists(cachedPath)) {
+        return fileUri.getUriFromPath(cachedPath);
+      }
       const path = await BookCoverCache.downloadCover(context, raw);
       return path ? fileUri.getUriFromPath(path) : raw;
     }
@@ -24,6 +36,10 @@ export class BookCoverCache {
       return '';
     }
     if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      const cachedPath = BookCoverCache.cachedCoverPath(context, raw);
+      if (BookCoverCache.exists(cachedPath)) {
+        return cachedPath;
+      }
       return await BookCoverCache.downloadCover(context, raw);
     }
     const localPath = BookCoverCache.localPathFromUri(raw);
@@ -61,7 +77,9 @@ export class BookCoverCache {
         expectDataType: http.HttpDataType.ARRAY_BUFFER,
         header: {
           'User-Agent': 'Mozilla/5.0 (Linux; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          'Referer': BookCoverCache.refererFromUrl(url),
+          'Origin': BookCoverCache.originFromUrl(url)
         }
       });
       if (response.responseCode < 200 || response.responseCode >= 300 || !(response.result instanceof ArrayBuffer)) {
@@ -129,6 +147,16 @@ export class BookCoverCache {
     if (lower.includes('.bmp')) return '.bmp';
     if (lower.includes('.gif')) return '.gif';
     return '.jpg';
+  }
+
+  private static originFromUrl(url: string): string {
+    const match = url.match(/^(https?:\/\/[^\/]+)/);
+    return match ? match[1] : '';
+  }
+
+  private static refererFromUrl(url: string): string {
+    const origin = BookCoverCache.originFromUrl(url);
+    return origin ? `${origin}/` : '';
   }
 
   private static hashText(value: string): string {

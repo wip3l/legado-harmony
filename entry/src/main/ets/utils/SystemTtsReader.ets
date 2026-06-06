@@ -10,9 +10,24 @@ export interface TtsReadOptions {
   onFinished?: () => void;
   onError?: (message: string) => void;
   onChunkStart?: (chunk: TtsChunk, index: number) => void;
+  person?: number;
+  online?: number;
+  style?: string;
+  language?: string;
+  speed?: number;
+}
+
+export class TtsVoiceOption {
+  id: number = 0;
+  name: string = '默认音色';
+  online: number = 0;
+  status: string = '';
+  style: string = '';
+  language: string = 'zh-CN';
 }
 
 export class SystemTtsReader {
+  private static readonly MAX_PROBE_PERSON: number = 20;
   private engine: textToSpeech.TextToSpeechEngine | null = null;
   private chunks: TtsChunk[] = [];
   private chunkIndex: number = 0;
@@ -25,6 +40,58 @@ export class SystemTtsReader {
   private currentSpeakStartedAt: number = 0;
   private currentSpeakMinDuration: number = 0;
   private completionPending: boolean = false;
+  private enginePerson: number = -1;
+  private engineOnline: number = -1;
+  private engineStyle: string = '';
+  private engineLanguage: string = '';
+  private optionPerson: number | null = null;
+  private optionOnline: number | null = null;
+  private optionStyle: string | null = null;
+  private optionLanguage: string | null = null;
+  private optionSpeed: number | null = null;
+
+  static async listAvailableVoices(): Promise<TtsVoiceOption[]> {
+    let engine: textToSpeech.TextToSpeechEngine | null = null;
+    try {
+      engine = await SystemTtsReader.createEngineWithMode(0, 0, '');
+    } catch (_) {
+      try {
+        engine = await SystemTtsReader.createEngineWithMode(0, 1, '');
+      } catch (_) {
+        return await SystemTtsReader.probeAvailableVoices();
+      }
+    }
+    try {
+      let voices: TtsVoiceOption[] = [];
+      try {
+        voices = voices.concat(SystemTtsReader.parseVoices(await engine.listVoices({
+          requestId: `voices_online_${Date.now()}`,
+          online: 0
+        }), 0));
+      } catch (_) {
+      }
+      try {
+        voices = voices.concat(SystemTtsReader.parseVoices(await engine.listVoices({
+          requestId: `voices_offline_${Date.now()}`,
+          online: 1
+        }), 1));
+      } catch (_) {
+      }
+      const parsed = SystemTtsReader.dedupeVoices(voices);
+      let verified = await SystemTtsReader.filterAvailableVoices(parsed);
+      if (verified.filter((voice: TtsVoiceOption) => voice.online === 0).length <= 1) {
+        verified = SystemTtsReader.dedupeVoices(verified.concat(await SystemTtsReader.probeAvailableVoices(0)));
+      }
+      return verified.length > 0 ? verified : await SystemTtsReader.probeAvailableVoices();
+    } catch (_) {
+      return await SystemTtsReader.probeAvailableVoices();
+    } finally {
+      try {
+        engine.shutdown();
+      } catch (_) {
+      }
+    }
+  }
 
   async start(text: string, options?: TtsReadOptions): Promise<void> {
     const cleanText = this.normalizeText(text);
@@ -36,10 +103,27 @@ export class SystemTtsReader {
     this.onFinished = options?.onFinished;
     this.onError = options?.onError;
     this.onChunkStart = options?.onChunkStart;
+    this.optionPerson = options?.person ?? null;
+    this.optionOnline = options?.online ?? null;
+    this.optionStyle = options?.style ?? null;
+    this.optionLanguage = options?.language ?? null;
+    this.optionSpeed = options?.speed ?? null;
     this.chunks = this.splitText(cleanText, 64);
     this.chunkIndex = 0;
     this.active = true;
-    const engine = await this.ensureEngine();
+    let engine: textToSpeech.TextToSpeechEngine;
+    try {
+      engine = await this.ensureEngine();
+    } catch (error) {
+      this.active = false;
+      const message = `TTS初始化失败：${this.currentVoiceLabel()} ${this.formatError(error)}`;
+      console.error('[TTS] ensure engine failed:', message);
+      if (this.onError) {
+        this.onError(message);
+        return;
+      }
+      throw new Error(message);
+    }
     if (!this.active || this.readGeneration !== generation) {
       return;
     }
@@ -64,7 +148,8 @@ export class SystemTtsReader {
         }
         this.currentRequestId = '';
         this.active = false;
-        const message = errorMessage || `系统朗读失败(${errorCode})`;
+        const message = `${errorMessage || `系统朗读失败(${errorCode})`}：${this.currentVoiceLabel()}`;
+        console.error('[TTS] speak error:', message);
         if (this.onError) this.onError(message);
       },
       onData: (_utteranceId: string, _audio: ArrayBuffer, _response: textToSpeech.SynthesisResponse) => {
@@ -79,6 +164,11 @@ export class SystemTtsReader {
     this.chunks = [];
     this.chunkIndex = 0;
     this.onChunkStart = undefined;
+    this.optionPerson = null;
+    this.optionOnline = null;
+    this.optionStyle = null;
+    this.optionLanguage = null;
+    this.optionSpeed = null;
     this.currentRequestId = '';
     this.currentSpeakStartedAt = 0;
     this.currentSpeakMinDuration = 0;
@@ -103,26 +193,30 @@ export class SystemTtsReader {
   }
 
   private async ensureEngine(): Promise<textToSpeech.TextToSpeechEngine> {
-    if (this.engine) return this.engine;
-    const extraParam: Record<string, Object> = {};
-    extraParam['style'] = 'interaction-broadcast' as Object;
-    extraParam['locate'] = 'CN' as Object;
-    extraParam['name'] = 'LegadoReaderTts' as Object;
-    try {
-      this.engine = await textToSpeech.createEngine({
-        language: 'zh-CN',
-        person: 0,
-        online: 1,
-        extraParams: extraParam
-      });
-    } catch (error) {
-      this.engine = await textToSpeech.createEngine({
-        language: 'zh-CN',
-        person: 0,
-        online: 0,
-        extraParams: extraParam
-      });
+    const person = this.getTtsPerson();
+    const online = this.getTtsOnline();
+    const style = this.getTtsStyle();
+    const language = this.getTtsLanguage();
+    if (this.engine && this.enginePerson === person && this.engineOnline === online &&
+      this.engineStyle === style && this.engineLanguage === language) return this.engine;
+    if (this.engine) {
+      try {
+        this.engine.shutdown();
+      } catch (_) {
+      }
+      this.engine = null;
     }
+    let actualOnline = online;
+    try {
+      this.engine = await SystemTtsReader.createEngineWithMode(person, online, style, language);
+    } catch (error) {
+      actualOnline = online === 0 ? 1 : 0;
+      this.engine = await SystemTtsReader.createEngineWithMode(person, actualOnline, style, language);
+    }
+    this.enginePerson = person;
+    this.engineOnline = actualOnline;
+    this.engineStyle = style;
+    this.engineLanguage = language;
     return this.engine;
   }
 
@@ -144,7 +238,7 @@ export class SystemTtsReader {
     }
     const extraParams: Record<string, Object> = {};
     extraParams['queueMode'] = 0 as Object;
-    extraParams['speed'] = 1 as Object;
+    extraParams['speed'] = this.getTtsSpeed() as Object;
     extraParams['volume'] = 2 as Object;
     extraParams['pitch'] = 1 as Object;
     extraParams['languageContext'] = 'zh-CN' as Object;
@@ -167,7 +261,9 @@ export class SystemTtsReader {
       this.currentSpeakMinDuration = 0;
       this.completionPending = false;
       this.active = false;
-      if (this.onError) this.onError('系统朗读失败');
+      const message = `系统朗读失败：${this.currentVoiceLabel()} ${this.formatError(error)}`;
+      console.error('[TTS] speak throw:', message);
+      if (this.onError) this.onError(message);
     }
   }
 
@@ -224,7 +320,198 @@ export class SystemTtsReader {
     const readableChars = value.replace(/\s/g, '').length;
     const punctuationMatches = value.match(/[，。！？；;,.!?、]/g);
     const punctuationCount = punctuationMatches ? punctuationMatches.length : 0;
-    return Math.max(700, Math.min(18000, readableChars * 210 + punctuationCount * 120));
+    const speed = Math.max(0.5, Math.min(2, this.getTtsSpeed()));
+    return Math.max(450, Math.min(18000, (readableChars * 210 + punctuationCount * 120) / speed));
+  }
+
+  private getTtsPerson(): number {
+    const value = AppStorage.get<number>('ttsPerson');
+    const optionValue = this.optionPerson;
+    return Math.max(0, optionValue === null ? (value === undefined ? 0 : Math.round(value)) : Math.round(optionValue));
+  }
+
+  private getTtsSpeed(): number {
+    const value = AppStorage.get<number>('ttsSpeed');
+    const optionValue = this.optionSpeed;
+    return Math.max(0.5, Math.min(2, optionValue === null ? (value === undefined ? 1 : value) : optionValue));
+  }
+
+  private getTtsOnline(): number {
+    const value = AppStorage.get<number>('ttsOnline');
+    const optionValue = this.optionOnline;
+    return (optionValue === null ? value : optionValue) === 1 ? 1 : 0;
+  }
+
+  private getTtsStyle(): string {
+    const value = AppStorage.get<string>('ttsStyle');
+    return this.optionStyle === null ? (value || '') : this.optionStyle;
+  }
+
+  private getTtsLanguage(): string {
+    const value = AppStorage.get<string>('ttsLanguage');
+    const language = this.optionLanguage === null ? (value || '') : this.optionLanguage;
+    return language || 'zh-CN';
+  }
+
+  private currentVoiceLabel(): string {
+    const mode = this.getTtsOnline() === 0 ? '在线' : '离线';
+    const style = this.getTtsStyle();
+    return `person=${this.getTtsPerson()} ${mode} language=${this.getTtsLanguage()}${style ? ` style=${style}` : ''}`;
+  }
+
+  private formatError(error: Object | undefined): string {
+    if (!error) return '';
+    const anyError = error as Record<string, Object>;
+    const code = anyError['code'] === undefined ? '' : `(${String(anyError['code'])})`;
+    const message = anyError['message'] === undefined ? '' : String(anyError['message']);
+    const text = `${code}${message}`.trim();
+    return text || JSON.stringify(error);
+  }
+
+  private static createEngineExtraParams(style?: string): Record<string, Object> {
+    const extraParam: Record<string, Object> = {};
+    if (style) {
+      extraParam['style'] = style as Object;
+    }
+    extraParam['locate'] = 'CN' as Object;
+    extraParam['name'] = 'LegadoReaderTts' as Object;
+    return extraParam;
+  }
+
+  private static parseVoices(voices: Array<textToSpeech.VoiceInfo>, online: number): TtsVoiceOption[] {
+    const options: TtsVoiceOption[] = [];
+    for (const raw of voices) {
+      const id = SystemTtsReader.parseVoiceId(raw);
+      const style = raw.style || '';
+      const language = raw.language || 'zh-CN';
+      if (id < 0 || options.some((voice: TtsVoiceOption) => voice.id === id &&
+        voice.online === online && voice.style === style && voice.language === language &&
+        voice.name === SystemTtsReader.parseVoiceName(raw, id))) {
+        continue;
+      }
+      const option = new TtsVoiceOption();
+      option.id = id;
+      option.name = SystemTtsReader.parseVoiceName(raw, id);
+      option.online = online;
+      option.status = raw.status || '';
+      option.style = style;
+      option.language = language;
+      options.push(option);
+    }
+    options.sort((a: TtsVoiceOption, b: TtsVoiceOption) => a.online - b.online ||
+      a.language.localeCompare(b.language) || a.id - b.id || a.name.localeCompare(b.name));
+    return options;
+  }
+
+  private static dedupeVoices(voices: TtsVoiceOption[]): TtsVoiceOption[] {
+    const options: TtsVoiceOption[] = [];
+    for (const voice of voices) {
+      if (!options.some((item: TtsVoiceOption) => item.id === voice.id &&
+        item.online === voice.online && item.style === voice.style &&
+        item.language === voice.language && item.name === voice.name)) {
+        options.push(voice);
+      }
+    }
+    options.sort((a: TtsVoiceOption, b: TtsVoiceOption) => a.online - b.online || a.id - b.id ||
+      a.language.localeCompare(b.language) || a.style.localeCompare(b.style) || a.name.localeCompare(b.name));
+    return options;
+  }
+
+  private static parseVoiceId(item: textToSpeech.VoiceInfo): number {
+    if (typeof item.person === 'number') {
+      return Math.round(item.person);
+    }
+    return -1;
+  }
+
+  private static parseVoiceName(item: textToSpeech.VoiceInfo, id: number): string {
+    if (item.description && item.description.trim()) {
+      return item.description.trim();
+    }
+    const tags: string[] = [];
+    if (item.style && item.style.trim()) {
+      tags.push(item.style.trim());
+    }
+    if (item.gender && item.gender.trim()) {
+      tags.push(item.gender.trim());
+    }
+    return id === 0 ? '默认音色' : (tags.length > 0 ? `系统音色 ${id} · ${tags.join('/')}` : `系统音色 ${id}`);
+  }
+
+  private static defaultVoices(): TtsVoiceOption[] {
+      const option = new TtsVoiceOption();
+      option.id = 0;
+      option.name = '默认音色';
+      option.online = 0;
+      option.status = 'default';
+      option.language = 'zh-CN';
+      return [option];
+  }
+
+  private static async probeAvailableVoices(online: number = 0): Promise<TtsVoiceOption[]> {
+    const options: TtsVoiceOption[] = [];
+    for (let person = 0; person <= SystemTtsReader.MAX_PROBE_PERSON; person++) {
+      const available = await SystemTtsReader.canCreateEngine(person, online);
+      if (!available) {
+        continue;
+      }
+      const option = new TtsVoiceOption();
+      option.id = person;
+      option.name = person === 0 ? '默认音色' : `${online === 0 ? '在线音色' : '离线音色'} ${person}`;
+      option.online = online;
+      option.status = 'probed';
+      option.language = 'zh-CN';
+      options.push(option);
+    }
+    return options.length > 0 ? options : SystemTtsReader.defaultVoices();
+  }
+
+  private static async filterAvailableVoices(voices: TtsVoiceOption[]): Promise<TtsVoiceOption[]> {
+    const options: TtsVoiceOption[] = [];
+    for (const voice of voices) {
+      const available = await SystemTtsReader.canCreateEngine(voice.id, voice.online, voice.style, voice.language);
+      if (available) {
+        options.push(voice);
+      }
+    }
+    return options;
+  }
+
+  private static async canCreateEngine(person: number, online: number, style: string = '',
+    language: string = 'zh-CN'): Promise<boolean> {
+    let engine: textToSpeech.TextToSpeechEngine | null = null;
+    try {
+      engine = await SystemTtsReader.createEngineWithMode(person, online, style, language);
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      try {
+        engine?.shutdown();
+      } catch (_) {
+      }
+    }
+  }
+
+  private static async createEngineWithMode(person: number, online: number, style: string,
+    language: string = 'zh-CN'): Promise<textToSpeech.TextToSpeechEngine> {
+    if (style) {
+      try {
+        return await textToSpeech.createEngine({
+          language: language || 'zh-CN',
+          person: person,
+          online: online,
+          extraParams: SystemTtsReader.createEngineExtraParams(style)
+        });
+      } catch (_) {
+      }
+    }
+    return await textToSpeech.createEngine({
+      language: language || 'zh-CN',
+      person: person,
+      online: online,
+      extraParams: SystemTtsReader.createEngineExtraParams('')
+    });
   }
 
   private splitText(text: string, maxLength: number): TtsChunk[] {

@@ -8,6 +8,7 @@ export default class RecentReadFormAbility extends FormExtensionAbility {
   private formDimensions: Map<string, number> = new Map();
 
   onAddForm(want: Want): formBindingData.FormBindingData {
+    this.ensureCoverSettings();
     const formId = this.getFormId(want);
     const dimension = this.getDimension(want.parameters);
     this.formDimensions.set(formId, dimension);
@@ -17,6 +18,7 @@ export default class RecentReadFormAbility extends FormExtensionAbility {
   }
 
   onUpdateForm(formId: string, wantParams?: Record<string, Object>): void {
+    this.ensureCoverSettings();
     const dimension = this.getDimension(wantParams, this.formDimensions.get(formId) || 2);
     this.formDimensions.set(formId, dimension);
     this.updateFormLater(formId, dimension);
@@ -55,6 +57,16 @@ export default class RecentReadFormAbility extends FormExtensionAbility {
     }).catch((err: Error) => {
       console.error('加载最近阅读卡片数据失败:', err);
     });
+  }
+
+  private ensureCoverSettings(): void {
+    PersistentStorage.persistProp('bookshelfCoverAlbums', '');
+    PersistentStorage.persistProp('bookshelfLightCoverAlbumId', '');
+    PersistentStorage.persistProp('bookshelfDarkCoverAlbumId', '');
+    PersistentStorage.persistProp('bookshelfCoverApplyScope', 'all');
+    PersistentStorage.persistProp('bookshelfCoverTargetBooks', '');
+    PersistentStorage.persistProp('bookshelfIgnoreSourceCover', false);
+    PersistentStorage.persistProp('bookshelfCoverMode', 'sequence');
   }
 
   private async buildData(dimension: number): Promise<RecentReadCardData> {

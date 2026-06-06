@@ -39,6 +39,8 @@ struct RecentReadCard {
   @LocalStorageProp('book0Name') book0Name: string = '';
   @LocalStorageProp('book0Author') book0Author: string = '';
   @LocalStorageProp('book0Progress') book0Progress: string = '';
+  @LocalStorageProp('book0Tag0') book0Tag0: string = '';
+  @LocalStorageProp('book0Tag1') book0Tag1: string = '';
   @LocalStorageProp('book0Url') book0Url: string = '';
   @LocalStorageProp('book0Cover0') book0Cover0: string = '';
   @LocalStorageProp('book0Cover1') book0Cover1: string = '';
@@ -46,6 +48,8 @@ struct RecentReadCard {
   @LocalStorageProp('book1Name') book1Name: string = '';
   @LocalStorageProp('book1Author') book1Author: string = '';
   @LocalStorageProp('book1Progress') book1Progress: string = '';
+  @LocalStorageProp('book1Tag0') book1Tag0: string = '';
+  @LocalStorageProp('book1Tag1') book1Tag1: string = '';
   @LocalStorageProp('book1Url') book1Url: string = '';
   @LocalStorageProp('book1Cover0') book1Cover0: string = '';
   @LocalStorageProp('book1Cover1') book1Cover1: string = '';
@@ -53,6 +57,8 @@ struct RecentReadCard {
   @LocalStorageProp('book2Name') book2Name: string = '';
   @LocalStorageProp('book2Author') book2Author: string = '';
   @LocalStorageProp('book2Progress') book2Progress: string = '';
+  @LocalStorageProp('book2Tag0') book2Tag0: string = '';
+  @LocalStorageProp('book2Tag1') book2Tag1: string = '';
   @LocalStorageProp('book2Url') book2Url: string = '';
   @LocalStorageProp('book2Cover0') book2Cover0: string = '';
   @LocalStorageProp('book2Cover1') book2Cover1: string = '';
@@ -107,15 +113,15 @@ struct RecentReadCard {
         Row({ space: 10 }) {
           if (this.book0Url) {
             this.bookCover(this.book0Name, this.book0Progress, this.book0Url, 0,
-              this.book0Cover0, this.book0Cover1, this.book0Cover2)
+              this.book0Cover0, this.book0Cover1, this.book0Cover2, this.book0Tag0, this.book0Tag1)
           }
           if (this.book1Url) {
             this.bookCover(this.book1Name, this.book1Progress, this.book1Url, 1,
-              this.book1Cover0, this.book1Cover1, this.book1Cover2)
+              this.book1Cover0, this.book1Cover1, this.book1Cover2, this.book1Tag0, this.book1Tag1)
           }
           if (this.book2Url) {
             this.bookCover(this.book2Name, this.book2Progress, this.book2Url, 2,
-              this.book2Cover0, this.book2Cover1, this.book2Cover2)
+              this.book2Cover0, this.book2Cover1, this.book2Cover2, this.book2Tag0, this.book2Tag1)
           }
         }
         .width('100%')
@@ -132,9 +138,23 @@ struct RecentReadCard {
 
   @Builder
   bookCover(name: string, progress: string, bookUrl: string, index: number,
-    cover0: string, cover1: string, cover2: string) {
+    cover0: string, cover1: string, cover2: string, tag0: string, tag1: string) {
     Stack({ alignContent: Alignment.BottomStart }) {
       this.coverBackground(index, cover0, cover1, cover2)
+
+      if (tag0 || tag1) {
+        Flex({ wrap: FlexWrap.Wrap }) {
+          if (tag0) {
+            this.tagChip(tag0)
+          }
+          if (tag1) {
+            this.tagChip(tag1)
+          }
+        }
+        .width('100%')
+        .padding({ left: 6, right: 6, top: 6 })
+        .align(Alignment.TopStart)
+      }
 
       Column() {
         Text(name || '未命名书籍')
@@ -162,6 +182,19 @@ struct RecentReadCard {
     .onClick(() => {
       postCardAction(this, new CardRouteAction(bookUrl));
     })
+  }
+
+  @Builder
+  tagChip(tag: string) {
+    Text(tag)
+      .fontSize(8)
+      .fontColor('#FFFFFF')
+      .maxLines(1)
+      .textOverflow({ overflow: TextOverflow.Ellipsis })
+      .padding({ left: 5, right: 5, top: 2, bottom: 2 })
+      .borderRadius(5)
+      .backgroundColor('#66000000')
+      .margin({ right: 4, bottom: 3 })
   }
 
   @Builder

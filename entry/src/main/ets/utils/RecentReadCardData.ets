@@ -1,6 +1,8 @@
 import { Context } from '@kit.AbilityKit';
 import { Book } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
+import { CoverGallerySettings } from './CoverGallerySettings';
+import { CoverGalleryStore, CoverGallerySnapshot } from './CoverGalleryStore';
 import { BookDisplayHelper } from './BookDisplayHelper';
 
 export const RECENT_READ_FORM_NAME = 'RecentReadForm';
@@ -15,6 +17,8 @@ export class RecentReadCardData {
   book0Name: string = '';
   book0Author: string = '';
   book0Progress: string = '';
+  book0Tag0: string = '';
+  book0Tag1: string = '';
   book0Url: string = '';
   book0Cover0: string = '';
   book0Cover1: string = '';
@@ -25,6 +29,8 @@ export class RecentReadCardData {
   book1Name: string = '';
   book1Author: string = '';
   book1Progress: string = '';
+  book1Tag0: string = '';
+  book1Tag1: string = '';
   book1Url: string = '';
   book1Cover0: string = '';
   book1Cover1: string = '';
@@ -35,6 +41,8 @@ export class RecentReadCardData {
   book2Name: string = '';
   book2Author: string = '';
   book2Progress: string = '';
+  book2Tag0: string = '';
+  book2Tag1: string = '';
   book2Url: string = '';
   book2Cover0: string = '';
   book2Cover1: string = '';
@@ -58,10 +66,16 @@ export class RecentReadCardDataProvider {
     const db = AppDatabase.getInstance();
     await db.initWithContext(context);
     const books = await db.getAllBooks();
-    return RecentReadCardDataProvider.fromBooks(books.slice(0, 3), dimension, darkMode);
+    let coverSettings = new CoverGallerySnapshot();
+    try {
+      coverSettings = await CoverGalleryStore.load(context);
+    } catch (e) {
+      console.warn('加载卡片封面图集设置失败:', e);
+    }
+    return RecentReadCardDataProvider.fromBooks(books.slice(0, 3), dimension, darkMode, coverSettings);
   }
 
-  private static fromBooks(books: Book[], dimension: number, darkMode: boolean): RecentReadCardData {
+  private static fromBooks(books: Book[], dimension: number, darkMode: boolean, coverSettings: CoverGallerySnapshot): RecentReadCardData {
     const data = new RecentReadCardData();
     data.dimension = dimension;
     data.darkMode = darkMode;
@@ -70,24 +84,27 @@ export class RecentReadCardDataProvider {
     data.updatedAt = RecentReadCardDataProvider.formatTime(Date.now());
 
     if (books.length > 0) {
-      RecentReadCardDataProvider.fillBook(data, 0, books[0]);
+      RecentReadCardDataProvider.fillBook(data, 0, books[0], darkMode, coverSettings);
     }
     if (books.length > 1) {
-      RecentReadCardDataProvider.fillBook(data, 1, books[1]);
+      RecentReadCardDataProvider.fillBook(data, 1, books[1], darkMode, coverSettings);
     }
     if (books.length > 2) {
-      RecentReadCardDataProvider.fillBook(data, 2, books[2]);
+      RecentReadCardDataProvider.fillBook(data, 2, books[2], darkMode, coverSettings);
     }
     return data;
   }
 
-  private static fillBook(data: RecentReadCardData, index: number, book: Book): void {
+  private static fillBook(data: RecentReadCardData, index: number, book: Book, darkMode: boolean, coverSettings: CoverGallerySnapshot): void {
     const progress = RecentReadCardDataProvider.progressText(book);
-    const covers = BookDisplayHelper.getCoverList(book);
+    const tags = RecentReadCardDataProvider.bookTags(book);
+    const covers = RecentReadCardDataProvider.getCoverList(book, darkMode, coverSettings);
     if (index === 0) {
       data.book0Name = book.name || '未命名书籍';
       data.book0Author = book.author || '作者未知';
       data.book0Progress = progress;
+      data.book0Tag0 = tags.length > 0 ? tags[0] : '';
+      data.book0Tag1 = tags.length > 1 ? tags[1] : '';
       data.book0Url = book.bookUrl;
       RecentReadCardDataProvider.fillCovers(data, 0, covers);
       return;
@@ -96,6 +113,8 @@ export class RecentReadCardDataProvider {
       data.book1Name = book.name || '未命名书籍';
       data.book1Author = book.author || '作者未知';
       data.book1Progress = progress;
+      data.book1Tag0 = tags.length > 0 ? tags[0] : '';
+      data.book1Tag1 = tags.length > 1 ? tags[1] : '';
       data.book1Url = book.bookUrl;
       RecentReadCardDataProvider.fillCovers(data, 1, covers);
       return;
@@ -103,6 +122,8 @@ export class RecentReadCardDataProvider {
     data.book2Name = book.name || '未命名书籍';
     data.book2Author = book.author || '作者未知';
     data.book2Progress = progress;
+    data.book2Tag0 = tags.length > 0 ? tags[0] : '';
+    data.book2Tag1 = tags.length > 1 ? tags[1] : '';
     data.book2Url = book.bookUrl;
     RecentReadCardDataProvider.fillCovers(data, 2, covers);
   }
@@ -141,6 +162,20 @@ export class RecentReadCardDataProvider {
     return raw ? `memory://book${bookIndex}Cover${coverIndex}` : '';
   }
 
+  private static getCoverList(book: Book, darkMode: boolean, coverSettings: CoverGallerySnapshot): string[] {
+    return CoverGallerySettings.getDisplayCoverList(
+      book,
+      darkMode,
+      coverSettings.albumsRaw,
+      coverSettings.lightAlbumId,
+      coverSettings.darkAlbumId,
+      coverSettings.applyScope,
+      coverSettings.targetBooksRaw,
+      coverSettings.ignoreSourceCover,
+      coverSettings.coverMode
+    );
+  }
+
   private static progressText(book: Book): string {
     if (book.durChapterTitle) {
       return book.durChapterTitle;
@@ -149,6 +184,11 @@ export class RecentReadCardDataProvider {
       return `第${book.durChapterIndex + 1}/${book.totalChapterNum}章`;
     }
     return '继续阅读';
+  }
+
+  private static bookTags(book: Book): string[] {
+    const tags = BookDisplayHelper.getBookTags(book);
+    return tags.slice(0, 2);
   }
 
   private static formatTime(time: number): string {

@@ -4,12 +4,22 @@ import { HttpClient } from '../http/HttpClient';
 import { AnalyzeUrl } from '../rule/AnalyzeUrl';
 import { AnalyzeRule } from '../rule/AnalyzeRule';
 import { JsRuntime } from '../rule/JsRuntime';
+import { VerificationSupport } from '../http/VerificationSupport';
+import { EncodedSourceUrl } from './EncodedSourceUrl';
+import { BookSourceDataUrlSupport } from './BookSourceDataUrlSupport';
+import { BookUrlResolver } from './BookUrlResolver';
 
 export interface ExploreEntry {
   title: string;
   url: string;
   sourceUrl: string;
   sourceName: string;
+}
+
+export interface ExploreSourceOption {
+  sourceName: string;
+  sourceUrl: string;
+  platforms: string[];
 }
 
 interface ExploreUrlItem {
@@ -20,11 +30,40 @@ interface ExploreUrlItem {
 export class ExploreCoordinator {
   private http: HttpClient = new HttpClient(10000);
 
-  async getEntries(): Promise<ExploreEntry[]> {
+  async getExploreSources(): Promise<ExploreSourceOption[]> {
+    const sources = await appDb.getEnabledBookSources();
+    const options: ExploreSourceOption[] = [];
+    for (const source of sources) {
+      if (!source.enabledExplore || !source.exploreUrl) continue;
+      options.push({
+        sourceName: source.bookSourceName,
+        sourceUrl: source.bookSourceUrl,
+        platforms: BookSourceDataUrlSupport.sourceUsesGyExplore(source) ?
+          await BookSourceDataUrlSupport.getExplorePlatforms(this.http, source) :
+          []
+      });
+    }
+    return options;
+  }
+
+  async getEntries(platform: string = '番茄', sourceUrl: string = ''): Promise<ExploreEntry[]> {
     const sources = await appDb.getEnabledBookSources();
     const entries: ExploreEntry[] = [];
     for (const source of sources) {
       if (!source.enabledExplore || !source.exploreUrl) continue;
+      if (sourceUrl && source.bookSourceUrl !== sourceUrl) continue;
+      if (BookSourceDataUrlSupport.sourceUsesGyExplore(source)) {
+        const dataUrlEntries = await BookSourceDataUrlSupport.getExploreEntries(this.http, platform);
+        for (const item of dataUrlEntries) {
+          entries.push({
+            title: item.title,
+            url: item.url,
+            sourceUrl: source.bookSourceUrl,
+            sourceName: source.bookSourceName
+          });
+        }
+        continue;
+      }
       if (!source.exploreRule?.bookList || !source.exploreRule?.name || !source.exploreRule?.bookUrl) {
         console.warn('[ExploreCoordinator] skip source without explore rules:', source.bookSourceName);
         continue;
@@ -39,33 +78,45 @@ export class ExploreCoordinator {
     const source = await appDb.getBookSource(entry.sourceUrl);
     if (!source) return [];
     try {
+      VerificationSupport.clearVerification();
+      if (BookSourceDataUrlSupport.sourceUsesGyExplore(source)) {
+        return await BookSourceDataUrlSupport.explore(this.http, source, entry.url, page);
+      }
       const au = new AnalyzeUrl(source, this.http);
-      const reqUrl = this.buildUrl(entry.url, page);
+      const reqUrl = this.buildUrl(source, entry.url, page);
       console.info('[ExploreCoordinator] explore:', `${entry.sourceName}/${entry.title}`, reqUrl);
-      const resp = await au.fetch(reqUrl);
+      const resp = EncodedSourceUrl.canHandle(reqUrl) ?
+        await this.fetchEncodedDataUrl(reqUrl) : await au.fetch(reqUrl);
       console.info('[ExploreCoordinator] response:', resp.statusCode, 'len:', resp.body?.length || 0, 'url:', resp.url);
+      if (VerificationSupport.shouldRequestBrowserVerification(source, resp.body, resp.statusCode, entry.url)) {
+        const verifyUrl = VerificationSupport.pickVerificationUrl(source, reqUrl, entry.url);
+        VerificationSupport.requestVerification(verifyUrl, `${source.bookSourceName} 验证`);
+        console.warn('[ExploreCoordinator] source needs browser verification:', source.bookSourceName, verifyUrl);
+        return [];
+      }
       if (!resp.success || !resp.body) {
         console.warn('[ExploreCoordinator] empty response:', resp.statusCode, resp.error || '');
         return [];
       }
 
-      const rule = new AnalyzeRule(resp.body, source.bookSourceUrl);
+      const baseUrl = BookUrlResolver.effectiveBase(resp, reqUrl, source.bookSourceUrl);
+      const rule = new AnalyzeRule(resp.body, baseUrl);
       const exploreRule = source.exploreRule;
       const items = rule.getElements(exploreRule.bookList || '');
       console.info('[ExploreCoordinator] parsed list:', source.bookSourceName, 'rule:', exploreRule.bookList, 'count:', items.length);
       const books: SearchBook[] = [];
 
       for (const item of items) {
-        const ir = new AnalyzeRule(item, source.bookSourceUrl);
+        const ir = new AnalyzeRule(item, baseUrl);
         const book = new SearchBook();
         book.name = ir.analyzeFirst(exploreRule.name) || '';
         book.author = ir.analyzeFirst(exploreRule.author) || '';
-        book.coverUrl = ir.analyzeFirst(exploreRule.coverUrl) || '';
+        book.coverUrl = BookSourceDataUrlSupport.normalizeCoverUrl(source, ir.analyzeFirst(exploreRule.coverUrl), baseUrl);
         book.intro = ir.analyzeFirst(exploreRule.intro) || '';
         book.kind = ir.analyzeFirst(exploreRule.kind) || '';
         book.latestChapterTitle = ir.analyzeFirst(exploreRule.lastChapter) || '';
         book.wordCount = ir.analyzeFirst(exploreRule.wordCount) || '';
-        book.bookUrl = this.resolve(ir.analyzeFirst(exploreRule.bookUrl), source.bookSourceUrl);
+        book.bookUrl = BookUrlResolver.resolve(ir.analyzeFirst(exploreRule.bookUrl), baseUrl);
         book.origin = source.bookSourceUrl;
         book.originName = source.bookSourceName;
 
@@ -131,20 +182,20 @@ export class ExploreCoordinator {
     return entries;
   }
 
-  private buildUrl(url: string, page: number): string {
+  private buildUrl(source: BookSource, url: string, page: number): string {
+    const built = BookSourceDataUrlSupport.buildRequestUrl(source, url, String(page));
+    if (built) return built;
     const js = new JsRuntime();
     js.setVar('page', String(page));
     js.setVar('pageIndex', String(page));
     return js.evalTemplate(url).replace(/\{\{[^}]+\}\}/g, String(page));
   }
 
-  private resolve(url: string, base: string): string {
-    if (!url || url.startsWith('http')) return url;
-    if (url.startsWith('/')) {
-      const m = base.match(/^(https?:\/\/[^/]+)/);
-      return m ? m[0] + url : base + url;
+  private async fetchEncodedDataUrl(url: string): Promise<{ url: string, statusCode: number, headers: Record<string, string>, body: string, success: boolean, error?: string }> {
+    const root = await EncodedSourceUrl.requestJsonForDataUrl(this.http, url);
+    if (!root) {
+      return { url: url, statusCode: 0, headers: {}, body: '', success: false, error: 'encoded data url request failed' };
     }
-    const b = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
-    return b + '/' + url;
+    return { url: url, statusCode: 200, headers: {}, body: JSON.stringify(root), success: true };
   }
 }

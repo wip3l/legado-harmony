@@ -1,4 +1,5 @@
 import http from '@ohos.net.http';
+import { util } from '@kit.ArkTS';
 import { CookieStore } from './CookieStore';
 
 export interface HttpRequest {
@@ -65,8 +66,8 @@ export class HttpClient {
         url: req.url,
         statusCode: resp.responseCode,
         headers: responseHeaders,
-        body: typeof resp.result === 'string' ? resp.result as string : String(resp.result || ''),
-        success: resp.responseCode >= 200 && resp.responseCode < 400
+        body: this.decodeBody(resp.result, req.charset),
+        success: resp.responseCode >= 200 && resp.responseCode < 300
       };
     } catch (e) {
       return {
@@ -98,5 +99,17 @@ export class HttpClient {
       if (key.toLowerCase() === lower) return String(headers[key] || '');
     }
     return '';
+  }
+
+  private decodeBody(result: string | Object, charset?: string): string {
+    if (typeof result === 'string') return result as string;
+    if (result instanceof ArrayBuffer) {
+      try {
+        return util.TextDecoder.create(charset || 'utf-8').decodeWithStream(new Uint8Array(result as ArrayBuffer), { stream: false });
+      } catch (_) {
+        return String(result || '');
+      }
+    }
+    return String(result || '');
   }
 }

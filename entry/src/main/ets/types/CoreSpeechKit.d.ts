@@ -1,29 +1,30 @@
 declare module '@kit.CoreSpeechKit' {
   export namespace textToSpeech {
-    export type ExtraParamValue = string | number | boolean;
-    export interface ExtraParams {
-      [key: string]: ExtraParamValue;
-    }
-
     export interface CreateEngineParams {
       language: string;
       person: number;
       online: number;
-      extraParams?: ExtraParams;
+      extraParams?: Record<string, Object>;
     }
 
     export interface SpeakParams {
       requestId: string;
-      extraParams?: ExtraParams;
+      extraParams?: Record<string, Object>;
     }
 
     export interface VoiceQuery {
       requestId: string;
       online: number;
+      extraParams?: Record<string, Object>;
     }
 
     export interface VoiceInfo {
-      [key: string]: Object;
+      language: string;
+      person: number;
+      style: string;
+      gender: string;
+      description: string;
+      status?: string;
     }
 
     export interface StartResponse {

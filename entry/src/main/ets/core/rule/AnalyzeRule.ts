@@ -1,6 +1,7 @@
 import { JsRuntime } from './JsRuntime';
 import { RuleContext } from './RuleContext';
 import { VerificationSupport } from '../http/VerificationSupport';
+import { EncodedJsonMap, EncodedSourceUrl } from '../book/EncodedSourceUrl';
 
 export class AnalyzeRule {
   private content: string = '';
@@ -19,6 +20,7 @@ export class AnalyzeRule {
   setBaseUrl(u: string): AnalyzeRule { this.baseUrl = u; return this; }
   setContext(ctx: RuleContext): AnalyzeRule { this.ctx = ctx; return this; }
   getContext(): RuleContext { return this.ctx; }
+  setJsVar(k: string, v: string): AnalyzeRule { this.js.setVar(k, v); return this; }
 
   // === 主入口 ===
 
@@ -46,6 +48,10 @@ export class AnalyzeRule {
     rule = this.applyJsBlocks(rule);
     const effective = this.stripProcessor(rule);
     if (!effective) return [];
+
+    if (effective.startsWith('@json:')) {
+      return this.jsonPathToStrings(effective.substring(6).trim());
+    }
 
     if (effective.includes('||')) {
       const parts = effective.split('||').map(part => part.trim()).filter(part => part.length > 0);
@@ -109,6 +115,11 @@ export class AnalyzeRule {
 
   analyzeFirst(rule: string): string {
     if (!rule) return '';
+    const originalRule = rule;
+    const pureJs = rule.match(/^\s*<js>([\s\S]*?)<\/js>\s*$/i);
+    if (pureJs) {
+      return this.evalResultJs(pureJs[1], this.content);
+    }
     rule = this.applyJsBlocks(rule);
 
     // 处理 @put:{key:value} - 存储变量（value 为 JSONPath 或字段名）
@@ -154,8 +165,13 @@ export class AnalyzeRule {
       return this.evalJsTemplate(rule.substring(4), this.content);
     }
 
+    if (rule.startsWith('@json:')) {
+      const values = this.jsonPathToStrings(rule.substring(6).trim());
+      return values.length > 0 ? values[0] : '';
+    }
+
     const a = this.analyze(rule);
-    return a.length > 0 ? this.applyProcessor(a[0], rule) : '';
+    return a.length > 0 ? this.applyProcessor(a[0], originalRule) : '';
   }
 
   private handlePrefixAes(aesArgs: string, sourceJson: string): string {
@@ -178,6 +194,8 @@ export class AnalyzeRule {
   private evalJsTemplate(expr: string, sourceJson: string): string {
     if (!expr) return '';
     expr = expr.trim();
+    const encodedDataUrl = this.evalEncodedDataUrlJs(expr, sourceJson);
+    if (encodedDataUrl) return encodedDataUrl;
     if (expr.includes('startBrowserAwait') || expr.includes('getVerificationCode')) {
       const verifyUrl = VerificationSupport.pickStartBrowserUrl(expr) || this.baseUrl;
       VerificationSupport.requestVerification(verifyUrl, '网页验证');
@@ -233,6 +251,109 @@ export class AnalyzeRule {
 
     // 第二步：清理 + 号和引号及 {{}} 模板括号，保留有效字符
     return expr.replace(/\s*\+\s*/g, '').replace(/['"]/g, '').replace(/\{\{|\}\}/g, '').trim();
+  }
+
+  private evalEncodedDataUrlJs(expr: string, sourceJson: string): string {
+    const typeMatch = expr.match(/type\s*:\s*["']([^"']+)["']|["']type["']\s*:\s*["']([^"']+)["']/);
+    if (!typeMatch || !expr.includes('data:;base64')) return '';
+    const type = typeMatch[1] || typeMatch[2] || '';
+    if (type === 'mybxs' || type === 'mybxc') {
+      const raw = this.evalRawEncodedValue(expr, sourceJson);
+      return raw ? EncodedSourceUrl.encodeRaw(raw, type) : '';
+    }
+    const data = EncodedSourceUrl.asMap(this.parseContentObject());
+    const resultData = this.parseJsonSafe(sourceJson);
+    const output: EncodedJsonMap = {};
+
+    if (type === 'gysearch') {
+      output['key'] = this.ctx.get('key') || this.js.getVar('key');
+      output['tab'] = this.extractLiteralAssignment(expr, 'tab') || '小说';
+      output['sourcesKey'] = this.extractLiteralAssignment(expr, 'sourcesKey') || '全部';
+      output['page'] = this.ctx.get('page') || this.js.getVar('page') || '1';
+      output['disabled_sources'] = this.extractLiteralAssignment(expr, 'disabled_sources') || '0';
+      return EncodedSourceUrl.encode(output, type);
+    }
+
+    const record = Object.keys(data).length > 0 ? data : resultData;
+    const bookId = this.pickValue(record, ['book_id', 'bookId']);
+    const source = this.pickValue(record, ['source', 'sources']);
+    const tab = this.pickValue(record, ['tab']) || '小说';
+    const tocUrl = this.pickValue(record, ['toc_url', 'tocUrl', 'url']);
+    if (bookId) output['book_id'] = bookId;
+    if (!output['book_id'] && this.ctx.get('book_id')) output['book_id'] = this.ctx.get('book_id');
+    if (source) {
+      output['source'] = source;
+      output['sources'] = source;
+    }
+    output['tab'] = tab;
+    if (tocUrl) {
+      output['url'] = tocUrl;
+      output['toc_url'] = tocUrl;
+    }
+
+    if (type === 'gycontent' || type === 'qingtian3') {
+      const itemId = this.pickValue(record, ['item_id', 'itemId']);
+      const title = this.pickValue(record, ['title']);
+      if (itemId) output['item_id'] = itemId;
+      if (title) output['title'] = title;
+      const ctxBookId = this.ctx.get('book_id');
+      if (!output['book_id'] && ctxBookId) output['book_id'] = ctxBookId;
+    } else if (type === 'gycatalog' || type === 'qingtian2') {
+      output['book_name'] = this.pickValue(record, ['book_name']);
+      output['author'] = this.pickValue(record, ['author']);
+      output['abstract'] = this.pickValue(record, ['abstract']);
+      output['thumb_url'] = this.pickValue(record, ['thumb_url']);
+    }
+    return EncodedSourceUrl.encode(output, type);
+  }
+
+  private evalRawEncodedValue(expr: string, sourceJson: string): string {
+    const vars: Record<string, string> = { result: sourceJson };
+    const matchAssignRe = /\b(?:var|let|const)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*result\.match\((\/[\s\S]*?\/[gimsuy]*)\)\s*\[\s*(\d+)\s*\]\s*;?/g;
+    let matchAssign: RegExpExecArray | null;
+    while ((matchAssign = matchAssignRe.exec(expr)) !== null) {
+      const re = this.parseJsRegex(matchAssign[2]);
+      const idx = parseInt(matchAssign[3]);
+      if (re) {
+        const matched = sourceJson.match(re);
+        vars[matchAssign[1]] = matched && matched[idx] !== undefined ? matched[idx] : '';
+      }
+    }
+    const directMatch = expr.match(/java\.base64Encode\(\s*([A-Za-z_][A-Za-z0-9_]*|result)\s*\)/);
+    if (directMatch) return vars[directMatch[1]] || '';
+    return sourceJson;
+  }
+
+  private jsonPathToStrings(rule: string): string[] {
+    if (!rule) return [];
+    const jsonV = this.evalJsonPath(rule);
+    if (Array.isArray(jsonV)) return (jsonV as Object[]).map(v => typeof v === 'string' ? v as string : JSON.stringify(v));
+    if (jsonV !== undefined && jsonV !== null) {
+      return [typeof jsonV === 'string' ? jsonV as string : JSON.stringify(jsonV)];
+    }
+    return [];
+  }
+
+  private parseJsonSafe(text: string): EncodedJsonMap {
+    try {
+      return EncodedSourceUrl.asMap(JSON.parse(text || '{}') as Object);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  private pickValue(data: EncodedJsonMap, keys: string[]): string {
+    for (const key of keys) {
+      const value = data[key];
+      if (value !== undefined && value !== null) return String(value);
+    }
+    return '';
+  }
+
+  private extractLiteralAssignment(expr: string, name: string): string {
+    const re = new RegExp(`\\b${name}\\s*=\\s*["']([^"']+)["']`);
+    const m = expr.match(re);
+    return m ? m[1] : '';
   }
 
   private evalBaseUrlReplace(expr: string): string {
@@ -413,6 +534,8 @@ export class AnalyzeRule {
   private applyJsBlocks(rule: string): string {
     if (!rule || !rule.includes('<js>')) return rule;
     return rule.replace(/<js>([\s\S]*?)<\/js>/gi, (_: string, code: string) => {
+      const encodedUrl = this.evalEncodedDataUrlJs(code, this.content);
+      if (encodedUrl) return encodedUrl;
       const result = this.evalJsBlockSideEffects(code);
       if (result) this.ctx.put('result', result);
       return '';
@@ -422,6 +545,7 @@ export class AnalyzeRule {
   private evalJsBlockSideEffects(code: string): string {
     if (!code) return '';
     let lastValue = '';
+    this.applySimpleAssignmentsToContext(code);
     const putRe = /java\.put\(\s*([^,]+)\s*,\s*([^)]+(?:\)[^,;]*)?)\s*\)/g;
     let putMatch: RegExpExecArray | null;
     while ((putMatch = putRe.exec(code)) !== null) {
@@ -441,6 +565,26 @@ export class AnalyzeRule {
     return lastValue;
   }
 
+  private applySimpleAssignmentsToContext(code: string): void {
+    const data = EncodedSourceUrl.asMap(this.parseContentObject());
+    const assignRe = /\b(?:let|var|const)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*result\.([A-Za-z_][A-Za-z0-9_]*)\s*;/g;
+    let assignMatch: RegExpExecArray | null;
+    while ((assignMatch = assignRe.exec(code)) !== null) {
+      const value = data[assignMatch[2]];
+      if (value !== undefined && value !== null) this.ctx.put(assignMatch[1], String(value));
+    }
+    const destructMatch = code.match(/\{([^}]+)\}\s*=\s*result/);
+    if (destructMatch) {
+      const names = destructMatch[1].split(',').map(item => item.trim()).filter(item => item.length > 0);
+      for (const name of names) {
+        const key = name.includes(':') ? name.split(':')[0].trim() : name;
+        const alias = name.includes(':') ? name.split(':')[1].trim() : name;
+        const value = data[key];
+        if (value !== undefined && value !== null) this.ctx.put(alias, String(value));
+      }
+    }
+  }
+
   private evalJsValue(expr: string): string {
     if (!expr) return '';
     let text = expr.trim();
@@ -452,7 +596,7 @@ export class AnalyzeRule {
       return v === undefined || v === null ? '' : String(v);
     });
     text = text.replace(/\$\.(\w+)/g, (_: string, key: string) => {
-      const data = this.parseContentObject() as Record<string, Object>;
+      const data = EncodedSourceUrl.asMap(this.parseContentObject());
       const v = data ? data[key] : undefined;
       return v === undefined || v === null ? '' : String(v);
     });
@@ -663,6 +807,7 @@ export class AnalyzeRule {
         const attrText = m[2] || '';
         if (!this.matchSelectorAttrs(attrText, parsed.id, parsed.classes, parsed.attrs)) continue;
         if (this.matchExcludedAttrs(attrText, parsed.notAttrs)) continue;
+        if (!this.matchNthPseudo(html, m.index, m[1], parsed.nthChild, parsed.nthOfType)) continue;
         res.push(this.sliceWholeElement(html, m.index, fullStartTag, m[1]));
         if (res.length > 5000) break;
       }
@@ -737,6 +882,8 @@ export class AnalyzeRule {
     classes: string[],
     attrs: Array<Record<string, string>>,
     notAttrs: Array<Record<string, string>>,
+    nthChild: number | null,
+    nthOfType: number | null,
     indexStart: number | null,
     indexEnd: number | null,
     excludeIndex: number | null
@@ -746,6 +893,16 @@ export class AnalyzeRule {
     s = s.replace(/:not\(\[([^\]]+)\]\)/g, (_: string, body: string) => {
       const m = body.match(/^([A-Za-z_:][\w:.-]*)([$~^*|]?=)?["']?([^"']*)["']?$/);
       if (m) notAttrs.push({ name: m[1], op: m[2] || '', value: m[3] || '' });
+      return '';
+    });
+    let nthChild: number | null = null;
+    let nthOfType: number | null = null;
+    s = s.replace(/:nth-child\(\s*(\d+)\s*\)/gi, (_: string, index: string) => {
+      nthChild = parseInt(index);
+      return '';
+    });
+    s = s.replace(/:nth-of-type\(\s*(\d+)\s*\)/gi, (_: string, index: string) => {
+      nthOfType = parseInt(index);
       return '';
     });
     let excludeIndex: number | null = null;
@@ -791,7 +948,7 @@ export class AnalyzeRule {
       if (ch === '#') id = value;
       i = j;
     }
-    return { tag, id, classes, attrs, notAttrs, indexStart, indexEnd, excludeIndex };
+    return { tag, id, classes, attrs, notAttrs, nthChild, nthOfType, indexStart, indexEnd, excludeIndex };
   }
 
   private matchSelectorAttrs(attrText: string, id: string, classes: string[], attrs: Array<Record<string, string>>): boolean {
@@ -833,6 +990,51 @@ export class AnalyzeRule {
       }
     }
     return false;
+  }
+
+  private matchNthPseudo(html: string, startIndex: number, tag: string, nthChild: number | null, nthOfType: number | null): boolean {
+    if (nthChild === null && nthOfType === null) return true;
+    const pos = this.directChildPosition(html, startIndex, tag);
+    if (nthChild !== null && pos.child !== nthChild) return false;
+    if (nthOfType !== null && pos.type !== nthOfType) return false;
+    return true;
+  }
+
+  private directChildPosition(html: string, targetIndex: number, targetTag: string): { child: number, type: number } {
+    const stack: Array<{ tag: string, childCount: number, typeCounts: Record<string, number> }> = [];
+    const re = /<\/?([a-zA-Z][a-zA-Z0-9_-]*)(?:\s[^>]*)?>/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) {
+      if (m.index > targetIndex) break;
+      const raw = m[0];
+      const tag = m[1].toLowerCase();
+      if (raw.startsWith('</')) {
+        for (let i = stack.length - 1; i >= 0; i--) {
+          if (String(stack[i]['tag']) === tag) {
+            stack.splice(i);
+            break;
+          }
+        }
+        continue;
+      }
+
+      let childIndex = 1;
+      let typeIndex = 1;
+      if (stack.length > 0) {
+        const parent = stack[stack.length - 1];
+        childIndex = parent.childCount + 1;
+        parent.childCount = childIndex;
+        typeIndex = (parent.typeCounts[tag] || 0) + 1;
+        parent.typeCounts[tag] = typeIndex;
+      }
+      if (m.index === targetIndex) {
+        return { child: childIndex, type: targetTag.toLowerCase() === tag ? typeIndex : 0 };
+      }
+      if (!raw.endsWith('/>') && !this.isVoidTag(tag)) {
+        stack.push({ tag: tag, childCount: 0, typeCounts: {} as Record<string, number> });
+      }
+    }
+    return { child: 0, type: 0 };
   }
 
   private getHtmlAttr(attrText: string, attr: string): string {
@@ -938,6 +1140,10 @@ export class AnalyzeRule {
 
   private evalResultJs(jsCode: string, value: string): string {
     if (!jsCode) return value;
+    const encodedDataUrl = this.evalEncodedDataUrlJs(jsCode, value);
+    if (encodedDataUrl) return encodedDataUrl;
+    const legacyValue = this.evalCommonLegacyJs(jsCode, value);
+    if (legacyValue) return legacyValue;
     const putMatch = jsCode.match(/java\.put\(\s*['"]([^'"]+)['"]\s*,\s*result\s*\)/);
     if (putMatch) {
       this.ctx.put(putMatch[1], value);
@@ -973,6 +1179,95 @@ export class AnalyzeRule {
     if (jsCode.includes('java.t2s')) return value;
     if (/book\.origin\s*\+\s*result/.test(jsCode)) return this.resolveUrl(value);
     return value;
+  }
+
+  private evalCommonLegacyJs(jsCode: string, value: string): string {
+    const vars: Record<string, string> = { result: value };
+    const matchAssignRe = /\b(?:var|let|const)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*result\.match\((\/[\s\S]*?\/[gimsuy]*)\)\s*\[\s*(\d+)\s*\]\s*;?/g;
+    let matchAssign: RegExpExecArray | null;
+    while ((matchAssign = matchAssignRe.exec(jsCode)) !== null) {
+      const re = this.parseJsRegex(matchAssign[2]);
+      const idx = parseInt(matchAssign[3]);
+      if (re) {
+        const m = value.match(re);
+        vars[matchAssign[1]] = m && m[idx] !== undefined ? m[idx] : '';
+      }
+    }
+
+    const parseIntRe = /\b(?:var|let|const)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*parseInt\(\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*\/\s*(\d+)\s*\)\s*;?/g;
+    let parseIntAssign: RegExpExecArray | null;
+    while ((parseIntAssign = parseIntRe.exec(jsCode)) !== null) {
+      const left = parseIntAssign[2];
+      const raw = /^[0-9]+$/.test(left) ? left : (vars[left] || '');
+      const divisor = parseInt(parseIntAssign[3]);
+      const num = parseInt(raw);
+      vars[parseIntAssign[1]] = divisor > 0 && !isNaN(num) ? String(Math.floor(num / divisor)) : '';
+    }
+
+    const expr = this.extractLastJsExpression(jsCode);
+    if (!expr) return '';
+    return this.evalSimpleConcatExpression(expr, vars);
+  }
+
+  private extractLastJsExpression(jsCode: string): string {
+    const trimmed = jsCode.trim();
+    const returnMatch = trimmed.match(/return\s+([\s\S]*?);?\s*$/);
+    if (returnMatch) return returnMatch[1].trim();
+
+    const parts = trimmed
+      .split(';')
+      .map(part => part.trim())
+      .filter(part => part.length > 0);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const part = parts[i];
+      if (!part.startsWith('var ') && !part.startsWith('let ') && !part.startsWith('const ')) {
+        return part;
+      }
+    }
+    return '';
+  }
+
+  private evalSimpleConcatExpression(expr: string, vars: Record<string, string>): string {
+    const parts = this.splitJsConcat(expr);
+    if (parts.length === 0) return '';
+    let out = '';
+    for (const part of parts) {
+      const token = part.trim();
+      if (!token) continue;
+      if ((token.startsWith("'") && token.endsWith("'")) || (token.startsWith('"') && token.endsWith('"'))) {
+        out += token.substring(1, token.length - 1);
+      } else if (vars[token] !== undefined) {
+        out += vars[token];
+      } else if (/^\d+$/.test(token)) {
+        out += token;
+      } else {
+        return '';
+      }
+    }
+    return out;
+  }
+
+  private splitJsConcat(expr: string): string[] {
+    const parts: string[] = [];
+    let quote = '';
+    let start = 0;
+    for (let i = 0; i < expr.length; i++) {
+      const ch = expr.charAt(i);
+      if (quote) {
+        if (ch === quote && expr.charAt(i - 1) !== '\\') quote = '';
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      if (ch === '+') {
+        parts.push(expr.substring(start, i));
+        start = i + 1;
+      }
+    }
+    parts.push(expr.substring(start));
+    return parts;
   }
 
   private parseJsRegex(literal: string): RegExp | null {
@@ -1033,6 +1328,12 @@ export class AnalyzeRule {
 
   private applyProcessor(value: string, rule: string): string {
     if (!value || !rule) return value;
+
+    const jsBlock = rule.match(/<js>([\s\S]*?)<\/js>/i);
+    if (jsBlock) {
+      const jsValue = this.evalResultJs(jsBlock[1], value);
+      if (jsValue) value = jsValue;
+    }
 
     // 处理 @js: 后缀（AES解密等）
     const jsSuffix = rule.match(/@js:(.+)$/);

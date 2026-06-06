@@ -804,6 +804,7 @@ struct BookSourcePage {
     source.bookUrlPattern = obj['bookUrlPattern'] as string || '';
     source.searchUrl = obj['searchUrl'] as string || '';
     source.exploreUrl = obj['exploreUrl'] as string || '';
+    source.jsLib = obj['jsLib'] as string || '';
     source.header = obj['header'] as string || '';
     source.enabled = obj['enabled'] !== false;
     source.enabledExplore = obj['enabledExplore'] !== false;

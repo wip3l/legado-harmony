@@ -78,6 +78,9 @@ struct AboutPage {
           this.infoCard('开源许可',
             '本项目采用 GPL-3.0 许可证。使用、修改和分发时请遵守对应开源协议。')
 
+          this.infoCard('致谢',
+            '感谢原始用户 @南破万卷墙 为App开发提出的建议。')
+
           Column() {
             Text('请仅使用自有、授权或明确允许访问的内容与规则。')
               .fontSize(12)

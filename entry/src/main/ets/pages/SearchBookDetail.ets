@@ -46,6 +46,7 @@ struct SearchBookDetailPage {
 
   onPageShow(): void {
     this.syncBars();
+    this.checkShelf();
   }
 
   build() {
@@ -288,6 +289,7 @@ struct SearchBookDetailPage {
       await db.insertBook(book);
 
       this.isInShelf = true;
+      this.isSaving = false;
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       promptAction.showToast({ message: '已加入书架' });
       return true;

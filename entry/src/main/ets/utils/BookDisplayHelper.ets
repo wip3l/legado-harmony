@@ -52,6 +52,10 @@ export class BookDisplayHelper {
     return visible;
   }
 
+  static getLastUpdateText(book: Book): string {
+    return BookDisplayHelper.extractLastUpdateText(book.kind);
+  }
+
   static getCover(book: Book): string {
     const covers = BookDisplayHelper.getCoverList(book);
     if (covers.length > 0) {
@@ -127,7 +131,12 @@ export class BookDisplayHelper {
   }
 
   private static appendTags(target: string[], raw: string): void {
-    const normalized = raw.replace(/[|/;；、，]/g, ',');
+    const normalized = BookDisplayHelper.removeUpdateText(raw)
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/[|/;；、，,·•●▪]+/g, ',')
+      .replace(/\s*[:：]\s*/g, ',')
+      .replace(/\s+/g, ',');
     const pieces = normalized.split(',');
     for (const piece of pieces) {
       const tag = piece.trim();
@@ -135,6 +144,27 @@ export class BookDisplayHelper {
         target.push(tag);
       }
     }
+  }
+
+  private static extractLastUpdateText(raw: string): string {
+    const value = raw || '';
+    const labelledMatch = value.match(/(?:最后更新|更新时间|更新于|更新)\s*[:：]?\s*(\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}(?:日)?(?:\s+\d{1,2}[:：]\d{1,2}(?:[:：]\d{1,2})?)?)/);
+    const dateTimeMatch = labelledMatch ? labelledMatch : value.match(/\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}(?:日)?(?:\s+\d{1,2}[:：]\d{1,2}(?:[:：]\d{1,2})?)?/);
+    if (dateTimeMatch) {
+      const matchText = labelledMatch ? dateTimeMatch[1] : dateTimeMatch[0];
+      return matchText.replace(/[年月]/g, '-').replace(/日/g, '').replace(/：/g, ':').trim();
+    }
+    const relativeMatch = value.match(/(?:刚刚|\d+\s*(?:秒|分钟|小时|天|周|月|年)前|昨日|昨天|今天|前天)/);
+    return relativeMatch ? relativeMatch[0].replace(/\s+/g, '') : '';
+  }
+
+  private static removeUpdateText(raw: string): string {
+    return (raw || '')
+      .replace(/(?:最后更新|更新时间|更新于|更新)\s*[:：]?\s*\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}(?:日)?(?:\s+\d{1,2}[:：]\d{1,2}(?:[:：]\d{1,2})?)?/g, ' ')
+      .replace(/(?:最后更新|更新时间|更新于|更新)\s*[:：]?\s*(?:刚刚|\d+\s*(?:秒|分钟|小时|天|周|月|年)前|昨日|昨天|今天|前天)/g, ' ')
+      .replace(/\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}(?:日)?(?:\s+\d{1,2}[:：]\d{1,2}(?:[:：]\d{1,2})?)?/g, ' ')
+      .replace(/\b\d{1,2}[:：]\d{1,2}(?:[:：]\d{1,2})?\b/g, ' ')
+      .replace(/(?:刚刚|\d+\s*(?:秒|分钟|小时|天|周|月|年)前|昨日|昨天|今天|前天)/g, ' ');
   }
 
   private static cleanCoverList(covers: string[]): string[] {

@@ -2,6 +2,8 @@ import { AbilityConstant, UIAbility, Want, Configuration, ConfigurationConstant 
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { RecentReadShortcut, RECENT_READ_SHORTCUT_ACTION, OPEN_BOOK_SHORTCUT_ACTION } from '../utils/RecentReadShortcut';
+import { CoverGalleryStore } from '../utils/CoverGalleryStore';
+import { BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettingsStore';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -19,6 +21,46 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate('navBarHeight', 0);
     }
     PersistentStorage.persistProp('bookshelfSortMode', 'recentRead');
+    PersistentStorage.persistProp('ttsPerson', 0);
+    PersistentStorage.persistProp('ttsOnline', 0);
+    PersistentStorage.persistProp('ttsStyle', '');
+    PersistentStorage.persistProp('ttsLanguage', 'zh-CN');
+    PersistentStorage.persistProp('ttsSpeed', 1);
+    PersistentStorage.persistProp('ttsOnlineSdkModeMigrated', false);
+    if (!AppStorage.get<boolean>('ttsOnlineSdkModeMigrated')) {
+      if (AppStorage.get<number>('ttsOnline') === 1) {
+        AppStorage.setOrCreate('ttsOnline', 0);
+      }
+      AppStorage.setOrCreate('ttsOnlineSdkModeMigrated', true);
+    }
+    PersistentStorage.persistProp('readerFontFamily', '');
+    PersistentStorage.persistProp('readerFontFilePath', '');
+    PersistentStorage.persistProp('readerFontSourceName', '系统默认');
+    PersistentStorage.persistProp('readerFontMode', 'system');
+    PersistentStorage.persistProp('readerSystemFontFamily', '');
+    PersistentStorage.persistProp('readerCustomFontsRaw', '');
+    PersistentStorage.persistProp('bookshelfShowTags', true);
+    PersistentStorage.persistProp('bookshelfShowIntro', true);
+    PersistentStorage.persistProp('bookshelfShowFullIntro', false);
+    PersistentStorage.persistProp('bookshelfCoverAlbums', '');
+    PersistentStorage.persistProp('bookshelfLightCoverAlbumId', '');
+    PersistentStorage.persistProp('bookshelfDarkCoverAlbumId', '');
+    PersistentStorage.persistProp('bookshelfCoverApplyScope', 'all');
+    PersistentStorage.persistProp('bookshelfCoverTargetBooks', '');
+    PersistentStorage.persistProp('bookshelfIgnoreSourceCover', false);
+    PersistentStorage.persistProp('bookshelfCoverMode', 'sequence');
+    PersistentStorage.persistProp('explorePlatform', '番茄');
+    CoverGalleryStore.load(this.context).then((snapshot) => {
+      CoverGalleryStore.applyToStorage(snapshot);
+      return CoverGalleryStore.save(this.context, snapshot);
+    }).catch((e: Error) => {
+      hilog.warn(0x0000, 'testTag', 'Sync cover gallery settings failed: %{public}s', JSON.stringify(e));
+    });
+    BookshelfDisplaySettingsStore.load(this.context).then((settings) => {
+      BookshelfDisplaySettingsStore.applyToStorage(settings);
+    }).catch((e: Error) => {
+      hilog.warn(0x0000, 'testTag', 'Sync bookshelf display settings failed: %{public}s', JSON.stringify(e));
+    });
     this.handleLaunchWant(want);
   }
 

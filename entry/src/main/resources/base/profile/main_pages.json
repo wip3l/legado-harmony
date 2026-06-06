@@ -8,6 +8,10 @@
     "pages/BookSourceEdit",
     "pages/Search",
     "pages/Settings",
+    "pages/CustomFontManager",
+    "pages/TtsSettings",
+    "pages/BookshelfSettings",
+    "pages/CoverGalleryManager",
     "pages/About",
     "pages/VerifyWeb"
   ]

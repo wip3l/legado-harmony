@@ -1,4 +1,4 @@
-import { router, window, promptAction, MeasureOptions } from '@kit.ArkUI';
+import { router, window, promptAction, MeasureOptions, font } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { inputConsumer, KeyCode, Action, KeyEvent } from '@kit.InputKit';
 import graphicsText from '@ohos.graphics.text';
@@ -74,6 +74,8 @@ struct ReadBookPage {
   @StorageLink('readerVolumeTurnPage') @Watch('onReaderVolumeTurnPageChanged') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
   @StorageLink('readerExtendToStatusBar') @Watch('onReaderExtendToStatusBarChanged') readerExtendToStatusBar: boolean = false;
+  @StorageLink('readerFontFamily') @Watch('onReaderFontChanged') readerFontFamily: string = '';
+  @StorageLink('readerFontFilePath') @Watch('onReaderFontChanged') readerFontFilePath: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('launchShortcutNonce') @Watch('onLaunchShortcutChanged') launchShortcutNonce: number = 0;
   private themeBackgrounds: string[] = ['#F6F0E5', '#F5F5F5', '#E8F1EA', '#1F1F1F'];
@@ -82,6 +84,7 @@ struct ReadBookPage {
   private volumeDownCallback?: (event: KeyEvent) => void;
 
   aboutToAppear() {
+    this.registerReaderFont();
     this.enterReaderImmersive();
     this.updateVolumeKeySubscription();
     const params = router.getParams() as Record<string, string>;
@@ -267,6 +270,45 @@ struct ReadBookPage {
     }
   }
 
+  async refreshCurrentChapter(): Promise<void> {
+    if (this.chapters.length === 0) {
+      return;
+    }
+
+    const engine = ReadBookEngine.get();
+    this.isLoading = true;
+    this.loadStatus = '正在刷新本章...';
+    try {
+      const body = await engine.reloadContent(this.currentChapterIndex);
+      if (body) {
+        this.content = body;
+        this.chapters = [...engine.chapters];
+        this.pendingRestorePageIndex = 0;
+        this.currentPageIndex = 0;
+        this.currentScrollOffset = 0;
+        this.pendingRestoreScrollOffset = 0;
+        this.paginateContent();
+        this.preloadReaderContent();
+        await this.saveReadingProgress();
+        promptAction.showToast({ message: '本章已刷新' });
+      } else {
+        this.updatePendingVerification();
+        const chapter = this.chapters[this.currentChapterIndex];
+        this.content = this.verificationUrl ? `${chapter ? chapter.title : '当前章节'}\n\n该书源需要先完成网页验证。请点击阅读菜单里的「验证」，完成后返回并重试。` :
+          (chapter ? `${chapter.title}\n\n章节内容刷新失败，请稍后重试或尝试换源。` : '刷新失败');
+        this.paginateContent();
+        promptAction.showToast({ message: '刷新本章失败' });
+      }
+    } catch (e) {
+      console.error('刷新本章失败:', e);
+      promptAction.showToast({ message: '刷新本章失败' });
+    } finally {
+      this.isLoading = false;
+      this.loadStatus = '';
+      this.updatePendingVerification();
+    }
+  }
+
   build() {
     Stack() {
       Column() {
@@ -320,6 +362,7 @@ struct ReadBookPage {
                 } else if (this.pageRenderVersion % 2 === 0) {
                   Text(this.currentPageText || this.getCurrentPageText())
                     .fontSize(this.readerFontSize)
+                    .fontFamily(this.getReaderFontFamily())
                     .lineHeight(this.readerLineHeight)
                     .fontColor(this.getTextColor())
                     .padding({ left: 18, right: 18, top: 18, bottom: 18 + this.getReaderContentBottomReserve() })
@@ -327,6 +370,7 @@ struct ReadBookPage {
                 } else {
                   Text(this.currentPageText || this.getCurrentPageText())
                     .fontSize(this.readerFontSize)
+                    .fontFamily(this.getReaderFontFamily())
                     .lineHeight(this.readerLineHeight)
                     .fontColor(this.getTextColor())
                     .padding({ left: 18, right: 18, top: 18, bottom: 18 + this.getReaderContentBottomReserve() })
@@ -448,7 +492,17 @@ struct ReadBookPage {
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-            // 重试按钮
+            if (this.chapters.length > 0) {
+              Button('刷新本章')
+                .height(36)
+                .fontSize(14)
+                .margin({ right: 8 })
+                .onClick(() => {
+                  this.hideReaderPanels();
+                  this.refreshCurrentChapter();
+                })
+            }
+
             if (this.verificationUrl) {
               Button('验证')
                 .height(36)
@@ -459,13 +513,17 @@ struct ReadBookPage {
                 })
             }
 
-            if (this.chapters.length === 0 && this.book?.origin !== 'local') {
+            if ((this.chapters.length === 0 && this.book?.origin !== 'local') || this.verificationUrl) {
               Button('重试')
                 .height(36)
                 .fontSize(14)
                 .onClick(() => {
                   this.hideReaderPanels();
-                  this.retryFetchChapters();
+                  if (this.chapters.length === 0) {
+                    this.retryFetchChapters();
+                  } else {
+                    this.loadContent();
+                  }
                 })
             }
           }
@@ -499,8 +557,8 @@ struct ReadBookPage {
               .fontSize(14)
               .layoutWeight(1)
               .margin({ right: 8 })
-              .onClick(() => {
-                this.turnPrev();
+              .onClick(async () => {
+                await this.loadPrevChapter();
                 this.hideReaderPanels();
               })
 
@@ -516,8 +574,8 @@ struct ReadBookPage {
             Button('下一章')
               .fontSize(14)
               .layoutWeight(1)
-              .onClick(() => {
-                this.turnNext();
+              .onClick(async () => {
+                await this.loadNextChapter();
                 this.hideReaderPanels();
               })
           }
@@ -869,6 +927,24 @@ struct ReadBookPage {
     return this.themeTextColors[index] || this.themeTextColors[0];
   }
 
+  getReaderFontFamily(): string {
+    return this.readerFontFamily || 'HarmonyOS Sans';
+  }
+
+  registerReaderFont(): void {
+    if (!this.readerFontFamily || !this.readerFontFilePath) {
+      return;
+    }
+    try {
+      font.registerFont({
+        familyName: this.readerFontFamily,
+        familySrc: this.readerFontFilePath
+      });
+    } catch (e) {
+      console.warn('注册阅读字体失败:', e);
+    }
+  }
+
   getTocTitleColor(chapter: BookChapter, index: number): string {
     if (index === this.currentChapterIndex) {
       return '#007DFF';
@@ -914,6 +990,11 @@ struct ReadBookPage {
   onReadLayoutChanged(): void {
     this.paginateContent();
     this.saveReadingProgress();
+  }
+
+  onReaderFontChanged(): void {
+    this.registerReaderFont();
+    this.onReadLayoutChanged();
   }
 
   onReaderExtendToStatusBarChanged(): void {
@@ -1476,6 +1557,7 @@ struct ReadBookPage {
       const lineHeightPx = this.toMeasurePx(Math.max(this.readerLineHeight, this.readerFontSize));
       const textStyle: graphicsText.TextStyle = {
         fontSize: fontSizePx,
+        fontFamilies: [this.getReaderFontFamily()],
         fontWeight: graphicsText.FontWeight.W400,
         lineHeightMinimum: lineHeightPx,
         lineHeightMaximum: lineHeightPx,
@@ -1537,11 +1619,12 @@ struct ReadBookPage {
     if (!text) {
       return 0;
     }
-    const options: MeasureOptions = {
-      textContent: text,
-      constraintWidth: Math.max(1, availableWidth),
-      fontSize: this.readerFontSize,
-      lineHeight: this.readerLineHeight,
+      const options: MeasureOptions = {
+        textContent: text,
+        constraintWidth: Math.max(1, availableWidth),
+        fontSize: this.readerFontSize,
+        fontFamily: this.getReaderFontFamily(),
+        lineHeight: this.readerLineHeight,
       fontWeight: FontWeight.Normal,
       textAlign: TextAlign.Start,
       wordBreak: WordBreak.BREAK_ALL
@@ -1749,6 +1832,7 @@ struct ReadBookPage {
         }, (slice: ReadTextSlice) => slice.key)
       }
       .fontSize(this.readerFontSize)
+      .fontFamily(this.getReaderFontFamily())
       .lineHeight(this.readerLineHeight)
       .fontColor(this.getTextColor())
       .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
@@ -1756,6 +1840,7 @@ struct ReadBookPage {
     } else {
       Text(this.getReadingRenderText(text))
         .fontSize(this.readerFontSize)
+        .fontFamily(this.getReaderFontFamily())
         .lineHeight(this.readerLineHeight)
         .fontColor(this.getTextColor())
         .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })

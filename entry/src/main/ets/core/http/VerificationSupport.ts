@@ -6,6 +6,8 @@ export class VerificationSupport {
     const sample = body.substring(0, Math.min(body.length, 4000));
     return sample.includes('Just a moment') || sample.includes('cf-challenge') ||
       sample.includes('Cloudflare') || sample.includes('challenge-platform') ||
+      sample.includes('error code: 522') || sample.includes('Error code: 522') ||
+      sample.includes('sedoparking.com') || sample.includes('Resources and Information') ||
       sample.includes('确认您是真人') || sample.includes('人机验证') ||
       sample.includes('请输入验证码') || sample.includes('验证码') ||
       sample.includes('cookie 验证') || sample.includes('Cookie 验证') ||
@@ -22,7 +24,10 @@ export class VerificationSupport {
     if (this.isChallengeResponse(body)) {
       return true;
     }
-    if (!(statusCode === 401 || statusCode === 403)) {
+    if (statusCode === 0) {
+      return this.hasBrowserVerifyHint(source, rule || '') || this.hasLoginEntry(source);
+    }
+    if (!(statusCode === 401 || statusCode === 403 || statusCode === 429 || statusCode === 521 || statusCode === 522 || statusCode === 523 || statusCode === 524)) {
       return false;
     }
     if (this.hasBrowserVerifyHint(source, rule || '')) {
@@ -74,6 +79,12 @@ export class VerificationSupport {
       this.canBrowserVerify(source.bookInfoRule?.init || '') ||
       this.canBrowserVerify(source.tocRule?.chapterList || '') ||
       this.canBrowserVerify(source.contentRule?.content || '');
+  }
+
+  private static hasLoginEntry(source: BookSource): boolean {
+    const loginUrl = this.cleanUrl(source.loginUrl || '');
+    return !!loginUrl && (loginUrl.startsWith('http://') || loginUrl.startsWith('https://')) &&
+      !this.looksLikeApiSource(source);
   }
 
   private static looksLikeApiSource(source: BookSource): boolean {

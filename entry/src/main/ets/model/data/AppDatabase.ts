@@ -14,7 +14,7 @@ export class AppDatabase {
   private initialized: boolean = false;
   private initPromise: Promise<void> | null = null;
   private readonly DATABASE_NAME = 'legado.db';
-  private readonly SCHEMA_VERSION = 1;
+  private readonly SCHEMA_VERSION = 2;
 
   private constructor() {}
 
@@ -109,6 +109,7 @@ export class AppDatabase {
         bookUrlPattern TEXT DEFAULT '',
         searchUrl TEXT DEFAULT '',
         exploreUrl TEXT DEFAULT '',
+        jsLib TEXT DEFAULT '',
         header TEXT DEFAULT '',
         bookListRule TEXT DEFAULT '{}',
         searchRule TEXT DEFAULT '{}',
@@ -219,6 +220,7 @@ export class AppDatabase {
       { table: 'books', column: 'variable', definition: 'variable TEXT' },
       { table: 'book_sources', column: 'searchUrl', definition: "searchUrl TEXT DEFAULT ''" },
       { table: 'book_sources', column: 'exploreUrl', definition: "exploreUrl TEXT DEFAULT ''" },
+      { table: 'book_sources', column: 'jsLib', definition: "jsLib TEXT DEFAULT ''" },
       { table: 'book_chapters', column: 'variable', definition: "variable TEXT DEFAULT ''" }
     ];
 
@@ -442,6 +444,7 @@ export class AppDatabase {
       bookUrlPattern: source.bookUrlPattern,
       searchUrl: source.searchUrl,
       exploreUrl: source.exploreUrl,
+      jsLib: source.jsLib,
       header: source.header,
       bookListRule: JSON.stringify(source.bookListRule),
       searchRule: JSON.stringify(source.searchRule),
@@ -480,6 +483,7 @@ export class AppDatabase {
       bookUrlPattern: source.bookUrlPattern,
       searchUrl: source.searchUrl,
       exploreUrl: source.exploreUrl,
+      jsLib: source.jsLib,
       header: source.header,
       bookListRule: JSON.stringify(source.bookListRule),
       searchRule: JSON.stringify(source.searchRule),
@@ -571,6 +575,8 @@ export class AppDatabase {
     source.searchUrl = searchUrlIndex >= 0 ? resultSet.getString(searchUrlIndex) : '';
     const exploreUrlIndex = resultSet.getColumnIndex('exploreUrl');
     source.exploreUrl = exploreUrlIndex >= 0 ? resultSet.getString(exploreUrlIndex) : '';
+    const jsLibIndex = resultSet.getColumnIndex('jsLib');
+    source.jsLib = jsLibIndex >= 0 ? resultSet.getString(jsLibIndex) : '';
     source.header = resultSet.getString(resultSet.getColumnIndex('header'));
     try {
       source.bookListRule = JSON.parse(resultSet.getString(resultSet.getColumnIndex('bookListRule')));
@@ -696,6 +702,14 @@ export class AppDatabase {
     if (!this.store) return;
     const predicates = new relationalStore.RdbPredicates('book_contents');
     predicates.equalTo('bookUrl', bookUrl);
+    await this.store.delete(predicates);
+  }
+
+  async deleteCachedChapterContent(bookUrl: string, chapterIndex: number): Promise<void> {
+    if (!this.store) return;
+    const predicates = new relationalStore.RdbPredicates('book_contents');
+    predicates.equalTo('bookUrl', bookUrl);
+    predicates.equalTo('chapterIndex', chapterIndex);
     await this.store.delete(predicates);
   }
 

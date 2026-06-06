@@ -5,6 +5,9 @@ import { AnalyzeRule } from '../rule/AnalyzeRule';
 import { RuleContext } from '../rule/RuleContext';
 import { util } from '@kit.ArkTS';
 import { VerificationSupport } from '../http/VerificationSupport';
+import { EncodedSourceUrl } from './EncodedSourceUrl';
+import { BookSourceDataUrlSupport } from './BookSourceDataUrlSupport';
+import { BookUrlResolver } from './BookUrlResolver';
 
 export class WebBookService {
   private http: HttpClient;
@@ -14,14 +17,19 @@ export class WebBookService {
   }
 
   async getBookInfo(source: BookSource, book: Book): Promise<Book> {
+    if (BookSourceDataUrlSupport.isEncodedSource(book.bookUrl)) {
+      return await BookSourceDataUrlSupport.getBookInfo(this.http, source, book);
+    }
     console.log('[WS] getBookInfo, URL:', book.bookUrl);
     const au = new AnalyzeUrl(source, this.http);
-    const resp = await au.fetch(book.bookUrl);
+    const resp = EncodedSourceUrl.canHandle(book.bookUrl) ?
+      await this.fetchEncodedDataUrl(book.bookUrl) : await au.fetch(book.bookUrl);
     console.log('[WS] getBookInfo resp:', resp.success, 'len:', resp.body.length);
     if (this.requestVerificationIfNeeded(source, book.bookUrl, resp.body, resp.statusCode, source.bookInfoRule.init)) {
       return book;
     }
     if (!resp.success || !resp.body) return book;
+    const baseUrl = BookUrlResolver.effectiveBase(resp, book.bookUrl, source.bookSourceUrl);
 
     const ctx = new RuleContext();
     ctx.loadFromJson(book.variable);
@@ -31,15 +39,16 @@ export class WebBookService {
     let content = resp.body;
     const infoRule = source.bookInfoRule;
     if (infoRule.init) {
-      const ir = new AnalyzeRule(content, book.bookUrl, ctx);
+      const ir = new AnalyzeRule(content, baseUrl, ctx);
       const initResult = ir.getString(infoRule.init);
       if (initResult) content = initResult;
     }
 
-    const ir = new AnalyzeRule(content, book.bookUrl, ctx);
+    const ir = new AnalyzeRule(content, baseUrl, ctx);
     book.name = ir.getString(infoRule.name) || book.name;
     book.author = ir.getString(infoRule.author) || book.author;
-    book.coverUrl = ir.getString(infoRule.coverUrl) || book.coverUrl;
+    book.coverUrl = BookSourceDataUrlSupport.normalizeCoverUrl(source, ir.getString(infoRule.coverUrl), baseUrl) ||
+      book.coverUrl;
     book.intro = ir.getString(infoRule.intro) || book.intro;
     book.kind = ir.getString(infoRule.kind) || book.kind;
     book.latestChapterTitle = ir.getString(infoRule.lastChapter) || book.latestChapterTitle;
@@ -53,7 +62,7 @@ export class WebBookService {
 
     // 如果 tocUrl 为空，尝试从 bookUrl 构造
     if (!book.tocUrl) {
-      book.tocUrl = this.fallbackTocUrl(book.bookUrl, infoRule.tocUrl, source.bookSourceUrl);
+      book.tocUrl = this.fallbackTocUrl(book.bookUrl, infoRule.tocUrl, baseUrl);
     }
 
     return book;
@@ -69,15 +78,12 @@ export class WebBookService {
     if (!novelId || !tocRule) return bookUrl;
     const url = tocRule.replace(/\{\{\$\.\w+\}\}/g, novelId).replace(/\{\{\w+\}\}/g, novelId);
     if (url.startsWith('http')) return url;
-    if (url.startsWith('/')) {
-      const m = baseUrl.match(/^(https?:\/\/[^/]+)/);
-      return m ? m[0] + url : baseUrl + url;
-    }
-    return baseUrl + '/' + url;
+    return BookUrlResolver.resolve(url, baseUrl);
   }
 
   private repairUrlWithBookId(url: string, bookUrl: string): string {
     if (!url || !bookUrl) return url;
+    if (!url.includes('/book/chapters') && !url.includes('/book//')) return url;
     const bookId = this.extractBookId(bookUrl);
     if (!bookId) return url;
 
@@ -102,32 +108,42 @@ export class WebBookService {
   }
 
   async getChapterList(source: BookSource, book: Book): Promise<BookChapter[]> {
+    if (BookSourceDataUrlSupport.isEncodedSource(book.tocUrl) || BookSourceDataUrlSupport.isEncodedSource(book.bookUrl)) {
+      return await BookSourceDataUrlSupport.getChapterList(this.http, source, book);
+    }
     console.log('[WS] getChapterList, tocUrl:', book.tocUrl);
     const tocUrl = book.tocUrl || book.bookUrl;
     const au = new AnalyzeUrl(source, this.http);
-    const resp = await au.fetch(tocUrl);
+    const resp = EncodedSourceUrl.canHandle(tocUrl) ?
+      await this.fetchEncodedDataUrl(tocUrl) : await au.fetch(tocUrl);
     if (this.requestVerificationIfNeeded(source, tocUrl, resp.body, resp.statusCode, source.tocRule.chapterList)) {
       return [];
     }
     if (!resp.success || !resp.body) return [];
+    const baseUrl = BookUrlResolver.effectiveBase(resp, tocUrl, book.bookUrl || source.bookSourceUrl);
 
     const ctx = new RuleContext();
     ctx.loadFromJson(book.variable);
     this.seedBookVariables(ctx, book.bookUrl);
 
-    const rule = new AnalyzeRule(resp.body, book.origin || source.bookSourceUrl, ctx);
+    const rule = new AnalyzeRule(resp.body, baseUrl, ctx);
     const tocRule = source.tocRule;
     const specialChapters = await this.tryBuildSpecialChapterList(source, book, resp.body);
     if (specialChapters.length > 0) {
       book.variable = ctx.toJson();
       return specialChapters;
     }
+    const banxiaChapters = this.tryBuildBanxiaChapterList(source, book, resp.body, baseUrl);
+    if (banxiaChapters.length > 0) {
+      book.variable = ctx.toJson();
+      return banxiaChapters;
+    }
     const items = rule.getElements(tocRule.chapterList || '');
     console.log('[WS] getChapterList items:', items.length, 'from resp:', resp.body.length);
 
     const chapters: BookChapter[] = [];
     for (let i = 0; i < items.length; i++) {
-      const ir = new AnalyzeRule(items[i], book.origin || source.bookSourceUrl, ctx);
+      const ir = new AnalyzeRule(items[i], baseUrl, ctx);
       const chap = new BookChapter();
       chap.title = ir.getString(tocRule.chapterName) || `第${i + 1}章`;
       let rawUrl = ir.getString(tocRule.chapterUrl);
@@ -163,11 +179,12 @@ export class WebBookService {
         console.warn('[WS] chapterUrl 修复后:', rawUrl.substring(0, 100));
       }
 
-      const resolvedChapterUrl = this.resolveVars(this.resolveUrl(rawUrl, book.origin || source.bookSourceUrl), ctx);
+      const resolvedChapterUrl = this.resolveVars(BookUrlResolver.resolve(rawUrl, baseUrl), ctx);
       chap.url = this.repairUrlWithBookId(resolvedChapterUrl, book.bookUrl);
       chap.bookUrl = book.bookUrl;
       chap.index = i;
       chap.isVip = ir.getString(tocRule.isVip) === 'true';
+      chap.variable = BookUrlResolver.setVariableJson(chap.variable, 'baseUrl', baseUrl);
       if (chap.title && chap.url) chapters.push(chap);
     }
 
@@ -177,6 +194,9 @@ export class WebBookService {
   }
 
   async getContent(source: BookSource, book: Book, chapter: BookChapter): Promise<string> {
+    if (BookSourceDataUrlSupport.isEncodedSource(chapter.url)) {
+      return await BookSourceDataUrlSupport.getContent(this.http, source, book, chapter);
+    }
     console.log('[WS] getContent, url:', chapter.url);
     const specialContent = await this.tryGetSpecialContent(source, chapter);
     if (specialContent) {
@@ -190,23 +210,30 @@ export class WebBookService {
         .trim();
     }
     const au = new AnalyzeUrl(source, this.http);
-    const resp = await au.fetch(chapter.url);
+    const resp = EncodedSourceUrl.canHandle(chapter.url) ?
+      await this.fetchEncodedDataUrl(chapter.url) : await au.fetch(chapter.url);
     console.log('[WS] getContent resp:', resp.success, 'len:', resp.body.length);
     if (this.requestVerificationIfNeeded(source, chapter.url, resp.body, resp.statusCode, source.contentRule.content)) {
       return '';
     }
     if (!resp.success || !resp.body) return '';
+    const baseUrl = BookUrlResolver.effectiveBase(resp, this.getChapterBaseUrl(chapter, book, source), book.bookUrl || source.bookSourceUrl);
 
     const ctx = new RuleContext();
     ctx.loadFromJson(book.variable);
     this.seedBookVariables(ctx, book.bookUrl);
 
-    const rule = new AnalyzeRule(resp.body, book.origin || source.bookSourceUrl, ctx);
+    const rule = new AnalyzeRule(resp.body, baseUrl, ctx);
     const contentRule = source.contentRule;
 
     let content = rule.getString(contentRule.content);
-    if (this.isBadExtractedContent(content)) {
-      content = this.tryExtractSpecialContentFromHtml(source, resp.body);
+    if (!content || this.isBadExtractedContent(content)) {
+      const banxiaContent = this.tryExtractBanxiaContent(source, resp.body, baseUrl);
+      if (banxiaContent) {
+        content = banxiaContent;
+      } else if (this.isBadExtractedContent(content)) {
+        content = this.tryExtractSpecialContentFromHtml(source, resp.body);
+      }
     }
     if (!content) return '';
 
@@ -227,14 +254,12 @@ export class WebBookService {
     return content;
   }
 
-  private resolveUrl(url: string, base: string): string {
-    if (!url || url.startsWith('http')) return url;
-    if (url.startsWith('/')) {
-      const m = base.match(/^(https?:\/\/[^/]+)/);
-      return m ? m[0] + url : base + url;
+  private async fetchEncodedDataUrl(url: string): Promise<{ url: string, statusCode: number, headers: Record<string, string>, body: string, success: boolean, error?: string }> {
+    const root = await EncodedSourceUrl.requestJsonForDataUrl(this.http, url);
+    if (!root) {
+      return { url: url, statusCode: 0, headers: {}, body: '', success: false, error: 'encoded data url request failed' };
     }
-    const b = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
-    return b + '/' + url;
+    return { url: url, statusCode: 200, headers: {}, body: JSON.stringify(root), success: true };
   }
 
   private requestVerificationIfNeeded(source: BookSource, requestUrl: string, body: string, statusCode: number, rule: string): boolean {
@@ -267,6 +292,232 @@ export class WebBookService {
     return '';
   }
 
+  private tryBuildBanxiaChapterList(source: BookSource, book: Book, body: string, baseUrl: string): BookChapter[] {
+    if (!body || !this.isBanxiaContext(source, book.bookUrl, book.tocUrl, baseUrl, body.substring(0, 3000))) {
+      return [];
+    }
+    const bookKey = this.extractBanxiaBookKey(book.tocUrl || book.bookUrl || baseUrl);
+    const catalogHtml = this.pickBanxiaCatalogBlock(body, baseUrl, bookKey);
+    let links = this.collectBanxiaChapterLinks(catalogHtml, baseUrl, bookKey);
+    if (links.length < 3 && catalogHtml !== body) {
+      links = this.collectBanxiaChapterLinks(body, baseUrl, bookKey);
+    }
+    links = this.trimBanxiaLeadingTeasers(links);
+    if (links.length === 0) return [];
+
+    const chapters: BookChapter[] = [];
+    for (const link of links) {
+      const chapter = new BookChapter();
+      chapter.title = link['title'] || `第${chapters.length + 1}章`;
+      chapter.url = link['url'] || '';
+      chapter.bookUrl = book.bookUrl;
+      chapter.index = chapters.length;
+      chapter.variable = BookUrlResolver.setVariableJson(chapter.variable, 'baseUrl', chapter.url || baseUrl);
+      if (chapter.title && chapter.url) chapters.push(chapter);
+    }
+    console.log('[WS] 半夏目录兜底:', chapters.length, 'from:', book.name || book.bookUrl);
+    return chapters;
+  }
+
+  private tryExtractBanxiaContent(source: BookSource, body: string, baseUrl: string): string {
+    if (!body || !this.isBanxiaContext(source, baseUrl, body.substring(0, 3000))) return '';
+    const blocks = [
+      this.extractIdBlock(body, 'nr1'),
+      this.extractIdBlock(body, 'chaptercontent'),
+      this.extractIdBlock(body, 'chapter-content'),
+      this.extractClassBlock(body, 'chaptercontent'),
+      this.extractClassBlock(body, 'chapter-content'),
+      this.extractClassBlock(body, 'reader-content'),
+      this.extractClassBlock(body, 'article-content'),
+      this.extractClassBlock(body, 'content'),
+      this.extractClassBlock(body, 'post')
+    ];
+    for (const block of blocks) {
+      const text = this.cleanBanxiaContentText(block);
+      if (this.isUsableBanxiaContent(text)) return text;
+    }
+
+    const article = this.extractTagBlock(body, 'article');
+    const articleText = this.cleanBanxiaContentText(article);
+    if (this.isUsableBanxiaContent(articleText)) return articleText;
+
+    const text = this.cleanBanxiaContentText(body);
+    return this.isUsableBanxiaContent(text) ? text : '';
+  }
+
+  private isBanxiaContext(source: BookSource, ...values: string[]): boolean {
+    const sourceRaw = `${source.bookSourceUrl || ''}\n${source.searchUrl || ''}\n${source.exploreUrl || ''}\n` +
+      `${source.jsLib || ''}`.toLowerCase();
+    const valueRaw = values.join('\n').toLowerCase();
+    const raw = `${sourceRaw}\n${valueRaw}`;
+    return raw.includes('xbanxia.cc') || raw.includes('banxianovel.com') ||
+      raw.includes('pinellianovel.com') || raw.includes('pinellia.bestzhufu.com') ||
+      valueRaw.includes('半夏小說') || valueRaw.includes('半夏小说');
+  }
+
+  private pickBanxiaCatalogBlock(body: string, baseUrl: string, bookKey: string): string {
+    const names = [
+      'book-list',
+      'chapter-list',
+      'chapterlist',
+      'catalog-list',
+      'catalog',
+      'directory',
+      'book-chapter-list',
+      'chapters'
+    ];
+    let best = '';
+    let bestCount = 0;
+    for (const name of names) {
+      const block = this.extractClassBlock(body, name) || this.extractIdBlock(body, name);
+      if (!block) continue;
+      const count = this.collectBanxiaChapterLinks(block, baseUrl, bookKey).length;
+      if (count > bestCount) {
+        best = block;
+        bestCount = count;
+      }
+    }
+    return bestCount >= 3 ? best : body;
+  }
+
+  private collectBanxiaChapterLinks(html: string, baseUrl: string, bookKey: string): Record<string, string>[] {
+    const links: Record<string, string>[] = [];
+    const seen: string[] = [];
+    const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(html || '')) !== null) {
+      const attrs = match[1] || '';
+      const hrefMatch = attrs.match(/\shref\s*=\s*["']([^"']+)["']/i);
+      if (!hrefMatch || !hrefMatch[1]) continue;
+      const url = BookUrlResolver.resolve(this.decodeHtmlEntities(hrefMatch[1]), baseUrl);
+      const chapterKey = this.extractBanxiaChapterKey(url, bookKey);
+      if (!chapterKey || seen.includes(chapterKey)) continue;
+      const titleMatch = attrs.match(/\stitle\s*=\s*["']([^"']+)["']/i);
+      const title = this.cleanInlineText(titleMatch && titleMatch[1] ? titleMatch[1] : match[2]);
+      if (!title || this.isBanxiaNavTitle(title)) continue;
+      seen.push(chapterKey);
+      links.push({
+        title: title,
+        url: url,
+        key: chapterKey
+      });
+      if (links.length > 20000) break;
+    }
+    return links;
+  }
+
+  private trimBanxiaLeadingTeasers(links: Record<string, string>[]): Record<string, string>[] {
+    if (links.length < 6) return links;
+    for (let i = 0; i < links.length; i++) {
+      if (this.isLikelyFirstBanxiaChapterTitle(links[i]['title'] || '')) {
+        const remain = links.length - i;
+        if (i > 0 && remain >= 3) return links.slice(i);
+        return links;
+      }
+    }
+    return links;
+  }
+
+  private isLikelyFirstBanxiaChapterTitle(title: string): boolean {
+    const compact = (title || '').replace(/\s+/g, '').toLowerCase();
+    return /^chapter0/.test(compact) || /^chapter1/.test(compact) ||
+      /^第(一|1|１|壹)[章节節回]/.test(compact) || /^第0[章节節回]/.test(compact) ||
+      compact.startsWith('序章') || compact.startsWith('楔子') ||
+      compact.startsWith('引子') || compact.startsWith('前言');
+  }
+
+  private isBanxiaNavTitle(title: string): boolean {
+    const compact = (title || '').replace(/\s+/g, '');
+    return !compact || compact === '開始閱讀' || compact === '开始阅读' || compact === '最近閱讀' ||
+      compact === '阅读记录' || compact === '書頁/目錄' || compact === '书页/目录' ||
+      compact === '上一章' || compact === '下一章' || compact === '上一頁' || compact === '下一頁' ||
+      compact === '上一页' || compact === '下一页' || compact === '首頁' || compact === '首页' ||
+      compact === '書庫' || compact === '书库' || compact === '作者';
+  }
+
+  private extractBanxiaBookKey(url: string): string {
+    const match = (url || '').match(/\/books?\/([^\/?#.]+)(?:\.html)?(?:[\/?#]|$)/i);
+    return match && match[1] ? match[1] : '';
+  }
+
+  private extractBanxiaChapterKey(url: string, expectedBookKey: string): string {
+    const match = (url || '').match(/\/books?\/([^\/?#.]+)\/([^\/?#.]+)(?:\.html)?(?:[?#]|$)/i);
+    if (!match || !match[1] || !match[2]) return '';
+    if (expectedBookKey && match[1] !== expectedBookKey) return '';
+    return `${match[1]}/${match[2]}`;
+  }
+
+  private cleanInlineText(value: string): string {
+    return this.decodeHtmlEntities(value || '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private cleanBanxiaContentText(html: string): string {
+    if (!html) return '';
+    const raw = this.decodeHtmlEntities(html)
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<\/div>/gi, '\n')
+      .replace(/<\/li>/gi, '\n')
+      .replace(/<h[1-6][^>]*>[\s\S]*?<\/h[1-6]>/gi, '\n')
+      .replace(/<[^>]+>/g, '\n')
+      .replace(/\r\n?/g, '\n');
+    const lines: string[] = [];
+    for (const sourceLine of raw.split('\n')) {
+      let line = sourceLine.replace(/\s+/g, ' ').trim();
+      if (!line || this.isBanxiaNoiseLine(line)) continue;
+      line = this.repairBanxiaReversedLine(line);
+      if (line && !this.isBanxiaNoiseLine(line)) lines.push(line);
+      if (lines.length > 4000) break;
+    }
+    return lines.join('\n\n')
+      .replace(/\(本章完\)/g, '')
+      .replace(/半夏小說[，,]\s*快樂很多/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  private repairBanxiaReversedLine(line: string): string {
+    const value = line.trim();
+    if (!/^[。！？!?，,、；;：:）」』”]/.test(value)) return value;
+    let reversed = '';
+    for (let i = value.length - 1; i >= 0; i--) {
+      reversed += value.charAt(i);
+    }
+    return reversed
+      .replace(/([\u3400-\u9fff])\s+(?=[\u3400-\u9fff])/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private isBanxiaNoiseLine(line: string): boolean {
+    const compact = (line || '').replace(/\s+/g, '');
+    return !compact || compact.includes('半夏小說') || compact.includes('半夏小说') ||
+      compact === 'A-AA+' || compact === '默認米黃護眼' || compact === '默认米黄护眼' ||
+      compact.includes('檢舉本章錯誤') || compact.includes('检举本章错误') ||
+      compact.includes('猜你喜歡') || compact.includes('猜你喜欢') ||
+      compact.includes('確認檢舉') || compact.includes('确认检举') ||
+      compact.includes('請選擇檢舉原因') || compact.includes('请选择检举原因') ||
+      compact.includes('版權所有') || compact.includes('版权所有') ||
+      compact.includes('上一章') || compact.includes('下一章') ||
+      compact.includes('上一頁') || compact.includes('下一頁') ||
+      compact.includes('书页/目录') || compact.includes('書頁/目錄');
+  }
+
+  private isUsableBanxiaContent(text: string): boolean {
+    if (!text || text.length < 30) return false;
+    const compact = text.replace(/\s+/g, '');
+    if (compact.includes('搜尋書名或作者') && compact.length < 200) return false;
+    return !compact.includes('請輸入書名') || compact.length > 300;
+  }
+
   private extractParagraphsFromContainer(html: string, className: string): string {
     const container = this.extractClassBlock(html, className);
     if (!container) return '';
@@ -291,11 +542,42 @@ export class WebBookService {
   }
 
   private extractClassBlock(html: string, className: string): string {
-    const re = new RegExp(`<([a-zA-Z][\\w-]*)([^>]*\\sclass=["'][^"']*\\b${className}\\b[^"']*["'][^>]*)>`, 'i');
+    return this.extractAttrBlock(html, 'class', className);
+  }
+
+  private extractIdBlock(html: string, id: string): string {
+    return this.extractAttrBlock(html, 'id', id);
+  }
+
+  private extractAttrBlock(html: string, attrName: string, attrValue: string): string {
+    const re = new RegExp(`<([a-zA-Z][\\w-]*)([^>]*\\s${attrName}=["'][^"']*\\b` +
+      `${this.escapeRegex(attrValue)}\\b[^"']*["'][^>]*)>`, 'i');
     const m = re.exec(html);
     if (!m) return '';
     const start = m.index;
     const tag = m[1];
+    const tagRe = new RegExp(`<\\/?${this.escapeRegex(tag)}(?:\\s[^>]*)?>`, 'gi');
+    tagRe.lastIndex = start;
+    let depth = 0;
+    let tm: RegExpExecArray | null;
+    while ((tm = tagRe.exec(html)) !== null) {
+      if (tm[0].startsWith('</')) {
+        depth--;
+        if (depth === 0) return html.substring(start, tagRe.lastIndex);
+      } else if (!tm[0].endsWith('/>')) {
+        depth++;
+      }
+    }
+    return html.substring(start);
+  }
+
+  private extractTagBlock(html: string, tagName: string): string {
+    if (!html || !tagName) return '';
+    const tag = this.escapeRegex(tagName);
+    const re = new RegExp(`<${tag}(?:\\s[^>]*)?>`, 'i');
+    const m = re.exec(html);
+    if (!m) return '';
+    const start = m.index;
     const tagRe = new RegExp(`<\\/?${tag}(?:\\s[^>]*)?>`, 'gi');
     tagRe.lastIndex = start;
     let depth = 0;
@@ -309,6 +591,23 @@ export class WebBookService {
       }
     }
     return html.substring(start);
+  }
+
+  private decodeHtmlEntities(value: string): string {
+    return (value || '')
+      .replace(/&#x([0-9a-fA-F]+);/g, (_: string, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_: string, num: string) => String.fromCharCode(parseInt(num, 10)))
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&#39;/g, "'");
+  }
+
+  private escapeRegex(value: string): string {
+    return (value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   private applyReplaceRegex(content: string, replaceRegex: string): string {
@@ -332,6 +631,10 @@ export class WebBookService {
     return url.replace(/@get:\{(\w+)\}/g, (_: string, key: string) => {
       return ctx.get(key);
     });
+  }
+
+  private getChapterBaseUrl(chapter: BookChapter, book: Book, source: BookSource): string {
+    return BookUrlResolver.getVariableJson(chapter.variable, 'baseUrl') || chapter.url || book.tocUrl || book.bookUrl || source.bookSourceUrl;
   }
 
   private seedBookVariables(ctx: RuleContext, bookUrl: string): void {

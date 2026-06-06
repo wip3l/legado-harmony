@@ -6,17 +6,16 @@ import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
 import { Book, BookChapter, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { SearchCoordinator, SearchCallback, SearchProgress } from '../core/book/SearchCoordinator';
-import { ExploreCoordinator, ExploreEntry } from '../core/book/ExploreCoordinator';
+import { ExploreCoordinator, ExploreEntry, ExploreSourceOption } from '../core/book/ExploreCoordinator';
 import { WebBookService } from '../core/book/WebBookService';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
 import { syncSystemSafeAreas } from '../utils/SystemBars';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
 import { BookCoverCache } from '../utils/BookCoverCache';
-import picker from '@ohos.file.picker';
-import fs from '@ohos.file.fs';
-import fileUri from '@ohos.file.fileuri';
-import zlib from '@ohos.zlib';
+import { CoverGallerySettings } from '../utils/CoverGallerySettings';
+import { BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettingsStore';
+import { BookIdentity } from '../utils/BookIdentity';
 
 @Entry
 @Component
@@ -410,7 +409,6 @@ struct BookshelfPage {
   @State isLoading: boolean = false;
   @State showDeleteDialog: boolean = false;
   @State showActionDialog: boolean = false;
-  @State showCoverDialog: boolean = false;
   @State showTagDialog: boolean = false;
   @State showCacheDialog: boolean = false;
   @State showChapterCacheDialog: boolean = false;
@@ -427,17 +425,44 @@ struct BookshelfPage {
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('bookshelfSortMode') sortMode: string = 'recentRead';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('bookshelfShowTags') bookshelfShowTags: boolean = true;
+  @StorageLink('bookshelfShowIntro') bookshelfShowIntro: boolean = true;
+  @StorageLink('bookshelfShowFullIntro') bookshelfShowFullIntro: boolean = false;
+  @StorageLink('bookshelfCoverAlbums') @Watch('onShelfCoverSettingsChanged') bookshelfCoverAlbums: string = '';
+  @StorageLink('bookshelfLightCoverAlbumId') @Watch('onShelfCoverSettingsChanged') bookshelfLightCoverAlbumId: string = '';
+  @StorageLink('bookshelfDarkCoverAlbumId') @Watch('onShelfCoverSettingsChanged') bookshelfDarkCoverAlbumId: string = '';
+  @StorageLink('bookshelfCoverApplyScope') @Watch('onShelfCoverSettingsChanged') bookshelfCoverApplyScope: string = 'all';
+  @StorageLink('bookshelfCoverTargetBooks') @Watch('onShelfCoverSettingsChanged') bookshelfCoverTargetBooks: string = '';
+  @StorageLink('bookshelfIgnoreSourceCover') @Watch('onShelfCoverSettingsChanged') bookshelfIgnoreSourceCover: boolean = false;
+  @StorageLink('bookshelfCoverMode') @Watch('onShelfCoverSettingsChanged') bookshelfCoverMode: string = 'sequence';
   private loadTimer: number = -1;
   private cacheTocLoadToken: number = 0;
   private cacheTocLoadBookUrl: string = '';
   private cacheTocLoadPromise: Promise<boolean> | null = null;
 
   aboutToAppear() {
+    this.reloadDisplaySettings();
     this.scheduleLoadBooks();
+  }
+
+  async reloadDisplaySettings(): Promise<void> {
+    try {
+      const settings = await BookshelfDisplaySettingsStore.load(getContext(this));
+      this.bookshelfShowTags = settings.showTags;
+      this.bookshelfShowIntro = settings.showIntro;
+      this.bookshelfShowFullIntro = settings.showFullIntro;
+    } catch (e) {
+      console.warn('恢复书架显示设置失败:', e);
+    }
   }
 
   onShelfChanged(): void {
     this.scheduleLoadBooks();
+  }
+
+  onShelfCoverSettingsChanged(): void {
+    this.shelfCoverMap = new Map();
+    this.refreshShelfCoverCache(this.books);
   }
 
   async loadBooks() {
@@ -513,28 +538,49 @@ struct BookshelfPage {
   async refreshShelfCoverCache(books: Book[]): Promise<void> {
     const context = getContext(this);
     const nextMap: Map<string, string> = new Map(this.shelfCoverMap);
-    let changed = false;
+    const pending: Array<[string, string]> = [];
     for (const book of books) {
-      const covers = BookDisplayHelper.getCoverList(book);
+      const covers = CoverGallerySettings.getDisplayCoverList(
+        book,
+        this.appDarkMode,
+        this.bookshelfCoverAlbums,
+        this.bookshelfLightCoverAlbumId,
+        this.bookshelfDarkCoverAlbumId,
+        this.bookshelfCoverApplyScope,
+        this.bookshelfCoverTargetBooks,
+        this.bookshelfIgnoreSourceCover,
+        this.bookshelfCoverMode
+      );
       for (let i = 0; i < covers.length; i++) {
         const raw = covers[i];
         if (!raw || (!raw.startsWith('http://') && !raw.startsWith('https://'))) {
           continue;
         }
-          const key = this.shelfCoverKey(book, i);
+        const key = this.shelfCoverKey(book, i);
+        const cached = BookCoverCache.resolveCachedCover(context, raw);
+        if (cached && nextMap.get(key) !== cached) {
+          nextMap.set(key, cached);
+          this.shelfCoverMap = new Map(nextMap);
+          continue;
+        }
+        pending.push([key, raw]);
+      }
+    }
+    for (const item of pending) {
+      const key = item[0];
+      const raw = item[1];
+      if (nextMap.get(key)) {
+        continue;
+      }
         try {
           const cached = await BookCoverCache.resolveCover(context, raw);
           if (cached && cached !== raw && nextMap.get(key) !== cached) {
             nextMap.set(key, cached);
-            changed = true;
+            this.shelfCoverMap = new Map(nextMap);
           }
         } catch (e) {
           console.warn('缓存书架封面失败:', e);
         }
-      }
-    }
-    if (changed) {
-      this.shelfCoverMap = nextMap;
     }
   }
 
@@ -599,54 +645,66 @@ struct BookshelfPage {
           List({ space: 8 }) {
             ForEach(this.books, (book: Book) => {
               ListItem() {
-                Row() {
-                  this.coverView(book, 56, 72)
+                Column({ space: 8 }) {
+                  Row() {
+                    this.coverView(book, 56, 72)
 
-                  Column() {
-                    Text(book.name)
-                      .fontSize(16)
-                      .fontWeight(FontWeight.Bold)
-                      .fontColor(this.primaryTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Column({ space: 4 }) {
+                      Text(book.name)
+                        .fontSize(16)
+                        .fontWeight(FontWeight.Bold)
+                        .fontColor(this.primaryTextColor())
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-                    Text(book.author || '作者未知')
-                      .fontSize(14)
-                      .fontColor(this.secondaryTextColor())
-                      .margin({ top: 4 })
+                      Text(this.getAuthorAndUpdateText(book))
+                        .fontSize(14)
+                        .fontColor(this.secondaryTextColor())
 
-                    Row() {
-                      if (book.origin !== 'local') {
-                        Text(book.originName || book.origin)
+                      Row() {
+                        if (book.origin !== 'local') {
+                          Text(book.originName || book.origin)
+                            .fontSize(12)
+                            .fontColor(this.sourceTagTextColor())
+                            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                            .backgroundColor(this.sourceTagBackgroundColor())
+                            .borderRadius(4)
+                            .margin({ right: 8 })
+                        }
+
+                        Text(this.getShelfProgressText(book))
                           .fontSize(12)
-                          .fontColor(this.sourceTagTextColor())
-                          .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-                          .backgroundColor(this.sourceTagBackgroundColor())
-                          .borderRadius(4)
-                          .margin({ right: 8 })
+                          .fontColor(this.subTextColor())
                       }
-
-                      Text(this.getShelfProgressText(book))
-                        .fontSize(12)
-                        .fontColor(this.subTextColor())
                     }
-                    .margin({ top: 4 })
+                    .layoutWeight(1)
+                    .margin({ left: 12 })
+                    .alignItems(HorizontalAlign.Start)
                   }
-                  .layoutWeight(1)
-                  .margin({ left: 12 })
-                  .alignItems(HorizontalAlign.Start)
+                  .width('100%')
+                  .alignItems(VerticalAlign.Top)
 
-                  if (this.getDisplayTags(book).length > 0) {
-                    Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.End }) {
+                  if (this.bookshelfShowIntro && this.getBookIntroText(book)) {
+                    Text(this.getBookIntroText(book))
+                      .fontSize(12)
+                      .fontColor(this.subTextColor())
+                      .lineHeight(18)
+                      .maxLines(this.bookshelfShowFullIntro ? 999 : 2)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .width('100%')
+                  }
+
+                  if (this.bookshelfShowTags && this.getDisplayTags(book).length > 0) {
+                    Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
                       ForEach(this.getDisplayTags(book), (tag: string, index: number) => {
                         this.tagChip(tag, index, 11)
                       })
                     }
-                    .width(108)
-                    .margin({ left: 8 })
+                    .width('100%')
                   }
                 }
                 .width('100%')
+                .alignItems(HorizontalAlign.Start)
                 .padding(12)
                 .backgroundColor(this.glassCardColor())
                 .borderRadius(8)
@@ -717,10 +775,6 @@ struct BookshelfPage {
                 this.showActionDialog = false;
                 this.openCacheDialog(book);
               }
-            })
-            this.actionItem('自定义封面', this.primaryTextColor(), () => {
-              this.showActionDialog = false;
-              this.showCoverDialog = true;
             })
             this.actionItem('自定义标签', this.primaryTextColor(), () => {
               if (this.pendingActionBook) {
@@ -899,49 +953,6 @@ struct BookshelfPage {
         .backgroundColor('#66000000')
       }
 
-      if (this.showCoverDialog && this.pendingActionBook) {
-        Column() {
-          Column() {
-            Text('自定义封面')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 16 })
-
-            this.actionItem('选择本地图片', this.primaryTextColor(), () => {
-              this.pickCoverImages();
-            })
-            this.actionItem('选择 ZIP 压缩包', this.primaryTextColor(), () => {
-              this.pickCoverZip();
-            })
-            this.actionItem('恢复书源封面', this.primaryTextColor(), () => {
-              this.clearCustomCover();
-            })
-
-            Button('取消')
-              .width('100%')
-              .height(44)
-              .margin({ top: 10 })
-              .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
-              .fontColor(this.primaryTextColor())
-              .onClick(() => {
-                this.showCoverDialog = false;
-                this.pendingActionBook = null;
-              })
-          }
-          .width('85%')
-          .padding(22)
-          .backgroundColor(this.cardColor())
-          .borderRadius(12)
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .justifyContent(FlexAlign.Center)
-      }
-
       if (this.showTagDialog && this.pendingActionBook) {
         Column() {
           Column() {
@@ -953,28 +964,33 @@ struct BookshelfPage {
               .textAlign(TextAlign.Center)
               .margin({ bottom: 14 })
 
-            Flex({ wrap: FlexWrap.Wrap }) {
-              ForEach(this.editingTags, (tag: string, index: number) => {
-                Row() {
-                  Text(tag)
-                    .fontSize(13)
-                    .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
-                  Text('×')
-                    .fontSize(14)
-                    .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
-                    .margin({ left: 6 })
-                }
-                .padding({ left: 10, right: 8, top: 5, bottom: 5 })
-                .backgroundColor(BookDisplayHelper.getTagBackgroundColor(index, this.appDarkMode))
-                .borderRadius(14)
-                .margin({ right: 8, bottom: 8 })
-                .onClick(() => {
-                  this.removeEditingTag(tag);
+            Scroll() {
+              Flex({ wrap: FlexWrap.Wrap }) {
+                ForEach(this.editingTags, (tag: string, index: number) => {
+                  Row() {
+                    Text(tag)
+                      .fontSize(13)
+                      .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
+                    Text('×')
+                      .fontSize(14)
+                      .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
+                      .margin({ left: 6 })
+                  }
+                  .padding({ left: 10, right: 8, top: 5, bottom: 5 })
+                  .backgroundColor(BookDisplayHelper.getTagBackgroundColor(index, this.appDarkMode))
+                  .borderRadius(14)
+                  .margin({ right: 8, bottom: 8 })
+                  .onClick(() => {
+                    this.removeEditingTag(tag);
+                  })
                 })
-              })
+              }
+              .width('100%')
             }
+            .scrollable(ScrollDirection.Vertical)
+            .scrollBar(BarState.Auto)
             .width('100%')
-            .height(40)
+            .constraintSize({ minHeight: 40, maxHeight: 220 })
             .margin({ bottom: 12 })
 
             Row() {
@@ -1117,7 +1133,19 @@ struct BookshelfPage {
 
   getDisplayTags(book: Book): string[] {
     const tags = BookDisplayHelper.getBookTags(book);
-    return tags.slice(0, 4);
+    return tags;
+  }
+
+  getAuthorAndUpdateText(book: Book): string {
+    const author = book.author || '作者未知';
+    const updateText = BookDisplayHelper.getLastUpdateText(book);
+    return updateText ? `${author} · 最后更新 ${updateText}` : author;
+  }
+
+  getBookIntroText(book: Book): string {
+    return (book.getDisplayIntro() || '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   @Builder
@@ -1168,7 +1196,17 @@ struct BookshelfPage {
   }
 
   getShelfCoverList(book: Book): string[] {
-    const covers = BookDisplayHelper.getCoverList(book);
+    const covers = CoverGallerySettings.getDisplayCoverList(
+      book,
+      this.appDarkMode,
+      this.bookshelfCoverAlbums,
+      this.bookshelfLightCoverAlbumId,
+      this.bookshelfDarkCoverAlbumId,
+      this.bookshelfCoverApplyScope,
+      this.bookshelfCoverTargetBooks,
+      this.bookshelfIgnoreSourceCover,
+      this.bookshelfCoverMode
+    );
     const displayCovers: string[] = [];
     for (let i = 0; i < covers.length; i++) {
       displayCovers.push(this.shelfCoverMap.get(this.shelfCoverKey(book, i)) || covers[i]);
@@ -1202,151 +1240,6 @@ struct BookshelfPage {
       .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
       .fontColor(color)
       .onClick(action)
-  }
-
-  async pickCoverImages(): Promise<void> {
-    if (!this.pendingActionBook) return;
-    try {
-      const options: picker.PhotoSelectOptions = new picker.PhotoSelectOptions();
-      options.MIMEType = picker.PhotoViewMIMETypes.IMAGE_TYPE;
-      options.maxSelectNumber = 20;
-      const result = await new picker.PhotoViewPicker(getContext(this)).select(options);
-      if (!result || result.photoUris.length === 0) {
-        return;
-      }
-      await this.saveCustomCovers(this.pendingActionBook, result.photoUris);
-      const message = result.photoUris.length > 1 ? `已选择 ${result.photoUris.length} 张，封面将自动轮播` : '已设置自定义封面';
-      promptAction.showToast({ message });
-    } catch (e) {
-      console.error('选择封面失败:', e);
-      promptAction.showToast({ message: '选择封面失败' });
-    }
-  }
-
-  async pickCoverZip(): Promise<void> {
-    if (!this.pendingActionBook) return;
-    try {
-      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
-      options.fileSuffixFilters = ['ZIP 压缩包|.zip'];
-      options.maxSelectNumber = 1;
-      const result = await new picker.DocumentViewPicker(getContext(this)).select(options);
-      if (!result || result.length === 0) {
-        return;
-      }
-      const imagePaths = await this.extractImagesFromZip(result[0]);
-      if (imagePaths.length === 0) {
-        promptAction.showToast({ message: '压缩包中未找到图片' });
-        return;
-      }
-      const imageUris = imagePaths.map((path: string) => fileUri.getUriFromPath(path));
-      await this.saveCustomCovers(this.pendingActionBook, imageUris);
-      const message = imageUris.length > 1 ? `已从压缩包导入 ${imageUris.length} 张封面，封面将自动轮播` : '已从压缩包设置封面';
-      promptAction.showToast({ message });
-    } catch (e) {
-      console.error('选择压缩包封面失败:', e);
-      promptAction.showToast({ message: '读取压缩包失败' });
-    }
-  }
-
-  async clearCustomCover(): Promise<void> {
-    if (!this.pendingActionBook) return;
-    const book = this.pendingActionBook;
-    book.customCoverUrl = '';
-    await this.updateShelfBook(book);
-    this.showCoverDialog = false;
-    this.pendingActionBook = null;
-    promptAction.showToast({ message: '已恢复书源封面' });
-  }
-
-  async saveCustomCover(book: Book, sourceUri: string): Promise<void> {
-    await this.saveCustomCovers(book, [sourceUri]);
-  }
-
-  async saveCustomCovers(book: Book, sourceUris: string[]): Promise<void> {
-    const context = getContext(this);
-    const dir = `${context.filesDir}/covers`;
-    await this.ensureDir(dir);
-    const savedUris: string[] = [];
-    for (let i = 0; i < sourceUris.length; i++) {
-      const sourceUri = sourceUris[i];
-      if (!sourceUri) {
-        continue;
-      }
-      const destPath = `${dir}/${this.safeFileName(book.bookUrl)}_${Date.now()}_${i}${this.coverExt(sourceUri)}`;
-      const destUri = fileUri.getUriFromPath(destPath);
-      try {
-        await fs.copy(sourceUri, destUri);
-        savedUris.push(destUri);
-      } catch (e) {
-        console.warn('复制封面失败，使用原始URI:', e);
-        savedUris.push(sourceUri);
-      }
-    }
-    if (savedUris.length === 0) {
-      promptAction.showToast({ message: '未找到可用封面' });
-      return;
-    }
-    book.customCoverUrl = BookDisplayHelper.encodeCustomCovers(savedUris);
-    await this.updateShelfBook(book);
-    this.showCoverDialog = false;
-    this.pendingActionBook = null;
-  }
-
-  async extractImagesFromZip(zipUri: string): Promise<string[]> {
-    const context = getContext(this);
-    const zipDir = `${context.tempDir}/cover_zip_${Date.now()}`;
-    const zipPath = `${zipDir}/source.zip`;
-    const outDir = `${zipDir}/out`;
-    await this.ensureDir(zipDir);
-    await this.ensureDir(outDir);
-    await fs.copy(zipUri, fileUri.getUriFromPath(zipPath));
-    await zlib.decompressFile(zipPath, outDir);
-    return await this.findImages(outDir);
-  }
-
-  async findImages(dir: string): Promise<string[]> {
-    const images: string[] = [];
-    let names: string[] = [];
-    try {
-      names = await fs.listFile(dir);
-    } catch (e) {
-      return images;
-    }
-    names.sort();
-    for (const name of names) {
-      const path = `${dir}/${name}`;
-      const stat = await fs.stat(path);
-      if (stat.isDirectory()) {
-        images.push(...await this.findImages(path));
-      } else if (this.isImageFile(name)) {
-        images.push(path);
-      }
-    }
-    return images;
-  }
-
-  isImageFile(name: string): boolean {
-    return /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(name);
-  }
-
-  async ensureDir(path: string): Promise<void> {
-    try {
-      await fs.mkdir(path, true);
-    } catch (e) {
-    }
-  }
-
-  safeFileName(value: string): string {
-    return (value || 'book').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 48) || 'book';
-  }
-
-  coverExt(uri: string): string {
-    const lower = uri.toLowerCase();
-    if (lower.includes('.png')) return '.png';
-    if (lower.includes('.webp')) return '.webp';
-    if (lower.includes('.bmp')) return '.bmp';
-    if (lower.includes('.gif')) return '.gif';
-    return '.jpg';
   }
 
   actionSheetBottomMargin(): number {
@@ -1677,13 +1570,18 @@ struct ExplorePage {
   @Prop navBarHeight: number = 0;
   @Prop @Watch('onActiveChanged') isActive: boolean = false;
   @State entries: ExploreEntry[] = [];
+  @State sourceOptions: ExploreSourceOption[] = [];
+  @State platformNames: string[] = [];
   @State sourceNames: string[] = [];
   @State selectedSourceName: string = '';
   @State selectedIndex: number = 0;
   @State books: SearchBook[] = [];
-  @State shelfBookUrls: string[] = [];
+  @State shelfBookKeys: string[] = [];
   @State isLoading: boolean = false;
   @State status: string = '';
+  @State verificationUrl: string = '';
+  @State verificationTitle: string = '';
+  @StorageLink('explorePlatform') selectedPlatform: string = '番茄';
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   private coordinator: ExploreCoordinator = new ExploreCoordinator();
@@ -1715,18 +1613,25 @@ struct ExplorePage {
     this.hasLoaded = true;
     this.isLoading = true;
     this.status = '正在加载发现分类...';
+    this.verificationUrl = '';
+    this.verificationTitle = '';
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      this.entries = await this.coordinator.getEntries();
-      this.sourceNames = this.buildSourceNames();
+      const previousSourceName = this.selectedSourceName;
+      this.sourceOptions = await this.coordinator.getExploreSources();
+      this.sourceNames = this.sourceOptions.map((option: ExploreSourceOption) => option.sourceName);
+      this.selectedSourceName = previousSourceName && this.sourceNames.includes(previousSourceName) ?
+        previousSourceName : (this.sourceNames.length > 0 ? this.sourceNames[0] : '');
+      this.platformNames = this.getSelectedSourcePlatforms();
+      this.normalizeSelectedPlatform();
+      this.entries = await this.coordinator.getEntries(this.selectedPlatform, this.getSelectedSourceUrl());
       if (this.entries.length > 0) {
-        this.selectedSourceName = this.sourceNames.length > 0 ? this.sourceNames[0] : '';
         this.selectedIndex = 0;
         await this.loadBooks();
       } else {
         this.books = [];
-        this.status = '暂无可用发现分类，请检查书源的发现地址';
+        this.status = `${this.getSelectedSiteLabel()} 暂无可用发现分类`;
       }
     } catch (e) {
       console.error('加载发现失败:', e);
@@ -1741,11 +1646,18 @@ struct ExplorePage {
     if (activeEntries.length === 0) return;
     this.isLoading = true;
     this.status = '正在获取发现内容...';
+    this.verificationUrl = '';
+    this.verificationTitle = '';
     try {
       const entry = activeEntries[Math.min(this.selectedIndex, activeEntries.length - 1)];
       this.books = await this.coordinator.explore(entry, 1);
       await this.syncExploreShelfStatus(this.books);
-      this.status = this.books.length > 0 ? `${entry.sourceName} · ${entry.title} · ${this.books.length} 本` : '当前分类暂无结果';
+      this.verificationUrl = AppStorage.get<string>('pendingVerificationUrl') || '';
+      this.verificationTitle = AppStorage.get<string>('pendingVerificationTitle') || '网页验证';
+      this.status = this.books.length > 0 ?
+        `${this.getSelectedSiteLabel()} · ${entry.sourceName} · ${entry.title} · ${this.books.length} 本` :
+        (this.verificationUrl ? `${entry.sourceName} 可能需要网页验证` :
+          `${this.getSelectedSiteLabel()} 当前分类暂无结果`);
     } catch (e) {
       console.error('获取发现内容失败:', e);
       this.status = '发现内容获取失败';
@@ -1789,9 +1701,31 @@ struct ExplorePage {
                 .borderRadius(18)
                 .border({ width: this.selectedSourceName === name ? 0 : 1, color: this.glassBorderColor() })
                 .onClick(() => {
-                  this.selectedSourceName = name;
-                  this.selectedIndex = 0;
-                  this.loadBooks();
+                  this.switchExploreSource(name);
+                })
+            })
+          }
+          .padding({ left: 16, right: 16 })
+        }
+        .width('100%')
+        .height(48)
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+      }
+
+      if (this.platformNames.length > 0) {
+        Scroll() {
+          Row({ space: 8 }) {
+            ForEach(this.platformNames, (name: string) => {
+              Text(name)
+                .fontSize(13)
+                .fontColor(this.selectedPlatform === name ? '#FFFFFF' : this.primaryTextColor())
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor(this.selectedPlatform === name ? '#007DFF' : this.glassCardColor())
+                .borderRadius(18)
+                .border({ width: this.selectedPlatform === name ? 0 : 1, color: this.glassBorderColor() })
+                .onClick(() => {
+                  this.switchExplorePlatform(name);
                 })
             })
           }
@@ -1829,11 +1763,26 @@ struct ExplorePage {
       }
 
       if (this.status) {
-        Text(this.status)
-          .fontSize(13)
-          .fontColor(this.secondaryTextColor())
-          .width('100%')
-          .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+        Row() {
+          Text(this.status)
+            .fontSize(13)
+            .fontColor(this.secondaryTextColor())
+            .layoutWeight(1)
+
+          if (this.verificationUrl) {
+            Button('去验证')
+              .height(28)
+              .fontSize(12)
+              .borderRadius(14)
+              .margin({ left: 12 })
+              .onClick(() => {
+                this.openVerification();
+              })
+          }
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+        .alignItems(VerticalAlign.Center)
       }
 
       if (this.isLoading) {
@@ -1910,12 +1859,23 @@ struct ExplorePage {
           Text('没有发现内容')
             .fontSize(16)
             .fontColor(this.subTextColor())
-          Text('请导入带 exploreUrl 的书源，或在书源编辑中补充发现地址')
+          Text(this.verificationUrl ? '当前书源可能需要网页验证' : '请切换书源或网站，或检查已启用书源的发现地址')
             .fontSize(14)
             .fontColor(this.subTextColor())
             .margin({ top: 8 })
             .textAlign(TextAlign.Center)
             .padding({ left: 32, right: 32 })
+          if (this.verificationUrl) {
+            Button('去验证')
+              .height(36)
+              .fontSize(14)
+              .borderRadius(18)
+              .margin({ top: 14 })
+              .backgroundColor('#007DFF')
+              .onClick(() => {
+                this.openVerification();
+              })
+          }
         }
         .width('100%')
         .layoutWeight(1)
@@ -1957,9 +1917,10 @@ struct ExplorePage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      const existing = await db.getBook(searchBook.bookUrl);
+      const searchKey = BookIdentity.keyOfSearchBook(searchBook);
+      const existing = await this.findShelfBookByKey(searchKey);
       if (existing) {
-        this.markSearchBookInShelf(searchBook.bookUrl);
+        this.markSearchBookInShelf(searchKey);
         AppStorage.setOrCreate('shelfUpdateTime', Date.now());
         promptAction.showToast({ message: '已在书架' });
         return;
@@ -2000,7 +1961,7 @@ struct ExplorePage {
       }
 
       await db.insertBook(book);
-      this.markSearchBookInShelf(book.bookUrl);
+      this.markSearchBookInShelf(BookIdentity.keyOfBook(book) || searchKey);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       promptAction.showToast({ message: '已加入书架' });
     } catch (e) {
@@ -2009,24 +1970,63 @@ struct ExplorePage {
     }
   }
 
+  switchExplorePlatform(platform: string): void {
+    if (this.selectedPlatform === platform || this.isLoading) {
+      return;
+    }
+    this.selectedPlatform = platform;
+    this.selectedIndex = 0;
+    this.books = [];
+    this.status = `正在切换到 ${platform}...`;
+    AppStorage.setOrCreate('explorePlatform', platform);
+    this.loadEntries();
+  }
+
+  switchExploreSource(sourceName: string): void {
+    if (this.selectedSourceName === sourceName || this.isLoading) {
+      return;
+    }
+    this.selectedSourceName = sourceName;
+    this.platformNames = this.getSelectedSourcePlatforms();
+    this.normalizeSelectedPlatform();
+    this.selectedIndex = 0;
+    this.books = [];
+    this.status = `正在切换到 ${sourceName}...`;
+    this.loadEntries();
+  }
+
+  normalizeSelectedPlatform(): void {
+    if (this.platformNames.length === 0) {
+      return;
+    }
+    if (!this.platformNames.includes(this.selectedPlatform)) {
+      this.selectedPlatform = this.platformNames.length > 0 ? this.platformNames[0] : '番茄';
+      AppStorage.setOrCreate('explorePlatform', this.selectedPlatform);
+    }
+  }
+
   async syncExploreShelfStatus(books: SearchBook[]): Promise<void> {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      const urls: string[] = [];
+      const shelfBooks = await db.getAllBooks();
+      const shelfKeys = shelfBooks.map((book: Book) => BookIdentity.keyOfBook(book));
+      const keys: string[] = [];
       for (const book of books) {
-        if (book.bookUrl && await db.getBook(book.bookUrl)) {
-          urls.push(book.bookUrl);
+        const key = BookIdentity.keyOfSearchBook(book);
+        if (key && shelfKeys.includes(key)) {
+          keys.push(key);
         }
       }
-      this.shelfBookUrls = urls;
+      this.shelfBookKeys = keys;
     } catch (e) {
       console.error('同步发现书架状态失败:', e);
     }
   }
 
   isSearchBookInShelf(book: SearchBook): boolean {
-    return !!book.bookUrl && this.shelfBookUrls.includes(book.bookUrl);
+    const key = BookIdentity.keyOfSearchBook(book);
+    return !!key && this.shelfBookKeys.includes(key);
   }
 
   async toggleSearchBookShelf(searchBook: SearchBook): Promise<void> {
@@ -2046,12 +2046,13 @@ struct ExplorePage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      const existing = await db.getBook(searchBook.bookUrl);
+      const key = BookIdentity.keyOfSearchBook(searchBook);
+      const existing = await this.findShelfBookByKey(key);
       if (existing) {
         this.deleteBookCoverCache(existing);
       }
-      await db.deleteBook(searchBook.bookUrl);
-      this.shelfBookUrls = this.shelfBookUrls.filter(url => url !== searchBook.bookUrl);
+      await db.deleteBook(existing?.bookUrl || searchBook.bookUrl);
+      this.shelfBookKeys = this.shelfBookKeys.filter(item => item !== key);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       promptAction.showToast({ message: '已移出书架' });
     } catch (e) {
@@ -2060,10 +2061,20 @@ struct ExplorePage {
     }
   }
 
-  markSearchBookInShelf(bookUrl: string): void {
-    if (bookUrl && !this.shelfBookUrls.includes(bookUrl)) {
-      this.shelfBookUrls = [...this.shelfBookUrls, bookUrl];
+  markSearchBookInShelf(bookKey: string): void {
+    if (bookKey && !this.shelfBookKeys.includes(bookKey)) {
+      this.shelfBookKeys = [...this.shelfBookKeys, bookKey];
     }
+  }
+
+  async findShelfBookByKey(bookKey: string): Promise<Book | null> {
+    if (!bookKey) return null;
+    const db = AppDatabase.getInstance();
+    const books = await db.getAllBooks();
+    for (const book of books) {
+      if (BookIdentity.keyOfBook(book) === bookKey) return book;
+    }
+    return null;
   }
 
   deleteBookCoverCache(book: Book): void {
@@ -2085,6 +2096,42 @@ struct ExplorePage {
       }
     }
     return names;
+  }
+
+  getSelectedSourcePlatforms(): string[] {
+    const option = this.getSelectedSourceOption();
+    return option ? option.platforms : [];
+  }
+
+  getSelectedSourceUrl(): string {
+    const option = this.getSelectedSourceOption();
+    return option ? option.sourceUrl : '';
+  }
+
+  getSelectedSourceOption(): ExploreSourceOption | null {
+    for (const option of this.sourceOptions) {
+      if (option.sourceName === this.selectedSourceName) return option;
+    }
+    return null;
+  }
+
+  getSelectedSiteLabel(): string {
+    return this.platformNames.length > 0 ? this.selectedPlatform : this.selectedSourceName;
+  }
+
+  openVerification(): void {
+    const url = this.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
+    if (!url) {
+      promptAction.showToast({ message: '暂无需要验证的网页' });
+      return;
+    }
+    router.pushUrl({
+      url: 'pages/VerifyWeb',
+      params: {
+        url: url,
+        title: this.verificationTitle || '网页验证'
+      }
+    });
   }
 
   getActiveEntries(): ExploreEntry[] {
@@ -2132,15 +2179,17 @@ struct SearchPage {
   @Prop @Watch('onActiveChanged') isActive: boolean = false;
   @State keyword: string = '';
   @State searchResults: SearchBook[] = [];
-  @State shelfBookUrls: string[] = [];
+  @State shelfBookKeys: string[] = [];
   @State isSearching: boolean = false;
   @State showResult: boolean = false;
   @State statusMessage: string = '';
   @State verificationUrl: string = '';
   @State verificationTitle: string = '';
+  @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   private coordinator: SearchCoordinator | null = null;
   private hasInitialized: boolean = false;
+  private shelfStatusVersion: number = 0;
 
   aboutToAppear() {
     if (this.isActive) {
@@ -2151,6 +2200,7 @@ struct SearchPage {
   onActiveChanged(): void {
     if (this.isActive) {
       this.initPage();
+      this.refreshSearchShelfStatus();
     }
   }
 
@@ -2195,6 +2245,7 @@ struct SearchPage {
               this.isSearching = false;
               this.statusMessage = '搜索已停止';
             } else {
+              this.hideKeyboard();
               this.doSearch();
             }
           })
@@ -2377,24 +2428,48 @@ struct SearchPage {
     }
   }
 
+  hideKeyboard(): void {
+    try {
+      this.getUIContext().getFocusController().clearFocus();
+    } catch (e) {
+    }
+  }
+
+  onShelfChanged(): void {
+    this.refreshSearchShelfStatus();
+  }
+
+  refreshSearchShelfStatus(): void {
+    if (this.searchResults.length > 0) {
+      this.syncSearchShelfStatus(this.searchResults);
+    }
+  }
+
   async syncSearchShelfStatus(books: SearchBook[]): Promise<void> {
     try {
+      const version = this.shelfStatusVersion;
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      const urls: string[] = [];
+      const shelfBooks = await db.getAllBooks();
+      const shelfKeys = shelfBooks.map((book: Book) => BookIdentity.keyOfBook(book));
+      const keys: string[] = [];
       for (const book of books) {
-        if (book.bookUrl && await db.getBook(book.bookUrl)) {
-          urls.push(book.bookUrl);
+        const key = BookIdentity.keyOfSearchBook(book);
+        if (key && shelfKeys.includes(key)) {
+          keys.push(key);
         }
       }
-      this.shelfBookUrls = urls;
+      if (version === this.shelfStatusVersion) {
+        this.shelfBookKeys = keys;
+      }
     } catch (e) {
       console.error('同步搜索书架状态失败:', e);
     }
   }
 
   isSearchBookInShelf(book: SearchBook): boolean {
-    return !!book.bookUrl && this.shelfBookUrls.includes(book.bookUrl);
+    const key = BookIdentity.keyOfSearchBook(book);
+    return !!key && this.shelfBookKeys.includes(key);
   }
 
   async toggleSearchBookShelf(searchBook: SearchBook): Promise<void> {
@@ -2414,9 +2489,10 @@ struct SearchPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      const existing = await db.getBook(searchBook.bookUrl);
+      const searchKey = BookIdentity.keyOfSearchBook(searchBook);
+      const existing = await this.findShelfBookByKey(searchKey);
       if (existing) {
-        this.markSearchBookInShelf(searchBook.bookUrl);
+        this.markSearchBookInShelf(searchKey);
         AppStorage.setOrCreate('shelfUpdateTime', Date.now());
         promptAction.showToast({ message: '已在书架' });
         return;
@@ -2457,7 +2533,7 @@ struct SearchPage {
       }
 
       await db.insertBook(book);
-      this.markSearchBookInShelf(book.bookUrl);
+      this.markSearchBookInShelf(BookIdentity.keyOfBook(book) || searchKey);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       promptAction.showToast({ message: '已加入书架' });
     } catch (e) {
@@ -2475,12 +2551,14 @@ struct SearchPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      const existing = await db.getBook(searchBook.bookUrl);
+      const key = BookIdentity.keyOfSearchBook(searchBook);
+      const existing = await this.findShelfBookByKey(key);
       if (existing) {
         this.deleteBookCoverCache(existing);
       }
-      await db.deleteBook(searchBook.bookUrl);
-      this.shelfBookUrls = this.shelfBookUrls.filter(url => url !== searchBook.bookUrl);
+      await db.deleteBook(existing?.bookUrl || searchBook.bookUrl);
+      this.shelfStatusVersion++;
+      this.shelfBookKeys = this.shelfBookKeys.filter(item => item !== key);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       promptAction.showToast({ message: '已移出书架' });
     } catch (e) {
@@ -2489,10 +2567,21 @@ struct SearchPage {
     }
   }
 
-  markSearchBookInShelf(bookUrl: string): void {
-    if (bookUrl && !this.shelfBookUrls.includes(bookUrl)) {
-      this.shelfBookUrls = [...this.shelfBookUrls, bookUrl];
+  markSearchBookInShelf(bookKey: string): void {
+    if (bookKey && !this.shelfBookKeys.includes(bookKey)) {
+      this.shelfStatusVersion++;
+      this.shelfBookKeys = [...this.shelfBookKeys, bookKey];
     }
+  }
+
+  async findShelfBookByKey(bookKey: string): Promise<Book | null> {
+    if (!bookKey) return null;
+    const db = AppDatabase.getInstance();
+    const books = await db.getAllBooks();
+    for (const book of books) {
+      if (BookIdentity.keyOfBook(book) === bookKey) return book;
+    }
+    return null;
   }
 
   deleteBookCoverCache(book: Book): void {
@@ -2649,6 +2738,60 @@ struct SettingsPage {
           .border({ width: 1, color: this.glassBorderColor() })
           .onClick(() => {
             router.pushUrl({ url: 'pages/Settings' });
+          })
+        }
+
+        ListItem() {
+          Row() {
+            Column() {
+              Text('朗读设置')
+                .fontSize(16)
+                .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
+              Text('音色与朗读倍速')
+                .fontSize(12)
+                .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
+                .margin({ top: 4 })
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            Text('>')
+              .fontSize(16)
+              .fontColor(this.appDarkMode ? '#777D87' : '#999')
+          }
+          .width('100%')
+          .height(64)
+          .padding({ left: 16, right: 16 })
+          .backgroundColor(this.glassCardColor())
+          .border({ width: 1, color: this.glassBorderColor() })
+          .onClick(() => {
+            router.pushUrl({ url: 'pages/TtsSettings' });
+          })
+        }
+
+        ListItem() {
+          Row() {
+            Column() {
+              Text('书架设置')
+                .fontSize(16)
+                .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
+              Text('标签、简介与封面图集')
+                .fontSize(12)
+                .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
+                .margin({ top: 4 })
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            Text('>')
+              .fontSize(16)
+              .fontColor(this.appDarkMode ? '#777D87' : '#999')
+          }
+          .width('100%')
+          .height(64)
+          .padding({ left: 16, right: 16 })
+          .backgroundColor(this.glassCardColor())
+          .border({ width: 1, color: this.glassBorderColor() })
+          .onClick(() => {
+            router.pushUrl({ url: 'pages/BookshelfSettings' });
           })
         }
 

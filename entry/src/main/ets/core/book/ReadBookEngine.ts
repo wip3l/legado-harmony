@@ -43,9 +43,7 @@ export class ReadBookEngine {
     console.log('[RE] cached chapters:', this.chapters.length);
 
     // 检查缓存章节是否有未解析的变量（旧版本残留）
-    const hasBrokenUrls = this.chapters.some(c =>
-      c.url.includes('@get:') || c.url.includes('{{') || c.url.includes('//')
-    );
+    const hasBrokenUrls = this.chapters.some(c => this.isBrokenChapterUrl(c.url));
 
     if (hasBrokenUrls || (this.chapters.length === 0 && this.source && book.origin !== 'local')) {
       if (hasBrokenUrls) {
@@ -63,13 +61,20 @@ export class ReadBookEngine {
     console.log('[RE] refreshToc start');
     this.isLoading = true;
     try {
-      this.book = await this.webBook.getBookInfo(this.source, this.book);
+      const oldBook = this.book;
+      const oldTocUrl = oldBook.tocUrl;
+      const oldLatestChapter = oldBook.latestChapterTitle;
+      const infoBook = await this.webBook.getBookInfo(this.source, this.book);
+      this.book = infoBook;
       console.log('[RE] getBookInfo done, tocUrl:', this.book.tocUrl);
-      await appDb.updateBook(this.book);
+      if (!this.book.tocUrl && oldTocUrl) {
+        this.book.tocUrl = oldTocUrl;
+      }
 
       const chapters = await this.webBook.getChapterList(this.source, this.book);
       console.log('[RE] getChapterList done, count:', chapters.length);
       if (chapters.length > 0) {
+        await appDb.updateBook(this.book);
         await appDb.deleteBookChapters(this.book.bookUrl);
         await appDb.insertBookChapters(chapters);
         this.chapters = chapters;
@@ -79,16 +84,42 @@ export class ReadBookEngine {
         this.book.totalChapterNum = chapters.length;
         this.book.latestChapterTitle = chapters[chapters.length - 1].title;
         await appDb.updateBook(this.book);
+      } else {
+        this.book.latestChapterTitle = this.book.latestChapterTitle || oldLatestChapter;
+        this.book.tocUrl = this.book.tocUrl || oldTocUrl;
+        console.warn('[RE] refreshToc returned no chapters, keep existing chapters:', this.chapters.length);
       }
     } finally {
       this.isLoading = false;
     }
   }
 
+  private isBrokenChapterUrl(url: string): boolean {
+    if (!url) return true;
+    if (url.includes('@get:') || url.includes('{{')) return true;
+    if (url.startsWith('data:')) return false;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) return true;
+    return /https?:\/\/[^/]+\/{2,}/.test(url);
+  }
+
   async loadContent(idx: number): Promise<string> {
     if (idx < 0 || idx >= this.chapters.length || !this.book) return '';
 
     this.curIdx = idx;
+    return await this.fetchContent(idx);
+  }
+
+  async reloadContent(idx: number): Promise<string> {
+    if (idx < 0 || idx >= this.chapters.length || !this.book) return '';
+
+    this.curIdx = idx;
+    this.chapterCache.delete(idx);
+    this.chapterLoading.delete(idx);
+    await appDb.deleteCachedChapterContent(this.book.bookUrl, idx);
+    const chapter = this.chapters[idx];
+    if (chapter) {
+      chapter.cacheDate = 0;
+    }
     return await this.fetchContent(idx);
   }
 
@@ -100,7 +131,7 @@ export class ReadBookEngine {
     if (this.chapterLoading.has(idx)) return await this.chapterLoading.get(idx)!;
 
     const cached = await appDb.getCachedChapterContent(this.book.bookUrl, idx);
-    if (cached) {
+    if (cached && !this.isInvalidChapterContent(cached)) {
       this.chapterCache.set(idx, cached);
       chapter.cacheDate = chapter.cacheDate || Date.now();
       return cached;
@@ -113,11 +144,13 @@ export class ReadBookEngine {
     const task = this.webBook.getContent(this.source, this.book, chapter)
       .then((text: string) => {
         if (text) {
-          this.chapterCache.set(idx, text);
-          chapter.cacheDate = Date.now();
-          appDb.saveCachedChapterContent(this.book!.bookUrl, chapter, text).catch((err: Error) => {
-            console.error('[RE] save chapter cache failed:', idx, err);
-          });
+          if (!this.isInvalidChapterContent(text)) {
+            this.chapterCache.set(idx, text);
+            chapter.cacheDate = Date.now();
+            appDb.saveCachedChapterContent(this.book!.bookUrl, chapter, text).catch((err: Error) => {
+              console.error('[RE] save chapter cache failed:', idx, err);
+            });
+          }
         }
         return text;
       })
@@ -130,6 +163,17 @@ export class ReadBookEngine {
 
   hasCachedContent(idx: number): boolean {
     return this.chapterCache.has(idx);
+  }
+
+  private isInvalidChapterContent(text: string): boolean {
+    if (!text) return false;
+    return text.includes('免登录访问次数已达上限') || text.includes('继续阅读请登录') ||
+      text.includes('请登录后刷新') || text.includes('今日免登录访问次数') ||
+      text.includes('当前书源需要登录') || text.includes('该书源需要先完成网页验证') ||
+      text.includes('登录信息已失效') || text.includes('账号信息异常') ||
+      text.includes('请重新登录') || text.includes('请重新登陆') ||
+      text.includes('访问速度过快') || text.includes('普通用户限制') ||
+      text.includes('升级VIP可享受不限速访问');
   }
 
   async cacheChapter(idx: number): Promise<boolean> {

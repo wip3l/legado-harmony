@@ -223,6 +223,7 @@ export class BookSource {
   bookUrlPattern: string = '';
   searchUrl: string = '';
   exploreUrl: string = '';
+  jsLib: string = '';
   header: string = '';
   bookListRule: BookListRule = new BookListRule();
   searchRule: SearchRule = new SearchRule();
