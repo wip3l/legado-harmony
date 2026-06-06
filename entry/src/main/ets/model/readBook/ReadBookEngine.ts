@@ -75,7 +75,9 @@ export class ReadBookEngine {
 
       // 始终先获取书籍详情，确保 tocUrl 正确
       console.log('[ReadBook] 先获取书籍详情以提取正确的 tocUrl');
+      const oldBook = this.book;
       this.book = await webBook.getBookInfo(this.bookSource, this.book);
+      this.preserveReadingState(this.book, oldBook);
       console.log('[ReadBook] getBookInfo完成, name:', this.book.name, 'tocUrl:', this.book.tocUrl, 'variable:', this.book.variable.substring(0, 100));
       await appDb.updateBook(this.book);
 
@@ -98,6 +100,35 @@ export class ReadBookEngine {
     } catch (e) {
       console.error('[ReadBook] 获取章节失败:', e);
     }
+  }
+
+  private preserveReadingState(target: Book, source: Book): void {
+    target.bookUrl = source.bookUrl;
+    target.origin = target.origin || source.origin;
+    target.originName = target.originName || source.originName;
+    target.group = source.group;
+    target.order = source.order;
+    target.originOrder = source.originOrder;
+    target.durChapterIndex = source.durChapterIndex;
+    target.durChapterPos = source.durChapterPos;
+    target.durChapterTitle = source.durChapterTitle;
+    target.durChapterTime = source.durChapterTime;
+    target.readConfig = source.readConfig;
+    target.syncTime = source.syncTime;
+    this.preserveVariableTime(target, source, 'lastReadTime');
+  }
+
+  private preserveVariableTime(target: Book, source: Book, key: string): void {
+    const sourceTime = this.parsePositiveTime(source.getVariable(key));
+    const targetTime = this.parsePositiveTime(target.getVariable(key));
+    if (sourceTime > targetTime) {
+      target.putVariable(key, `${sourceTime}`);
+    }
+  }
+
+  private parsePositiveTime(value: string): number {
+    const time = Number(value);
+    return time > 0 ? time : 0;
   }
 
   private async parseLocalBook(): Promise<void> {
@@ -229,10 +260,12 @@ export class ReadBookEngine {
 
   async saveProgress(): Promise<void> {
     if (!this.book) return;
-    
+    const now = Date.now();
+
     this.book.durChapterIndex = this.currentChapterIndex;
     this.book.durChapterPos = this.currentChapterPos;
-    this.book.durChapterTime = Date.now();
+    this.book.durChapterTime = now;
+    this.book.putVariable('lastReadTime', `${now}`);
     
     await appDb.updateBook(this.book);
   }

@@ -133,11 +133,6 @@ export class WebBookService {
       book.variable = ctx.toJson();
       return specialChapters;
     }
-    const banxiaChapters = this.tryBuildBanxiaChapterList(source, book, resp.body, baseUrl);
-    if (banxiaChapters.length > 0) {
-      book.variable = ctx.toJson();
-      return banxiaChapters;
-    }
     const items = rule.getElements(tocRule.chapterList || '');
     console.log('[WS] getChapterList items:', items.length, 'from resp:', resp.body.length);
 
@@ -190,6 +185,10 @@ export class WebBookService {
 
     // 保存变量回 book
     book.variable = ctx.toJson();
+    if (chapters.length > 0) return chapters;
+
+    const fallbackChapters = this.tryBuildGenericChapterList(book, resp.body, baseUrl);
+    if (fallbackChapters.length > 0) return fallbackChapters;
     return chapters;
   }
 
@@ -228,12 +227,8 @@ export class WebBookService {
 
     let content = rule.getString(contentRule.content);
     if (!content || this.isBadExtractedContent(content)) {
-      const banxiaContent = this.tryExtractBanxiaContent(source, resp.body, baseUrl);
-      if (banxiaContent) {
-        content = banxiaContent;
-      } else if (this.isBadExtractedContent(content)) {
-        content = this.tryExtractSpecialContentFromHtml(source, resp.body);
-      }
+      const fallbackContent = this.tryExtractReadableContentFromHtml(resp.body);
+      if (fallbackContent) content = fallbackContent;
     }
     if (!content) return '';
 
@@ -280,30 +275,16 @@ export class WebBookService {
       sample.includes('<!doctype html') || sample.includes('<html');
   }
 
-  private tryExtractSpecialContentFromHtml(source: BookSource, body: string): string {
-    if (!body) return '';
-    const host = source.bookSourceUrl || '';
-    if (host.includes('ttkan.co')) {
-      return this.extractParagraphsFromContainer(body, 'content');
-    }
-    if (host.includes('50zw.')) {
-      return this.extractParagraphsFromContainer(body, 'word_read');
-    }
-    return '';
-  }
-
-  private tryBuildBanxiaChapterList(source: BookSource, book: Book, body: string, baseUrl: string): BookChapter[] {
-    if (!body || !this.isBanxiaContext(source, book.bookUrl, book.tocUrl, baseUrl, body.substring(0, 3000))) {
-      return [];
-    }
-    const bookKey = this.extractBanxiaBookKey(book.tocUrl || book.bookUrl || baseUrl);
-    const catalogHtml = this.pickBanxiaCatalogBlock(body, baseUrl, bookKey);
-    let links = this.collectBanxiaChapterLinks(catalogHtml, baseUrl, bookKey);
+  private tryBuildGenericChapterList(book: Book, body: string, baseUrl: string): BookChapter[] {
+    if (!body) return [];
+    const bookKey = this.extractGenericBookKey(book.tocUrl || book.bookUrl || baseUrl);
+    const catalogHtml = this.pickGenericCatalogBlock(body, baseUrl, bookKey);
+    let links = this.collectGenericChapterLinks(catalogHtml, baseUrl, bookKey, catalogHtml !== body);
     if (links.length < 3 && catalogHtml !== body) {
-      links = this.collectBanxiaChapterLinks(body, baseUrl, bookKey);
+      links = this.collectGenericChapterLinks(body, baseUrl, bookKey, false);
     }
-    links = this.trimBanxiaLeadingTeasers(links);
-    if (links.length === 0) return [];
+    links = this.trimLeadingTeaserLinks(links);
+    if (links.length < 3) return [];
 
     const chapters: BookChapter[] = [];
     for (const link of links) {
@@ -315,47 +296,56 @@ export class WebBookService {
       chapter.variable = BookUrlResolver.setVariableJson(chapter.variable, 'baseUrl', chapter.url || baseUrl);
       if (chapter.title && chapter.url) chapters.push(chapter);
     }
-    console.log('[WS] 半夏目录兜底:', chapters.length, 'from:', book.name || book.bookUrl);
+    console.log('[WS] 通用目录兜底:', chapters.length, 'from:', book.name || book.bookUrl);
     return chapters;
   }
 
-  private tryExtractBanxiaContent(source: BookSource, body: string, baseUrl: string): string {
-    if (!body || !this.isBanxiaContext(source, baseUrl, body.substring(0, 3000))) return '';
-    const blocks = [
-      this.extractIdBlock(body, 'nr1'),
-      this.extractIdBlock(body, 'chaptercontent'),
-      this.extractIdBlock(body, 'chapter-content'),
-      this.extractClassBlock(body, 'chaptercontent'),
-      this.extractClassBlock(body, 'chapter-content'),
-      this.extractClassBlock(body, 'reader-content'),
-      this.extractClassBlock(body, 'article-content'),
-      this.extractClassBlock(body, 'content'),
-      this.extractClassBlock(body, 'post')
+  private tryExtractReadableContentFromHtml(body: string): string {
+    if (!body) return '';
+    const names = [
+      'nr1',
+      'chaptercontent',
+      'chapter-content',
+      'chapter_content',
+      'reader-content',
+      'read-content',
+      'article-content',
+      'article_content',
+      'TxtContent',
+      'txtcontent',
+      'word_read',
+      'readtxt',
+      'booktext',
+      'BookText',
+      'content',
+      'post'
     ];
+    const blocks: string[] = [];
+    for (const name of names) {
+      blocks.push(this.extractIdBlock(body, name));
+      blocks.push(this.extractClassBlock(body, name));
+    }
+    blocks.push(this.extractTagBlock(body, 'article'));
+
+    let best = '';
+    let bestScore = 0;
     for (const block of blocks) {
-      const text = this.cleanBanxiaContentText(block);
-      if (this.isUsableBanxiaContent(text)) return text;
+      const text = this.cleanReadableContentText(block);
+      const score = this.scoreReadableContent(text);
+      if (score > bestScore) {
+        best = text;
+        bestScore = score;
+      }
     }
 
-    const article = this.extractTagBlock(body, 'article');
-    const articleText = this.cleanBanxiaContentText(article);
-    if (this.isUsableBanxiaContent(articleText)) return articleText;
-
-    const text = this.cleanBanxiaContentText(body);
-    return this.isUsableBanxiaContent(text) ? text : '';
+    if (!best) {
+      const text = this.cleanReadableContentText(body);
+      if (this.isUsableReadableContent(text)) best = text;
+    }
+    return best;
   }
 
-  private isBanxiaContext(source: BookSource, ...values: string[]): boolean {
-    const sourceRaw = `${source.bookSourceUrl || ''}\n${source.searchUrl || ''}\n${source.exploreUrl || ''}\n` +
-      `${source.jsLib || ''}`.toLowerCase();
-    const valueRaw = values.join('\n').toLowerCase();
-    const raw = `${sourceRaw}\n${valueRaw}`;
-    return raw.includes('xbanxia.cc') || raw.includes('banxianovel.com') ||
-      raw.includes('pinellianovel.com') || raw.includes('pinellia.bestzhufu.com') ||
-      valueRaw.includes('半夏小說') || valueRaw.includes('半夏小说');
-  }
-
-  private pickBanxiaCatalogBlock(body: string, baseUrl: string, bookKey: string): string {
+  private pickGenericCatalogBlock(body: string, baseUrl: string, bookKey: string): string {
     const names = [
       'book-list',
       'chapter-list',
@@ -364,14 +354,19 @@ export class WebBookService {
       'catalog',
       'directory',
       'book-chapter-list',
-      'chapters'
+      'chapters',
+      'listmain',
+      'list',
+      'play_0',
+      'volume-list',
+      'chapter'
     ];
     let best = '';
     let bestCount = 0;
     for (const name of names) {
       const block = this.extractClassBlock(body, name) || this.extractIdBlock(body, name);
       if (!block) continue;
-      const count = this.collectBanxiaChapterLinks(block, baseUrl, bookKey).length;
+      const count = this.collectGenericChapterLinks(block, baseUrl, bookKey, true).length;
       if (count > bestCount) {
         best = block;
         bestCount = count;
@@ -380,7 +375,8 @@ export class WebBookService {
     return bestCount >= 3 ? best : body;
   }
 
-  private collectBanxiaChapterLinks(html: string, baseUrl: string, bookKey: string): Record<string, string>[] {
+  private collectGenericChapterLinks(html: string, baseUrl: string, bookKey: string, inCatalogBlock: boolean):
+    Record<string, string>[] {
     const links: Record<string, string>[] = [];
     const seen: string[] = [];
     const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
@@ -390,11 +386,13 @@ export class WebBookService {
       const hrefMatch = attrs.match(/\shref\s*=\s*["']([^"']+)["']/i);
       if (!hrefMatch || !hrefMatch[1]) continue;
       const url = BookUrlResolver.resolve(this.decodeHtmlEntities(hrefMatch[1]), baseUrl);
-      const chapterKey = this.extractBanxiaChapterKey(url, bookKey);
+      const chapterKey = this.normalizeChapterLinkKey(url);
       if (!chapterKey || seen.includes(chapterKey)) continue;
       const titleMatch = attrs.match(/\stitle\s*=\s*["']([^"']+)["']/i);
       const title = this.cleanInlineText(titleMatch && titleMatch[1] ? titleMatch[1] : match[2]);
-      if (!title || this.isBanxiaNavTitle(title)) continue;
+      if (!title || this.isNavigationTitle(title)) continue;
+      const likelyChapter = this.isLikelyChapterTitle(title) || this.isLikelyChapterUrl(url, baseUrl, bookKey);
+      if (!inCatalogBlock && !likelyChapter) continue;
       seen.push(chapterKey);
       links.push({
         title: title,
@@ -406,10 +404,10 @@ export class WebBookService {
     return links;
   }
 
-  private trimBanxiaLeadingTeasers(links: Record<string, string>[]): Record<string, string>[] {
+  private trimLeadingTeaserLinks(links: Record<string, string>[]): Record<string, string>[] {
     if (links.length < 6) return links;
     for (let i = 0; i < links.length; i++) {
-      if (this.isLikelyFirstBanxiaChapterTitle(links[i]['title'] || '')) {
+      if (this.isLikelyFirstChapterTitle(links[i]['title'] || '')) {
         const remain = links.length - i;
         if (i > 0 && remain >= 3) return links.slice(i);
         return links;
@@ -418,7 +416,7 @@ export class WebBookService {
     return links;
   }
 
-  private isLikelyFirstBanxiaChapterTitle(title: string): boolean {
+  private isLikelyFirstChapterTitle(title: string): boolean {
     const compact = (title || '').replace(/\s+/g, '').toLowerCase();
     return /^chapter0/.test(compact) || /^chapter1/.test(compact) ||
       /^第(一|1|１|壹)[章节節回]/.test(compact) || /^第0[章节節回]/.test(compact) ||
@@ -426,25 +424,45 @@ export class WebBookService {
       compact.startsWith('引子') || compact.startsWith('前言');
   }
 
-  private isBanxiaNavTitle(title: string): boolean {
+  private isLikelyChapterTitle(title: string): boolean {
+    const compact = (title || '').replace(/\s+/g, '').toLowerCase();
+    return /^chapter\d+/.test(compact) || /^ch\.\d+/.test(compact) ||
+      /^第[\d一二三四五六七八九十百千万零〇壹贰叁肆伍陆柒捌玖拾兩两]+[章节節回卷]/.test(compact) ||
+      compact.startsWith('序章') || compact.startsWith('楔子') || compact.startsWith('引子') ||
+      compact.startsWith('前言') || compact.startsWith('番外');
+  }
+
+  private isNavigationTitle(title: string): boolean {
     const compact = (title || '').replace(/\s+/g, '');
     return !compact || compact === '開始閱讀' || compact === '开始阅读' || compact === '最近閱讀' ||
       compact === '阅读记录' || compact === '書頁/目錄' || compact === '书页/目录' ||
       compact === '上一章' || compact === '下一章' || compact === '上一頁' || compact === '下一頁' ||
       compact === '上一页' || compact === '下一页' || compact === '首頁' || compact === '首页' ||
-      compact === '書庫' || compact === '书库' || compact === '作者';
+      compact === '返回目录' || compact === '返回目錄' || compact === '書庫' || compact === '书库' ||
+      compact === '作者' || compact === '目录' || compact === '目錄' || compact === '首页';
   }
 
-  private extractBanxiaBookKey(url: string): string {
-    const match = (url || '').match(/\/books?\/([^\/?#.]+)(?:\.html)?(?:[\/?#]|$)/i);
-    return match && match[1] ? match[1] : '';
+  private extractGenericBookKey(url: string): string {
+    const clean = (url || '').replace(/[?#].*$/, '').replace(/\.html?$/i, '');
+    const segments = clean.split('/').filter(part => part.length > 0);
+    if (segments.length === 0) return '';
+    const last = segments[segments.length - 1];
+    if (/^[A-Za-z0-9_-]{2,60}$/.test(last)) return last;
+    return '';
   }
 
-  private extractBanxiaChapterKey(url: string, expectedBookKey: string): string {
-    const match = (url || '').match(/\/books?\/([^\/?#.]+)\/([^\/?#.]+)(?:\.html)?(?:[?#]|$)/i);
-    if (!match || !match[1] || !match[2]) return '';
-    if (expectedBookKey && match[1] !== expectedBookKey) return '';
-    return `${match[1]}/${match[2]}`;
+  private normalizeChapterLinkKey(url: string): string {
+    const clean = (url || '').replace(/#[\s\S]*$/, '').replace(/[?&](?:from|spm|utm_[^=]+)=[^&]*/g, '');
+    return clean.replace(/[?&]$/g, '').replace(/\/$/g, '');
+  }
+
+  private isLikelyChapterUrl(url: string, baseUrl: string, bookKey: string): boolean {
+    const clean = (url || '').replace(/[?#].*$/, '').toLowerCase();
+    if (!clean || clean === (baseUrl || '').replace(/[?#].*$/, '').toLowerCase()) return false;
+    if (bookKey && clean.includes(`/${bookKey.toLowerCase()}/`)) return true;
+    if (/\/(?:chapter|read|content|book)\/[^/]+\/[^/]+/.test(clean)) return true;
+    const last = clean.split('/').filter(part => part.length > 0).pop() || '';
+    return /^(?:\d+|chapter[_-]?\d+|ch[_-]?\d+|read[_-]?\d+)\.html?$/.test(last);
   }
 
   private cleanInlineText(value: string): string {
@@ -456,7 +474,7 @@ export class WebBookService {
       .trim();
   }
 
-  private cleanBanxiaContentText(html: string): string {
+  private cleanReadableContentText(html: string): string {
     if (!html) return '';
     const raw = this.decodeHtmlEntities(html)
       .replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -472,19 +490,18 @@ export class WebBookService {
     const lines: string[] = [];
     for (const sourceLine of raw.split('\n')) {
       let line = sourceLine.replace(/\s+/g, ' ').trim();
-      if (!line || this.isBanxiaNoiseLine(line)) continue;
-      line = this.repairBanxiaReversedLine(line);
-      if (line && !this.isBanxiaNoiseLine(line)) lines.push(line);
+      if (!line || this.isNoiseLine(line)) continue;
+      line = this.repairReversedLine(line);
+      if (line && !this.isNoiseLine(line)) lines.push(line);
       if (lines.length > 4000) break;
     }
     return lines.join('\n\n')
       .replace(/\(本章完\)/g, '')
-      .replace(/半夏小說[，,]\s*快樂很多/g, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
 
-  private repairBanxiaReversedLine(line: string): string {
+  private repairReversedLine(line: string): string {
     const value = line.trim();
     if (!/^[。！？!?，,、；;：:）」』”]/.test(value)) return value;
     let reversed = '';
@@ -497,48 +514,36 @@ export class WebBookService {
       .trim();
   }
 
-  private isBanxiaNoiseLine(line: string): boolean {
+  private isNoiseLine(line: string): boolean {
     const compact = (line || '').replace(/\s+/g, '');
-    return !compact || compact.includes('半夏小說') || compact.includes('半夏小说') ||
-      compact === 'A-AA+' || compact === '默認米黃護眼' || compact === '默认米黄护眼' ||
+    return !compact || compact === 'A-AA+' || compact === '默認米黃護眼' || compact === '默认米黄护眼' ||
       compact.includes('檢舉本章錯誤') || compact.includes('检举本章错误') ||
       compact.includes('猜你喜歡') || compact.includes('猜你喜欢') ||
       compact.includes('確認檢舉') || compact.includes('确认检举') ||
       compact.includes('請選擇檢舉原因') || compact.includes('请选择检举原因') ||
       compact.includes('版權所有') || compact.includes('版权所有') ||
+      compact.includes('如果被转码') || compact.includes('如果被轉碼') ||
+      compact.includes('阅读模式') || compact.includes('閱讀模式') ||
+      compact.includes('本章没完') || compact.includes('本章未完') ||
+      compact.includes('继续阅读') || compact.includes('繼續閱讀') ||
       compact.includes('上一章') || compact.includes('下一章') ||
       compact.includes('上一頁') || compact.includes('下一頁') ||
       compact.includes('书页/目录') || compact.includes('書頁/目錄');
   }
 
-  private isUsableBanxiaContent(text: string): boolean {
+  private scoreReadableContent(text: string): number {
+    if (!this.isUsableReadableContent(text)) return 0;
+    const lines = text.split('\n').filter(line => line.trim().length > 0).length;
+    return text.length + lines * 80;
+  }
+
+  private isUsableReadableContent(text: string): boolean {
     if (!text || text.length < 30) return false;
     const compact = text.replace(/\s+/g, '');
     if (compact.includes('搜尋書名或作者') && compact.length < 200) return false;
-    return !compact.includes('請輸入書名') || compact.length > 300;
-  }
-
-  private extractParagraphsFromContainer(html: string, className: string): string {
-    const container = this.extractClassBlock(html, className);
-    if (!container) return '';
-    const paragraphs: string[] = [];
-    const re = /<p(?:\s[^>]*)?>([\s\S]*?)<\/p>/gi;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(container)) !== null) {
-      const text = m[1]
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<[^>]+>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .trim();
-      if (text && !text.includes('本章完') && !text.includes('武林中文网')) {
-        paragraphs.push(text);
-      }
-      if (paragraphs.length > 3000) break;
-    }
-    return paragraphs.join('\n\n');
+    if (compact.includes('請輸入書名') && compact.length < 300) return false;
+    if (compact.includes('请输入书名') && compact.length < 300) return false;
+    return true;
   }
 
   private extractClassBlock(html: string, className: string): string {
@@ -639,6 +644,8 @@ export class WebBookService {
 
   private seedBookVariables(ctx: RuleContext, bookUrl: string): void {
     if (!bookUrl) return;
+    ctx.put('book.bookUrl', bookUrl);
+    ctx.put('bookUrl', bookUrl);
     const id = this.extractQueryParam(bookUrl, 'book_id') || this.extractQueryParam(bookUrl, 'bookid') ||
       this.extractQueryParam(bookUrl, 'id') || this.extractBookId(bookUrl);
     if (id) {

@@ -122,42 +122,20 @@ export class AnalyzeRule {
     }
     rule = this.applyJsBlocks(rule);
 
-    // 处理 @put:{key:value} - 存储变量（value 为 JSONPath 或字段名）
-    const putMatch = rule.match(/@put:\{([^}]+)\}/);
-    if (putMatch) {
-      const putStr = putMatch[1];
-      const parts = putStr.split(/[,;]/);
-      for (const part of parts) {
-        const kv = part.split(':');
-        if (kv.length >= 2) {
-          const k = kv[0].trim();
-          const rawV = kv.slice(1).join(':').trim();
-          // 解析 value：如果是 $..xxx 或 $.xxx，从 content JSON 中取实际值
-          let v = rawV;
-          if (rawV.startsWith('$..') || rawV.startsWith('$.')) {
-            try {
-              const data = JSON.parse(this.content) as Record<string, Object>;
-              if (rawV.startsWith('$..')) {
-                const found = this.deepFind(data as Object, rawV.substring(3));
-                if (found !== undefined) v = String(found);
-              } else {
-                const key = rawV.substring(2);
-                const found = (data as Record<string, Object>)[key];
-                if (found !== undefined) v = String(found);
-              }
-            } catch (_) {}
-          }
-          this.ctx.put(k, v);
-        }
-      }
-      // 继续解析去除 @put: 后的规则
-      rule = rule.replace(putMatch[0], '').trim();
+    // 处理 @put:{key:value} - 存储变量，value 按普通规则执行后写入上下文
+    const putBlock = this.extractPutBlock(rule);
+    if (putBlock) {
+      this.applyPutBlock(putBlock.body);
+      rule = (rule.substring(0, putBlock.start) + rule.substring(putBlock.end)).trim();
       if (!rule) return '';
     }
 
+    const directGet = this.evalDirectGetRule(rule);
+    if (directGet !== null) return directGet;
+
     // 处理 @get:{key} 替换
-    rule = rule.replace(/@get:\{(\w+)\}/g, (_: string, key: string) => {
-      return this.ctx.get(key);
+    rule = rule.replace(/@get:\{([^}]+)\}/g, (_: string, key: string) => {
+      return this.ctx.get(key.trim());
     });
 
     // 处理 @js: 前缀规则（JS 模板拼接，如 @js:'url'+$.nid+'/'+$.cid）
@@ -172,6 +150,128 @@ export class AnalyzeRule {
 
     const a = this.analyze(rule);
     return a.length > 0 ? this.applyProcessor(a[0], originalRule) : '';
+  }
+
+  private extractPutBlock(rule: string): { start: number, end: number, body: string } | null {
+    const marker = '@put:{';
+    const start = rule.indexOf(marker);
+    if (start < 0) return null;
+    const bodyStart = start + marker.length;
+    let depth = 1;
+    let quote = '';
+    for (let i = bodyStart; i < rule.length; i++) {
+      const ch = rule.charAt(i);
+      if (quote) {
+        if (ch === quote && rule.charAt(i - 1) !== '\\') quote = '';
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      if (ch === '{') depth++;
+      if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          return { start: start, end: i + 1, body: rule.substring(bodyStart, i) };
+        }
+      }
+    }
+    return null;
+  }
+
+  private applyPutBlock(body: string): void {
+    const parts = this.splitTopLevel(body, [',', ';']);
+    for (const part of parts) {
+      const idx = this.indexOfTopLevel(part, ':');
+      if (idx <= 0) continue;
+      const key = this.stripQuotes(part.substring(0, idx).trim());
+      let valueRule = part.substring(idx + 1).trim();
+      valueRule = this.stripQuotes(valueRule);
+      if (!key) continue;
+      const value = this.evaluatePutValue(valueRule);
+      this.ctx.put(key, value);
+    }
+  }
+
+  private evaluatePutValue(valueRule: string): string {
+    if (!valueRule) return '';
+    if (valueRule.startsWith('@get:{')) {
+      const value = this.evalDirectGetRule(valueRule);
+      if (value !== null) return value;
+    }
+    const values = this.analyze(valueRule);
+    if (values.length > 0) {
+      const processed = values
+        .map(value => this.applyProcessor(value, valueRule))
+        .filter(value => value.length > 0);
+      return processed.join('\n');
+    }
+    return valueRule;
+  }
+
+  private evalDirectGetRule(rule: string): string | null {
+    const match = rule.match(/^@get:\{([^}]+)\}([\s\S]*)$/);
+    if (!match) return null;
+    let value = this.ctx.get(match[1].trim());
+    const suffix = match[2] || '';
+    if (!suffix) return value;
+    const processors = suffix.split('@').map(part => part.trim()).filter(part => part.length > 0);
+    for (const processor of processors) {
+      if (processor === 'text' || processor === 'ownText' || processor === 'textNodes') {
+        value = this.stripHtml(value);
+      } else if (processor === 'html') {
+        value = value;
+      } else if (processor.startsWith('js:')) {
+        value = this.evalResultJs(processor.substring(3), value);
+      } else if (this.isAttrName(processor)) {
+        value = this.extractAttr(value, processor);
+      }
+      if (!value) break;
+    }
+    return value;
+  }
+
+  private splitTopLevel(text: string, separators: string[]): string[] {
+    const result: string[] = [];
+    let depth = 0;
+    let quote = '';
+    let start = 0;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text.charAt(i);
+      if (quote) {
+        if (ch === quote && text.charAt(i - 1) !== '\\') quote = '';
+        continue;
+      }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '(' || ch === '[' || ch === '{') depth++;
+      if (ch === ')' || ch === ']' || ch === '}') depth--;
+      if (depth === 0 && separators.includes(ch)) {
+        const part = text.substring(start, i).trim();
+        if (part) result.push(part);
+        start = i + 1;
+      }
+    }
+    const last = text.substring(start).trim();
+    if (last) result.push(last);
+    return result;
+  }
+
+  private indexOfTopLevel(text: string, target: string): number {
+    let depth = 0;
+    let quote = '';
+    for (let i = 0; i < text.length; i++) {
+      const ch = text.charAt(i);
+      if (quote) {
+        if (ch === quote && text.charAt(i - 1) !== '\\') quote = '';
+        continue;
+      }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '(' || ch === '[' || ch === '{') depth++;
+      if (ch === ')' || ch === ']' || ch === '}') depth--;
+      if (depth === 0 && ch === target) return i;
+    }
+    return -1;
   }
 
   private handlePrefixAes(aesArgs: string, sourceJson: string): string {
@@ -259,7 +359,8 @@ export class AnalyzeRule {
     const type = typeMatch[1] || typeMatch[2] || '';
     if (type === 'mybxs' || type === 'mybxc') {
       const raw = this.evalRawEncodedValue(expr, sourceJson);
-      return raw ? EncodedSourceUrl.encodeRaw(raw, type) : '';
+      const host = this.ctx.get('host') || this.ctx.get('backend') || this.js.getVar('host') || this.js.getVar('backend');
+      return raw ? EncodedSourceUrl.encodeRaw(raw, type, host) : '';
     }
     const data = EncodedSourceUrl.asMap(this.parseContentObject());
     const resultData = this.parseJsonSafe(sourceJson);
@@ -608,8 +709,8 @@ export class AnalyzeRule {
   private resolveRuleValue(rule: string): string {
     if (!rule) return '';
     if (rule.startsWith('@get:{')) {
-      const m = rule.match(/@get:\{(\w+)\}/);
-      return m ? this.ctx.get(m[1]) : '';
+      const m = rule.match(/@get:\{([^}]+)\}/);
+      return m ? this.ctx.get(m[1].trim()) : '';
     }
     if (rule.startsWith('$') || rule.startsWith('@.')) {
       const v = this.evalJsonPath(rule);
@@ -967,7 +1068,7 @@ export class AnalyzeRule {
         case '$=': if (!value.endsWith(expect)) return false; break;
         case '^=': if (!value.startsWith(expect)) return false; break;
         case '*=': if (!value.includes(expect)) return false; break;
-        case '~=': if (!new RegExp(`(^|\\s)${this.escapeRegex(expect)}(\\s|$)`).test(value)) return false; break;
+        case '~=': if (!this.matchRegexLikeAttribute(value, expect)) return false; break;
         case '|=': if (value !== expect && !value.startsWith(expect + '-')) return false; break;
       }
     }
@@ -985,7 +1086,7 @@ export class AnalyzeRule {
         case '$=': if (value.endsWith(expect)) return true; break;
         case '^=': if (value.startsWith(expect)) return true; break;
         case '*=': if (value.includes(expect)) return true; break;
-        case '~=': if (new RegExp(`(^|\\s)${this.escapeRegex(expect)}(\\s|$)`).test(value)) return true; break;
+        case '~=': if (this.matchRegexLikeAttribute(value, expect)) return true; break;
         case '|=': if (value === expect || value.startsWith(expect + '-')) return true; break;
       }
     }
@@ -998,6 +1099,15 @@ export class AnalyzeRule {
     if (nthChild !== null && pos.child !== nthChild) return false;
     if (nthOfType !== null && pos.type !== nthOfType) return false;
     return true;
+  }
+
+  private matchRegexLikeAttribute(value: string, expect: string): boolean {
+    if (!value) return false;
+    try {
+      return new RegExp(expect, 'i').test(value);
+    } catch (_) {
+      return new RegExp(`(^|\\s)${this.escapeRegex(expect)}(\\s|$)`).test(value);
+    }
   }
 
   private directChildPosition(html: string, targetIndex: number, targetTag: string): { child: number, type: number } {
@@ -1284,8 +1394,8 @@ export class AnalyzeRule {
     let result = template.replace(/\{\{([^}]+)\}\}/g, (_: string, expr: string) => {
       const rule = expr.trim();
       if (rule.startsWith('@get:{')) {
-        const m = rule.match(/@get:\{(\w+)\}/);
-        return m ? this.ctx.get(m[1]) : '';
+        const m = rule.match(/@get:\{([^}]+)\}/);
+        return m ? this.ctx.get(m[1].trim()) : '';
       }
       if (rule.startsWith('$') || rule.startsWith('@.')) {
         const v = this.evalJsonPath(rule);
@@ -1296,6 +1406,8 @@ export class AnalyzeRule {
         const ctxVal = this.ctx.get(rule);
         if (ctxVal) return ctxVal;
       }
+      const ctxVal = this.ctx.get(rule);
+      if (ctxVal) return ctxVal;
       return this.js.evalTemplate(`{{${rule}}}`);
     });
 
@@ -1336,9 +1448,9 @@ export class AnalyzeRule {
     }
 
     // 处理 @js: 后缀（AES解密等）
-    const jsSuffix = rule.match(/@js:(.+)$/);
+    const jsSuffix = rule.match(/@js:([\s\S]+)$/);
     if (jsSuffix) {
-      const jsCode = jsSuffix[1];
+      const jsCode = jsSuffix[1].trim();
       if (jsCode.startsWith('java.aesBase64DecodeToString')) {
         value = this.applyAesDecrypt(value, jsCode);
         if (!value) return '';

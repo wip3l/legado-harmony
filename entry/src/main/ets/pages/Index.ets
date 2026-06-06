@@ -7,15 +7,16 @@ import { Book, BookChapter, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { SearchCoordinator, SearchCallback, SearchProgress } from '../core/book/SearchCoordinator';
 import { ExploreCoordinator, ExploreEntry, ExploreSourceOption } from '../core/book/ExploreCoordinator';
-import { WebBookService } from '../core/book/WebBookService';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
+import { SearchBookResultList } from '../components/book/SearchBookResultList';
 import { syncSystemSafeAreas } from '../utils/SystemBars';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
 import { BookCoverCache } from '../utils/BookCoverCache';
 import { CoverGallerySettings } from '../utils/CoverGallerySettings';
 import { BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettingsStore';
-import { BookIdentity } from '../utils/BookIdentity';
+import { SearchBookShelfHelper } from '../utils/SearchBookShelfHelper';
+import { BookshelfSortHelper } from '../utils/BookshelfSortHelper';
 
 @Entry
 @Component
@@ -1454,13 +1455,11 @@ struct BookshelfPage {
   }
 
   sortBooks(books: Book[]): Book[] {
-    const sorted = [...books];
     if (this.sortMode === 'recentRead') {
-      sorted.sort((a: Book, b: Book) => {
-        const readDiff = this.getBookReadTime(b) - this.getBookReadTime(a);
-        return readDiff !== 0 ? readDiff : this.getBookAddTime(b) - this.getBookAddTime(a);
-      });
-    } else if (this.sortMode === 'name') {
+      return BookshelfSortHelper.sortByRecentRead(books);
+    }
+    const sorted = [...books];
+    if (this.sortMode === 'name') {
       sorted.sort((a: Book, b: Book) => this.compareBookName(a, b));
     } else {
       sorted.sort((a: Book, b: Book) => this.getBookAddTime(b) - this.getBookAddTime(a));
@@ -1489,23 +1488,15 @@ struct BookshelfPage {
   }
 
   getBookAddTime(book: Book): number {
-    return book.latestChapterTime || book.lastCheckTime || book.durChapterTime || 0;
+    return BookshelfSortHelper.getBookAddTime(book);
   }
 
   getBookReadTime(book: Book): number {
-    const lastReadTime = this.parseBookTime(book.getVariable('lastReadTime'));
-    if (lastReadTime > 0) {
-      return lastReadTime;
-    }
-    if (!book.durChapterTitle && book.durChapterIndex <= 0 && book.durChapterPos <= 0) {
-      return 0;
-    }
-    return book.durChapterTime || 0;
+    return BookshelfSortHelper.getBookReadTime(book);
   }
 
   parseBookTime(value: string): number {
-    const time = Number(value);
-    return time > 0 ? time : 0;
+    return BookshelfSortHelper.parseBookTime(value);
   }
 
   getShelfProgressText(book: Book): string {
@@ -1577,6 +1568,7 @@ struct ExplorePage {
   @State selectedIndex: number = 0;
   @State books: SearchBook[] = [];
   @State shelfBookKeys: string[] = [];
+  @State addingShelfBookKeys: string[] = [];
   @State isLoading: boolean = false;
   @State status: string = '';
   @State verificationUrl: string = '';
@@ -1586,6 +1578,7 @@ struct ExplorePage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   private coordinator: ExploreCoordinator = new ExploreCoordinator();
   private hasLoaded: boolean = false;
+  private shelfStatusVersion: number = 0;
 
   aboutToAppear() {
     if (this.isActive) {
@@ -1799,61 +1792,27 @@ struct ExplorePage {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
       } else if (this.books.length > 0) {
-        List({ space: 8 }) {
-          ForEach(this.books, (book: SearchBook) => {
-            ListItem() {
-              Row() {
-                Column() {
-                  Text(book.name)
-                    .fontSize(16)
-                    .fontWeight(FontWeight.Bold)
-                    .fontColor(this.primaryTextColor())
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-                  Text(book.author || '作者未知')
-                    .fontSize(14)
-                    .fontColor(this.secondaryTextColor())
-                    .margin({ top: 4 })
-
-                  Text(`${book.originName}${book.kind ? ' · ' + book.kind : ''}`)
-                    .fontSize(12)
-                    .fontColor(this.subTextColor())
-                    .margin({ top: 4 })
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                }
-                .layoutWeight(1)
-                .alignItems(HorizontalAlign.Start)
-
-                Button(this.isSearchBookInShelf(book) ? '移除' : '加入')
-                  .height(32)
-                  .fontSize(13)
-                  .borderRadius(16)
-                  .backgroundColor(this.isSearchBookInShelf(book) ? '#E53935' : '#007DFF')
-                  .fontColor('#FFFFFF')
-                  .margin({ left: 12 })
-                  .onClick(() => {
-                    this.toggleSearchBookShelf(book);
-                  })
-              }
-              .width('100%')
-              .padding(12)
-              .backgroundColor(this.glassCardColor())
-              .borderRadius(8)
-              .border({ width: 1, color: this.glassBorderColor() })
-              .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
-              .onClick(() => {
-                this.openSearchBookDetail(book);
-              })
-            }
-          })
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .padding({ left: 16, right: 16, bottom: 12 })
-        .backgroundColor(this.pageColor())
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+        SearchBookResultList({
+          books: this.books,
+          shelfBookKeys: this.shelfBookKeys,
+          busyBookKeys: this.addingShelfBookKeys,
+          showKind: true,
+          pageColor: this.pageColor(),
+          cardColor: this.glassCardColor(),
+          itemBorderColor: this.glassBorderColor(),
+          itemBorderWidth: 1,
+          shadowColor: this.glassShadowColor(),
+          primaryTextColor: this.primaryTextColor(),
+          secondaryTextColor: this.secondaryTextColor(),
+          subTextColor: this.subTextColor(),
+          bottomPadding: 12,
+          onOpenBook: (book: SearchBook) => {
+            this.openSearchBookDetail(book);
+          },
+          onToggleShelf: (book: SearchBook) => {
+            this.toggleSearchBookShelf(book);
+          }
+        })
       } else {
         Column() {
           Text('没有发现内容')
@@ -1909,64 +1868,16 @@ struct ExplorePage {
   }
 
   async addSearchBookToShelf(searchBook: SearchBook): Promise<void> {
-    if (!searchBook.bookUrl) {
-      promptAction.showToast({ message: '书籍地址为空' });
-      return;
-    }
-
+    const searchKey = SearchBookShelfHelper.keyOf(searchBook);
+    this.markSearchBookJoining(searchKey);
     try {
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      const searchKey = BookIdentity.keyOfSearchBook(searchBook);
-      const existing = await this.findShelfBookByKey(searchKey);
-      if (existing) {
-        this.markSearchBookInShelf(searchKey);
-        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-        promptAction.showToast({ message: '已在书架' });
-        return;
-      }
-
-      const book = new Book();
-      book.bookUrl = searchBook.bookUrl;
-      book.tocUrl = searchBook.tocUrl;
-      book.origin = searchBook.origin;
-      book.originName = searchBook.originName;
-      book.name = searchBook.name;
-      book.author = searchBook.author;
-      book.kind = searchBook.kind;
-      book.coverUrl = searchBook.coverUrl;
-      book.intro = searchBook.intro;
-      book.latestChapterTitle = searchBook.latestChapterTitle;
-      book.wordCount = searchBook.wordCount;
-      book.variable = searchBook.variable;
-      book.group = -2147483645;
-      book.type = 0;
-      book.canUpdate = true;
-      book.lastCheckTime = Date.now();
-      book.latestChapterTime = Date.now();
-
-      const source = book.origin ? await db.getBookSource(book.origin) : null;
-      if (source) {
-        const service = new WebBookService();
-        const fullBook = await service.getBookInfo(source, book);
-        book.tocUrl = fullBook.tocUrl;
-        book.name = fullBook.name;
-        book.author = fullBook.author;
-        book.kind = fullBook.kind;
-        book.coverUrl = fullBook.coverUrl;
-        book.intro = fullBook.intro;
-        book.latestChapterTitle = fullBook.latestChapterTitle;
-        book.wordCount = fullBook.wordCount;
-        book.variable = fullBook.variable;
-      }
-
-      await db.insertBook(book);
-      this.markSearchBookInShelf(BookIdentity.keyOfBook(book) || searchKey);
-      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      promptAction.showToast({ message: '已加入书架' });
+      const change = await SearchBookShelfHelper.addToShelf(getContext(this), searchBook);
+      this.markSearchBookInShelf(change.shelfKey || change.requestKey);
     } catch (e) {
       console.error('加入书架失败:', e);
       promptAction.showToast({ message: '加入书架失败' });
+    } finally {
+      this.unmarkSearchBookJoining(searchKey);
     }
   }
 
@@ -2007,29 +1918,29 @@ struct ExplorePage {
 
   async syncExploreShelfStatus(books: SearchBook[]): Promise<void> {
     try {
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      const shelfBooks = await db.getAllBooks();
-      const shelfKeys = shelfBooks.map((book: Book) => BookIdentity.keyOfBook(book));
-      const keys: string[] = [];
-      for (const book of books) {
-        const key = BookIdentity.keyOfSearchBook(book);
-        if (key && shelfKeys.includes(key)) {
-          keys.push(key);
-        }
+      const version = this.shelfStatusVersion;
+      const keys = await SearchBookShelfHelper.syncShelfKeys(getContext(this), books);
+      if (version === this.shelfStatusVersion) {
+        this.shelfBookKeys = keys;
       }
-      this.shelfBookKeys = keys;
     } catch (e) {
       console.error('同步发现书架状态失败:', e);
     }
   }
 
   isSearchBookInShelf(book: SearchBook): boolean {
-    const key = BookIdentity.keyOfSearchBook(book);
-    return !!key && this.shelfBookKeys.includes(key);
+    return SearchBookShelfHelper.isInShelf(book, this.shelfBookKeys);
+  }
+
+  isSearchBookJoiningShelf(book: SearchBook): boolean {
+    return SearchBookShelfHelper.isBusy(book, this.addingShelfBookKeys);
   }
 
   async toggleSearchBookShelf(searchBook: SearchBook): Promise<void> {
+    if (this.isSearchBookJoiningShelf(searchBook)) {
+      return;
+    }
+
     if (this.isSearchBookInShelf(searchBook)) {
       await this.removeSearchBookFromShelf(searchBook);
     } else {
@@ -2038,23 +1949,10 @@ struct ExplorePage {
   }
 
   async removeSearchBookFromShelf(searchBook: SearchBook): Promise<void> {
-    if (!searchBook.bookUrl) {
-      promptAction.showToast({ message: '书籍地址为空' });
-      return;
-    }
-
     try {
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      const key = BookIdentity.keyOfSearchBook(searchBook);
-      const existing = await this.findShelfBookByKey(key);
-      if (existing) {
-        this.deleteBookCoverCache(existing);
-      }
-      await db.deleteBook(existing?.bookUrl || searchBook.bookUrl);
-      this.shelfBookKeys = this.shelfBookKeys.filter(item => item !== key);
-      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      promptAction.showToast({ message: '已移出书架' });
+      const change = await SearchBookShelfHelper.removeFromShelf(getContext(this), searchBook);
+      this.shelfStatusVersion++;
+      this.shelfBookKeys = SearchBookShelfHelper.withoutKey(this.shelfBookKeys, change.requestKey);
     } catch (e) {
       console.error('移出书架失败:', e);
       promptAction.showToast({ message: '移出书架失败' });
@@ -2062,29 +1960,24 @@ struct ExplorePage {
   }
 
   markSearchBookInShelf(bookKey: string): void {
-    if (bookKey && !this.shelfBookKeys.includes(bookKey)) {
-      this.shelfBookKeys = [...this.shelfBookKeys, bookKey];
+    const next = SearchBookShelfHelper.withAddedKey(this.shelfBookKeys, bookKey);
+    if (next !== this.shelfBookKeys) {
+      this.shelfStatusVersion++;
+      this.shelfBookKeys = next;
     }
   }
 
-  async findShelfBookByKey(bookKey: string): Promise<Book | null> {
-    if (!bookKey) return null;
-    const db = AppDatabase.getInstance();
-    const books = await db.getAllBooks();
-    for (const book of books) {
-      if (BookIdentity.keyOfBook(book) === bookKey) return book;
+  markSearchBookJoining(bookKey: string): void {
+    const next = SearchBookShelfHelper.withAddedKey(this.addingShelfBookKeys, bookKey);
+    if (next !== this.addingShelfBookKeys) {
+      this.addingShelfBookKeys = next;
     }
-    return null;
   }
 
-  deleteBookCoverCache(book: Book): void {
-    const context = getContext(this);
-    const covers = [
-      ...BookDisplayHelper.decodeCoverList(book.customCoverUrl),
-      ...BookDisplayHelper.decodeCoverList(book.coverUrl)
-    ];
-    for (const cover of covers) {
-      BookCoverCache.deleteCachedCover(context, cover);
+  unmarkSearchBookJoining(bookKey: string): void {
+    const next = SearchBookShelfHelper.withoutKey(this.addingShelfBookKeys, bookKey);
+    if (next !== this.addingShelfBookKeys) {
+      this.addingShelfBookKeys = next;
     }
   }
 
@@ -2180,6 +2073,7 @@ struct SearchPage {
   @State keyword: string = '';
   @State searchResults: SearchBook[] = [];
   @State shelfBookKeys: string[] = [];
+  @State addingShelfBookKeys: string[] = [];
   @State isSearching: boolean = false;
   @State showResult: boolean = false;
   @State statusMessage: string = '';
@@ -2279,76 +2173,27 @@ struct SearchPage {
       }
 
       if (this.showResult && this.searchResults.length > 0) {
-        List({ space: 8 }) {
-          ForEach(this.searchResults, (book: SearchBook) => {
-            ListItem() {
-              Row() {
-                Column() {
-                  Text(book.name)
-                    .fontSize(16)
-                    .fontWeight(FontWeight.Bold)
-                    .fontColor(this.primaryTextColor())
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-                  Text(book.author || '作者未知')
-                    .fontSize(14)
-                    .fontColor(this.secondaryTextColor())
-                    .margin({ top: 4 })
-
-                  Text(book.originName)
-                    .fontSize(12)
-                    .fontColor(this.subTextColor())
-                    .margin({ top: 4 })
-                }
-                .layoutWeight(1)
-                .alignItems(HorizontalAlign.Start)
-
-                Button(this.isSearchBookInShelf(book) ? '移除' : '加入')
-                  .height(32)
-                  .fontSize(13)
-                  .borderRadius(16)
-                  .backgroundColor(this.isSearchBookInShelf(book) ? '#E53935' : '#007DFF')
-                  .fontColor('#FFFFFF')
-                  .margin({ left: 12 })
-                  .onClick(() => {
-                    this.toggleSearchBookShelf(book);
-                  })
-              }
-              .width('100%')
-              .padding(12)
-              .backgroundColor(this.glassCardColor())
-              .borderRadius(8)
-              .border({ width: 1, color: this.glassBorderColor() })
-              .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
-              .onClick(() => {
-                this.openSearchBookDetail(book);
-              })
-            }
-          })
-
-          if (this.isSearching) {
-            ListItem() {
-              Row() {
-                LoadingProgress()
-                  .width(20)
-                  .height(20)
-                Text('继续搜索中...')
-                  .fontSize(13)
-                  .fontColor(this.subTextColor())
-                  .margin({ left: 8 })
-              }
-              .width('100%')
-              .height(44)
-              .justifyContent(FlexAlign.Center)
-            }
+        SearchBookResultList({
+          books: this.searchResults,
+          shelfBookKeys: this.shelfBookKeys,
+          busyBookKeys: this.addingShelfBookKeys,
+          showLoadingMore: this.isSearching,
+          pageColor: this.pageColor(),
+          cardColor: this.glassCardColor(),
+          itemBorderColor: this.glassBorderColor(),
+          itemBorderWidth: 1,
+          shadowColor: this.glassShadowColor(),
+          primaryTextColor: this.primaryTextColor(),
+          secondaryTextColor: this.secondaryTextColor(),
+          subTextColor: this.subTextColor(),
+          bottomPadding: 12,
+          onOpenBook: (book: SearchBook) => {
+            this.openSearchBookDetail(book);
+          },
+          onToggleShelf: (book: SearchBook) => {
+            this.toggleSearchBookShelf(book);
           }
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .padding({ left: 16, right: 16, bottom: 12 })
-        .backgroundColor(this.pageColor())
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+        })
       } else if (this.isSearching) {
         Column() {
           LoadingProgress()
@@ -2448,17 +2293,7 @@ struct SearchPage {
   async syncSearchShelfStatus(books: SearchBook[]): Promise<void> {
     try {
       const version = this.shelfStatusVersion;
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      const shelfBooks = await db.getAllBooks();
-      const shelfKeys = shelfBooks.map((book: Book) => BookIdentity.keyOfBook(book));
-      const keys: string[] = [];
-      for (const book of books) {
-        const key = BookIdentity.keyOfSearchBook(book);
-        if (key && shelfKeys.includes(key)) {
-          keys.push(key);
-        }
-      }
+      const keys = await SearchBookShelfHelper.syncShelfKeys(getContext(this), books);
       if (version === this.shelfStatusVersion) {
         this.shelfBookKeys = keys;
       }
@@ -2468,11 +2303,18 @@ struct SearchPage {
   }
 
   isSearchBookInShelf(book: SearchBook): boolean {
-    const key = BookIdentity.keyOfSearchBook(book);
-    return !!key && this.shelfBookKeys.includes(key);
+    return SearchBookShelfHelper.isInShelf(book, this.shelfBookKeys);
+  }
+
+  isSearchBookJoiningShelf(book: SearchBook): boolean {
+    return SearchBookShelfHelper.isBusy(book, this.addingShelfBookKeys);
   }
 
   async toggleSearchBookShelf(searchBook: SearchBook): Promise<void> {
+    if (this.isSearchBookJoiningShelf(searchBook)) {
+      return;
+    }
+
     if (this.isSearchBookInShelf(searchBook)) {
       await this.removeSearchBookFromShelf(searchBook);
     } else {
@@ -2481,86 +2323,25 @@ struct SearchPage {
   }
 
   async addSearchBookToShelf(searchBook: SearchBook): Promise<void> {
-    if (!searchBook.bookUrl) {
-      promptAction.showToast({ message: '书籍地址为空' });
-      return;
-    }
+    const searchKey = SearchBookShelfHelper.keyOf(searchBook);
+    this.markSearchBookJoining(searchKey);
 
     try {
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      const searchKey = BookIdentity.keyOfSearchBook(searchBook);
-      const existing = await this.findShelfBookByKey(searchKey);
-      if (existing) {
-        this.markSearchBookInShelf(searchKey);
-        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-        promptAction.showToast({ message: '已在书架' });
-        return;
-      }
-
-      const book = new Book();
-      book.bookUrl = searchBook.bookUrl;
-      book.tocUrl = searchBook.tocUrl;
-      book.origin = searchBook.origin;
-      book.originName = searchBook.originName;
-      book.name = searchBook.name;
-      book.author = searchBook.author;
-      book.kind = searchBook.kind;
-      book.coverUrl = searchBook.coverUrl;
-      book.intro = searchBook.intro;
-      book.latestChapterTitle = searchBook.latestChapterTitle;
-      book.wordCount = searchBook.wordCount;
-      book.variable = searchBook.variable;
-      book.group = -2147483645;
-      book.type = 0;
-      book.canUpdate = true;
-      book.lastCheckTime = Date.now();
-      book.latestChapterTime = Date.now();
-
-      const source = book.origin ? await db.getBookSource(book.origin) : null;
-      if (source) {
-        const service = new WebBookService();
-        const fullBook = await service.getBookInfo(source, book);
-        book.tocUrl = fullBook.tocUrl;
-        book.name = fullBook.name;
-        book.author = fullBook.author;
-        book.kind = fullBook.kind;
-        book.coverUrl = fullBook.coverUrl;
-        book.intro = fullBook.intro;
-        book.latestChapterTitle = fullBook.latestChapterTitle;
-        book.wordCount = fullBook.wordCount;
-        book.variable = fullBook.variable;
-      }
-
-      await db.insertBook(book);
-      this.markSearchBookInShelf(BookIdentity.keyOfBook(book) || searchKey);
-      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      promptAction.showToast({ message: '已加入书架' });
+      const change = await SearchBookShelfHelper.addToShelf(getContext(this), searchBook);
+      this.markSearchBookInShelf(change.shelfKey || change.requestKey);
     } catch (e) {
       console.error('加入书架失败:', e);
       promptAction.showToast({ message: '加入书架失败' });
+    } finally {
+      this.unmarkSearchBookJoining(searchKey);
     }
   }
 
   async removeSearchBookFromShelf(searchBook: SearchBook): Promise<void> {
-    if (!searchBook.bookUrl) {
-      promptAction.showToast({ message: '书籍地址为空' });
-      return;
-    }
-
     try {
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      const key = BookIdentity.keyOfSearchBook(searchBook);
-      const existing = await this.findShelfBookByKey(key);
-      if (existing) {
-        this.deleteBookCoverCache(existing);
-      }
-      await db.deleteBook(existing?.bookUrl || searchBook.bookUrl);
+      const change = await SearchBookShelfHelper.removeFromShelf(getContext(this), searchBook);
       this.shelfStatusVersion++;
-      this.shelfBookKeys = this.shelfBookKeys.filter(item => item !== key);
-      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      promptAction.showToast({ message: '已移出书架' });
+      this.shelfBookKeys = SearchBookShelfHelper.withoutKey(this.shelfBookKeys, change.requestKey);
     } catch (e) {
       console.error('移出书架失败:', e);
       promptAction.showToast({ message: '移出书架失败' });
@@ -2568,30 +2349,24 @@ struct SearchPage {
   }
 
   markSearchBookInShelf(bookKey: string): void {
-    if (bookKey && !this.shelfBookKeys.includes(bookKey)) {
+    const next = SearchBookShelfHelper.withAddedKey(this.shelfBookKeys, bookKey);
+    if (next !== this.shelfBookKeys) {
       this.shelfStatusVersion++;
-      this.shelfBookKeys = [...this.shelfBookKeys, bookKey];
+      this.shelfBookKeys = next;
     }
   }
 
-  async findShelfBookByKey(bookKey: string): Promise<Book | null> {
-    if (!bookKey) return null;
-    const db = AppDatabase.getInstance();
-    const books = await db.getAllBooks();
-    for (const book of books) {
-      if (BookIdentity.keyOfBook(book) === bookKey) return book;
+  markSearchBookJoining(bookKey: string): void {
+    const next = SearchBookShelfHelper.withAddedKey(this.addingShelfBookKeys, bookKey);
+    if (next !== this.addingShelfBookKeys) {
+      this.addingShelfBookKeys = next;
     }
-    return null;
   }
 
-  deleteBookCoverCache(book: Book): void {
-    const context = getContext(this);
-    const covers = [
-      ...BookDisplayHelper.decodeCoverList(book.customCoverUrl),
-      ...BookDisplayHelper.decodeCoverList(book.coverUrl)
-    ];
-    for (const cover of covers) {
-      BookCoverCache.deleteCachedCover(context, cover);
+  unmarkSearchBookJoining(bookKey: string): void {
+    const next = SearchBookShelfHelper.withoutKey(this.addingShelfBookKeys, bookKey);
+    if (next !== this.addingShelfBookKeys) {
+      this.addingShelfBookKeys = next;
     }
   }
 

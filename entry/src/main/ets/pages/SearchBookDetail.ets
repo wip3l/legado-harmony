@@ -222,7 +222,13 @@ struct SearchBookDetailPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      this.isInShelf = await db.getBook(this.bookUrl) !== null;
+      const existing = await db.getBook(this.bookUrl);
+      if (existing && !existing.coverUrl && this.coverUrl) {
+        existing.coverUrl = this.coverUrl;
+        await db.updateBook(existing);
+        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      }
+      this.isInShelf = existing !== null;
     } catch (e) {
       console.error('检查书架失败:', e);
       this.isInShelf = false;
@@ -241,6 +247,11 @@ struct SearchBookDetailPage {
       await db.initWithContext(getContext(this));
       const existing = await db.getBook(this.bookUrl);
       if (existing) {
+        if (!existing.coverUrl && this.coverUrl) {
+          existing.coverUrl = this.coverUrl;
+          await db.updateBook(existing);
+          AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+        }
         this.isInShelf = true;
         return true;
       }
@@ -262,6 +273,7 @@ struct SearchBookDetailPage {
       book.canUpdate = true;
       book.lastCheckTime = Date.now();
       book.latestChapterTime = Date.now();
+      const fallbackCoverUrl = book.coverUrl;
       const source = book.origin ? await db.getBookSource(book.origin) : null;
       if (source) {
         const service = new WebBookService();
@@ -270,7 +282,7 @@ struct SearchBookDetailPage {
         book.name = fullBook.name;
         book.author = fullBook.author;
         book.kind = fullBook.kind;
-        book.coverUrl = fullBook.coverUrl;
+        book.coverUrl = fullBook.coverUrl || fallbackCoverUrl;
         book.intro = fullBook.intro;
         book.latestChapterTitle = fullBook.latestChapterTitle;
         book.wordCount = fullBook.wordCount;

@@ -13,6 +13,7 @@
         "2*4"
       ],
       "updateEnabled": true,
+      "formVisibleNotify": true,
       "updateDuration": 1,
       "scheduledUpdateTime": "06:00"
     }

@@ -2,6 +2,7 @@ import { router } from '@kit.ArkUI';
 import { Context } from '@kit.AbilityKit';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { Book } from '../model/data/Book';
+import { BookshelfSortHelper } from './BookshelfSortHelper';
 
 export const RECENT_READ_SHORTCUT_ACTION = 'recent_read';
 export const OPEN_BOOK_SHORTCUT_ACTION = 'open_book';
@@ -93,7 +94,7 @@ export class RecentReadShortcut {
   private static async getRecentReadBook(context: Context): Promise<Book | null> {
     const db = AppDatabase.getInstance();
     await db.initWithContext(context);
-    const books = await db.getAllBooks();
+    const books = BookshelfSortHelper.sortByRecentRead(await db.getAllBooks());
     return books.length > 0 ? books[0] : null;
   }
 }

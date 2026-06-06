@@ -76,9 +76,6 @@ export class SearchCoordinator {
 
   private async searchOne(source: BookSource, keyword: string): Promise<SearchBook[]> {
     try {
-      if (BookSourceDataUrlSupport.sourceUsesMyBxSearch(source)) {
-        return await BookSourceDataUrlSupport.searchMyBx(this.http, source, keyword);
-      }
       if (BookSourceDataUrlSupport.sourceUsesGySearch(source)) {
         return await BookSourceDataUrlSupport.search(this.http, source, keyword);
       }
@@ -94,7 +91,7 @@ export class SearchCoordinator {
       js.setVar('page', '1');
 
       const au = new AnalyzeUrl(source, this.http);
-      let urlTemplate = this.evalAndBuild(js, source, keyword);
+      let urlTemplate = await this.evalAndBuild(js, source, keyword);
       if (!urlTemplate && source.searchUrl.includes('gysearch')) {
         urlTemplate = EncodedSourceUrl.buildSearchUrl(keyword);
       }
@@ -125,8 +122,13 @@ export class SearchCoordinator {
       console.log('[SC] parsed list:', source.bookSourceName, 'rule:', searchRule.bookList, 'count:', items.length);
 
       const books: SearchBook[] = [];
+      const sourceBackendHost = BookSourceDataUrlSupport.sourceBackendHost(source);
       for (const item of items) {
         const ir = new AnalyzeRule(item, baseUrl);
+        if (sourceBackendHost) {
+          ir.getContext().put('host', sourceBackendHost);
+          ir.getContext().put('backend', sourceBackendHost);
+        }
         const book = new SearchBook();
         book.name = ir.analyzeFirst(searchRule.name) || '';
         book.author = ir.analyzeFirst(searchRule.author) || '';
@@ -172,10 +174,12 @@ export class SearchCoordinator {
     }
   }
 
-  private evalAndBuild(js: JsRuntime, source: BookSource, keyword: string): string {
+  private async evalAndBuild(js: JsRuntime, source: BookSource, keyword: string): Promise<string> {
     const searchUrl = source.searchUrl;
     const baseUrl = source.bookSourceUrl;
     if (!searchUrl) return `${baseUrl}/search?q={{key}}`;
+    const scriptedFormUrl = await this.tryBuildScriptedFormSearchUrl(source, keyword);
+    if (scriptedFormUrl) return scriptedFormUrl;
     const buildRequestUrl = BookSourceDataUrlSupport.buildRequestUrl(source, searchUrl, '1', keyword);
     if (buildRequestUrl) return buildRequestUrl;
     const qingtianUrl = this.buildQingtianSearchUrl(source, keyword, '1');
@@ -207,6 +211,75 @@ export class SearchCoordinator {
     // 清理残留模板
     url = url.replace(/\{\{[^}]+\}\}/g, '');
     return url;
+  }
+
+  private async tryBuildScriptedFormSearchUrl(source: BookSource, keyword: string): Promise<string> {
+    const script = source.searchUrl || '';
+    if (!script.startsWith('@js:') || !script.includes('java.ajax') || !script.includes('input[name=act]')) {
+      return '';
+    }
+    const baseUrl = BookUrlResolver.cleanBaseUrl(source.bookSourceUrl);
+    const formBaseUrl = this.extractScriptBaseUrl(script, baseUrl);
+    const appendPath = this.extractAppendedPath(script);
+    if (!formBaseUrl || !appendPath) return '';
+
+    const resp = await this.http.execute({
+      url: formBaseUrl,
+      method: 'GET',
+      headers: this.parseSourceHeaders(source.header)
+    });
+    if (!resp.success || !resp.body) return '';
+
+    const act = this.extractInputValue(resp.body, 'act');
+    if (!act) return '';
+    const submit = /\/www/i.test(formBaseUrl) ? '搜索 ' : '快速搜书';
+    const body = `act=${encodeURIComponent(act)}&q=${encodeURIComponent(keyword)}&submit=${encodeURIComponent(submit)}`;
+    const targetUrl = BookUrlResolver.resolve(appendPath, formBaseUrl);
+    const option = JSON.stringify({
+      body: body,
+      method: 'POST',
+      charset: 'GBK',
+      headers: { Referer: formBaseUrl }
+    });
+    return `${targetUrl},${option}`;
+  }
+
+  private extractScriptBaseUrl(script: string, fallbackUrl: string): string {
+    if (script.includes('source.key') || script.includes('source.getKey()')) return fallbackUrl;
+    const literalMatch = script.match(/\burl\s*=\s*["'](https?:\/\/[^"']+)["']/);
+    if (literalMatch && literalMatch[1]) return literalMatch[1];
+    if (script.includes('baseUrl')) return fallbackUrl;
+    return fallbackUrl;
+  }
+
+  private extractAppendedPath(script: string): string {
+    const appendMatch = script.match(/\burl\s*\+=\s*["']([^"']+)["']/);
+    if (appendMatch && appendMatch[1]) return appendMatch[1];
+    const pathMatch = script.match(/["'](\/[^"']*search[^"']*)["']/i) ||
+      script.match(/["'](\/[^"']*ss[^"']*)["']/i);
+    return pathMatch && pathMatch[1] ? pathMatch[1] : '';
+  }
+
+  private extractInputValue(html: string, name: string): string {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameFirst = new RegExp(`<input\\b[^>]*\\bname=["']${escaped}["'][^>]*\\bvalue=["']([^"']*)["'][^>]*>`, 'i');
+    const valueFirst = new RegExp(`<input\\b[^>]*\\bvalue=["']([^"']*)["'][^>]*\\bname=["']${escaped}["'][^>]*>`, 'i');
+    const match = html.match(nameFirst) || html.match(valueFirst);
+    return match && match[1] ? match[1] : '';
+  }
+
+  private parseSourceHeaders(header: string): Record<string, string> {
+    if (!header) return {};
+    try {
+      return JSON.parse(header.replace(/'/g, '"')) as Record<string, string>;
+    } catch (_) {
+      const result: Record<string, string> = {};
+      for (const line of header.split(/[\n\r]+/)) {
+        const idx = line.indexOf(':');
+        if (idx > 0) result[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+      }
+      return result;
+    }
   }
 
   private buildQingtianSearchUrl(source: BookSource, keyword: string, page: string): string {

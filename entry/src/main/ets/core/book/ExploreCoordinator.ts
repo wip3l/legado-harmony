@@ -105,9 +105,14 @@ export class ExploreCoordinator {
       const items = rule.getElements(exploreRule.bookList || '');
       console.info('[ExploreCoordinator] parsed list:', source.bookSourceName, 'rule:', exploreRule.bookList, 'count:', items.length);
       const books: SearchBook[] = [];
+      const sourceBackendHost = BookSourceDataUrlSupport.sourceBackendHost(source);
 
       for (const item of items) {
         const ir = new AnalyzeRule(item, baseUrl);
+        if (sourceBackendHost) {
+          ir.getContext().put('host', sourceBackendHost);
+          ir.getContext().put('backend', sourceBackendHost);
+        }
         const book = new SearchBook();
         book.name = ir.analyzeFirst(exploreRule.name) || '';
         book.author = ir.analyzeFirst(exploreRule.author) || '';

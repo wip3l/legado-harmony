@@ -65,6 +65,8 @@ struct ReadBookPage {
   private isPageTurning: boolean = false;
   private isAutoLoadingScrollChapter: boolean = false;
   private suppressScrollReachStart: boolean = false;
+  private lastRecentReadCardReloadAt: number = 0;
+  private lastRecentReadCardChapterIndex: number = -1;
   @StorageLink('readerFontSize') @Watch('onReadLayoutChanged') readerFontSize: number = 20;
   @StorageLink('readerLineHeight') @Watch('onReadLayoutChanged') readerLineHeight: number = 32;
   @StorageLink('readerParagraphSpacing') @Watch('onReadLayoutChanged') readerParagraphSpacing: number = 10;
@@ -475,14 +477,17 @@ struct ReadBookPage {
       if (this.showMenu) {
         Column() {
           Row() {
-            Text('<')
-              .fontSize(24)
+            Row() {
+              Text('<')
+                .fontSize(24)
+                .textAlign(TextAlign.Center)
+            }
               .width(40)
               .height(56)
-              .textAlign(TextAlign.Center)
-              .onClick(async () => {
-                await this.saveReadingProgress();
-                router.back();
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .onClick(() => {
+                this.exitReaderPage();
               })
 
             Text(this.book?.name || '')
@@ -1126,17 +1131,20 @@ struct ReadBookPage {
     }
     this.book.durChapterIndex = chapterIndex;
     this.book.durChapterPos = pageIndex;
+    const now = Date.now();
     this.book.durChapterTitle = this.getChapterTitle();
-    this.book.durChapterTime = Date.now();
-    this.book.putVariable('lastReadTime', `${this.book.durChapterTime}`);
+    this.book.durChapterTime = now;
+    this.book.putVariable('lastReadTime', `${now}`);
     engine.curIdx = chapterIndex;
     engine.curPos = pageIndex;
     engine.book = this.book;
+    const shouldRefreshRecentCard = chapterIndex !== this.lastRecentReadCardChapterIndex;
+    this.lastRecentReadCardChapterIndex = chapterIndex;
     try {
       const db = AppDatabase.getInstance();
       await db.updateBook(this.book);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      RecentReadCardUpdater.reload(getContext(this) as common.UIAbilityContext);
+      this.reloadRecentReadCardLater(shouldRefreshRecentCard);
     } catch (e) {
       console.error('保存阅读进度失败:', e);
     }
@@ -1146,15 +1154,32 @@ struct ReadBookPage {
     if (!this.book) {
       return;
     }
-    this.book.putVariable('lastReadTime', `${Date.now()}`);
+    const now = Date.now();
+    this.book.durChapterTime = now;
+    this.book.putVariable('lastReadTime', `${now}`);
     try {
       const db = AppDatabase.getInstance();
       await db.updateBook(this.book);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      RecentReadCardUpdater.reload(getContext(this) as common.UIAbilityContext);
+      this.lastRecentReadCardChapterIndex = this.currentChapterIndex;
+      this.reloadRecentReadCardLater(true);
     } catch (e) {
       console.error('更新最近阅读时间失败:', e);
     }
+  }
+
+  reloadRecentReadCardLater(force: boolean = false): void {
+    const now = Date.now();
+    if (!force && now - this.lastRecentReadCardReloadAt < 30000) {
+      return;
+    }
+    this.lastRecentReadCardReloadAt = now;
+    const context = getContext(this) as common.UIAbilityContext;
+    setTimeout(() => {
+      RecentReadCardUpdater.reload(context).catch((err: Error) => {
+        console.error('刷新最近阅读卡片失败:', err);
+      });
+    }, 0);
   }
 
   async saveReadConfig() {
@@ -1957,6 +1982,15 @@ struct ReadBookPage {
     this.showSettings = false;
   }
 
+  exitReaderPage(): void {
+    this.hideReaderPanels();
+    this.stopTtsReading();
+    this.saveReadingProgress().catch((e: Error) => {
+      console.error('返回阅读页时保存进度失败:', e);
+    });
+    router.back();
+  }
+
   paginateContent() {
     if (!this.content || this.pageViewWidth <= 0 || this.pageViewHeight <= 0) {
       this.contentPages = this.content ? [this.content] : [];
@@ -2017,7 +2051,6 @@ struct ReadBookPage {
     if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
       this.stopTtsReading();
     }
-    this.preloadReaderContent();
     await this.runPageTurnAnimation(1, this.readerPageTurnMode === 1 ? 'slide' : 'tap');
   }
 
@@ -2025,7 +2058,6 @@ struct ReadBookPage {
     if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
       this.stopTtsReading();
     }
-    this.preloadReaderContent();
     await this.runPageTurnAnimation(-1, this.readerPageTurnMode === 1 ? 'slide' : 'tap');
   }
 
@@ -2035,6 +2067,12 @@ struct ReadBookPage {
     }
     const engine = ReadBookEngine.get();
     engine.preloadAround(this.currentChapterIndex, 2, 1);
+  }
+
+  preloadReaderContentLater(): void {
+    setTimeout(() => {
+      this.preloadReaderContent();
+    }, 0);
   }
 
   async loadNextChapterOnScrollEnd(): Promise<void> {
@@ -2098,9 +2136,9 @@ struct ReadBookPage {
         this.currentPageIndex++;
         this.syncCurrentPageText();
         if (this.contentPages.length - this.currentPageIndex <= 3) {
-          this.preloadReaderContent();
+          this.preloadReaderContentLater();
         }
-        await this.saveReadingProgress();
+        this.saveReadingProgress();
       } else {
         await this.loadNextChapter();
       }
@@ -2111,9 +2149,9 @@ struct ReadBookPage {
       this.currentPageIndex--;
       this.syncCurrentPageText();
       if (this.currentPageIndex <= 2) {
-        this.preloadReaderContent();
+        this.preloadReaderContentLater();
       }
-      await this.saveReadingProgress();
+      this.saveReadingProgress();
     } else {
       await this.loadPrevChapter();
     }

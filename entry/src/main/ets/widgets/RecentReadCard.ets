@@ -17,111 +17,61 @@ class CardRouteAction {
   }
 }
 
-class CardRefreshParams {
-  action: string = 'refresh';
-}
-
-class CardRefreshAction {
-  action: string = 'message';
-  params: CardRefreshParams = new CardRefreshParams();
-}
-
 let storage = new LocalStorage();
 
 @Entry(storage)
 @Component
 struct RecentReadCard {
-  @LocalStorageProp('dimension') dimension: number = 2;
+  @LocalStorageProp('version') version: number = 0;
+  @LocalStorageProp('orderSignature') orderSignature: string = '';
   @LocalStorageProp('darkMode') darkMode: boolean = false;
   @LocalStorageProp('count') count: number = 0;
-  @LocalStorageProp('emptyText') emptyText: string = '暂无最近阅读';
   @LocalStorageProp('updatedAt') updatedAt: string = '';
+  @LocalStorageProp('emptyTitle') emptyTitle: string = '暂无最近阅读';
+  @LocalStorageProp('emptySubtitle') emptySubtitle: string = '打开书架阅读后会显示在这里';
+
   @LocalStorageProp('book0Name') book0Name: string = '';
-  @LocalStorageProp('book0Author') book0Author: string = '';
+  @LocalStorageProp('book0Meta') book0Meta: string = '';
   @LocalStorageProp('book0Progress') book0Progress: string = '';
-  @LocalStorageProp('book0Tag0') book0Tag0: string = '';
-  @LocalStorageProp('book0Tag1') book0Tag1: string = '';
   @LocalStorageProp('book0Url') book0Url: string = '';
-  @LocalStorageProp('book0Cover0') book0Cover0: string = '';
-  @LocalStorageProp('book0Cover1') book0Cover1: string = '';
-  @LocalStorageProp('book0Cover2') book0Cover2: string = '';
+  @LocalStorageProp('book0Cover') book0Cover: string = '';
+  @LocalStorageProp('book0Accent') book0Accent: string = '#007DFF';
+
   @LocalStorageProp('book1Name') book1Name: string = '';
-  @LocalStorageProp('book1Author') book1Author: string = '';
+  @LocalStorageProp('book1Meta') book1Meta: string = '';
   @LocalStorageProp('book1Progress') book1Progress: string = '';
-  @LocalStorageProp('book1Tag0') book1Tag0: string = '';
-  @LocalStorageProp('book1Tag1') book1Tag1: string = '';
   @LocalStorageProp('book1Url') book1Url: string = '';
-  @LocalStorageProp('book1Cover0') book1Cover0: string = '';
-  @LocalStorageProp('book1Cover1') book1Cover1: string = '';
-  @LocalStorageProp('book1Cover2') book1Cover2: string = '';
+  @LocalStorageProp('book1Cover') book1Cover: string = '';
+  @LocalStorageProp('book1Accent') book1Accent: string = '#2E7D68';
+
   @LocalStorageProp('book2Name') book2Name: string = '';
-  @LocalStorageProp('book2Author') book2Author: string = '';
+  @LocalStorageProp('book2Meta') book2Meta: string = '';
   @LocalStorageProp('book2Progress') book2Progress: string = '';
-  @LocalStorageProp('book2Tag0') book2Tag0: string = '';
-  @LocalStorageProp('book2Tag1') book2Tag1: string = '';
   @LocalStorageProp('book2Url') book2Url: string = '';
-  @LocalStorageProp('book2Cover0') book2Cover0: string = '';
-  @LocalStorageProp('book2Cover1') book2Cover1: string = '';
-  @LocalStorageProp('book2Cover2') book2Cover2: string = '';
+  @LocalStorageProp('book2Cover') book2Cover: string = '';
+  @LocalStorageProp('book2Accent') book2Accent: string = '#7A5AF8';
 
   build() {
     Column() {
-      Row() {
-        Column() {
-          Text('最近阅读')
-            .fontSize(17)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.primaryTextColor())
-            .maxLines(1)
-          Text(this.updatedAt ? `更新 ${this.updatedAt}` : '轻页书架')
-            .fontSize(11)
-            .fontColor(this.secondaryTextColor())
-            .margin({ top: 2 })
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
+      Text(`${this.version}|${this.orderSignature}`)
+        .height(0)
+        .opacity(0)
+        .fontSize(1)
 
-        Text('↻')
-          .fontSize(18)
-          .fontColor('#007DFF')
-          .width(32)
-          .height(32)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            postCardAction(this, new CardRefreshAction());
-          })
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
+      this.header()
 
       if (this.count <= 0) {
-        Column() {
-          Text(this.emptyText)
-            .fontSize(14)
-            .fontColor(this.secondaryTextColor())
-            .maxLines(1)
-          Text('打开应用添加书籍后会显示在这里')
-            .fontSize(11)
-            .fontColor(this.tertiaryTextColor())
-            .margin({ top: 4 })
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Start)
+        this.emptyState()
       } else {
-        Row({ space: 10 }) {
+        Row({ space: 8 }) {
           if (this.book0Url) {
-            this.bookCover(this.book0Name, this.book0Progress, this.book0Url, 0,
-              this.book0Cover0, this.book0Cover1, this.book0Cover2, this.book0Tag0, this.book0Tag1)
+            this.bookTile(this.book0Name, this.book0Progress, this.book0Url, this.book0Cover, this.book0Accent)
           }
           if (this.book1Url) {
-            this.bookCover(this.book1Name, this.book1Progress, this.book1Url, 1,
-              this.book1Cover0, this.book1Cover1, this.book1Cover2, this.book1Tag0, this.book1Tag1)
+            this.bookTile(this.book1Name, this.book1Progress, this.book1Url, this.book1Cover, this.book1Accent)
           }
           if (this.book2Url) {
-            this.bookCover(this.book2Name, this.book2Progress, this.book2Url, 2,
-              this.book2Cover0, this.book2Cover1, this.book2Cover2, this.book2Tag0, this.book2Tag1)
+            this.bookTile(this.book2Name, this.book2Progress, this.book2Url, this.book2Cover, this.book2Accent)
           }
         }
         .width('100%')
@@ -132,37 +82,82 @@ struct RecentReadCard {
     }
     .width('100%')
     .height('100%')
-    .padding(14)
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
     .backgroundColor(this.cardBackgroundColor())
   }
 
   @Builder
-  bookCover(name: string, progress: string, bookUrl: string, index: number,
-    cover0: string, cover1: string, cover2: string, tag0: string, tag1: string) {
-    Stack({ alignContent: Alignment.BottomStart }) {
-      this.coverBackground(index, cover0, cover1, cover2)
-
-      if (tag0 || tag1) {
-        Flex({ wrap: FlexWrap.Wrap }) {
-          if (tag0) {
-            this.tagChip(tag0)
-          }
-          if (tag1) {
-            this.tagChip(tag1)
-          }
-        }
-        .width('100%')
-        .padding({ left: 6, right: 6, top: 6 })
-        .align(Alignment.TopStart)
+  header() {
+    Row() {
+      Column() {
+        Text('最近阅读')
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .maxLines(1)
+        Text(this.updatedAt ? `更新 ${this.updatedAt}` : '轻页书架')
+          .fontSize(11)
+          .fontColor(this.secondaryTextColor())
+          .margin({ top: 2 })
+          .maxLines(1)
       }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Button('刷新', { type: ButtonType.Capsule })
+        .fontSize(12)
+        .fontColor('#007DFF')
+        .height(30)
+        .padding({ left: 10, right: 10 })
+        .backgroundColor(this.darkMode ? '#253041' : '#E7F0FF')
+        .stateEffect(true)
+        .onClick(() => {
+          postCardAction(this, {
+            action: 'message',
+            params: {
+              action: 'refresh',
+              nonce: Date.now()
+            }
+          });
+        })
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  emptyState() {
+    Column() {
+      Text(this.emptyTitle || '暂无最近阅读')
+        .fontSize(15)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.primaryTextColor())
+        .maxLines(1)
+      Text(this.emptySubtitle || '打开书架阅读后会显示在这里')
+        .fontSize(11)
+        .fontColor(this.secondaryTextColor())
+        .margin({ top: 5 })
+        .maxLines(1)
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  bookTile(name: string, progress: string, bookUrl: string, cover: string, accent: string) {
+    Stack({ alignContent: Alignment.BottomStart }) {
+      this.coverBackground(name, cover, accent)
 
       Column() {
         Text(name || '未命名书籍')
-          .fontSize(13)
+          .fontSize(12)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+
         Text(progress || '继续阅读')
           .fontSize(9)
           .fontColor('#E8EEF7')
@@ -171,12 +166,12 @@ struct RecentReadCard {
           .margin({ top: 3 })
       }
       .width('100%')
-      .padding({ left: 8, right: 8, top: 7, bottom: 7 })
+      .padding({ left: 7, right: 7, top: 7, bottom: 7 })
       .backgroundColor('#66000000')
       .alignItems(HorizontalAlign.Start)
     }
-    .width('31%')
-    .height(96)
+    .layoutWeight(1)
+    .height(104)
     .borderRadius(8)
     .clip(true)
     .onClick(() => {
@@ -185,71 +180,28 @@ struct RecentReadCard {
   }
 
   @Builder
-  tagChip(tag: string) {
-    Text(tag)
-      .fontSize(8)
-      .fontColor('#FFFFFF')
-      .maxLines(1)
-      .textOverflow({ overflow: TextOverflow.Ellipsis })
-      .padding({ left: 5, right: 5, top: 2, bottom: 2 })
-      .borderRadius(5)
-      .backgroundColor('#66000000')
-      .margin({ right: 4, bottom: 3 })
-  }
-
-  @Builder
-  coverBackground(index: number, cover0: string, cover1: string, cover2: string) {
-    if (cover1 || cover2) {
-      Swiper() {
-        if (cover0) {
-          this.coverImage(cover0)
-        }
-        if (cover1) {
-          this.coverImage(cover1)
-        }
-        if (cover2) {
-          this.coverImage(cover2)
-        }
-      }
-      .width('100%')
-      .height('100%')
-      .autoPlay(true)
-      .interval(3500)
-      .indicator(false)
-      .loop(true)
-    } else if (cover0) {
-      this.coverImage(cover0)
-    } else {
+  coverBackground(name: string, cover: string, accent: string) {
+    Stack() {
       Column() {
-        Text('阅读')
-          .fontSize(10)
-          .fontColor('#DDEBFF')
-          .opacity(0.8)
-          .margin({ top: 9, left: 9 })
+        Text(name ? name.substring(0, 1) : '书')
+          .fontSize(26)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#FFFFFF')
       }
       .width('100%')
       .height('100%')
-      .alignItems(HorizontalAlign.Start)
-      .backgroundColor(this.coverColor(index))
-    }
-  }
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor(accent || '#007DFF')
 
-  @Builder
-  coverImage(cover: string) {
-    Image(cover)
-      .width('100%')
-      .height('100%')
-      .objectFit(ImageFit.Cover)
-  }
-
-  private coverColor(index: number): string {
-    if (index === 0) {
-      return '#007DFF';
+      if (cover) {
+        Image(cover)
+          .width('100%')
+          .height('100%')
+          .objectFit(ImageFit.Cover)
+      }
     }
-    if (index === 1) {
-      return '#627287';
-    }
-    return '#2E7D68';
+    .width('100%')
+    .height('100%')
   }
 
   private cardBackgroundColor(): string {
@@ -261,10 +213,6 @@ struct RecentReadCard {
   }
 
   private secondaryTextColor(): string {
-    return this.darkMode ? '#8A8F98' : '#7C858F';
-  }
-
-  private tertiaryTextColor(): string {
-    return this.darkMode ? '#6F7480' : '#A0A7B0';
+    return this.darkMode ? '#8A8F98' : '#69717A';
   }
 }

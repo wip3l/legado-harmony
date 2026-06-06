@@ -66,6 +66,7 @@ export class ReadBookEngine {
       const oldLatestChapter = oldBook.latestChapterTitle;
       const infoBook = await this.webBook.getBookInfo(this.source, this.book);
       this.book = infoBook;
+      this.preserveReadingState(this.book, oldBook);
       console.log('[RE] getBookInfo done, tocUrl:', this.book.tocUrl);
       if (!this.book.tocUrl && oldTocUrl) {
         this.book.tocUrl = oldTocUrl;
@@ -92,6 +93,35 @@ export class ReadBookEngine {
     } finally {
       this.isLoading = false;
     }
+  }
+
+  private preserveReadingState(target: Book, source: Book): void {
+    target.bookUrl = source.bookUrl;
+    target.origin = target.origin || source.origin;
+    target.originName = target.originName || source.originName;
+    target.group = source.group;
+    target.order = source.order;
+    target.originOrder = source.originOrder;
+    target.durChapterIndex = source.durChapterIndex;
+    target.durChapterPos = source.durChapterPos;
+    target.durChapterTitle = source.durChapterTitle;
+    target.durChapterTime = source.durChapterTime;
+    target.readConfig = source.readConfig;
+    target.syncTime = source.syncTime;
+    this.preserveVariableTime(target, source, 'lastReadTime');
+  }
+
+  private preserveVariableTime(target: Book, source: Book, key: string): void {
+    const sourceTime = this.parsePositiveTime(source.getVariable(key));
+    const targetTime = this.parsePositiveTime(target.getVariable(key));
+    if (sourceTime > targetTime) {
+      target.putVariable(key, `${sourceTime}`);
+    }
+  }
+
+  private parsePositiveTime(value: string): number {
+    const time = Number(value);
+    return time > 0 ? time : 0;
   }
 
   private isBrokenChapterUrl(url: string): boolean {
@@ -233,9 +263,11 @@ export class ReadBookEngine {
 
   async saveProgress(): Promise<void> {
     if (!this.book) return;
+    const now = Date.now();
     this.book.durChapterIndex = this.curIdx;
     this.book.durChapterPos = this.curPos;
-    this.book.durChapterTime = Date.now();
+    this.book.durChapterTime = now;
+    this.book.putVariable('lastReadTime', `${now}`);
     await appDb.updateBook(this.book);
   }
 

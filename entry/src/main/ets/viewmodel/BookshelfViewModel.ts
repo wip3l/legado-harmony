@@ -1,6 +1,7 @@
-import { Book } from '../../model/data/Book';
-import { appDb } from '../../model/data/AppDatabase';
-import { LocalBook } from '../../model/localBook/LocalBook';
+import { Book } from '../model/data/Book';
+import { appDb } from '../model/data/AppDatabase';
+import { LocalBook } from '../model/localBook/LocalBook';
+import { BookshelfSortHelper } from '../utils/BookshelfSortHelper';
 import picker from '@ohos.file.picker';
 
 export class BookshelfViewModel {
@@ -122,9 +123,7 @@ export class BookshelfViewModel {
   }
 
   getRecentBooks(count: number): Book[] {
-    return [...this.books]
-      .sort((a, b) => b.durChapterTime - a.durChapterTime)
-      .slice(0, count);
+    return BookshelfSortHelper.getRecentReadBooks(this.books, count);
   }
 
   getLocalBooks(): Book[] {

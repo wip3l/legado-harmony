@@ -2,7 +2,6 @@ import { Book, BookChapter, BookSource, SearchBook } from '../../model/data/Book
 import { HttpClient, HttpResponse } from '../http/HttpClient';
 import { VerificationSupport } from '../http/VerificationSupport';
 import { JsRuntime } from '../rule/JsRuntime';
-import { AnalyzeRule } from '../rule/AnalyzeRule';
 import { EncodedJsonMap, EncodedSourcePayload, EncodedSourceUrl } from './EncodedSourceUrl';
 import { BookUrlResolver } from './BookUrlResolver';
 
@@ -27,12 +26,6 @@ export class BookSourceDataUrlSupport {
   static sourceUsesGySearch(source: BookSource): boolean {
     return (source.searchUrl || '').includes('gysearch') || (source.searchUrl || '').includes('gycatalog') ||
       (source.searchUrl || '').includes('gycontent');
-  }
-
-  static sourceUsesMyBxSearch(source: BookSource): boolean {
-    return ((source.searchUrl || '').includes('/bx/search') || (source.jsLib || '').includes('/bx/search')) &&
-      ((source.jsLib || '').includes('xbanxia') || (source.exploreUrl || '').includes('xbanxia') ||
-        (source.jsLib || '').includes('no.skybook.qzz.io'));
   }
 
   static sourceUsesGyExplore(source: BookSource): boolean {
@@ -89,45 +82,15 @@ export class BookSourceDataUrlSupport {
     return url;
   }
 
+  static sourceBackendHost(source: BookSource): string {
+    return BookSourceDataUrlSupport.backendHost(source);
+  }
+
   static async search(http: HttpClient, source: BookSource, keyword: string, page: number = 1): Promise<SearchBook[]> {
     const url = EncodedSourceUrl.buildSearchUrl(keyword, page);
     const root = await EncodedSourceUrl.requestJsonForDataUrl(http, url);
     if (!root) return [];
     return BookSourceDataUrlSupport.parseBookList(root, source);
-  }
-
-  static async searchMyBx(http: HttpClient, source: BookSource, keyword: string, page: number = 1): Promise<SearchBook[]> {
-    const url = `https://www.xbanxia.cc/modules/article/search.php?searchkey=${encodeURIComponent(keyword)}` +
-      (page > 1 ? `&page=${encodeURIComponent(String(page))}` : '');
-    const resp = await http.execute({ url: url, method: 'GET', headers: {} });
-    if (!resp.success || !resp.body) return [];
-    const rule = new AnalyzeRule(resp.body, url);
-    const items = rule.getElements('.pop-books2 li');
-    const books: SearchBook[] = [];
-    const host = BookSourceDataUrlSupport.backendHost(source);
-    for (const item of items) {
-      const ir = new AnalyzeRule(item, url);
-      const href = ir.analyzeFirst('a.0@href');
-      const idMatch = href.match(/\/books\/(\d+)\.html?/);
-      const bookId = idMatch ? idMatch[1] : '';
-      const name = ir.analyzeFirst('h2@text') || ir.analyzeFirst('a.0@title');
-      if (!bookId || !name) continue;
-      const book = new SearchBook();
-      book.name = name;
-      book.author = ir.analyzeFirst('.pop-intro@text') || ir.analyzeFirst('.pop-intro@title');
-      book.coverUrl = BookSourceDataUrlSupport.normalizeCoverUrl(source,
-        BookSourceDataUrlSupport.resolveSourceUrl(host, ir.analyzeFirst('img@data-original')));
-      book.bookUrl = EncodedSourceUrl.encodeRaw(bookId, 'mybxs', host);
-      book.origin = source.bookSourceUrl;
-      book.originName = source.bookSourceName;
-      book.bookSourceComment = source.bookSourceComment;
-      book.customOrder = source.customOrder;
-      book.weight = source.weight;
-      if (!books.some((bookItem: SearchBook) => bookItem.bookUrl === book.bookUrl && bookItem.origin === book.origin)) {
-        books.push(book);
-      }
-    }
-    return books;
   }
 
   static async getExploreEntries(http: HttpClient, platform: string = '番茄', tab: string = '小说',
@@ -265,7 +228,7 @@ export class BookSourceDataUrlSupport {
 
   private static async getMyBxBookInfo(http: HttpClient, source: BookSource, book: Book,
     payload: EncodedSourcePayload): Promise<Book> {
-    const host = BookSourceDataUrlSupport.backendHost(source) || EncodedSourceUrl.str(payload.options['host']);
+    const host = BookSourceDataUrlSupport.myBxHost(source, book, payload);
     const bookId = payload.text;
     if (!host || !bookId) return book;
     const root = await BookSourceDataUrlSupport.requestMyBxBackendJson(http,
@@ -346,6 +309,7 @@ export class BookSourceDataUrlSupport {
   private static async getMyBxBookInfoFromSite(http: HttpClient, source: BookSource, book: Book, bookId: string,
     backendHost: string): Promise<Book> {
     const siteHost = BookSourceDataUrlSupport.myBxSiteHost(source);
+    if (!siteHost) return book;
     const resp = await BookSourceDataUrlSupport.fetchMyBxSite(http, `${siteHost}/books/${encodeURIComponent(bookId)}.html`);
     if (!resp.success || !resp.body) return book;
     const html = resp.body;
@@ -378,6 +342,7 @@ export class BookSourceDataUrlSupport {
   private static async getMyBxChapterListFromSite(http: HttpClient, source: BookSource, book: Book, bookId: string,
     backendHost: string): Promise<BookChapter[]> {
     const siteHost = BookSourceDataUrlSupport.myBxSiteHost(source);
+    if (!siteHost) return [];
     const resp = await BookSourceDataUrlSupport.fetchMyBxSite(http, `${siteHost}/books/${encodeURIComponent(bookId)}.html`);
     if (!resp.success || !resp.body) return [];
     const block = BookSourceDataUrlSupport.extractElementBlockByClass(resp.body, 'book-list') || resp.body;
@@ -418,6 +383,7 @@ export class BookSourceDataUrlSupport {
     if (!bookId || !chapterId) return '';
     const siteHost = BookSourceDataUrlSupport.variableValue(chapter.variable, 'siteHost') ||
       BookSourceDataUrlSupport.myBxSiteHost(source);
+    if (!siteHost) return '';
     const resp = await BookSourceDataUrlSupport.fetchMyBxSite(http,
       `${siteHost}/books/${encodeURIComponent(bookId)}/${encodeURIComponent(chapterId)}.html`);
     if (!resp.success || !resp.body) return '';
@@ -590,9 +556,11 @@ export class BookSourceDataUrlSupport {
   private static normalizeMirroredAssetUrl(source: BookSource, url: string): string {
     const value = (url || '').trim();
     if (!value) return '';
-    const raw = `${source.bookSourceUrl || ''}\n${source.searchUrl || ''}\n${source.exploreUrl || ''}\n${source.jsLib || ''}`;
-    if (raw.includes('xbanxia') && value.includes('/bx/files/')) {
-      return value.replace(/^https?:\/\/[^/]+\/bx\/files\//, 'https://image.xbanxia.cc/files/');
+    if (value.includes('/bx/files/')) {
+      const assetOrigin = BookSourceDataUrlSupport.preferredAssetOrigin(source);
+      if (assetOrigin) {
+        return value.replace(/^https?:\/\/[^/]+\/bx\/files\//i, `${assetOrigin}/files/`);
+      }
     }
     return value;
   }
@@ -605,7 +573,7 @@ export class BookSourceDataUrlSupport {
     if (fromBook) return fromBook;
     const fromChapter = chapter ? BookSourceDataUrlSupport.variableValue(chapter.variable, 'host') : '';
     if (fromChapter) return fromChapter;
-    return BookSourceDataUrlSupport.backendHost(source) || 'https://no.skybook.qzz.io';
+    return BookSourceDataUrlSupport.backendHost(source);
   }
 
   private static variableValue(raw: string, key: string): string {
@@ -618,12 +586,13 @@ export class BookSourceDataUrlSupport {
   }
 
   private static async fetchMyBxSite(http: HttpClient, url: string): Promise<HttpResponse> {
+    const referer = BookSourceDataUrlSupport.originFromUrl(url);
     return await http.execute({
       url: url,
       method: 'GET',
       headers: {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Referer': BookSourceDataUrlSupport.myBxSiteHost(null)
+        'Referer': referer
       }
     });
   }
@@ -647,12 +616,19 @@ export class BookSourceDataUrlSupport {
   }
 
   private static myBxSiteHost(source: BookSource | null): string {
-    const raw = source ? `${source.bookSourceUrl || ''}\n${source.searchUrl || ''}\n${source.exploreUrl || ''}\n${source.jsLib || ''}` : '';
-    const match = raw.match(/https?:\/\/(?:www\.)?xbanxia\.cc/i);
-    if (match && match[0]) {
-      return match[0].replace(/^http:\/\//i, 'https://').replace('://xbanxia.cc', '://www.xbanxia.cc');
+    if (!source) return '';
+    const raw = BookSourceDataUrlSupport.sourceRaw(source);
+    const bookUrlMatch = raw.match(/https?:\/\/[^'"`\s#)]+\/books?\//i);
+    if (bookUrlMatch && bookUrlMatch[0]) return BookSourceDataUrlSupport.originFromUrl(bookUrlMatch[0]);
+    const sourceOrigin = BookSourceDataUrlSupport.originFromUrl(source.bookSourceUrl || '');
+    if (sourceOrigin) return sourceOrigin;
+    const assetOrigin = BookSourceDataUrlSupport.preferredAssetOrigin(source);
+    const assetHostMatch = assetOrigin.match(/^(https?:\/\/)([^/]+)$/i);
+    if (assetHostMatch && assetHostMatch[1] && assetHostMatch[2]) {
+      const host = assetHostMatch[2].replace(/^(?:image|img|pic|static|assets?|files?)[.-]/i, 'www.');
+      if (host !== assetHostMatch[2]) return `${assetHostMatch[1]}${host}`;
     }
-    return 'https://www.xbanxia.cc';
+    return '';
   }
 
   private static extractFirst(text: string, regex: RegExp): string {
@@ -715,7 +691,6 @@ export class BookSourceDataUrlSupport {
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
       .replace(/\(本章完\)/g, '')
-      .replace(/半夏小說[，,]\s*快樂很多/g, '')
       .replace(/\r\n?/g, '\n')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
@@ -746,12 +721,34 @@ export class BookSourceDataUrlSupport {
 
   private static resolveSourceUrl(host: string, url: string): string {
     if (!url) return '';
-    if (url.startsWith('http://image.xbanxia.cc/files/')) {
-      return url.replace('http://image.xbanxia.cc/files/', 'https://image.xbanxia.cc/files/');
+    if (/^http:\/\/[^/]+\/(?:bx\/)?files\//i.test(url)) {
+      return url.replace(/^http:\/\//i, 'https://');
     }
     if (url.startsWith('http://') || url.startsWith('https://')) return url;
     if (url.startsWith('/')) return `${host}${url}`;
     return `${host}/${url}`;
+  }
+
+  private static sourceRaw(source: BookSource): string {
+    return `${source.bookSourceUrl || ''}\n${source.searchUrl || ''}\n${source.exploreUrl || ''}\n${source.jsLib || ''}`
+      .replace(/\\\//g, '/');
+  }
+
+  private static preferredAssetOrigin(source: BookSource): string {
+    const raw = BookSourceDataUrlSupport.sourceRaw(source);
+    const urls = raw.match(/https?:\/\/[^'"`\s#),]+/g) || [];
+    for (const url of urls) {
+      const origin = BookSourceDataUrlSupport.originFromUrl(url);
+      const host = origin.replace(/^https?:\/\//i, '');
+      if (/^(?:image|img|pic|static|assets?|files?)[.-]/i.test(host)) return origin;
+      if (/(?:^|[.-])(?:image|img|pic|static|assets?|files?)(?:[.-]|$)/i.test(host)) return origin;
+    }
+    return '';
+  }
+
+  private static originFromUrl(url: string): string {
+    const match = (url || '').match(/^https?:\/\/[^/]+/i);
+    return match && match[0] ? match[0].replace(/^http:\/\//i, 'https://') : '';
   }
 
   private static buildPagedUrl(url: string, page: number): string {
