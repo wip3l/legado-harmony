@@ -37,7 +37,6 @@ struct SettingsPage {
   @StorageLink('readerSystemFontFamily') readerSystemFontFamily: string = '';
   @StorageLink('readerCustomFontsRaw') readerCustomFontsRaw: string = '';
   @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
-  @StorageLink('readerTapTurnPage') readerTapTurnPage: boolean = true;
   @StorageLink('readerVolumeTurnPage') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
   @StorageLink('readerExtendToStatusBar') readerExtendToStatusBar: boolean = false;
@@ -105,9 +104,6 @@ struct SettingsPage {
 
           this.sectionTitle('翻页方式')
           this.pageTurnOptions()
-          this.switchItem('点击区域翻页', '开启后点击阅读页左右区域切换上一页/下一页', this.readerTapTurnPage, (value: boolean) => {
-            this.readerTapTurnPage = value;
-          })
           this.switchItem('音量键翻页', '阅读页获得焦点时使用音量上/下键切换上一页/下一页', this.readerVolumeTurnPage, (value: boolean) => {
             this.readerVolumeTurnPage = value;
           })
@@ -588,19 +584,23 @@ struct SettingsPage {
   }
 
   previewBackgroundColor(): string {
-    return this.themes[this.readerThemeIndex] || this.themes[0];
+    return this.themes[this.effectivePreviewThemeIndex()] || this.themes[0];
   }
 
   previewTitleColor(): string {
-    return this.readerThemeIndex === 3 ? '#E8EAED' : '#1F1F1F';
+    return this.effectivePreviewThemeIndex() === 3 ? '#E8EAED' : '#1F1F1F';
   }
 
   previewTextColor(): string {
-    return this.readerThemeIndex === 3 ? '#DADCE0' : '#333333';
+    return this.effectivePreviewThemeIndex() === 3 ? '#DADCE0' : '#333333';
   }
 
   previewSubTextColor(): string {
-    return this.readerThemeIndex === 3 ? '#9AA0A6' : '#776B5F';
+    return this.effectivePreviewThemeIndex() === 3 ? '#9AA0A6' : '#776B5F';
+  }
+
+  effectivePreviewThemeIndex(): number {
+    return this.appDarkMode ? 3 : this.readerThemeIndex;
   }
 
   syncBars(): void {

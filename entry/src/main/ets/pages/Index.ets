@@ -2084,6 +2084,8 @@ struct SearchPage {
   private coordinator: SearchCoordinator | null = null;
   private hasInitialized: boolean = false;
   private shelfStatusVersion: number = 0;
+  private shelfSyncRunning: boolean = false;
+  private pendingShelfSyncBooks: SearchBook[] = [];
 
   aboutToAppear() {
     if (this.isActive) {
@@ -2257,13 +2259,13 @@ struct SearchPage {
         this.statusMessage = p.status;
         this.verificationUrl = p.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
         this.verificationTitle = p.verificationTitle || AppStorage.get<string>('pendingVerificationTitle') || '网页验证';
-        this.syncSearchShelfStatus(p.results);
+        this.requestSearchShelfStatusSync(p.results);
         if (p.finished) {
           this.isSearching = false;
         }
       };
 
-      this.coordinator = new SearchCoordinator(4);
+      this.coordinator = new SearchCoordinator(10);
       await this.coordinator.search(keyword, callback);
       await db.saveSearchKeyword(keyword);
     } catch (e) {
@@ -2286,8 +2288,25 @@ struct SearchPage {
 
   refreshSearchShelfStatus(): void {
     if (this.searchResults.length > 0) {
-      this.syncSearchShelfStatus(this.searchResults);
+      this.requestSearchShelfStatusSync(this.searchResults);
     }
+  }
+
+  requestSearchShelfStatusSync(books: SearchBook[]): void {
+    this.pendingShelfSyncBooks = books;
+    if (!this.shelfSyncRunning) {
+      this.drainSearchShelfStatusSync();
+    }
+  }
+
+  async drainSearchShelfStatusSync(): Promise<void> {
+    this.shelfSyncRunning = true;
+    while (this.pendingShelfSyncBooks.length > 0) {
+      const books = this.pendingShelfSyncBooks;
+      this.pendingShelfSyncBooks = [];
+      await this.syncSearchShelfStatus(books);
+    }
+    this.shelfSyncRunning = false;
   }
 
   async syncSearchShelfStatus(books: SearchBook[]): Promise<void> {

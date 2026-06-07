@@ -207,14 +207,35 @@ export class SystemTtsReader {
       this.engine = null;
     }
     let actualOnline = online;
+    let lastError: Object | undefined = undefined;
     try {
       this.engine = await SystemTtsReader.createEngineWithMode(person, online, style, language);
     } catch (error) {
+      lastError = error as Object;
       actualOnline = online === 0 ? 1 : 0;
-      this.engine = await SystemTtsReader.createEngineWithMode(person, actualOnline, style, language);
+      try {
+        this.engine = await SystemTtsReader.createEngineWithMode(person, actualOnline, style, language);
+      } catch (secondError) {
+        lastError = secondError as Object;
+        const fallbackPerson = 0;
+        actualOnline = online;
+        const fallbackStyle = '';
+        try {
+          this.engine = await SystemTtsReader.createEngineWithMode(fallbackPerson, actualOnline, fallbackStyle, language);
+        } catch (thirdError) {
+          lastError = thirdError as Object;
+          actualOnline = online === 0 ? 1 : 0;
+          try {
+            this.engine = await SystemTtsReader.createEngineWithMode(fallbackPerson, actualOnline, fallbackStyle, language);
+          } catch (fourthError) {
+            lastError = fourthError as Object;
+            throw new Error(SystemTtsReader.formatStaticError(lastError) || 'createEngine failed');
+          }
+        }
+      }
     }
     this.enginePerson = person;
-    this.engineOnline = actualOnline;
+    this.engineOnline = online;
     this.engineStyle = style;
     this.engineLanguage = language;
     return this.engine;
@@ -241,7 +262,7 @@ export class SystemTtsReader {
     extraParams['speed'] = this.getTtsSpeed() as Object;
     extraParams['volume'] = 2 as Object;
     extraParams['pitch'] = 1 as Object;
-    extraParams['languageContext'] = 'zh-CN' as Object;
+    extraParams['languageContext'] = this.getTtsLanguage() as Object;
     extraParams['audioType'] = 'pcm' as Object;
     extraParams['soundChannel'] = 1 as Object;
     extraParams['playType'] = 1 as Object;
@@ -368,14 +389,65 @@ export class SystemTtsReader {
     return text || JSON.stringify(error);
   }
 
-  private static createEngineExtraParams(style?: string): Record<string, Object> {
+  private static createEngineExtraParams(style?: string, language: string = 'zh-CN'): Record<string, Object> {
     const extraParam: Record<string, Object> = {};
     if (style) {
       extraParam['style'] = style as Object;
     }
-    extraParam['locate'] = 'CN' as Object;
+    extraParam['locate'] = SystemTtsReader.localeToLocate(language) as Object;
     extraParam['name'] = 'LegadoReaderTts' as Object;
     return extraParam;
+  }
+
+  private static createEngineExtraParamVariants(style: string, language: string): Array<Record<string, Object> | undefined> {
+    const variants: Array<Record<string, Object> | undefined> = [];
+    variants.push(SystemTtsReader.createEngineExtraParams(style, language));
+    if (style) {
+      variants.push(SystemTtsReader.createEngineExtraParams('', language));
+    }
+    const nameOnly: Record<string, Object> = {};
+    nameOnly['name'] = 'LegadoReaderTts' as Object;
+    variants.push(nameOnly);
+    variants.push(undefined);
+    return variants;
+  }
+
+  private static localeToLocate(language: string): string {
+    const value = (language || 'zh-CN').trim();
+    if (value.length === 0) {
+      return 'CN';
+    }
+    return 'CN';
+  }
+
+  private static languageVariants(language: string): string[] {
+    const value = (language || 'zh-CN').trim() || 'zh-CN';
+    const variants: string[] = [value];
+    if (value.includes('-')) {
+      variants.push(value.replace(/-/g, '_'));
+    }
+    if (value.includes('_')) {
+      variants.push(value.replace(/_/g, '-'));
+    }
+    const lower = value.toLowerCase();
+    if (lower.startsWith('en')) {
+      variants.push('en-US');
+      variants.push('en_US');
+      variants.push('en');
+      variants.push('zh-CN');
+      variants.push('zh_CN');
+    } else if (lower.startsWith('zh')) {
+      variants.push('zh-CN');
+      variants.push('zh_CN');
+      variants.push('zh');
+    }
+    const result: string[] = [];
+    for (const item of variants) {
+      if (item && !result.includes(item)) {
+        result.push(item);
+      }
+    }
+    return result;
   }
 
   private static parseVoices(voices: Array<textToSpeech.VoiceInfo>, online: number): TtsVoiceOption[] {
@@ -383,7 +455,7 @@ export class SystemTtsReader {
     for (const raw of voices) {
       const id = SystemTtsReader.parseVoiceId(raw);
       const style = raw.style || '';
-      const language = raw.language || 'zh-CN';
+      const language = SystemTtsReader.parseVoiceLanguage(raw);
       if (id < 0 || options.some((voice: TtsVoiceOption) => voice.id === id &&
         voice.online === online && voice.style === style && voice.language === language &&
         voice.name === SystemTtsReader.parseVoiceName(raw, id))) {
@@ -436,6 +508,17 @@ export class SystemTtsReader {
       tags.push(item.gender.trim());
     }
     return id === 0 ? '默认音色' : (tags.length > 0 ? `系统音色 ${id} · ${tags.join('/')}` : `系统音色 ${id}`);
+  }
+
+  private static parseVoiceLanguage(item: textToSpeech.VoiceInfo): string {
+    if (item.language && item.language.trim()) {
+      return item.language.trim();
+    }
+    const text = `${item.description || ''} ${item.style || ''}`.toLowerCase();
+    if (text.includes('english') || text.includes('en-us') || text.includes('us voice')) {
+      return 'en-US';
+    }
+    return 'zh-CN';
   }
 
   private static defaultVoices(): TtsVoiceOption[] {
@@ -495,23 +578,34 @@ export class SystemTtsReader {
 
   private static async createEngineWithMode(person: number, online: number, style: string,
     language: string = 'zh-CN'): Promise<textToSpeech.TextToSpeechEngine> {
-    if (style) {
-      try {
-        return await textToSpeech.createEngine({
-          language: language || 'zh-CN',
-          person: person,
-          online: online,
-          extraParams: SystemTtsReader.createEngineExtraParams(style)
-        });
-      } catch (_) {
+    let lastError: Object | undefined = undefined;
+    for (const lang of SystemTtsReader.languageVariants(language)) {
+      for (const extraParams of SystemTtsReader.createEngineExtraParamVariants(style, lang)) {
+        try {
+          const params: textToSpeech.CreateEngineParams = {
+            language: lang || 'zh-CN',
+            person: person,
+            online: online
+          };
+          if (extraParams !== undefined) {
+            params.extraParams = extraParams;
+          }
+          return await textToSpeech.createEngine(params);
+        } catch (error) {
+          lastError = error as Object;
+        }
       }
     }
-    return await textToSpeech.createEngine({
-      language: language || 'zh-CN',
-      person: person,
-      online: online,
-      extraParams: SystemTtsReader.createEngineExtraParams('')
-    });
+    throw new Error(SystemTtsReader.formatStaticError(lastError) || 'createEngine failed');
+  }
+
+  private static formatStaticError(error: Object | undefined): string {
+    if (!error) return '';
+    const anyError = error as Record<string, Object>;
+    const code = anyError['code'] === undefined ? '' : `(${String(anyError['code'])})`;
+    const message = anyError['message'] === undefined ? '' : String(anyError['message']);
+    const text = `${code}${message}`.trim();
+    return text || JSON.stringify(error);
   }
 
   private splitText(text: string, maxLength: number): TtsChunk[] {

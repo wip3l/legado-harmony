@@ -119,13 +119,13 @@ struct BookSourcePage {
 
         if (this.selectionMode) {
           Row() {
-            Toggle({ type: ToggleType.Checkbox, isOn: this.isAllSelected() })
-              .onChange((isOn: boolean) => {
-                if (isOn) {
-                  this.selectAllSources();
-                } else {
-                  this.clearSelection();
-                }
+            Text(this.isAllSelected() ? '☑' : '☐')
+              .fontSize(20)
+              .fontColor('#007DFF')
+              .width(28)
+              .textAlign(TextAlign.Center)
+              .onClick(() => {
+                this.toggleAllSources();
               })
 
             Text(`已选择 ${this.selectedSourceUrls.length}/${this.sources.length}`)
@@ -138,11 +138,7 @@ struct BookSourcePage {
               .fontSize(14)
               .fontColor('#007DFF')
               .onClick(() => {
-                if (this.isAllSelected()) {
-                  this.clearSelection();
-                } else {
-                  this.selectAllSources();
-                }
+                this.toggleAllSources();
               })
           }
           .width('100%')
@@ -587,6 +583,14 @@ struct BookSourcePage {
 
   selectAllSources(): void {
     this.selectedSourceUrls = this.sources.map((source: BookSource) => source.bookSourceUrl);
+  }
+
+  toggleAllSources(): void {
+    if (this.isAllSelected()) {
+      this.clearSelection();
+      return;
+    }
+    this.selectAllSources();
   }
 
   clearSelection(): void {

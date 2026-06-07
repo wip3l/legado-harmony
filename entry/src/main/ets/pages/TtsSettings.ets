@@ -289,7 +289,7 @@ struct TtsSettingsPage {
     }
     try {
       this.isPreviewing = true;
-      await this.previewReader.start(this.previewText, {
+      await this.previewReader.start(this.getPreviewText(), {
         person: this.ttsPerson,
         online: this.ttsOnline,
         style: this.ttsStyle,
@@ -307,6 +307,14 @@ struct TtsSettingsPage {
       this.isPreviewing = false;
       promptAction.showToast({ message: '试听失败' });
     }
+  }
+
+  getPreviewText(): string {
+    const language = (this.ttsLanguage || '').toLowerCase();
+    if (language.startsWith('en')) {
+      return 'This is a short text for voice preview. The current voice and speed will be used for playback.';
+    }
+    return this.previewText;
   }
 
   @Builder

@@ -22,14 +22,22 @@ export interface SearchProgress {
 
 export type SearchCallback = (progress: SearchProgress) => void;
 
+const MAX_SEARCH_CONCURRENCY = 12;
+
+interface ScoredSearchBook {
+  book: SearchBook;
+  index: number;
+  score: number;
+}
+
 export class SearchCoordinator {
   private http: HttpClient;
   private concurrency: number;
   private cancelled: boolean = false;
 
-  constructor(concurrency: number = 4) {
+  constructor(concurrency: number = 8) {
     this.http = new HttpClient(8000);
-    this.concurrency = concurrency;
+    this.concurrency = Math.max(1, Math.min(Math.floor(concurrency), MAX_SEARCH_CONCURRENCY));
   }
 
   cancel(): void {
@@ -47,31 +55,44 @@ export class SearchCoordinator {
 
     const all: SearchBook[] = [];
     let done = 0;
+    let nextIndex = 0;
+    const workerCount = Math.min(this.concurrency, sources.length);
 
-    // 分批并发
-    for (let i = 0; i < sources.length; i += this.concurrency) {
-      if (this.cancelled) break;
-      const batch = sources.slice(i, i + this.concurrency);
-      const tasks = batch.map(s => this.searchOne(s, keyword));
+    const emitProgress = (): void => {
+      const verifyUrl = AppStorage.get<string>('pendingVerificationUrl') || '';
+      callback({
+        done: done, total: sources.length, results: this.sortSearchResults(all, keyword),
+        finished: done >= sources.length,
+        status: verifyUrl ? `已搜索 ${done}/${sources.length}，找到 ${all.length} 本；有书源需要网页验证` :
+          `已搜索 ${done}/${sources.length}，找到 ${all.length} 本`,
+        needVerification: verifyUrl.length > 0,
+        verificationUrl: verifyUrl,
+        verificationTitle: AppStorage.get<string>('pendingVerificationTitle') || '网页验证'
+      });
+    };
 
-      const batchResults = await Promise.all(tasks);
-      for (const books of batchResults) {
+    const runWorker = async (): Promise<void> => {
+      while (!this.cancelled) {
+        const sourceIndex = nextIndex;
+        nextIndex++;
+        if (sourceIndex >= sources.length) break;
+
+        const books = await this.searchOne(sources[sourceIndex], keyword);
+        if (this.cancelled) break;
+
         done++;
         all.push(...books);
-        const verifyUrl = AppStorage.get<string>('pendingVerificationUrl') || '';
-        callback({
-          done: done, total: sources.length, results: [...all],
-          finished: done >= sources.length,
-          status: verifyUrl ? `已搜索 ${done}/${sources.length}，找到 ${all.length} 本；有书源需要网页验证` :
-            `已搜索 ${done}/${sources.length}，找到 ${all.length} 本`,
-          needVerification: verifyUrl.length > 0,
-          verificationUrl: verifyUrl,
-          verificationTitle: AppStorage.get<string>('pendingVerificationTitle') || '网页验证'
-        });
+        emitProgress();
       }
-    }
+    };
 
-    return all;
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < workerCount; i++) {
+      workers.push(runWorker());
+    }
+    await Promise.all(workers);
+
+    return this.sortSearchResults(all, keyword);
   }
 
   private async searchOne(source: BookSource, keyword: string): Promise<SearchBook[]> {
@@ -154,6 +175,9 @@ export class SearchCoordinator {
         }
         book.origin = source.bookSourceUrl;
         book.originName = source.bookSourceName;
+        book.bookSourceComment = source.bookSourceComment;
+        book.customOrder = source.customOrder;
+        book.weight = source.weight;
 
         if (book.name && book.bookUrl && !books.some(b => b.bookUrl === book.bookUrl && b.origin === book.origin)) {
           if (books.length === 0) {
@@ -172,6 +196,72 @@ export class SearchCoordinator {
       console.error('[SC] search failed:', source.bookSourceName, e);
       return [];
     }
+  }
+
+  private sortSearchResults(results: SearchBook[], keyword: string): SearchBook[] {
+    const normalizedKeyword = this.normalizeSearchText(keyword);
+    if (!normalizedKeyword) return [...results];
+    const scored: ScoredSearchBook[] = results.map((book: SearchBook, index: number): ScoredSearchBook => {
+      return {
+        book: book,
+        index: index,
+        score: this.searchRelevanceScore(book, normalizedKeyword)
+      };
+    });
+    scored.sort((a: ScoredSearchBook, b: ScoredSearchBook): number => {
+      const scoreDiff = b.score - a.score;
+      if (scoreDiff !== 0) return scoreDiff;
+      const weightDiff = (b.book.weight || 0) - (a.book.weight || 0);
+      if (weightDiff !== 0) return weightDiff;
+      const orderDiff = (a.book.customOrder || 0) - (b.book.customOrder || 0);
+      if (orderDiff !== 0) return orderDiff;
+      return a.index - b.index;
+    });
+    return scored.map((item: ScoredSearchBook): SearchBook => item.book);
+  }
+
+  private searchRelevanceScore(book: SearchBook, normalizedKeyword: string): number {
+    let score = 0;
+    score += this.fieldMatchScore(this.normalizeSearchText(book.name), normalizedKeyword, 1200, 900, 700, 240);
+    score += this.fieldMatchScore(this.normalizeSearchText(book.author), normalizedKeyword, 260, 220, 180, 70);
+    score += this.fieldMatchScore(this.normalizeSearchText(book.kind), normalizedKeyword, 90, 70, 50, 20);
+    score += this.fieldMatchScore(this.normalizeSearchText(book.latestChapterTitle), normalizedKeyword, 50, 40, 30, 0);
+    score += this.fieldMatchScore(this.normalizeSearchText(book.intro), normalizedKeyword, 40, 30, 20, 0);
+    return score;
+  }
+
+  private fieldMatchScore(value: string, keyword: string, exactScore: number, startsScore: number,
+    containsScore: number, looseScore: number): number {
+    if (!value || !keyword) return 0;
+    if (value === keyword) return exactScore;
+    if (value.startsWith(keyword)) return startsScore + this.shortTextBonus(value, keyword);
+    const index = value.indexOf(keyword);
+    if (index >= 0) {
+      return containsScore + Math.max(0, 80 - index) + this.shortTextBonus(value, keyword);
+    }
+    return this.looseKeywordScore(value, keyword, looseScore);
+  }
+
+  private shortTextBonus(value: string, keyword: string): number {
+    return Math.max(0, Math.min(80, 80 - Math.max(0, value.length - keyword.length) * 4));
+  }
+
+  private looseKeywordScore(value: string, keyword: string, maxScore: number): number {
+    if (keyword.length <= 1 || maxScore <= 0) return 0;
+    let hitCount = 0;
+    for (let i = 0; i < keyword.length; i++) {
+      if (value.includes(keyword.charAt(i))) hitCount++;
+    }
+    const ratio = hitCount / keyword.length;
+    if (ratio >= 0.8) return Math.floor(maxScore * ratio);
+    if (ratio >= 0.5) return Math.floor(maxScore * ratio * 0.5);
+    return 0;
+  }
+
+  private normalizeSearchText(value: string): string {
+    return (value || '').trim().toLowerCase()
+      .replace(/\s+/g, '')
+      .replace(/[《》【】\[\]（）()「」『』"“”'‘’.,，。:：;；!！?？、·_\-]/g, '');
   }
 
   private async evalAndBuild(js: JsRuntime, source: BookSource, keyword: string): Promise<string> {

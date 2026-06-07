@@ -26,6 +26,8 @@ struct SearchPage {
   @State verificationTitle: string = '';
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   private shelfStatusVersion: number = 0;
+  private shelfSyncRunning: boolean = false;
+  private pendingShelfSyncBooks: SearchBook[] = [];
 
   aboutToAppear() {
     this.syncBars();
@@ -243,14 +245,14 @@ struct SearchPage {
 
     try {
       const db = AppDatabase.getInstance();
-      const coordinator = new SearchCoordinator(6);
+      const coordinator = new SearchCoordinator(10);
       const keyword = this.keyword.trim();
       const allBooks = await coordinator.search(keyword, (progress: SearchProgress) => {
         this.searchResults = progress.results;
         this.statusMessage = progress.status;
         this.verificationUrl = progress.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
         this.verificationTitle = progress.verificationTitle || AppStorage.get<string>('pendingVerificationTitle') || '网页验证';
-        this.syncSearchShelfStatus(progress.results);
+        this.requestSearchShelfStatusSync(progress.results);
         if (progress.finished) {
           this.isSearching = false;
         }
@@ -286,8 +288,25 @@ struct SearchPage {
 
   refreshSearchShelfStatus(): void {
     if (this.searchResults.length > 0) {
-      this.syncSearchShelfStatus(this.searchResults);
+      this.requestSearchShelfStatusSync(this.searchResults);
     }
+  }
+
+  requestSearchShelfStatusSync(books: SearchBook[]): void {
+    this.pendingShelfSyncBooks = books;
+    if (!this.shelfSyncRunning) {
+      this.drainSearchShelfStatusSync();
+    }
+  }
+
+  async drainSearchShelfStatusSync(): Promise<void> {
+    this.shelfSyncRunning = true;
+    while (this.pendingShelfSyncBooks.length > 0) {
+      const books = this.pendingShelfSyncBooks;
+      this.pendingShelfSyncBooks = [];
+      await this.syncSearchShelfStatus(books);
+    }
+    this.shelfSyncRunning = false;
   }
 
   async syncSearchShelfStatus(books: SearchBook[]): Promise<void> {
