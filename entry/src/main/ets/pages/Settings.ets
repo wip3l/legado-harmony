@@ -37,6 +37,7 @@ struct SettingsPage {
   @StorageLink('readerSystemFontFamily') readerSystemFontFamily: string = '';
   @StorageLink('readerCustomFontsRaw') readerCustomFontsRaw: string = '';
   @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
+  @StorageLink('readerPageTurnAnimation') readerPageTurnAnimation: boolean = true;
   @StorageLink('readerVolumeTurnPage') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
   @StorageLink('readerExtendToStatusBar') readerExtendToStatusBar: boolean = false;
@@ -104,6 +105,9 @@ struct SettingsPage {
 
           this.sectionTitle('翻页方式')
           this.pageTurnOptions()
+          this.switchItem('翻页动画', '开启后滑动或点击翻页会预览上一页/下一页，并在松手后补完整页动画', this.readerPageTurnAnimation, (value: boolean) => {
+            this.readerPageTurnAnimation = value;
+          })
           this.switchItem('音量键翻页', '阅读页获得焦点时使用音量上/下键切换上一页/下一页', this.readerVolumeTurnPage, (value: boolean) => {
             this.readerVolumeTurnPage = value;
           })

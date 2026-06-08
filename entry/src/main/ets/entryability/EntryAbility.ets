@@ -22,16 +22,16 @@ export default class EntryAbility extends UIAbility {
     }
     PersistentStorage.persistProp('bookshelfSortMode', 'recentRead');
     PersistentStorage.persistProp('ttsPerson', 0);
-    PersistentStorage.persistProp('ttsOnline', 0);
+    PersistentStorage.persistProp('ttsOnline', 1);
     PersistentStorage.persistProp('ttsStyle', '');
     PersistentStorage.persistProp('ttsLanguage', 'zh-CN');
     PersistentStorage.persistProp('ttsSpeed', 1);
-    PersistentStorage.persistProp('ttsOnlineSdkModeMigrated', false);
-    if (!AppStorage.get<boolean>('ttsOnlineSdkModeMigrated')) {
-      if (AppStorage.get<number>('ttsOnline') === 1) {
-        AppStorage.setOrCreate('ttsOnline', 0);
+    PersistentStorage.persistProp('ttsOfflineSdkModeMigrated', false);
+    if (!AppStorage.get<boolean>('ttsOfflineSdkModeMigrated')) {
+      if (AppStorage.get<number>('ttsOnline') === 0) {
+        AppStorage.setOrCreate('ttsOnline', 1);
       }
-      AppStorage.setOrCreate('ttsOnlineSdkModeMigrated', true);
+      AppStorage.setOrCreate('ttsOfflineSdkModeMigrated', true);
     }
     PersistentStorage.persistProp('readerFontFamily', '');
     PersistentStorage.persistProp('readerFontFilePath', '');
@@ -39,6 +39,7 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('readerFontMode', 'system');
     PersistentStorage.persistProp('readerSystemFontFamily', '');
     PersistentStorage.persistProp('readerCustomFontsRaw', '');
+    PersistentStorage.persistProp('readerPageTurnAnimation', true);
     PersistentStorage.persistProp('bookshelfShowTags', true);
     PersistentStorage.persistProp('bookshelfShowIntro', true);
     PersistentStorage.persistProp('bookshelfShowFullIntro', false);

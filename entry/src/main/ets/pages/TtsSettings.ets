@@ -6,7 +6,7 @@ import { SystemTtsReader, TtsVoiceOption } from '../utils/SystemTtsReader';
 @Component
 struct TtsSettingsPage {
   @StorageLink('ttsPerson') ttsPerson: number = 0;
-  @StorageLink('ttsOnline') ttsOnline: number = 0;
+  @StorageLink('ttsOnline') ttsOnline: number = 1;
   @StorageLink('ttsStyle') ttsStyle: string = '';
   @StorageLink('ttsLanguage') ttsLanguage: string = 'zh-CN';
   @StorageLink('ttsSpeed') ttsSpeed: number = 1;
@@ -145,8 +145,8 @@ struct TtsSettingsPage {
   }
 
   normalizeDefaultOnlineVoice(): void {
-    if (this.ttsPerson === 0 && this.ttsOnline === 1 && !this.ttsStyle) {
-      this.ttsOnline = 0;
+    if (this.ttsOnline === 0) {
+      this.ttsOnline = 1;
     }
   }
 
@@ -154,7 +154,7 @@ struct TtsSettingsPage {
     const option = new TtsVoiceOption();
     option.id = 0;
     option.name = '默认音色';
-    option.online = 0;
+    option.online = 1;
     option.status = 'default';
     option.language = 'zh-CN';
     return option;
