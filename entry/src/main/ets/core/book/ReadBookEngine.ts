@@ -139,6 +139,18 @@ export class ReadBookEngine {
     return await this.fetchContent(idx);
   }
 
+  async peekContent(idx: number): Promise<string> {
+    if (idx < 0 || idx >= this.chapters.length || !this.book) return '';
+
+    return await this.fetchContent(idx);
+  }
+
+  getCachedContent(idx: number): string {
+    if (idx < 0 || idx >= this.chapters.length) return '';
+
+    return this.chapterCache.get(idx) || '';
+  }
+
   async reloadContent(idx: number): Promise<string> {
     if (idx < 0 || idx >= this.chapters.length || !this.book) return '';
 
