@@ -742,27 +742,12 @@ struct CoverGalleryManagerPage {
   selectedAlbumPanel() {
     Column({ space: 14 }) {
       Column() {
-        Row() {
-          Text(this.selectedAlbumName())
-            .fontSize(17)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.primaryTextColor())
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1)
-          Text(`${this.selectedAlbumCoverSize} 张`)
-            .fontSize(12)
-            .fontColor(this.subTextColor())
-        }
-        .width('100%')
-
         TextInput({ placeholder: '重命名图集', text: this.renameAlbumName })
           .height(42)
           .fontColor(this.primaryTextColor())
           .placeholderColor(this.subTextColor())
           .backgroundColor(this.inputColor())
           .borderRadius(8)
-          .margin({ top: 12 })
           .onChange((value: string) => {
             this.renameAlbumName = value;
           })
