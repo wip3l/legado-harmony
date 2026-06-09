@@ -4,6 +4,7 @@ import { window } from '@kit.ArkUI';
 import { RecentReadShortcut, RECENT_READ_SHORTCUT_ACTION, OPEN_BOOK_SHORTCUT_ACTION } from '../utils/RecentReadShortcut';
 import { CoverGalleryStore } from '../utils/CoverGalleryStore';
 import { BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettingsStore';
+import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -50,6 +51,9 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('bookshelfCoverTargetBooks', '');
     PersistentStorage.persistProp('bookshelfIgnoreSourceCover', false);
     PersistentStorage.persistProp('bookshelfCoverMode', 'sequence');
+    PersistentStorage.persistProp('searchExploreShowResultCover', true);
+    PersistentStorage.persistProp('searchExploreShowResultTags', true);
+    PersistentStorage.persistProp('searchExplorePromptAddToShelfOnBack', true);
     PersistentStorage.persistProp('explorePlatform', '番茄');
     CoverGalleryStore.load(this.context).then((snapshot) => {
       CoverGalleryStore.applyToStorage(snapshot);
@@ -61,6 +65,11 @@ export default class EntryAbility extends UIAbility {
       BookshelfDisplaySettingsStore.applyToStorage(settings);
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Sync bookshelf display settings failed: %{public}s', JSON.stringify(e));
+    });
+    SearchExploreSettingsStore.load(this.context).then((settings) => {
+      SearchExploreSettingsStore.applyToStorage(settings);
+    }).catch((e: Error) => {
+      hilog.warn(0x0000, 'testTag', 'Sync search explore settings failed: %{public}s', JSON.stringify(e));
     });
     this.handleLaunchWant(want);
   }
