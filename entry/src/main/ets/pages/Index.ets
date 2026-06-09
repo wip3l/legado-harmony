@@ -1579,6 +1579,7 @@ struct ExplorePage {
   private coordinator: ExploreCoordinator = new ExploreCoordinator();
   private hasLoaded: boolean = false;
   private shelfStatusVersion: number = 0;
+  private exploreLoadVersion: number = 0;
 
   aboutToAppear() {
     if (this.isActive) {
@@ -1603,48 +1604,64 @@ struct ExplorePage {
   }
 
   async loadEntries() {
+    const loadVersion = this.beginExploreLoad();
     this.hasLoaded = true;
-    this.isLoading = true;
     this.status = '正在加载发现分类...';
     this.verificationUrl = '';
     this.verificationTitle = '';
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
+      if (!this.isCurrentExploreLoad(loadVersion)) return;
       const previousSourceName = this.selectedSourceName;
-      this.sourceOptions = await this.coordinator.getExploreSources();
-      this.sourceNames = this.sourceOptions.map((option: ExploreSourceOption) => option.sourceName);
+      const sourceOptions = await this.coordinator.getExploreSources();
+      if (!this.isCurrentExploreLoad(loadVersion)) return;
+      this.sourceOptions = sourceOptions;
+      this.sourceNames = sourceOptions.map((option: ExploreSourceOption) => option.sourceName);
       this.selectedSourceName = previousSourceName && this.sourceNames.includes(previousSourceName) ?
         previousSourceName : (this.sourceNames.length > 0 ? this.sourceNames[0] : '');
       this.platformNames = this.getSelectedSourcePlatforms();
       this.normalizeSelectedPlatform();
-      this.entries = await this.coordinator.getEntries(this.selectedPlatform, this.getSelectedSourceUrl());
+      const entries = await this.coordinator.getEntries(this.selectedPlatform, this.getSelectedSourceUrl());
+      if (!this.isCurrentExploreLoad(loadVersion)) return;
+      this.entries = entries;
       if (this.entries.length > 0) {
         this.selectedIndex = 0;
-        await this.loadBooks();
+        await this.loadBooks(loadVersion);
       } else {
         this.books = [];
         this.status = `${this.getSelectedSiteLabel()} 暂无可用发现分类`;
       }
     } catch (e) {
+      if (!this.isCurrentExploreLoad(loadVersion)) return;
       console.error('加载发现失败:', e);
       this.status = '发现加载失败';
     } finally {
-      this.isLoading = false;
+      this.finishExploreLoad(loadVersion);
     }
   }
 
-  async loadBooks() {
+  async loadBooks(loadVersion?: number) {
+    const currentLoadVersion = loadVersion ?? this.beginExploreLoad();
     const activeEntries = this.getActiveEntries();
-    if (activeEntries.length === 0) return;
-    this.isLoading = true;
+    if (activeEntries.length === 0) {
+      this.finishExploreLoad(currentLoadVersion);
+      return;
+    }
     this.status = '正在获取发现内容...';
     this.verificationUrl = '';
     this.verificationTitle = '';
     try {
       const entry = activeEntries[Math.min(this.selectedIndex, activeEntries.length - 1)];
-      this.books = await this.coordinator.explore(entry, 1);
-      await this.syncExploreShelfStatus(this.books);
+      const books = await this.coordinator.explore(entry, 1);
+      if (!this.isCurrentExploreLoad(currentLoadVersion)) return;
+      this.books = books;
+      const shelfStatusVersion = this.shelfStatusVersion;
+      const shelfKeys = await this.loadExploreShelfKeys(books);
+      if (!this.isCurrentExploreLoad(currentLoadVersion)) return;
+      if (shelfStatusVersion === this.shelfStatusVersion) {
+        this.shelfBookKeys = shelfKeys;
+      }
       this.verificationUrl = AppStorage.get<string>('pendingVerificationUrl') || '';
       this.verificationTitle = AppStorage.get<string>('pendingVerificationTitle') || '网页验证';
       this.status = this.books.length > 0 ?
@@ -1652,10 +1669,11 @@ struct ExplorePage {
         (this.verificationUrl ? `${entry.sourceName} 可能需要网页验证` :
           `${this.getSelectedSiteLabel()} 当前分类暂无结果`);
     } catch (e) {
+      if (!this.isCurrentExploreLoad(currentLoadVersion)) return;
       console.error('获取发现内容失败:', e);
       this.status = '发现内容获取失败';
     } finally {
-      this.isLoading = false;
+      this.finishExploreLoad(currentLoadVersion);
     }
   }
 
@@ -1882,7 +1900,7 @@ struct ExplorePage {
   }
 
   switchExplorePlatform(platform: string): void {
-    if (this.selectedPlatform === platform || this.isLoading) {
+    if (this.selectedPlatform === platform) {
       return;
     }
     this.selectedPlatform = platform;
@@ -1894,7 +1912,7 @@ struct ExplorePage {
   }
 
   switchExploreSource(sourceName: string): void {
-    if (this.selectedSourceName === sourceName || this.isLoading) {
+    if (this.selectedSourceName === sourceName) {
       return;
     }
     this.selectedSourceName = sourceName;
@@ -1904,6 +1922,22 @@ struct ExplorePage {
     this.books = [];
     this.status = `正在切换到 ${sourceName}...`;
     this.loadEntries();
+  }
+
+  beginExploreLoad(): number {
+    this.exploreLoadVersion++;
+    this.isLoading = true;
+    return this.exploreLoadVersion;
+  }
+
+  isCurrentExploreLoad(loadVersion: number): boolean {
+    return loadVersion === this.exploreLoadVersion;
+  }
+
+  finishExploreLoad(loadVersion: number): void {
+    if (this.isCurrentExploreLoad(loadVersion)) {
+      this.isLoading = false;
+    }
   }
 
   normalizeSelectedPlatform(): void {
@@ -1919,13 +1953,17 @@ struct ExplorePage {
   async syncExploreShelfStatus(books: SearchBook[]): Promise<void> {
     try {
       const version = this.shelfStatusVersion;
-      const keys = await SearchBookShelfHelper.syncShelfKeys(getContext(this), books);
+      const keys = await this.loadExploreShelfKeys(books);
       if (version === this.shelfStatusVersion) {
         this.shelfBookKeys = keys;
       }
     } catch (e) {
       console.error('同步发现书架状态失败:', e);
     }
+  }
+
+  async loadExploreShelfKeys(books: SearchBook[]): Promise<string[]> {
+    return await SearchBookShelfHelper.syncShelfKeys(getContext(this), books);
   }
 
   isSearchBookInShelf(book: SearchBook): boolean {
