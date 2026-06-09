@@ -10,7 +10,7 @@ export class JsRuntime {
 
   evalTemplate(tpl: string): string {
     if (!tpl.includes('{{')) return tpl;
-    return tpl.replace(/\{\{([^}]+)\}\}/g, (_: string, expr: string) => this.evalExpr(expr.trim()));
+    return tpl.replace(/\{\{([\s\S]*?)\}\}/g, (_: string, expr: string) => this.evalExpr(expr.trim()));
   }
 
   private evalExpr(expr: string): string {

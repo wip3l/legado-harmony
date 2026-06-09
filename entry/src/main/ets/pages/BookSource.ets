@@ -856,12 +856,15 @@ struct BookSourcePage {
     source.bookSourceGroup = obj['bookSourceGroup'] as string || '';
     source.bookSourceComment = obj['bookSourceComment'] as string || '';
     source.loginUrl = obj['loginUrl'] as string || '';
+    source.loginUi = obj['loginUi'] as string || '';
     source.loginCheckJs = obj['loginCheckJs'] as string || '';
+    source.loginHeader = obj['loginHeader'] as string || '';
     source.bookUrlPattern = obj['bookUrlPattern'] as string || '';
     source.searchUrl = obj['searchUrl'] as string || '';
     source.exploreUrl = obj['exploreUrl'] as string || '';
     source.jsLib = obj['jsLib'] as string || '';
     source.header = obj['header'] as string || '';
+    source.variableComment = obj['variableComment'] as string || obj['variable'] as string || '';
     source.enabled = obj['enabled'] !== false;
     source.enabledExplore = obj['enabledExplore'] !== false;
     source.weight = (obj['weight'] as number) || 0;

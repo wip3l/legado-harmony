@@ -7,6 +7,8 @@ import { BookCoverCache } from './BookCoverCache';
 import { BookDisplayHelper } from './BookDisplayHelper';
 import { BookIdentity } from './BookIdentity';
 import { CoverUrlNormalizer } from './CoverUrlNormalizer';
+import { BookFieldSanitizer } from './BookFieldSanitizer';
+import { SearchExplorePendingBook } from './SearchExplorePendingBook';
 
 export class SearchBookShelfChange {
   requestKey: string = '';
@@ -64,7 +66,7 @@ export class SearchBookShelfHelper {
   static async syncShelfKeys(context: Context, books: SearchBook[]): Promise<string[]> {
     const db = AppDatabase.getInstance();
     await db.initWithContext(context);
-    const shelfBooks = await db.getAllBooks();
+    const shelfBooks = SearchExplorePendingBook.filterShelfBooks(await db.getAllBooks());
     const shelfKeys = shelfBooks.map((book: Book) => BookIdentity.keyOfBook(book));
     const keys: string[] = [];
     for (const book of books) {
@@ -85,13 +87,18 @@ export class SearchBookShelfHelper {
     const db = AppDatabase.getInstance();
     await db.initWithContext(context);
     const searchKey = SearchBookShelfHelper.keyOf(searchBook);
-    const existing = await SearchBookShelfHelper.findShelfBookByKey(searchKey);
+    const existing = await SearchBookShelfHelper.findShelfBookByKey(searchKey, true);
     if (existing) {
       const nextCoverUrl = CoverUrlNormalizer.prefer(searchBook.coverUrl, existing.coverUrl);
       if (nextCoverUrl && existing.coverUrl !== nextCoverUrl) {
         existing.coverUrl = nextCoverUrl;
-        await db.updateBook(existing);
       }
+      existing.kind = BookFieldSanitizer.prefer(searchBook.kind, existing.kind);
+      existing.intro = BookFieldSanitizer.prefer(searchBook.intro, existing.intro);
+      existing.latestChapterTitle = BookFieldSanitizer.prefer(searchBook.latestChapterTitle, existing.latestChapterTitle);
+      existing.wordCount = BookFieldSanitizer.prefer(searchBook.wordCount, existing.wordCount);
+      SearchExplorePendingBook.clearPendingAddToShelf(existing);
+      await db.updateBook(existing);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       promptAction.showToast({ message: '已在书架' });
       return new SearchBookShelfChange(searchKey, searchKey);
@@ -107,23 +114,28 @@ export class SearchBookShelfHelper {
       book.tocUrl = fullBook.tocUrl || book.tocUrl;
       book.name = fullBook.name || book.name;
       book.author = fullBook.author || book.author;
-      book.kind = fullBook.kind || book.kind;
+      book.kind = BookFieldSanitizer.prefer(fullBook.kind, book.kind);
       book.coverUrl = CoverUrlNormalizer.prefer(fallbackCoverUrl, fullBook.coverUrl || book.coverUrl);
-      book.intro = fullBook.intro || book.intro;
-      book.latestChapterTitle = fullBook.latestChapterTitle || book.latestChapterTitle;
-      book.wordCount = fullBook.wordCount || book.wordCount;
+      book.intro = BookFieldSanitizer.prefer(fullBook.intro, book.intro);
+      book.latestChapterTitle = BookFieldSanitizer.prefer(fullBook.latestChapterTitle, book.latestChapterTitle);
+      book.wordCount = BookFieldSanitizer.prefer(fullBook.wordCount, book.wordCount);
       book.variable = fullBook.variable || book.variable;
     }
 
     const resolvedKey = BookIdentity.keyOfBook(book);
     if (resolvedKey && resolvedKey !== searchKey) {
-      const resolvedExisting = await SearchBookShelfHelper.findShelfBookByKey(resolvedKey);
+      const resolvedExisting = await SearchBookShelfHelper.findShelfBookByKey(resolvedKey, true);
       if (resolvedExisting) {
         const nextCoverUrl = CoverUrlNormalizer.prefer(book.coverUrl, resolvedExisting.coverUrl);
         if (nextCoverUrl && resolvedExisting.coverUrl !== nextCoverUrl) {
           resolvedExisting.coverUrl = nextCoverUrl;
-          await db.updateBook(resolvedExisting);
         }
+        resolvedExisting.kind = BookFieldSanitizer.prefer(book.kind, resolvedExisting.kind);
+        resolvedExisting.intro = BookFieldSanitizer.prefer(book.intro, resolvedExisting.intro);
+        resolvedExisting.latestChapterTitle = BookFieldSanitizer.prefer(book.latestChapterTitle, resolvedExisting.latestChapterTitle);
+        resolvedExisting.wordCount = BookFieldSanitizer.prefer(book.wordCount, resolvedExisting.wordCount);
+        SearchExplorePendingBook.clearPendingAddToShelf(resolvedExisting);
+        await db.updateBook(resolvedExisting);
         AppStorage.setOrCreate('shelfUpdateTime', Date.now());
         promptAction.showToast({ message: '已在书架' });
         return new SearchBookShelfChange(searchKey, resolvedKey);
@@ -146,7 +158,7 @@ export class SearchBookShelfHelper {
     const db = AppDatabase.getInstance();
     await db.initWithContext(context);
     const key = SearchBookShelfHelper.keyOf(searchBook);
-    const existing = await SearchBookShelfHelper.findShelfBookByKey(key);
+    const existing = await SearchBookShelfHelper.findShelfBookByKey(key, true);
     if (existing) {
       SearchBookShelfHelper.deleteBookCoverCache(context, existing);
     }
@@ -164,11 +176,11 @@ export class SearchBookShelfHelper {
     book.originName = searchBook.originName;
     book.name = searchBook.name;
     book.author = searchBook.author;
-    book.kind = searchBook.kind;
+    book.kind = BookFieldSanitizer.clean(searchBook.kind);
     book.coverUrl = CoverUrlNormalizer.normalize(searchBook.coverUrl);
-    book.intro = searchBook.intro;
-    book.latestChapterTitle = searchBook.latestChapterTitle;
-    book.wordCount = searchBook.wordCount;
+    book.intro = BookFieldSanitizer.clean(searchBook.intro);
+    book.latestChapterTitle = BookFieldSanitizer.clean(searchBook.latestChapterTitle);
+    book.wordCount = BookFieldSanitizer.clean(searchBook.wordCount);
     book.variable = searchBook.variable;
     book.group = -2147483645;
     book.type = 0;
@@ -178,14 +190,15 @@ export class SearchBookShelfHelper {
     return book;
   }
 
-  private static async findShelfBookByKey(bookKey: string): Promise<Book | null> {
+  private static async findShelfBookByKey(bookKey: string, includePending: boolean = false): Promise<Book | null> {
     if (!bookKey) {
       return null;
     }
     const db = AppDatabase.getInstance();
     const books = await db.getAllBooks();
     for (const book of books) {
-      if (BookIdentity.keyOfBook(book) === bookKey) {
+      if (BookIdentity.keyOfBook(book) === bookKey &&
+        (includePending || !SearchExplorePendingBook.isPendingAddToShelf(book))) {
         return book;
       }
     }

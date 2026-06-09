@@ -1,5 +1,6 @@
 import { BookSource } from '../../model/data/Book';
 import { HttpClient, HttpRequest, HttpResponse } from '../http/HttpClient';
+import { VerificationSupport } from '../http/VerificationSupport';
 
 export interface UrlConfig {
   url: string;
@@ -125,7 +126,7 @@ export class AnalyzeUrl {
 
   private resolveUrl(url: string): string {
     if (!url || url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
-    if (url.startsWith('//')) return 'https:' + url;
+    if (/^\/\/[A-Za-z0-9.-]+(?::\d+)?(?:[/?#]|$)/.test(url)) return 'https:' + url;
 
     const base = this.cleanBaseUrl(this.source?.bookSourceUrl || '');
     if (!base) return url;
@@ -145,6 +146,10 @@ export class AnalyzeUrl {
 
   buildRequest(): HttpRequest {
     const merged = { ...this.config.sourceHeaders, ...this.config.headers };
+    if (this.source && !merged['Cookie']) {
+      const cookie = VerificationSupport.sourceCookieHeader(this.source, this.config.url);
+      if (cookie) merged['Cookie'] = cookie;
+    }
     if (this.config.method === 'POST' && this.config.body && !merged['Content-Type']) {
       merged['Content-Type'] = 'application/x-www-form-urlencoded';
     }
@@ -163,17 +168,54 @@ export class AnalyzeUrl {
     if (!req.url) {
       return { url: urlTemplate, statusCode: 0, headers: {}, body: '', success: false, error: 'empty url' };
     }
-    const resp = await this.client.execute(req);
+    const resp = await this.fetchFollowingRedirects(req);
     if (this.isUsableResponse(resp)) return resp;
 
     const fallbackUrls = this.buildFallbackUrls(req.url);
     for (const url of fallbackUrls) {
-      const fallbackResp = await this.client.execute({ ...req, url: url });
+      const fallbackResp = await this.fetchFollowingRedirects({ ...req, url: url });
       if (this.isUsableResponse(fallbackResp)) {
         return fallbackResp;
       }
     }
     return resp;
+  }
+
+  private async fetchFollowingRedirects(req: HttpRequest): Promise<HttpResponse> {
+    let currentReq = req;
+    let lastResp = await this.client.execute(currentReq);
+    for (let i = 0; i < 3; i++) {
+      if (lastResp.statusCode < 300 || lastResp.statusCode >= 400) return lastResp;
+      const location = this.findHeader(lastResp.headers, 'location');
+      if (!location) return lastResp;
+      const nextUrl = this.resolveRedirectUrl(location, currentReq.url);
+      if (!nextUrl || nextUrl === currentReq.url) return lastResp;
+      currentReq = { ...currentReq, url: nextUrl };
+      lastResp = await this.client.execute(currentReq);
+    }
+    return lastResp;
+  }
+
+  private findHeader(headers: Record<string, string>, name: string): string {
+    const lower = name.toLowerCase();
+    for (const key in headers) {
+      if (key.toLowerCase() === lower) return String(headers[key] || '');
+    }
+    return '';
+  }
+
+  private resolveRedirectUrl(location: string, baseUrl: string): string {
+    const value = (location || '').trim();
+    if (!value) return '';
+    if (value.startsWith('http://') || value.startsWith('https://')) return value;
+    if (value.startsWith('//')) return 'https:' + value;
+    const base = this.cleanBaseUrl(baseUrl);
+    const origin = base.match(/^(https?:\/\/[^/]+)/);
+    if (value.startsWith('/')) return origin ? origin[1] + value : value;
+    const qIndex = base.indexOf('?');
+    const clean = qIndex >= 0 ? base.substring(0, qIndex) : base;
+    const dir = clean.endsWith('/') ? clean : clean.replace(/\/[^/]*$/, '/');
+    return dir + value;
   }
 
   getConfig(): UrlConfig {

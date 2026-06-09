@@ -41,7 +41,7 @@ struct SearchExploreSettingsPage {
             })
 
           this.sectionTitle('书架提示')
-          this.switchItem('返回提示加入书架', '从搜索或发现进入详情后，返回时询问是否加入书架',
+          this.switchItem('返回提示加入书架', '从搜索或发现详情点击阅读后，返回时询问是否加入书架',
             this.searchExplorePromptAddToShelfOnBack, (value: boolean) => {
               this.searchExplorePromptAddToShelfOnBack = value;
               this.onSettingChanged();

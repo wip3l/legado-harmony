@@ -18,7 +18,7 @@ export class BookUrlResolver {
   static resolve(url: string, base: string): string {
     const value = (url || '').trim();
     if (!value || value.startsWith('http://') || value.startsWith('https://') || value.startsWith('data:')) return value;
-    if (value.startsWith('//')) return 'https:' + value;
+    if (/^\/\/[A-Za-z0-9.-]+(?::\d+)?(?:[/?#]|$)/.test(value)) return 'https:' + value;
 
     const cleanBase = this.cleanBaseUrl(base);
     if (!cleanBase) return value;

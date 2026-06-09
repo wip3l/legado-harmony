@@ -7,6 +7,7 @@ import { CoverAlbum, CoverGallerySettings } from '../utils/CoverGallerySettings'
 import { CoverGalleryStore, CoverGallerySnapshot } from '../utils/CoverGalleryStore';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { BookshelfDisplaySettings, BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettingsStore';
+import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 
 @Entry
 @Component
@@ -172,7 +173,7 @@ struct BookshelfSettingsPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      this.books = await db.getAllBooks();
+      this.books = SearchExplorePendingBook.filterShelfBooks(await db.getAllBooks());
     } catch (e) {
       console.warn('加载书籍列表失败:', e);
       this.books = [];

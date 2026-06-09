@@ -6,6 +6,8 @@ import { syncSystemBars } from '../utils/SystemBars';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
 import { BookIdentity } from '../utils/BookIdentity';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
+import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
+import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 
 @Entry
 @Component
@@ -27,6 +29,8 @@ struct SearchBookDetailPage {
   @State isInShelf: boolean = false;
   @State isSaving: boolean = false;
   @State promptAddToShelfOnBackFromResult: boolean = false;
+  @State promptAddToShelfAfterRead: boolean = false;
+  @State pendingAddToShelfBookUrl: string = '';
   @State showAddToShelfOnBackDialog: boolean = false;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
 
@@ -52,7 +56,11 @@ struct SearchBookDetailPage {
 
   onPageShow(): void {
     this.syncBars();
-    this.checkShelf();
+    this.checkShelf().then(() => {
+      if (this.shouldPromptAddToShelfOnBack()) {
+        this.showAddToShelfOnBackPrompt();
+      }
+    });
   }
 
   build() {
@@ -258,7 +266,7 @@ struct SearchBookDetailPage {
       if (existing) {
         this.syncStateFromBook(existing);
       }
-      this.isInShelf = existing !== null;
+      this.isInShelf = existing !== null && !SearchExplorePendingBook.isPendingAddToShelf(existing);
     } catch (e) {
       console.error('检查书架失败:', e);
       this.isInShelf = false;
@@ -281,11 +289,18 @@ struct SearchBookDetailPage {
         const nextCoverUrl = CoverUrlNormalizer.prefer(this.coverUrl, existing.coverUrl);
         if (nextCoverUrl && existing.coverUrl !== nextCoverUrl) {
           existing.coverUrl = nextCoverUrl;
-          await db.updateBook(existing);
-          AppStorage.setOrCreate('shelfUpdateTime', Date.now());
         }
+        existing.kind = BookFieldSanitizer.prefer(this.kind, existing.kind);
+        existing.intro = BookFieldSanitizer.prefer(this.intro, existing.intro);
+        existing.latestChapterTitle = BookFieldSanitizer.prefer(this.latestChapterTitle, existing.latestChapterTitle);
+        existing.wordCount = BookFieldSanitizer.prefer(this.wordCount, existing.wordCount);
+        SearchExplorePendingBook.clearPendingAddToShelf(existing);
+        await db.updateBook(existing);
+        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
         this.syncStateFromBook(existing);
         this.isInShelf = true;
+        this.promptAddToShelfAfterRead = false;
+        this.pendingAddToShelfBookUrl = '';
         return true;
       }
 
@@ -296,11 +311,11 @@ struct SearchBookDetailPage {
       book.originName = this.originName;
       book.name = this.name;
       book.author = this.author;
-      book.kind = this.kind;
+      book.kind = BookFieldSanitizer.clean(this.kind);
       book.coverUrl = CoverUrlNormalizer.normalize(this.coverUrl);
-      book.intro = this.intro;
-      book.latestChapterTitle = this.latestChapterTitle;
-      book.wordCount = this.wordCount;
+      book.intro = BookFieldSanitizer.clean(this.intro);
+      book.latestChapterTitle = BookFieldSanitizer.clean(this.latestChapterTitle);
+      book.wordCount = BookFieldSanitizer.clean(this.wordCount);
       book.group = -2147483645;
       book.type = 0;
       book.canUpdate = true;
@@ -315,11 +330,11 @@ struct SearchBookDetailPage {
         book.tocUrl = fullBook.tocUrl || book.tocUrl;
         book.name = fullBook.name || book.name;
         book.author = fullBook.author || book.author;
-        book.kind = fullBook.kind || book.kind;
+        book.kind = BookFieldSanitizer.prefer(fullBook.kind, book.kind);
         book.coverUrl = CoverUrlNormalizer.prefer(fallbackCoverUrl, fullBook.coverUrl || book.coverUrl);
-        book.intro = fullBook.intro || book.intro;
-        book.latestChapterTitle = fullBook.latestChapterTitle || book.latestChapterTitle;
-        book.wordCount = fullBook.wordCount || book.wordCount;
+        book.intro = BookFieldSanitizer.prefer(fullBook.intro, book.intro);
+        book.latestChapterTitle = BookFieldSanitizer.prefer(fullBook.latestChapterTitle, book.latestChapterTitle);
+        book.wordCount = BookFieldSanitizer.prefer(fullBook.wordCount, book.wordCount);
         book.variable = fullBook.variable || book.variable;
       }
 
@@ -328,18 +343,28 @@ struct SearchBookDetailPage {
         const nextCoverUrl = CoverUrlNormalizer.prefer(book.coverUrl, resolvedExisting.coverUrl);
         if (nextCoverUrl && resolvedExisting.coverUrl !== nextCoverUrl) {
           resolvedExisting.coverUrl = nextCoverUrl;
-          await db.updateBook(resolvedExisting);
-          AppStorage.setOrCreate('shelfUpdateTime', Date.now());
         }
+        resolvedExisting.kind = BookFieldSanitizer.prefer(book.kind, resolvedExisting.kind);
+        resolvedExisting.intro = BookFieldSanitizer.prefer(book.intro, resolvedExisting.intro);
+        resolvedExisting.latestChapterTitle = BookFieldSanitizer.prefer(book.latestChapterTitle, resolvedExisting.latestChapterTitle);
+        resolvedExisting.wordCount = BookFieldSanitizer.prefer(book.wordCount, resolvedExisting.wordCount);
+        SearchExplorePendingBook.clearPendingAddToShelf(resolvedExisting);
+        await db.updateBook(resolvedExisting);
+        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
         this.syncStateFromBook(resolvedExisting);
         this.isInShelf = true;
+        this.promptAddToShelfAfterRead = false;
+        this.pendingAddToShelfBookUrl = '';
         return true;
       }
 
+      SearchExplorePendingBook.clearPendingAddToShelf(book);
       await db.insertBook(book);
       this.syncStateFromBook(book);
 
       this.isInShelf = true;
+      this.promptAddToShelfAfterRead = false;
+      this.pendingAddToShelfBookUrl = '';
       this.isSaving = false;
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       promptAction.showToast({ message: '已加入书架' });
@@ -363,7 +388,8 @@ struct SearchBookDetailPage {
 
   shouldPromptAddToShelfOnBack(): boolean {
     return this.promptAddToShelfOnBackFromResult && this.searchExplorePromptAddToShelfOnBack &&
-      !this.isInShelf && !this.isSaving && !this.showAddToShelfOnBackDialog && !!this.bookUrl;
+      this.promptAddToShelfAfterRead && !this.isSaving && !this.showAddToShelfOnBackDialog &&
+      !!this.bookUrl && this.bookUrl === this.pendingAddToShelfBookUrl;
   }
 
   showAddToShelfOnBackPrompt(): void {
@@ -372,15 +398,166 @@ struct SearchBookDetailPage {
 
   dismissAddToShelfOnBackPrompt(): void {
     this.showAddToShelfOnBackDialog = false;
-    router.back();
+    this.removePendingReadBook().finally(() => {
+      router.back();
+    });
+  }
+
+  async removePendingReadBook(): Promise<void> {
+    if (!this.pendingAddToShelfBookUrl) {
+      return;
+    }
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const pendingBook = await db.getBook(this.pendingAddToShelfBookUrl);
+      if (SearchExplorePendingBook.isPendingAddToShelf(pendingBook)) {
+        await db.deleteBook(this.pendingAddToShelfBookUrl);
+        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      }
+    } catch (e) {
+      console.error('移除临时阅读书籍失败:', e);
+    }
+    this.promptAddToShelfAfterRead = false;
+    this.pendingAddToShelfBookUrl = '';
+    this.isInShelf = false;
+  }
+
+  async keepPendingReadBookInShelf(): Promise<boolean> {
+    if (!this.pendingAddToShelfBookUrl) {
+      return await this.addToShelf();
+    }
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const pendingBook = await db.getBook(this.pendingAddToShelfBookUrl);
+      if (pendingBook) {
+        SearchExplorePendingBook.clearPendingAddToShelf(pendingBook);
+        await db.updateBook(pendingBook);
+        this.syncStateFromBook(pendingBook);
+        this.isInShelf = true;
+        this.promptAddToShelfAfterRead = false;
+        this.pendingAddToShelfBookUrl = '';
+        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+        promptAction.showToast({ message: '已加入书架' });
+        return true;
+      }
+    } catch (e) {
+      console.error('加入书架失败:', e);
+      promptAction.showToast({ message: '加入书架失败' });
+      return false;
+    }
+    return await this.addToShelf();
   }
 
   async confirmAddToShelfOnBack(): Promise<void> {
     this.showAddToShelfOnBackDialog = false;
-    const ok = await this.addToShelf();
+    const ok = await this.keepPendingReadBookInShelf();
     if (ok) {
       router.back();
     }
+  }
+
+  async prepareBookForReading(): Promise<boolean> {
+    if (!this.bookUrl) {
+      promptAction.showToast({ message: '书籍地址为空' });
+      return false;
+    }
+
+    this.isSaving = true;
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const requestKey = BookIdentity.keyOfUrl(this.bookUrl);
+      const existing = await db.getBook(this.bookUrl) || await this.findShelfBookByKey(requestKey, true);
+      if (existing) {
+        const nextCoverUrl = CoverUrlNormalizer.prefer(this.coverUrl, existing.coverUrl);
+        if (nextCoverUrl && existing.coverUrl !== nextCoverUrl) {
+          existing.coverUrl = nextCoverUrl;
+          await db.updateBook(existing);
+          AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+        }
+        this.syncStateFromBook(existing);
+        if (SearchExplorePendingBook.isPendingAddToShelf(existing)) {
+          this.isInShelf = false;
+          this.promptAddToShelfAfterRead = this.promptAddToShelfOnBackFromResult;
+          this.pendingAddToShelfBookUrl = existing.bookUrl;
+        } else {
+          this.isInShelf = true;
+          this.promptAddToShelfAfterRead = false;
+          this.pendingAddToShelfBookUrl = '';
+        }
+        return true;
+      }
+
+      const book = await this.buildBookForShelf();
+      const resolvedExisting = await this.findShelfBookByKey(BookIdentity.keyOfBook(book), true);
+      if (resolvedExisting) {
+        this.syncStateFromBook(resolvedExisting);
+        if (SearchExplorePendingBook.isPendingAddToShelf(resolvedExisting)) {
+          this.isInShelf = false;
+          this.promptAddToShelfAfterRead = this.promptAddToShelfOnBackFromResult;
+          this.pendingAddToShelfBookUrl = resolvedExisting.bookUrl;
+        } else {
+          this.isInShelf = true;
+          this.promptAddToShelfAfterRead = false;
+          this.pendingAddToShelfBookUrl = '';
+        }
+        return true;
+      }
+      SearchExplorePendingBook.markPendingAddToShelf(book);
+      await db.insertBook(book);
+      this.syncStateFromBook(book);
+      this.isInShelf = false;
+      this.promptAddToShelfAfterRead = this.promptAddToShelfOnBackFromResult;
+      this.pendingAddToShelfBookUrl = book.bookUrl;
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      return true;
+    } catch (e) {
+      console.error('准备阅读失败:', e);
+      promptAction.showToast({ message: '打开阅读失败' });
+      return false;
+    } finally {
+      this.isSaving = false;
+    }
+  }
+
+  async buildBookForShelf(): Promise<Book> {
+    const book = new Book();
+    book.bookUrl = this.bookUrl;
+    book.tocUrl = this.tocUrl;
+    book.origin = this.origin;
+    book.originName = this.originName;
+    book.name = this.name;
+    book.author = this.author;
+    book.kind = BookFieldSanitizer.clean(this.kind);
+    book.coverUrl = CoverUrlNormalizer.normalize(this.coverUrl);
+    book.intro = BookFieldSanitizer.clean(this.intro);
+    book.latestChapterTitle = BookFieldSanitizer.clean(this.latestChapterTitle);
+    book.wordCount = BookFieldSanitizer.clean(this.wordCount);
+    book.group = -2147483645;
+    book.type = 0;
+    book.canUpdate = true;
+    book.lastCheckTime = Date.now();
+    book.latestChapterTime = Date.now();
+    const fallbackCoverUrl = book.coverUrl;
+    const db = AppDatabase.getInstance();
+    const source = book.origin ? await db.getBookSource(book.origin) : null;
+    if (source) {
+      const service = new WebBookService();
+      const fullBook = await service.getBookInfo(source, book);
+      book.bookUrl = fullBook.bookUrl || book.bookUrl;
+      book.tocUrl = fullBook.tocUrl || book.tocUrl;
+      book.name = fullBook.name || book.name;
+      book.author = fullBook.author || book.author;
+      book.kind = BookFieldSanitizer.prefer(fullBook.kind, book.kind);
+      book.coverUrl = CoverUrlNormalizer.prefer(fallbackCoverUrl, fullBook.coverUrl || book.coverUrl);
+      book.intro = BookFieldSanitizer.prefer(fullBook.intro, book.intro);
+      book.latestChapterTitle = BookFieldSanitizer.prefer(fullBook.latestChapterTitle, book.latestChapterTitle);
+      book.wordCount = BookFieldSanitizer.prefer(fullBook.wordCount, book.wordCount);
+      book.variable = fullBook.variable || book.variable;
+    }
+    return book;
   }
 
   @Builder
@@ -434,19 +611,20 @@ struct SearchBookDetailPage {
     .justifyContent(FlexAlign.Center)
     .onClick(() => {
       if (!this.isSaving) {
-        router.back();
+        this.dismissAddToShelfOnBackPrompt();
       }
     })
   }
 
-  async findShelfBookByKey(bookKey: string): Promise<Book | null> {
+  async findShelfBookByKey(bookKey: string, includePending: boolean = false): Promise<Book | null> {
     if (!bookKey) {
       return null;
     }
     const db = AppDatabase.getInstance();
     const books = await db.getAllBooks();
     for (const book of books) {
-      if (BookIdentity.keyOfBook(book) === bookKey) {
+      if (BookIdentity.keyOfBook(book) === bookKey &&
+        (includePending || !SearchExplorePendingBook.isPendingAddToShelf(book))) {
         return book;
       }
     }
@@ -468,7 +646,7 @@ struct SearchBookDetailPage {
   }
 
   async startRead() {
-    const ok = await this.addToShelf();
+    const ok = await this.prepareBookForReading();
     if (!ok) return;
 
     router.pushUrl({

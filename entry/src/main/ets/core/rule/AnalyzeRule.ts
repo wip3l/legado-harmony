@@ -35,10 +35,15 @@ export class AnalyzeRule {
 
   getElements(rule: string): string[] {
     if (!rule) return [this.content];
-    // 防止超大内容进入正则
-    if (this.content.length > 500000) return [];
+    // 防止超大 HTML 进入正则/CSS 解析，但 JSON 接口列表仍需要正常走 JSONPath。
+    if (this.content.length > 500000 && !this.isJsonPathLikeRule(rule)) return [];
     const items = this.analyze(rule);
     return items.length > 0 ? items : [this.content];
+  }
+
+  private isJsonPathLikeRule(rule: string): boolean {
+    const effective = this.stripProcessor((rule || '').trim());
+    return effective.startsWith('$') || effective.startsWith('@.') || effective.startsWith('@json:');
   }
 
   // === 核心解析 ===
@@ -89,7 +94,7 @@ export class AnalyzeRule {
 
     // JSONPath
     const jsonV = this.evalJsonPath(effective);
-    if (Array.isArray(jsonV)) return (jsonV as Object[]).map(v => typeof v === 'string' ? v as string : JSON.stringify(v));
+    if (Array.isArray(jsonV)) return this.jsonPathArrayToStrings(jsonV as Object[]);
     if (jsonV !== undefined && jsonV !== null) return [String(jsonV)];
 
     // CSS 选择器
@@ -294,6 +299,8 @@ export class AnalyzeRule {
   private evalJsTemplate(expr: string, sourceJson: string): string {
     if (!expr) return '';
     expr = expr.trim();
+    const javaStringValue = this.evalJavaGetStringExpression(expr, sourceJson);
+    if (javaStringValue !== null) return javaStringValue;
     const encodedDataUrl = this.evalEncodedDataUrlJs(expr, sourceJson);
     if (encodedDataUrl) return encodedDataUrl;
     if (expr.includes('startBrowserAwait') || expr.includes('getVerificationCode')) {
@@ -351,6 +358,24 @@ export class AnalyzeRule {
 
     // 第二步：清理 + 号和引号及 {{}} 模板括号，保留有效字符
     return expr.replace(/\s*\+\s*/g, '').replace(/['"]/g, '').replace(/\{\{|\}\}/g, '').trim();
+  }
+
+  private evalJavaGetStringExpression(expr: string, sourceJson: string): string | null {
+    const getStringMatch = expr.match(/(?:replaceCover\s*\(\s*)?java\.getString\(\s*["']([^"']+)["']\s*\)\s*\)?/);
+    if (!getStringMatch) return null;
+    const keyOrPath = getStringMatch[1];
+    let data: Object | null = null;
+    try { data = JSON.parse(sourceJson) as Object; } catch (_) {}
+    if (!data) return '';
+    let value: Object | string | undefined = undefined;
+    if (keyOrPath.startsWith('$')) {
+      value = this.getByPath(data, keyOrPath);
+    } else {
+      value = (data as Record<string, Object>)[keyOrPath] as Object | string;
+      if (value === undefined) value = this.deepFind(data, keyOrPath);
+    }
+    if (Array.isArray(value)) return value.map(item => String(item)).join(',');
+    return value === undefined || value === null ? '' : String(value);
   }
 
   private evalEncodedDataUrlJs(expr: string, sourceJson: string): string {
@@ -428,11 +453,25 @@ export class AnalyzeRule {
   private jsonPathToStrings(rule: string): string[] {
     if (!rule) return [];
     const jsonV = this.evalJsonPath(rule);
-    if (Array.isArray(jsonV)) return (jsonV as Object[]).map(v => typeof v === 'string' ? v as string : JSON.stringify(v));
+    if (Array.isArray(jsonV)) {
+      return this.jsonPathArrayToStrings(jsonV as Object[]);
+    }
     if (jsonV !== undefined && jsonV !== null) {
       return [typeof jsonV === 'string' ? jsonV as string : JSON.stringify(jsonV)];
     }
     return [];
+  }
+
+  private jsonPathArrayToStrings(values: Object[]): string[] {
+    const result: string[] = [];
+    for (const value of values) {
+      if (Array.isArray(value)) {
+        result.push(...this.jsonPathArrayToStrings(value as Object[]));
+      } else {
+        result.push(typeof value === 'string' ? value as string : JSON.stringify(value));
+      }
+    }
+    return result;
   }
 
   private parseJsonSafe(text: string): EncodedJsonMap {
@@ -507,7 +546,7 @@ export class AnalyzeRule {
     let cur: Object = obj;
     for (const p of parts) {
       if (p === '[*]' || p === '*') {
-        if (Array.isArray(cur)) return cur.map(v => typeof v === 'string' ? v : JSON.stringify(v));
+        if (Array.isArray(cur)) return cur as Object[];
         return undefined;
       }
       if (p.includes('..')) {
@@ -1391,11 +1430,16 @@ export class AnalyzeRule {
   }
 
   private evalTemplateRule(template: string): string {
-    let result = template.replace(/\{\{([^}]+)\}\}/g, (_: string, expr: string) => {
+    let result = template.replace(/\{\{([\s\S]*?)\}\}/g, (_: string, expr: string) => {
       const rule = expr.trim();
+      const sourceValue = this.evalSourceVariable(rule);
+      if (sourceValue !== null) return sourceValue;
       if (rule.startsWith('@get:{')) {
         const m = rule.match(/@get:\{([^}]+)\}/);
         return m ? this.ctx.get(m[1].trim()) : '';
+      }
+      if ((rule.startsWith('$') || rule.startsWith('@.')) && (rule.includes('##') || rule.includes('@js:'))) {
+        return this.analyzeFirst(rule);
       }
       if (rule.startsWith('$') || rule.startsWith('@.')) {
         const v = this.evalJsonPath(rule);
@@ -1416,6 +1460,16 @@ export class AnalyzeRule {
       result = result.substring(0, jsIndex);
     }
     return result;
+  }
+
+  private evalSourceVariable(rule: string): string | null {
+    if (rule === 'source.bookSourceUrl') return this.ctx.get('source.bookSourceUrl') || this.ctx.get('bookSourceUrl');
+    if (rule === 'source.bookSourceName') return this.ctx.get('source.bookSourceName') || this.ctx.get('bookSourceName');
+    if (rule === 'source.bookSourceGroup') return this.ctx.get('source.bookSourceGroup') || this.ctx.get('bookSourceGroup');
+    if (rule === 'source.bookSourceComment') return this.ctx.get('source.bookSourceComment') || this.ctx.get('bookSourceComment');
+    const getVariable = rule.match(/^source\.getVariable\(\s*["']([^"']+)["']\s*\)$/);
+    if (getVariable) return this.ctx.get(`source.variable.${getVariable[1]}`) || this.ctx.get('source.variable') || '';
+    return null;
   }
 
   // === 后处理 ===
@@ -1551,7 +1605,7 @@ export class AnalyzeRule {
 
   private resolveUrl(url: string): string {
     if (!url || url.startsWith('http')) return url;
-    if (url.startsWith('//')) return 'https:' + url;
+    if (/^\/\/[A-Za-z0-9.-]+(?::\d+)?(?:[/?#]|$)/.test(url)) return 'https:' + url;
     if (url.startsWith('/')) {
       const m = this.baseUrl.match(/^(https?:\/\/[^/]+)/);
       return m ? m[0] + url : this.baseUrl + url;

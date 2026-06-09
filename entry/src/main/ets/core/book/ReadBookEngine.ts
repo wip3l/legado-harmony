@@ -183,6 +183,7 @@ export class ReadBookEngine {
       return '';
     }
 
+    await this.refreshSourceForContent();
     const task = this.webBook.getContent(this.source, this.book, chapter)
       .then((text: string) => {
         if (text) {
@@ -201,6 +202,16 @@ export class ReadBookEngine {
       });
     this.chapterLoading.set(idx, task);
     return await task;
+  }
+
+  private async refreshSourceForContent(): Promise<void> {
+    if (!this.book || !this.source || !this.book.origin || this.book.origin === 'local') {
+      return;
+    }
+    const latestSource = await appDb.getBookSource(this.book.origin);
+    if (latestSource) {
+      this.source = latestSource;
+    }
   }
 
   hasCachedContent(idx: number): boolean {
