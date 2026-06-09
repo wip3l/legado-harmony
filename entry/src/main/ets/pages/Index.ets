@@ -16,6 +16,7 @@ import { BookCoverCache } from '../utils/BookCoverCache';
 import { CoverGallerySettings } from '../utils/CoverGallerySettings';
 import { BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettingsStore';
 import { SearchBookShelfHelper } from '../utils/SearchBookShelfHelper';
+import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 import { BookshelfSortHelper } from '../utils/BookshelfSortHelper';
 
 @Entry
@@ -471,7 +472,7 @@ struct BookshelfPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      this.books = this.sortBooks(await db.getAllBooks());
+      this.books = this.sortBooks(SearchExplorePendingBook.filterShelfBooks(await db.getAllBooks()));
       this.refreshShelfCoverCache(this.books);
     } catch (e) {
       console.error('加载书籍失败:', e);
@@ -1606,7 +1607,7 @@ struct ExplorePage {
     this.syncExploreShelfStatus(this.books);
   }
 
-  async loadEntries() {
+  async loadEntries(platformOverride: string = '') {
     const loadVersion = this.beginExploreLoad();
     this.hasLoaded = true;
     this.status = '正在加载发现分类...';
@@ -1624,6 +1625,9 @@ struct ExplorePage {
       this.selectedSourceName = previousSourceName && this.sourceNames.includes(previousSourceName) ?
         previousSourceName : (this.sourceNames.length > 0 ? this.sourceNames[0] : '');
       this.platformNames = this.getSelectedSourcePlatforms();
+      if (platformOverride && this.platformNames.includes(platformOverride)) {
+        this.selectedPlatform = platformOverride;
+      }
       this.normalizeSelectedPlatform();
       const entries = await this.coordinator.getEntries(this.selectedPlatform, this.getSelectedSourceUrl());
       if (!this.isCurrentExploreLoad(loadVersion)) return;
@@ -1828,7 +1832,7 @@ struct ExplorePage {
           primaryTextColor: this.primaryTextColor(),
           secondaryTextColor: this.secondaryTextColor(),
           subTextColor: this.subTextColor(),
-          bottomPadding: 12,
+          bottomPadding: this.resultListBottomInset(),
           onOpenBook: (book: SearchBook) => {
             this.openSearchBookDetail(book);
           },
@@ -1914,7 +1918,7 @@ struct ExplorePage {
     this.books = [];
     this.status = `正在切换到 ${platform}...`;
     AppStorage.setOrCreate('explorePlatform', platform);
-    this.loadEntries();
+    this.loadEntries(platform);
   }
 
   switchExploreSource(sourceName: string): void {
@@ -2074,6 +2078,15 @@ struct ExplorePage {
   getActiveEntries(): ExploreEntry[] {
     if (!this.selectedSourceName) return this.entries;
     return this.entries.filter(entry => entry.sourceName === this.selectedSourceName);
+  }
+
+  resultListBottomInset(): number {
+    const comfortableGap = 20;
+    if (deviceInfo.sdkApiVersion < 23) {
+      return comfortableGap;
+    }
+    const floatingTabHeight = 56;
+    return floatingTabHeight + Math.max(this.navBarHeight, 8) + comfortableGap;
   }
 
   pageColor(): string {
@@ -2237,7 +2250,7 @@ struct SearchPage {
           primaryTextColor: this.primaryTextColor(),
           secondaryTextColor: this.secondaryTextColor(),
           subTextColor: this.subTextColor(),
-          bottomPadding: 12,
+          bottomPadding: this.resultListBottomInset(),
           onOpenBook: (book: SearchBook) => {
             this.openSearchBookDetail(book);
           },
@@ -2508,6 +2521,15 @@ struct SearchPage {
   statusMessageColor(): string {
     return this.appDarkMode ? '#14251B' : '#E8F5E9';
   }
+
+  resultListBottomInset(): number {
+    const comfortableGap = 20;
+    if (deviceInfo.sdkApiVersion < 23) {
+      return comfortableGap;
+    }
+    const floatingTabHeight = 56;
+    return floatingTabHeight + Math.max(this.navBarHeight, 8) + comfortableGap;
+  }
 }
 
 @Component
@@ -2645,7 +2667,7 @@ struct SettingsPage {
               Text('搜索/发现配置')
                 .fontSize(16)
                 .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
-              Text('封面、标签与返回加入书架提示')
+              Text('封面、标签与阅读后加入书架提示')
                 .fontSize(12)
                 .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
                 .margin({ top: 4 })

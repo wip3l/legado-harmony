@@ -36,21 +36,31 @@ export class EncodedSourceUrl {
   ];
 
   static isEncodedDataUrl(url: string): boolean {
-    return (url || '').startsWith('data:;base64,');
+    const value = url || '';
+    return value.startsWith('data:;base64,') ||
+      value.startsWith('data:detailsUrl;base64,') ||
+      value.startsWith('data:catalogUrl;base64,') ||
+      value.startsWith('data:contentUrl;base64,');
   }
 
   static decode(url: string): EncodedSourcePayload | null {
     if (!EncodedSourceUrl.isEncodedDataUrl(url)) return null;
     const payload = new EncodedSourcePayload();
     payload.raw = url;
-    const rest = url.substring('data:;base64,'.length);
+    const prefix = EncodedSourceUrl.dataUrlPrefix(url);
+    if (!prefix.prefix) return null;
+    const rest = url.substring(prefix.prefix.length);
     const split = EncodedSourceUrl.splitPayload(rest);
     const jsonText = EncodedSourceUrl.base64Decode(split[0]);
     payload.text = jsonText;
-    try {
-      payload.data = EncodedSourceUrl.asMap(JSON.parse(jsonText) as Object);
-    } catch (_) {
-      payload.data = {};
+    if (prefix.type === 'shushanContent') {
+      payload.data = EncodedSourceUrl.parseLegacyShushanContentData(jsonText);
+    } else {
+      try {
+        payload.data = EncodedSourceUrl.asMap(JSON.parse(jsonText) as Object);
+      } catch (_) {
+        payload.data = {};
+      }
     }
     if (split[1]) {
       try {
@@ -59,6 +69,9 @@ export class EncodedSourceUrl {
         payload.options = {};
       }
       payload.type = EncodedSourceUrl.str(payload.options['type']);
+    }
+    if (prefix.type) {
+      payload.type = prefix.type;
     }
     return payload;
   }
@@ -69,7 +82,8 @@ export class EncodedSourceUrl {
     return payload.type === 'gysearch' || payload.type === 'gydetail' ||
       payload.type === 'gycatalog' || payload.type === 'gycontent' ||
       payload.type === 'qingtian' || payload.type === 'qingtian2' || payload.type === 'qingtian3' ||
-      payload.type === 'mybxs' || payload.type === 'mybxc';
+      payload.type === 'mybxs' || payload.type === 'mybxc' ||
+      payload.type === 'shushanDetail' || payload.type === 'shushanCatalog' || payload.type === 'shushanContent';
   }
 
   static async requestJsonForDataUrl(http: HttpClient, url: string, preferredHost?: string):
@@ -179,7 +193,7 @@ export class EncodedSourceUrl {
     const fromHost = EncodedSourceUrl.hostFromUrl(fromUrl) || fromUrl;
     const cookie = CookieStore.getCookie(fromUrl) || CookieStore.getCookie(fromHost);
     if (!cookie) return;
-    for (const host of EncodedSourceUrl.DEFAULT_HOSTS) {
+    for (const host of EncodedSourceUrl.relatedHosts(fromHost)) {
       if (!host.startsWith('http')) continue;
       CookieStore.setCookies(host, cookie);
       CookieStore.setCookies(`${host}/login`, cookie);
@@ -283,7 +297,7 @@ export class EncodedSourceUrl {
 
   private static hosts(preferredHost?: string): string[] {
     const hosts: string[] = [];
-    if (preferredHost) hosts.push(preferredHost);
+    if (preferredHost) return [preferredHost];
     for (const host of EncodedSourceUrl.DEFAULT_HOSTS) {
       if (!hosts.includes(host)) hosts.push(host);
     }
@@ -306,12 +320,31 @@ export class EncodedSourceUrl {
       const value = EncodedSourceUrl.cookieValue(cookie, name);
       if (value) return value;
     }
-    for (const otherHost of EncodedSourceUrl.DEFAULT_HOSTS) {
+    for (const otherHost of EncodedSourceUrl.relatedHosts(host)) {
       const cookie = CookieStore.getCookie(otherHost);
       const value = EncodedSourceUrl.cookieValue(cookie, name);
       if (value) return value;
     }
     return '';
+  }
+
+  private static relatedHosts(host: string): string[] {
+    const value = (host || '').toLowerCase();
+    const hosts: string[] = [];
+    const isGuangYu = value.includes('gyks.cf');
+    const isDaHuiLang = value.includes('219.154.201.122') || value.includes('langge') ||
+      value.includes('czyl') || value.includes('101.35.133.34');
+    for (const item of EncodedSourceUrl.DEFAULT_HOSTS) {
+      const low = item.toLowerCase();
+      if (isGuangYu && low.includes('gyks.cf')) {
+        hosts.push(item);
+      } else if (isDaHuiLang && (low.includes('219.154.201.122') || low.includes('langge') ||
+        low.includes('czyl') || low.includes('101.35.133.34'))) {
+        hosts.push(item);
+      }
+    }
+    if (hosts.length === 0 && host) hosts.push(host);
+    return hosts;
   }
 
   private static cookieValue(cookie: string, name: string): string {
@@ -329,6 +362,44 @@ export class EncodedSourceUrl {
     const comma = rest.indexOf(',');
     if (comma < 0) return [rest, ''];
     return [rest.substring(0, comma), rest.substring(comma + 1)];
+  }
+
+  private static dataUrlPrefix(url: string): { prefix: string, type: string } {
+    if ((url || '').startsWith('data:;base64,')) return { prefix: 'data:;base64,', type: '' };
+    if ((url || '').startsWith('data:detailsUrl;base64,')) {
+      return { prefix: 'data:detailsUrl;base64,', type: 'shushanDetail' };
+    }
+    if ((url || '').startsWith('data:catalogUrl;base64,')) {
+      return { prefix: 'data:catalogUrl;base64,', type: 'shushanCatalog' };
+    }
+    if ((url || '').startsWith('data:contentUrl;base64,')) {
+      return { prefix: 'data:contentUrl;base64,', type: 'shushanContent' };
+    }
+    return { prefix: '', type: '' };
+  }
+
+  private static parseLegacyShushanContentData(text: string): EncodedJsonMap {
+    const data: EncodedJsonMap = { url: text || '' };
+    const query = (text || '').startsWith('chapter?') ? (text || '').substring('chapter?'.length) : (text || '');
+    for (const item of query.split('&')) {
+      const pair = item.trim();
+      if (!pair) continue;
+      const eq = pair.indexOf('=');
+      const key = eq >= 0 ? pair.substring(0, eq) : pair;
+      const rawValue = eq >= 0 ? pair.substring(eq + 1) : '';
+      const decodedKey = EncodedSourceUrl.decodeQueryPart(key);
+      if (!decodedKey) continue;
+      data[decodedKey] = EncodedSourceUrl.decodeQueryPart(rawValue);
+    }
+    return data;
+  }
+
+  private static decodeQueryPart(value: string): string {
+    try {
+      return decodeURIComponent((value || '').replace(/\+/g, ' '));
+    } catch (_) {
+      return value || '';
+    }
   }
 
   private static base64Encode(input: string): string {

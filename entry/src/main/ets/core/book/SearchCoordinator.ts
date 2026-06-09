@@ -3,6 +3,7 @@ import { appDb } from '../../model/data/AppDatabase';
 import { HttpClient } from '../http/HttpClient';
 import { AnalyzeUrl } from '../rule/AnalyzeUrl';
 import { AnalyzeRule } from '../rule/AnalyzeRule';
+import { RuleContext } from '../rule/RuleContext';
 import { JsRuntime } from '../rule/JsRuntime';
 import { VerificationSupport } from '../http/VerificationSupport';
 import { EncodedSourceUrl } from './EncodedSourceUrl';
@@ -118,12 +119,12 @@ export class SearchCoordinator {
       }
       console.log('[SC] search source:', source.bookSourceName, 'url:', urlTemplate);
       const resp = EncodedSourceUrl.canHandle(urlTemplate) ?
-        await this.fetchEncodedDataUrl(urlTemplate) : await au.fetch(urlTemplate);
+        await this.fetchEncodedDataUrl(urlTemplate, source) : await au.fetch(urlTemplate);
 
       console.log('[SC] response:', source.bookSourceName, resp.statusCode, 'len:', resp.body?.length || 0);
       if (VerificationSupport.shouldRequestBrowserVerification(source, resp.body, resp.statusCode, source.searchUrl)) {
         const verifyUrl = VerificationSupport.pickVerificationUrl(source, urlTemplate, source.searchUrl);
-        VerificationSupport.requestVerification(verifyUrl, `${source.bookSourceName} 验证`);
+        VerificationSupport.requestVerification(verifyUrl, `${source.bookSourceName} 验证`, source);
         console.warn('[SC] source needs browser verification:', source.bookSourceName, verifyUrl);
         return [];
       }
@@ -134,6 +135,7 @@ export class SearchCoordinator {
 
       const baseUrl = BookUrlResolver.effectiveBase(resp, urlTemplate, source.bookSourceUrl);
       const rule = new AnalyzeRule(resp.body, baseUrl);
+      this.seedSourceVariables(rule.getContext(), source);
       rule.setJsVar('key', encodeURIComponent(keyword));
       rule.setJsVar('searchKey', encodeURIComponent(keyword));
       rule.setJsVar('keyword', encodeURIComponent(keyword));
@@ -146,6 +148,7 @@ export class SearchCoordinator {
       const sourceBackendHost = BookSourceDataUrlSupport.sourceBackendHost(source);
       for (const item of items) {
         const ir = new AnalyzeRule(item, baseUrl);
+        this.seedSourceVariables(ir.getContext(), source);
         if (sourceBackendHost) {
           ir.getContext().put('host', sourceBackendHost);
           ir.getContext().put('backend', sourceBackendHost);
@@ -153,7 +156,8 @@ export class SearchCoordinator {
         const book = new SearchBook();
         book.name = ir.analyzeFirst(searchRule.name) || '';
         book.author = ir.analyzeFirst(searchRule.author) || '';
-        book.coverUrl = BookSourceDataUrlSupport.normalizeCoverUrl(source, ir.analyzeFirst(searchRule.coverUrl), baseUrl);
+        book.coverUrl = BookSourceDataUrlSupport.normalizeCoverUrlFromItem(source,
+          ir.analyzeFirst(searchRule.coverUrl), item, baseUrl);
         book.intro = ir.analyzeFirst(searchRule.intro) || '';
         book.kind = ir.analyzeFirst(searchRule.kind) || '';
         book.latestChapterTitle = ir.analyzeFirst(searchRule.lastChapter) || '';
@@ -172,6 +176,13 @@ export class SearchCoordinator {
             } catch (_) {}
           }
           book.bookUrl = BookUrlResolver.resolve(book.bookUrl, baseUrl);
+        }
+        const searchBookId = this.extractBookId(ir, item, book.bookUrl);
+        const responseCoverUrl = BookSourceDataUrlSupport.normalizeCoverUrlFromResponse(source, resp.body, searchBookId,
+          baseUrl);
+        if (responseCoverUrl && this.shouldReplaceCover(book.coverUrl)) {
+          book.coverUrl = responseCoverUrl;
+          console.log('[SC] cover from response:', source.bookSourceName, book.name, searchBookId);
         }
         book.origin = source.bookSourceUrl;
         book.originName = source.bookSourceName;
@@ -264,6 +275,35 @@ export class SearchCoordinator {
       .replace(/[《》【】\[\]（）()「」『』"“”'‘’.,，。:：;；!！?？、·_\-]/g, '');
   }
 
+  private extractBookId(ir: AnalyzeRule, itemJson: string, bookUrl: string): string {
+    const fromContext = ir.getContext().get('book_id') || ir.getContext().get('bookId') || ir.getContext().get('id');
+    if (fromContext) return fromContext;
+    const fromUrl = this.extractQueryValue(bookUrl, 'book_id') || this.extractQueryValue(bookUrl, 'bookId') ||
+      this.extractQueryValue(bookUrl, 'bookid') || this.extractQueryValue(bookUrl, 'id');
+    if (fromUrl) return fromUrl;
+    try {
+      const item = JSON.parse(itemJson || '{}') as Record<string, Object>;
+      return String(item['book_id'] || item['bookId'] || item['id'] || '');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  private extractQueryValue(url: string, key: string): string {
+    if (!url || !key) return '';
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = url.match(new RegExp(`[?&]${escaped}=([^&#]+)`, 'i'));
+    return match && match[1] ? decodeURIComponent(match[1]) : '';
+  }
+
+  private shouldReplaceCover(url: string): boolean {
+    const value = (url || '').trim().toLowerCase();
+    return !value || value === 'thumb_url' || value === 'cover' || value === 'audio_thumb_uri' ||
+      value.includes('{{') || value.includes('}}') || value.includes('$..') || value.includes('$.') ||
+      value.includes('.heic') || value.includes('reading-sign.fqnovelpic.com') ||
+      /\/(?:thumb_url|cover|audio_thumb_uri)$/.test(value);
+  }
+
   private async evalAndBuild(js: JsRuntime, source: BookSource, keyword: string): Promise<string> {
     const searchUrl = source.searchUrl;
     const baseUrl = source.bookSourceUrl;
@@ -297,10 +337,30 @@ export class SearchCoordinator {
         url = resultMatch ? resultMatch[1] : (relativeOptionMatch ? relativeOptionMatch[1] : (directUrlMatch ? directUrlMatch[1] : ''));
       }
     }
+    url = this.applySourceTemplate(url, source);
     url = js.evalTemplate(url);
     // 清理残留模板
     url = url.replace(/\{\{[^}]+\}\}/g, '');
     return url;
+  }
+
+  private applySourceTemplate(url: string, source: BookSource): string {
+    return (url || '')
+      .replace(/\{\{\s*source\.bookSourceUrl\s*\}\}/g, source.bookSourceUrl || '')
+      .replace(/\{\{\s*source\.bookSourceName\s*\}\}/g, source.bookSourceName || '')
+      .replace(/\{\{\s*source\.bookSourceGroup\s*\}\}/g, source.bookSourceGroup || '');
+  }
+
+  private seedSourceVariables(ctx: RuleContext, source: BookSource): void {
+    ctx.put('source.bookSourceUrl', source.bookSourceUrl || '');
+    ctx.put('bookSourceUrl', source.bookSourceUrl || '');
+    ctx.put('source.bookSourceName', source.bookSourceName || '');
+    ctx.put('bookSourceName', source.bookSourceName || '');
+    ctx.put('source.bookSourceGroup', source.bookSourceGroup || '');
+    ctx.put('bookSourceGroup', source.bookSourceGroup || '');
+    ctx.put('source.bookSourceComment', source.bookSourceComment || '');
+    ctx.put('bookSourceComment', source.bookSourceComment || '');
+    ctx.put('source.variable', source.variableComment || '');
   }
 
   private async tryBuildScriptedFormSearchUrl(source: BookSource, keyword: string): Promise<string> {
@@ -424,8 +484,9 @@ export class SearchCoordinator {
     return hosts;
   }
 
-  private async fetchEncodedDataUrl(url: string): Promise<{ url: string, statusCode: number, headers: Record<string, string>, body: string, success: boolean, error?: string }> {
-    const root = await EncodedSourceUrl.requestJsonForDataUrl(this.http, url);
+  private async fetchEncodedDataUrl(url: string, source: BookSource): Promise<{ url: string, statusCode: number, headers: Record<string, string>, body: string, success: boolean, error?: string }> {
+    const root = await EncodedSourceUrl.requestJsonForDataUrl(this.http, url,
+      BookSourceDataUrlSupport.sourceBackendHost(source));
     if (!root) {
       return { url: url, statusCode: 0, headers: {}, body: '', success: false, error: 'encoded data url request failed' };
     }

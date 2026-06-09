@@ -2,6 +2,8 @@ import { router, promptAction } from '@kit.ArkUI';
 import { webview } from '@kit.ArkWeb';
 import { CookieStore } from '../core/http/CookieStore';
 import { EncodedSourceUrl } from '../core/book/EncodedSourceUrl';
+import { VerificationSupport } from '../core/http/VerificationSupport';
+import { AppDatabase } from '../model/data/AppDatabase';
 import { syncSystemBars } from '../utils/SystemBars';
 
 @Entry
@@ -30,8 +32,15 @@ struct VerifyWebPage {
   aboutToAppear(): void {
     this.syncBars();
     const params = router.getParams() as Record<string, string>;
-    this.url = params?.['url'] || AppStorage.get<string>('pendingVerificationUrl') || 'https://www.qidian.com';
+    const initialUrl = params?.['url'] || AppStorage.get<string>('pendingVerificationUrl') || 'https://www.qidian.com';
     this.title = params?.['title'] || AppStorage.get<string>('pendingVerificationTitle') || '网页验证';
+    if (VerificationSupport.isBookSourceLoginUrl(initialUrl)) {
+      this.url = 'about:blank';
+      this.currentUrl = '';
+      this.resolveBookSourceLoginUrl(initialUrl);
+      return;
+    }
+    this.url = initialUrl;
     this.currentUrl = this.url;
   }
 
@@ -129,12 +138,15 @@ struct VerifyWebPage {
       this.saveCookies(this.url);
       CookieStore.copyCookies(this.currentUrl, this.url);
     }
+    this.syncBookSourceLoginCookies();
     this.syncGuangYuCookies(this.currentUrl || this.url);
     const isGuangYu = this.isGuangYuVerify(this.currentUrl || this.url);
     const verified = !isGuangYu || this.hasGuangYuToken();
     if (verified) {
       AppStorage.setOrCreate('pendingVerificationUrl', '');
       AppStorage.setOrCreate('pendingVerificationTitle', '');
+      AppStorage.setOrCreate('pendingVerificationSourceUrl', '');
+      AppStorage.setOrCreate('pendingVerificationLoginUrl', '');
       AppStorage.setOrCreate('verificationCompletedAt', Date.now());
       promptAction.showToast({ message: '验证信息已保存，请重试搜索或刷新目录' });
       router.back();
@@ -147,6 +159,40 @@ struct VerifyWebPage {
     if (!url) return;
     CookieStore.getCookie(url);
     CookieStore.saveAsync();
+  }
+
+  async resolveBookSourceLoginUrl(url: string): Promise<void> {
+    const bookSourceUrl = VerificationSupport.getBookSourceUrlFromLoginUrl(url);
+    if (!bookSourceUrl) return;
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const source = await db.getBookSource(bookSourceUrl);
+      const loginUrl = source ? VerificationSupport.resolveBookSourceLoginUrl(source) : '';
+      if (source && loginUrl) {
+        this.url = loginUrl;
+        this.currentUrl = loginUrl;
+        this.title = `${source.bookSourceName || '书源'} 登录`;
+        AppStorage.setOrCreate('pendingVerificationSourceUrl', source.bookSourceUrl || '');
+        AppStorage.setOrCreate('pendingVerificationLoginUrl', loginUrl);
+        return;
+      }
+    } catch (e) {
+      console.error('解析书源登录地址失败:', e);
+    }
+    router.replaceUrl({
+      url: 'pages/BookSourceEdit',
+      params: {
+        bookSourceUrl: bookSourceUrl
+      }
+    });
+  }
+
+  syncBookSourceLoginCookies(): void {
+    const sourceUrl = AppStorage.get<string>('pendingVerificationSourceUrl') || '';
+    const loginUrl = AppStorage.get<string>('pendingVerificationLoginUrl') || this.url;
+    if (!sourceUrl || !loginUrl) return;
+    VerificationSupport.syncLoginCookiesToSourceHosts(sourceUrl, loginUrl, this.currentUrl || this.url);
   }
 
   syncGuangYuCookies(sourceUrl: string): void {

@@ -220,6 +220,7 @@ export class BookSource {
   loginUrl: string = '';
   loginUi: string = '';
   loginCheckJs: string = '';
+  loginHeader: string = '';
   bookUrlPattern: string = '';
   searchUrl: string = '';
   exploreUrl: string = '';

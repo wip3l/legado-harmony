@@ -14,7 +14,7 @@ export class AppDatabase {
   private initialized: boolean = false;
   private initPromise: Promise<void> | null = null;
   private readonly DATABASE_NAME = 'legado.db';
-  private readonly SCHEMA_VERSION = 2;
+  private readonly SCHEMA_VERSION = 3;
 
   private constructor() {}
 
@@ -106,6 +106,7 @@ export class AppDatabase {
         loginUrl TEXT DEFAULT '',
         loginUi TEXT,
         loginCheckJs TEXT DEFAULT '',
+        loginHeader TEXT DEFAULT '',
         bookUrlPattern TEXT DEFAULT '',
         searchUrl TEXT DEFAULT '',
         exploreUrl TEXT DEFAULT '',
@@ -221,6 +222,7 @@ export class AppDatabase {
       { table: 'book_sources', column: 'searchUrl', definition: "searchUrl TEXT DEFAULT ''" },
       { table: 'book_sources', column: 'exploreUrl', definition: "exploreUrl TEXT DEFAULT ''" },
       { table: 'book_sources', column: 'jsLib', definition: "jsLib TEXT DEFAULT ''" },
+      { table: 'book_sources', column: 'loginHeader', definition: "loginHeader TEXT DEFAULT ''" },
       { table: 'book_chapters', column: 'variable', definition: "variable TEXT DEFAULT ''" }
     ];
 
@@ -441,6 +443,7 @@ export class AppDatabase {
       loginUrl: source.loginUrl,
       loginUi: source.loginUi,
       loginCheckJs: source.loginCheckJs,
+      loginHeader: source.loginHeader,
       bookUrlPattern: source.bookUrlPattern,
       searchUrl: source.searchUrl,
       exploreUrl: source.exploreUrl,
@@ -480,6 +483,7 @@ export class AppDatabase {
       loginUrl: source.loginUrl,
       loginUi: source.loginUi,
       loginCheckJs: source.loginCheckJs,
+      loginHeader: source.loginHeader,
       bookUrlPattern: source.bookUrlPattern,
       searchUrl: source.searchUrl,
       exploreUrl: source.exploreUrl,
@@ -570,6 +574,8 @@ export class AppDatabase {
     source.loginUrl = resultSet.getString(resultSet.getColumnIndex('loginUrl'));
     source.loginUi = resultSet.getString(resultSet.getColumnIndex('loginUi'));
     source.loginCheckJs = resultSet.getString(resultSet.getColumnIndex('loginCheckJs'));
+    const loginHeaderIndex = resultSet.getColumnIndex('loginHeader');
+    source.loginHeader = loginHeaderIndex >= 0 ? resultSet.getString(loginHeaderIndex) : '';
     source.bookUrlPattern = resultSet.getString(resultSet.getColumnIndex('bookUrlPattern'));
     const searchUrlIndex = resultSet.getColumnIndex('searchUrl');
     source.searchUrl = searchUrlIndex >= 0 ? resultSet.getString(searchUrlIndex) : '';

@@ -2,6 +2,7 @@ import { router } from '@kit.ArkUI';
 import { SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { promptAction } from '@kit.ArkUI';
+import deviceInfo from '@ohos.deviceInfo';
 import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
 import { SearchBookResultList } from '../components/book/SearchBookResultList';
 import { syncSystemBars } from '../utils/SystemBars';
@@ -127,7 +128,7 @@ struct SearchPage {
           primaryTextColor: this.primaryTextColor(),
           secondaryTextColor: this.secondaryTextColor(),
           subTextColor: this.subTextColor(),
-          bottomPadding: 0,
+          bottomPadding: this.searchResultBottomInset(),
           onOpenBook: (book: SearchBook) => {
             this.openSearchBookDetail(book);
           },
@@ -454,6 +455,15 @@ struct SearchPage {
 
   statusMessageColor(): string {
     return this.appDarkMode ? '#14251B' : '#E8F5E9';
+  }
+
+  searchResultBottomInset(): number {
+    const comfortableGap = 20;
+    if (deviceInfo.sdkApiVersion < 23) {
+      return comfortableGap;
+    }
+    const floatingTabHeight = 56;
+    return floatingTabHeight + Math.max(this.navBarHeight, 8) + comfortableGap;
   }
 
   syncBars(): void {

@@ -1,4 +1,5 @@
 import { BookSource } from '../../model/data/Book';
+import { CookieStore } from './CookieStore';
 
 export class VerificationSupport {
   static isChallengeResponse(body: string): boolean {
@@ -36,17 +37,54 @@ export class VerificationSupport {
     return !this.looksLikeApiSource(source);
   }
 
-  static requestVerification(url: string, title: string): void {
+  static requestVerification(url: string, title: string, source?: BookSource): void {
     const cleanUrl = this.cleanUrl(url);
     if (!cleanUrl) return;
     AppStorage.setOrCreate('pendingVerificationUrl', cleanUrl);
     AppStorage.setOrCreate('pendingVerificationTitle', title || '网页验证');
     AppStorage.setOrCreate('pendingVerificationTime', Date.now());
+    if (source) {
+      AppStorage.setOrCreate('pendingVerificationSourceUrl', source.bookSourceUrl || '');
+      AppStorage.setOrCreate('pendingVerificationLoginUrl', this.resolveBookSourceLoginUrl(source));
+    }
+  }
+
+  static buildBookSourceLoginUrl(source: BookSource): string {
+    const bookSourceUrl = encodeURIComponent(source.bookSourceUrl || '');
+    return `legado://book-source-login?bookSourceUrl=${bookSourceUrl}`;
+  }
+
+  static isBookSourceLoginUrl(url: string): boolean {
+    return (url || '').startsWith('legado://book-source-login');
+  }
+
+  static getBookSourceUrlFromLoginUrl(url: string): string {
+    const match = (url || '').match(/[?&]bookSourceUrl=([^&]+)/);
+    if (!match || !match[1]) return '';
+    try {
+      return decodeURIComponent(match[1]);
+    } catch (_) {
+      return match[1];
+    }
+  }
+
+  static resolveBookSourceLoginUrl(source: BookSource): string {
+    const loginUrl = this.cleanUrl(source.loginUrl || '');
+    if (this.isHttpUrl(loginUrl)) return loginUrl;
+
+    const host = this.firstScriptHost(source);
+    if (host) return `${host.replace(/\/+$/, '')}/login`;
+
+    const sourceUrl = this.cleanUrl(source.bookSourceUrl || '');
+    if (this.isHttpUrl(sourceUrl)) return `${sourceUrl.replace(/\/+$/, '')}/login`;
+    return '';
   }
 
   static clearVerification(): void {
     AppStorage.setOrCreate('pendingVerificationUrl', '');
     AppStorage.setOrCreate('pendingVerificationTitle', '');
+    AppStorage.setOrCreate('pendingVerificationSourceUrl', '');
+    AppStorage.setOrCreate('pendingVerificationLoginUrl', '');
   }
 
   static getPendingUrl(): string {
@@ -60,7 +98,20 @@ export class VerificationSupport {
       this.pickStartBrowserUrl(source.tocRule?.chapterList || '') ||
       this.pickStartBrowserUrl(source.contentRule?.content || '');
     if (fromRule) return this.resolveUrl(fromRule, source.bookSourceUrl);
+
+    const loginUrl = this.cleanUrl(source.loginUrl || '');
+    if (this.isHttpUrl(loginUrl) && this.shouldPreferLoginUrl(source, requestUrl)) {
+      return loginUrl;
+    }
+
+    const resolvedLoginUrl = this.resolveBookSourceLoginUrl(source);
+    if (resolvedLoginUrl && this.shouldPreferLoginUrl(source, requestUrl)) {
+      return resolvedLoginUrl;
+    }
+
     if (requestUrl && requestUrl.startsWith('http')) return this.cleanUrl(requestUrl);
+    if (this.isHttpUrl(loginUrl)) return loginUrl;
+    if (resolvedLoginUrl) return resolvedLoginUrl;
     return this.cleanUrl(source.bookSourceUrl);
   }
 
@@ -95,10 +146,111 @@ export class VerificationSupport {
       header.includes('client-version') || header.includes('okhttp');
   }
 
+  private static firstScriptHost(source: BookSource): string {
+    const raw = `${source.jsLib || ''}\n${source.loginUrl || ''}\n${source.exploreUrl || ''}\n${source.searchUrl || ''}`;
+    const hostBlock = raw.match(/\bhosts?\s*=\s*\[([\s\S]*?)\]/);
+    const body = hostBlock ? hostBlock[1] : raw;
+    const match = body.match(/["'](https?:\/\/[^"'`\s,)]+)["']/i);
+    return match ? this.cleanUrl(match[1]) : '';
+  }
+
+  static sourceCookieHeader(source: BookSource, requestUrl: string): string {
+    if (!source || !requestUrl) return '';
+    const existing = CookieStore.getCookie(requestUrl);
+    if (existing) return existing;
+
+    const loginUrl = this.cleanUrl(source.loginUrl || '');
+    const loginCookie = CookieStore.getCookie(loginUrl) || CookieStore.getCookie(this.originOf(loginUrl));
+    if (!loginCookie) return '';
+
+    const requestHost = this.hostOf(requestUrl);
+    const sourceHost = this.hostOf(source.bookSourceUrl || '');
+    const loginHost = this.hostOf(loginUrl);
+    if (!requestHost || !loginHost) return '';
+    if (requestHost === loginHost || requestHost === sourceHost || this.isFanqieRelatedHost(requestHost, source)) {
+      return loginCookie;
+    }
+    return '';
+  }
+
+  static syncLoginCookiesToSourceHosts(sourceUrl: string, loginUrl: string, currentUrl: string): void {
+    const fromUrls = [
+      currentUrl,
+      loginUrl,
+      this.originOf(currentUrl),
+      this.originOf(loginUrl),
+      'https://fanqienovel.com'
+    ].filter((item: string) => this.isHttpUrl(item));
+    let fromUrl = '';
+    for (const item of fromUrls) {
+      if (CookieStore.getCookie(item)) {
+        fromUrl = item;
+        break;
+      }
+    }
+    if (!fromUrl) return;
+
+    const targets = [
+      sourceUrl,
+      this.originOf(sourceUrl),
+      loginUrl,
+      this.originOf(loginUrl),
+      'https://fanqienovel.com',
+      'https://novel.snssdk.com',
+      'https://api5-normal-sinfonlineb.fqnovel.com'
+    ].filter((item: string) => this.isHttpUrl(item));
+    for (const target of targets) {
+      CookieStore.copyCookies(fromUrl, target);
+      CookieStore.copyCookies(fromUrl, `${target}/`);
+      CookieStore.copyCookies(fromUrl, `${target}/api`);
+      CookieStore.copyCookies(fromUrl, `${target}/content`);
+      CookieStore.copyCookies(fromUrl, `${target}/info`);
+    }
+    CookieStore.saveAsync();
+  }
+
+  private static shouldPreferLoginUrl(source: BookSource, requestUrl: string): boolean {
+    const cleanRequest = this.cleanUrl(requestUrl || '');
+    if (!this.isHttpUrl(cleanRequest)) return true;
+    if (this.looksLikeApiRequestUrl(cleanRequest)) return true;
+
+    const loginHost = this.hostOf(source.loginUrl || '');
+    const sourceHost = this.hostOf(source.bookSourceUrl || '');
+    const requestHost = this.hostOf(cleanRequest);
+    return !!loginHost && !!sourceHost && !!requestHost && loginHost !== requestHost && sourceHost === requestHost;
+  }
+
+  private static looksLikeApiRequestUrl(url: string): boolean {
+    const clean = (url || '').toLowerCase();
+    return clean.includes('/api/') || clean.includes('/bookapi/') ||
+      /\/(?:search|content|info)(?:\?|$)/.test(clean) ||
+      clean.includes('format=json') || clean.endsWith('.json');
+  }
+
+  private static isFanqieRelatedHost(host: string, source: BookSource): boolean {
+    const raw = `${source.bookSourceUrl || ''}\n${source.loginUrl || ''}\n${source.searchUrl || ''}\n${source.exploreUrl || ''}`.toLowerCase();
+    return raw.includes('fanqie') || raw.includes('fq-book') || raw.includes('snssdk') ||
+      host.includes('fanqie') || host.includes('fqnovel') || host.includes('snssdk') || host.includes('fq-book');
+  }
+
+  private static hostOf(url: string): string {
+    const match = this.cleanUrl(url || '').match(/^https?:\/\/([^/:?#]+)/i);
+    return match ? match[1].toLowerCase() : '';
+  }
+
+  private static originOf(url: string): string {
+    const match = this.cleanUrl(url || '').match(/^(https?:\/\/[^/:?#]+(?::\d+)?)/i);
+    return match ? match[1] : '';
+  }
+
+  private static isHttpUrl(url: string): boolean {
+    return (url || '').startsWith('http://') || (url || '').startsWith('https://');
+  }
+
   private static cleanUrl(url: string): string {
     if (!url) return '';
     let clean = url.replace(/##[\s\S]*$/, '').split(',{')[0].trim();
-    if (clean.startsWith('//')) clean = 'https:' + clean;
+    if (/^\/\/[A-Za-z0-9.-]+(?::\d+)?(?:[/?#]|$)/.test(clean)) clean = 'https:' + clean;
     return clean;
   }
 
@@ -106,7 +258,7 @@ export class VerificationSupport {
     if (!url) return '';
     if (url === 'baseUrl') return this.cleanUrl(base);
     if (url.startsWith('http://') || url.startsWith('https://')) return this.cleanUrl(url);
-    if (url.startsWith('//')) return 'https:' + url;
+    if (/^\/\/[A-Za-z0-9.-]+(?::\d+)?(?:[/?#]|$)/.test(url)) return 'https:' + url;
     const cleanBase = this.cleanUrl(base);
     if (url.startsWith('/')) {
       const match = cleanBase.match(/^(https?:\/\/[^/]+)/);

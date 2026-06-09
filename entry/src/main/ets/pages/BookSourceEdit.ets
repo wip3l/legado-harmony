@@ -3,6 +3,7 @@ import { BookSource } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { promptAction } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
+import { HttpClient } from '../core/http/HttpClient';
 
 @Entry
 @Component
@@ -15,6 +16,9 @@ struct BookSourceEditPage {
   @State isLoading: boolean = false;
   @State currentTab: number = 0;
   @State sourceLoadedVersion: number = 0;
+  @State shushanEmail: string = '';
+  @State shushanPassword: string = '';
+  @State shushanLoggingIn: boolean = false;
 
   aboutToAppear() {
     this.syncBars();
@@ -39,6 +43,7 @@ struct BookSourceEditPage {
       const source = await db.getBookSource(this.bookSourceUrl);
       if (source) {
         this.source = source;
+        this.restoreShushanLoginFields();
         this.currentTab = 0;
         this.sourceLoadedVersion++;
       }
@@ -67,6 +72,7 @@ struct BookSourceEditPage {
       } else {
         await db.insertBookSource(this.source);
       }
+      this.clearShushanPendingVerificationIfReady();
       promptAction.showToast({ message: '保存成功' });
       router.back();
     } catch (e) {
@@ -265,6 +271,14 @@ struct BookSourceEditPage {
         this.source.loginCheckJs = value;
       })
 
+      this.inputItemBuilder('登录密钥', this.source.loginHeader, (value: string) => {
+        this.source.loginHeader = value;
+      })
+
+      if (this.isShushanSource()) {
+        this.shushanLoginBuilder()
+      }
+
       this.inputItemBuilder('URL正则', this.source.bookUrlPattern, (value: string) => {
         this.source.bookUrlPattern = value;
       })
@@ -317,6 +331,56 @@ struct BookSourceEditPage {
         this.source.weight = parseInt(value) || 0;
       })
     }
+  }
+
+  @Builder
+  shushanLoginBuilder() {
+    Column({ space: 10 }) {
+      Text('书山账号登录')
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+
+      TextInput({ text: this.shushanEmail, placeholder: '邮箱' })
+        .width('100%')
+        .height(44)
+        .borderRadius(8)
+        .backgroundColor(this.cardColor())
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.placeholderTextColor())
+        .padding({ left: 12, right: 12 })
+        .onChange((value: string) => {
+          this.shushanEmail = value;
+          this.saveShushanLoginFieldsToSession();
+        })
+
+      TextInput({ text: this.shushanPassword, placeholder: '密码' })
+        .type(InputType.Password)
+        .width('100%')
+        .height(44)
+        .borderRadius(8)
+        .backgroundColor(this.cardColor())
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.placeholderTextColor())
+        .padding({ left: 12, right: 12 })
+        .onChange((value: string) => {
+          this.shushanPassword = value;
+          this.saveShushanLoginFieldsToSession();
+        })
+
+      Button(this.shushanLoggingIn ? '登录中...' : '登录并保存密钥')
+        .width('100%')
+        .height(40)
+        .borderRadius(8)
+        .backgroundColor('#007DFF')
+        .fontColor('#FFFFFF')
+        .enabled(!this.shushanLoggingIn)
+        .onClick(() => {
+          this.loginShushan();
+        })
+    }
+    .width('100%')
+    .padding({ top: 8, bottom: 8 })
   }
 
   @Builder
@@ -528,6 +592,125 @@ struct BookSourceEditPage {
         this.source.contentRule.imageStyle = value;
       })
     }
+  }
+
+  async loginShushan(): Promise<void> {
+    const email = this.shushanEmail.trim();
+    const password = this.shushanPassword.trim();
+    if (!email || !password) {
+      promptAction.showToast({ message: '请输入书山账号邮箱和密码' });
+      return;
+    }
+    this.saveShushanLoginFieldsToSession();
+    this.shushanLoggingIn = true;
+    try {
+      const http = new HttpClient(10000);
+      let lastMessage = '书山登录失败';
+      for (const host of this.shushanHostCandidates()) {
+        const resp = await http.execute({
+          url: `${host}/login`,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.7151.104 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'X-Novel-Token': 'SHUSAN_READ_2025'
+          },
+          body: `email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`
+        });
+        if (!resp.success || !resp.body) {
+          continue;
+        }
+        const root = JSON.parse(resp.body) as Record<string, Object>;
+        if (String(root['code'] || '') !== '200') {
+          lastMessage = String(root['message'] || lastMessage);
+          continue;
+        }
+        const data = (root['data'] || {}) as Record<string, Object>;
+        const user = (data['user'] || {}) as Record<string, Object>;
+        const apiKey = String(user['api_key'] || '').trim();
+        if (!apiKey) {
+          lastMessage = '登录成功但未返回密钥';
+          continue;
+        }
+        this.source.loginHeader = apiKey;
+        await this.saveSourceWithoutBack();
+        this.clearShushanPendingVerificationIfReady();
+        promptAction.showToast({ message: '书山登录成功，密钥已保存' });
+        this.sourceLoadedVersion++;
+        return;
+      }
+      promptAction.showToast({ message: lastMessage });
+    } catch (e) {
+      console.error('书山登录失败:', e);
+      promptAction.showToast({ message: '书山登录失败' });
+    } finally {
+      this.shushanLoggingIn = false;
+    }
+  }
+
+  async saveSourceWithoutBack(): Promise<void> {
+    const db = AppDatabase.getInstance();
+    await db.initWithContext(getContext(this));
+    const existing = await db.getBookSource(this.source.bookSourceUrl);
+    if (existing) {
+      await db.updateBookSource(this.source);
+    } else {
+      await db.insertBookSource(this.source);
+    }
+  }
+
+  clearShushanPendingVerificationIfReady(): void {
+    if (!this.isShushanSource() || !(this.source.loginHeader || '').trim()) return;
+    AppStorage.setOrCreate('pendingVerificationUrl', '');
+    AppStorage.setOrCreate('pendingVerificationTitle', '');
+    AppStorage.setOrCreate('verificationCompletedAt', Date.now());
+  }
+
+  restoreShushanLoginFields(): void {
+    if (!this.isShushanSource()) return;
+    const key = this.shushanSessionKey();
+    this.shushanEmail = AppStorage.get<string>(`${key}:email`) || this.shushanEmail;
+    this.shushanPassword = AppStorage.get<string>(`${key}:password`) || this.shushanPassword;
+  }
+
+  saveShushanLoginFieldsToSession(): void {
+    if (!this.isShushanSource()) return;
+    const key = this.shushanSessionKey();
+    AppStorage.setOrCreate(`${key}:email`, this.shushanEmail);
+    AppStorage.setOrCreate(`${key}:password`, this.shushanPassword);
+  }
+
+  shushanSessionKey(): string {
+    return `shushanLogin:${encodeURIComponent(this.source.bookSourceUrl || this.bookSourceUrl || '')}`;
+  }
+
+  isShushanSource(): boolean {
+    const raw = `${this.source.bookSourceUrl || ''}\n${this.source.searchUrl || ''}\n${this.source.exploreUrl || ''}\n` +
+      `${this.source.loginUrl || ''}\n${this.source.jsLib || ''}\n${this.source.header || ''}`;
+    return raw.includes('vossc.com') || raw.includes('SHUSAN_READ_2025');
+  }
+
+  shushanHost(): string {
+    const raw = `${this.source.bookSourceUrl || ''}\n${this.source.loginUrl || ''}\n${this.source.jsLib || ''}`;
+    const match = raw.match(/https?:\/\/[^'"`\s,)]+vossc\.com/i);
+    return match ? match[0] : 'https://v1.vossc.com';
+  }
+
+  shushanHostCandidates(): string[] {
+    const hosts = [
+      this.shushanHost(),
+      'http://1.94.248.5:7001',
+      'https://v1.vossc.com',
+      'https://v2.vossc.com',
+      'https://v3.vossc.com',
+      'https://v4.vossc.com'
+    ];
+    const result: string[] = [];
+    for (const host of hosts) {
+      if (host && !result.includes(host)) result.push(host);
+    }
+    return result;
   }
 
   @Builder
