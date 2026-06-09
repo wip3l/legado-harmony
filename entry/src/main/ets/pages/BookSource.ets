@@ -7,6 +7,9 @@ import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
 
+const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
+const BOOK_SOURCE_IMPORT_TIMEOUT_MS = 20000;
+
 @Entry
 @Component
 struct BookSourcePage {
@@ -22,6 +25,7 @@ struct BookSourcePage {
   @State selectedSourceUrls: string[] = [];
   @State showBatchDeleteDialog: boolean = false;
   @State importUrl: string = '';
+  @State isImporting: boolean = false;
 
   aboutToAppear() {
     this.syncBars();
@@ -477,6 +481,39 @@ struct BookSourcePage {
           this.showBatchDeleteDialog = false;
         })
       }
+
+      if (this.isImporting) {
+        Column() {
+          Column() {
+            LoadingProgress()
+              .width(46)
+              .height(46)
+              .color('#007DFF')
+
+            Text('正在导入书源...')
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .margin({ top: 14 })
+
+            Text('请稍候')
+              .fontSize(13)
+              .fontColor(this.subTextColor())
+              .margin({ top: 6 })
+          }
+          .width(180)
+          .padding({ left: 24, right: 24, top: 26, bottom: 24 })
+          .backgroundColor(this.cardColor())
+          .borderRadius(12)
+          .alignItems(HorizontalAlign.Center)
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#80000000')
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+        })
+      }
     }
     .width('100%')
     .height('100%')
@@ -678,7 +715,7 @@ struct BookSourcePage {
         return;
       }
 
-      promptAction.showToast({ message: '正在导入...' });
+      this.isImporting = true;
       const content = await this.readTextFile(pickerResult[0]);
       if (!content.trim()) {
         promptAction.showToast({ message: '文件内容为空' });
@@ -689,6 +726,8 @@ struct BookSourcePage {
       console.error('从文件导入失败:', e);
       const errMsg = e instanceof Error ? e.message : String(e);
       promptAction.showToast({ message: `导入失败: ${errMsg}` });
+    } finally {
+      this.isImporting = false;
     }
   }
 
@@ -699,8 +738,8 @@ struct BookSourcePage {
       if (stat.size <= 0) {
         return '';
       }
-      if (stat.size > 5 * 1024 * 1024) {
-        throw new Error('文件过大，请选择 5MB 以内的书源文件');
+      if (stat.size > BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES) {
+        throw new Error('文件过大，请选择 25MB 以内的书源文件');
       }
 
       file = await fs.open(filePath, fs.OpenMode.READ_ONLY);
@@ -723,7 +762,7 @@ struct BookSourcePage {
     }
 
     try {
-      promptAction.showToast({ message: '正在导入...' });
+      this.isImporting = true;
       const content = await this.fetchImportUrlBody(url);
       await this.importSourcesFromJson(content);
       this.showImportUrlDialog = false;
@@ -732,16 +771,18 @@ struct BookSourcePage {
       console.error('从URL导入失败:', e);
       const errMsg = e instanceof Error ? e.message : String(e);
       promptAction.showToast({ message: `导入失败: ${errMsg}` });
+    } finally {
+      this.isImporting = false;
     }
   }
 
   async fetchImportUrlBody(url: string): Promise<string> {
-    const response = await new HttpClient(10000).execute({
+    const response = await new HttpClient(BOOK_SOURCE_IMPORT_TIMEOUT_MS).execute({
       url,
       method: 'GET',
       headers: {},
-      connectTimeout: 10000,
-      readTimeout: 10000
+      connectTimeout: BOOK_SOURCE_IMPORT_TIMEOUT_MS,
+      readTimeout: BOOK_SOURCE_IMPORT_TIMEOUT_MS
     });
     if (!response.success) {
       throw new Error(response.error || `HTTP ${response.statusCode}`);

@@ -13,13 +13,39 @@
           "storeFile": "C:\\Users\\apart\\.ohos\\config\\default_legado-harmony_PApShW1orkn7C3OskTgaa_gvU1tdKIoK6G30oro8DA0=.p12",
           "storePassword": "0000001A143B9A4FBC4E44626953BF6D875DCAB4124382B03D384ED673F9C654391B30A9FCA042B7C059"
         }
+      },
+      {
+        "name": "release",
+        "type": "HarmonyOS",
+        "material": {
+          "storeFile": "C:\\harmony-key\\legado-harmony-release.p12",
+          "storePassword": "00000030CA2521DAC58D30FEE544A29B158D52CBD7F6D78EDCF1820A3F239230B32C60D0A14E2AC22610BF6AFAADB08D8A7B47EC5A2FA22F758DDAAE35F068EE",
+          "keyAlias": "legadoharmonyreleasekey",
+          "keyPassword": "00000030E296F0FD84CB18AC4AFA2117D456848E3E669EAB1A006DDFCFF4946FCB8F94A5919FDA86B2D247DD5FA7D14476853B06F84B2DB53E8C01AB6FFD936A",
+          "signAlg": "SHA256withECDSA",
+          "profile": "C:\\harmony-key\\publicRelease.p7b",
+          "certpath": "C:\\harmony-key\\publicRelease-leaf-first.cer"
+        }
       }
     ],
     "products": [
       {
         "name": "default",
         "signingConfig": "default",
-        "compatibleSdkVersion": "6.1.0(23)",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        },
+        "targetSdkVersion": "6.1.0(23)"
+      },
+      {
+        "name": "release",
+        "signingConfig": "release",
+        "compatibleSdkVersion": "5.0.0(12)",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
           "strictMode": {
@@ -47,7 +73,8 @@
         {
           "name": "default",
           "applyToProducts": [
-            "default"
+            "default",
+            "release"
           ]
         }
       ]

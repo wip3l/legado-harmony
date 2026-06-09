@@ -17,19 +17,28 @@ export interface TtsReadOptions {
   speed?: number;
 }
 
+export interface TtsVoiceDownloadCallbacks {
+  onStart?: (message: string) => void;
+  onProgress?: (progress: string) => void;
+}
+
 export class TtsVoiceOption {
   id: number = 0;
   name: string = '默认音色';
   online: number = 1;
   status: string = '';
+  systemStatus: string = '';
   style: string = '';
   language: string = 'zh-CN';
+  downloadLanguage: string = '';
+  gender: string = '';
+  available: boolean = true;
+  downloadable: boolean = false;
 }
 
 export class SystemTtsReader {
   private static readonly LEGACY_ONLINE_MODE: number = 0;
   private static readonly OFFLINE_MODE: number = 1;
-  private static readonly MAX_PROBE_PERSON: number = 21;
   private engine: textToSpeech.TextToSpeechEngine | null = null;
   private chunks: TtsChunk[] = [];
   private chunkIndex: number = 0;
@@ -53,47 +62,204 @@ export class SystemTtsReader {
   private optionSpeed: number | null = null;
 
   static async listAvailableVoices(): Promise<TtsVoiceOption[]> {
-    let engine: textToSpeech.TextToSpeechEngine | null = null;
-    try {
-      engine = await SystemTtsReader.createEngineWithMode(0, SystemTtsReader.OFFLINE_MODE, '');
-    } catch (_) {
-      try {
-        engine = await SystemTtsReader.createEngineWithMode(0, SystemTtsReader.LEGACY_ONLINE_MODE, '');
-      } catch (_) {
-        return await SystemTtsReader.probeAvailableVoices();
-      }
-    }
     try {
       let voices: TtsVoiceOption[] = [];
-      try {
-        voices = voices.concat(SystemTtsReader.parseVoices(await engine.listVoices({
-          requestId: `voices_offline_${Date.now()}`,
-          online: SystemTtsReader.OFFLINE_MODE
-        }), SystemTtsReader.OFFLINE_MODE));
-      } catch (_) {
+      voices = voices.concat(await SystemTtsReader.listModuleVoices(SystemTtsReader.OFFLINE_MODE));
+      voices = voices.concat(await SystemTtsReader.listModuleVoices(SystemTtsReader.LEGACY_ONLINE_MODE));
+      if (voices.length === 0) {
+        voices = SystemTtsReader.knownVoiceOptions();
+      } else {
+        voices = SystemTtsReader.knownVoiceOptions().concat(voices);
       }
-      try {
-        voices = voices.concat(SystemTtsReader.parseVoices(await engine.listVoices({
-          requestId: `voices_legacy_online_${Date.now()}`,
-          online: SystemTtsReader.LEGACY_ONLINE_MODE
-        }), SystemTtsReader.LEGACY_ONLINE_MODE));
-      } catch (_) {
-      }
-      const parsed = SystemTtsReader.dedupeVoices(voices.concat(SystemTtsReader.knownVoiceOptions()));
-      let verified = await SystemTtsReader.filterAvailableVoices(parsed);
-      if (verified.filter((voice: TtsVoiceOption) => voice.online === SystemTtsReader.OFFLINE_MODE).length <= 1) {
-        verified = SystemTtsReader.dedupeVoices(
-          verified.concat(await SystemTtsReader.probeAvailableVoices(SystemTtsReader.OFFLINE_MODE)));
-      }
-      return verified.length > 0 ? verified : await SystemTtsReader.probeAvailableVoices();
+      const parsed = SystemTtsReader.dedupeVoices(voices);
+      return parsed.length > 0 ? parsed : SystemTtsReader.defaultVoices();
     } catch (_) {
-      return await SystemTtsReader.probeAvailableVoices();
-    } finally {
+      return SystemTtsReader.dedupeVoices(SystemTtsReader.knownVoiceOptions());
+    }
+  }
+
+  static async downloadVoice(voice: TtsVoiceOption, callbacks?: TtsVoiceDownloadCallbacks): Promise<void> {
+    const variants = SystemTtsReader.createVoiceDownloadVariants(voice);
+    let lastError: Error | undefined = undefined;
+    for (const params of variants) {
       try {
-        engine.shutdown();
-      } catch (_) {
+        await SystemTtsReader.downloadVoiceWithParams(params, callbacks);
+        return;
+      } catch (error) {
+        lastError = error as Error;
       }
     }
+    throw lastError || new Error('音色下载失败');
+  }
+
+  private static downloadVoiceWithParams(downloadParams: textToSpeech.VoiceDownload,
+    callbacks?: TtsVoiceDownloadCallbacks): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      console.info(`[TTS] downloadVoice request: person=${downloadParams.person}, language=${downloadParams.language}, style=${downloadParams.style}`);
+      let settled = false;
+      let response: textToSpeech.DownloadResponse | null = null;
+      const cleanup = (): void => {
+        if (!response) {
+          return;
+        }
+        try {
+          response.off('start', startCallback);
+          response.off('progress', progressCallback);
+          response.off('complete', completeCallback);
+          response.off('cancel', cancelCallback);
+          response.off('error', errorCallback);
+        } catch (_) {
+        }
+      };
+      const finish = (): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        console.info(`[TTS] downloadVoice finished: person=${downloadParams.person}, language=${downloadParams.language}, style=${downloadParams.style}`);
+        resolve();
+      };
+      const fail = (error: Object | undefined, fallback: string): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        const message = SystemTtsReader.formatStaticError(error) || fallback;
+        console.error(`[TTS] downloadVoice failed: person=${downloadParams.person}, language=${downloadParams.language}, style=${downloadParams.style}, error=${message}`);
+        reject(new Error(message));
+      };
+      const startCallback = (message: string): void => {
+        console.info(`[TTS] downloadVoice started: ${message || downloadParams.requestId}`);
+        if (callbacks && callbacks.onStart) {
+          callbacks.onStart(message || '');
+        }
+      };
+      const progressCallback = (progress: string): void => {
+        console.info(`[TTS] downloadVoice progress: ${progress || ''}`);
+        if (callbacks && callbacks.onProgress) {
+          callbacks.onProgress(progress || '');
+        }
+      };
+      const completeCallback = (_voiceInfo: textToSpeech.VoiceInfo): void => {
+        finish();
+      };
+      const cancelCallback = (_message: string): void => {
+        fail(undefined, '音色下载已取消');
+      };
+      const errorCallback = (error: Object): void => {
+        fail(error as Object, '音色下载失败');
+      };
+      try {
+        textToSpeech.downloadVoice(downloadParams, (error: Object | null | undefined,
+          downloadResponse: textToSpeech.DownloadResponse) => {
+          const code = SystemTtsReader.errorCode(error as Object | undefined);
+          if (code === 1002300010) {
+            finish();
+            return;
+          }
+          if (error) {
+            fail(error as Object, '音色下载失败');
+            return;
+          }
+          if (!downloadResponse) {
+            fail(undefined, '音色下载失败');
+            return;
+          }
+          response = downloadResponse;
+          response.on('start', startCallback);
+          response.on('progress', progressCallback);
+          response.on('complete', completeCallback);
+          response.on('cancel', cancelCallback);
+          response.on('error', errorCallback);
+        });
+      } catch (error) {
+        const code = SystemTtsReader.errorCode(error as Object);
+        if (code === 1002300010) {
+          finish();
+          return;
+        }
+        fail(error as Object, '音色下载失败');
+      }
+    });
+  }
+
+  private static createVoiceDownloadVariants(voice: TtsVoiceOption): textToSpeech.VoiceDownload[] {
+    const languages: string[] = [];
+    const addLanguage = (language: string): void => {
+      const value = (language || '').trim();
+      if (value && !languages.includes(value)) {
+        languages.push(value);
+      }
+    };
+    addLanguage(voice.downloadLanguage);
+    for (const language of SystemTtsReader.languageVariants(voice.language || 'zh-CN')) {
+      addLanguage(language);
+    }
+    const styles: string[] = [];
+    const addStyle = (style: string): void => {
+      if (!styles.includes(style)) {
+        styles.push(style);
+      }
+    };
+    addStyle(voice.style || '');
+    addStyle('');
+    const result: textToSpeech.VoiceDownload[] = [];
+    for (const language of languages) {
+      for (const style of styles) {
+        result.push({
+          requestId: `voice_download_${Date.now()}_${voice.id}_${result.length}`,
+          language: language,
+          person: voice.id,
+          style: style
+        });
+      }
+    }
+    return result;
+  }
+
+  private static async listModuleVoices(online: number): Promise<TtsVoiceOption[]> {
+    try {
+      const voices = await textToSpeech.listVoices({
+        requestId: `module_voices_${online}_${Date.now()}`,
+        online: online
+      });
+      console.info(`[TTS] module listVoices online=${online}: ${SystemTtsReader.voiceInfosSummary(voices)}`);
+      return SystemTtsReader.parseVoices(voices, online);
+    } catch (error) {
+      console.warn(`[TTS] module listVoices failed online=${online}: ${SystemTtsReader.formatStaticError(error as Object)}`);
+      return [];
+    }
+  }
+
+  private static errorCode(error: Object | null | undefined): number {
+    if (!error) {
+      return 0;
+    }
+    const anyError = error as Record<string, Object>;
+    const code = anyError['code'];
+    if (typeof code === 'number') {
+      return Math.round(code);
+    }
+    if (code !== undefined) {
+      const parsed = Number(String(code));
+      if (!Number.isNaN(parsed)) {
+        return Math.round(parsed);
+      }
+    }
+    return 0;
+  }
+
+  private static voiceInfosSummary(voices: Array<textToSpeech.VoiceInfo>): string {
+    if (!voices || voices.length === 0) {
+      return 'empty';
+    }
+    const items: string[] = [];
+    for (const voice of voices) {
+      items.push(`person=${voice.person},language=${voice.language || ''},style=${voice.style || ''},gender=${voice.gender || ''},status=${voice.status || ''},description=${voice.description || ''}`);
+    }
+    return items.join(' | ');
   }
 
   async start(text: string, options?: TtsReadOptions): Promise<void> {
@@ -415,6 +581,9 @@ export class SystemTtsReader {
     if (value.length === 0) {
       return 'CN';
     }
+    if (value.toLowerCase().startsWith('en')) {
+      return 'US';
+    }
     return 'CN';
   }
 
@@ -458,11 +627,17 @@ export class SystemTtsReader {
       }
       const option = new TtsVoiceOption();
       option.id = id;
-      option.name = SystemTtsReader.parseVoiceName(raw, id);
+      option.name = SystemTtsReader.knownVoiceName(id, language) || SystemTtsReader.parseVoiceName(raw, id);
       option.online = online;
       option.status = raw.status || '';
+      option.systemStatus = raw.status || '';
       option.style = style;
       option.language = language;
+      option.downloadLanguage = raw.language || '';
+      option.gender = raw.gender || SystemTtsReader.knownVoiceGender(id, language);
+      option.downloadable = SystemTtsReader.isDownloadableStatus(raw.status || '') &&
+        !SystemTtsReader.isInstalledStatus(raw.status || '');
+      option.available = !option.downloadable;
       options.push(option);
     }
     options.sort((a: TtsVoiceOption, b: TtsVoiceOption) => a.online - b.online ||
@@ -473,15 +648,24 @@ export class SystemTtsReader {
   private static dedupeVoices(voices: TtsVoiceOption[]): TtsVoiceOption[] {
     const options: TtsVoiceOption[] = [];
     for (const voice of voices) {
-      if (!options.some((item: TtsVoiceOption) => item.id === voice.id &&
-        item.online === voice.online && item.style === voice.style &&
-        item.language === voice.language)) {
+      const voiceKey = SystemTtsReader.voiceDedupeKey(voice);
+      const existing = options.find((item: TtsVoiceOption) => SystemTtsReader.voiceDedupeKey(item) === voiceKey);
+      if (existing) {
+        SystemTtsReader.mergeVoiceMetadata(existing, voice);
+      } else {
         options.push(voice);
       }
     }
     options.sort((a: TtsVoiceOption, b: TtsVoiceOption) => a.online - b.online || a.id - b.id ||
       a.language.localeCompare(b.language) || a.style.localeCompare(b.style) || a.name.localeCompare(b.name));
     return options;
+  }
+
+  private static voiceDedupeKey(voice: TtsVoiceOption): string {
+    const language = SystemTtsReader.normalizeVoiceLanguage(voice.language || 'zh-CN', voice.id);
+    const knownName = SystemTtsReader.knownVoiceName(voice.id, language);
+    const style = knownName || voice.id === 0 ? '' : (voice.style || '');
+    return `${voice.id}_${voice.online}_${language}_${style}`;
   }
 
   private static parseVoiceId(item: textToSpeech.VoiceInfo): number {
@@ -507,13 +691,37 @@ export class SystemTtsReader {
 
   private static parseVoiceLanguage(item: textToSpeech.VoiceInfo): string {
     if (item.language && item.language.trim()) {
-      return item.language.trim();
+      return SystemTtsReader.normalizeVoiceLanguage(item.language, item.person);
+    }
+    if (item.person === 8) {
+      return 'en-US';
+    }
+    if (item.person === 13 || item.person === 21) {
+      return 'zh-CN';
     }
     const text = `${item.description || ''} ${item.style || ''}`.toLowerCase();
     if (text.includes('english') || text.includes('en-us') || text.includes('us voice')) {
       return 'en-US';
     }
     return 'zh-CN';
+  }
+
+  private static normalizeVoiceLanguage(language: string, person: number): string {
+    if (person === 8) {
+      return 'en-US';
+    }
+    if (person === 13 || person === 21) {
+      return 'zh-CN';
+    }
+    const value = (language || 'zh-CN').trim().replace(/_/g, '-');
+    const lower = value.toLowerCase();
+    if (lower === 'zh' || lower === 'zh-cn' || lower.startsWith('zh-hans')) {
+      return 'zh-CN';
+    }
+    if (lower === 'en' || lower === 'en-us') {
+      return 'en-US';
+    }
+    return value || 'zh-CN';
   }
 
   private static defaultVoices(): TtsVoiceOption[] {
@@ -523,6 +731,7 @@ export class SystemTtsReader {
       option.online = SystemTtsReader.OFFLINE_MODE;
       option.status = 'default';
       option.language = 'zh-CN';
+      option.available = true;
       return [option];
   }
 
@@ -542,71 +751,70 @@ export class SystemTtsReader {
     option.online = SystemTtsReader.OFFLINE_MODE;
     option.status = 'known';
     option.language = language;
+    option.gender = SystemTtsReader.knownVoiceGender(id, language);
+    option.available = false;
+    option.downloadable = id !== 0;
     return option;
   }
 
-  private static probePersons(): number[] {
-    const persons: number[] = [0, 13, 21, 8];
-    for (let person = 1; person <= SystemTtsReader.MAX_PROBE_PERSON; person++) {
-      if (!persons.includes(person)) {
-        persons.push(person);
-      }
+  private static mergeVoiceMetadata(target: TtsVoiceOption, source: TtsVoiceOption): void {
+    if (!target.style && source.style) {
+      target.style = source.style;
     }
-    return persons;
+    target.language = SystemTtsReader.normalizeVoiceLanguage(target.language || source.language || 'zh-CN', target.id);
+    if (!target.downloadLanguage && source.downloadLanguage) {
+      target.downloadLanguage = source.downloadLanguage;
+    }
+    if (!target.systemStatus && source.systemStatus) {
+      target.systemStatus = source.systemStatus;
+    }
+    if ((!target.status || target.status === 'known') && source.status) {
+      target.status = source.status;
+    }
+    if (!target.gender && source.gender) {
+      target.gender = source.gender;
+    }
+    target.available = target.available || source.available;
+    target.downloadable = target.available ? false : (target.downloadable || source.downloadable ||
+      SystemTtsReader.isDownloadableStatus(source.systemStatus || source.status));
   }
 
-  private static async probeAvailableVoices(online: number = SystemTtsReader.OFFLINE_MODE): Promise<TtsVoiceOption[]> {
-    const options: TtsVoiceOption[] = [];
-    for (const person of SystemTtsReader.probePersons()) {
-      const language = person === 8 ? 'en-US' : 'zh-CN';
-      const available = await SystemTtsReader.canCreateEngine(person, online, '', language);
-      if (!available) {
-        continue;
-      }
-      const option = SystemTtsReader.createProbedVoiceOption(person, online, language);
-      options.push(option);
-    }
-    return options.length > 0 ? options : SystemTtsReader.defaultVoices();
+  private static isDownloadableStatus(status: string): boolean {
+    const value = (status || '').toLowerCase();
+    return value === 'ga' || value.includes('download') || value.includes('not_installed');
   }
 
-  private static createProbedVoiceOption(person: number, online: number, language: string): TtsVoiceOption {
-    const known = SystemTtsReader.knownVoiceOptions().find((voice: TtsVoiceOption) =>
-      voice.id === person && voice.language === language);
-    const option = new TtsVoiceOption();
-    option.id = person;
-    option.name = known ? known.name : (person === 0 ? '默认音色' :
-      `${online === SystemTtsReader.LEGACY_ONLINE_MODE ? '在线音色' : '离线音色'} ${person}`);
-    option.online = online;
-    option.status = known ? 'known' : 'probed';
-    option.language = language;
-    return option;
+  private static isInstalledStatus(status: string): boolean {
+    const value = (status || '').toLowerCase();
+    return value.includes('installed') || value.includes('downloaded') || value === 'local';
   }
 
-  private static async filterAvailableVoices(voices: TtsVoiceOption[]): Promise<TtsVoiceOption[]> {
-    const options: TtsVoiceOption[] = [];
-    for (const voice of voices) {
-      const available = await SystemTtsReader.canCreateEngine(voice.id, voice.online, voice.style, voice.language);
-      if (available) {
-        options.push(voice);
-      }
+  private static knownVoiceName(id: number, language: string): string {
+    const lower = (language || '').toLowerCase();
+    if (id === 0) {
+      return '默认音色';
     }
-    return options;
+    if (id === 13 && lower.startsWith('zh')) {
+      return '聆小珊';
+    }
+    if (id === 21 && lower.startsWith('zh')) {
+      return '凌飞哲';
+    }
+    if (id === 8 && lower.startsWith('en')) {
+      return 'US Laura';
+    }
+    return '';
   }
 
-  private static async canCreateEngine(person: number, online: number, style: string = '',
-    language: string = 'zh-CN'): Promise<boolean> {
-    let engine: textToSpeech.TextToSpeechEngine | null = null;
-    try {
-      engine = await SystemTtsReader.createEngineWithMode(person, online, style, language);
-      return true;
-    } catch (_) {
-      return false;
-    } finally {
-      try {
-        engine?.shutdown();
-      } catch (_) {
-      }
+  private static knownVoiceGender(id: number, language: string): string {
+    const lower = (language || '').toLowerCase();
+    if (id === 21 && lower.startsWith('zh')) {
+      return 'male';
     }
+    if ((id === 13 && lower.startsWith('zh')) || (id === 8 && lower.startsWith('en'))) {
+      return 'female';
+    }
+    return '';
   }
 
   private static async createEngineWithMode(person: number, online: number, style: string,
