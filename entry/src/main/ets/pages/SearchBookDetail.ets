@@ -26,6 +26,9 @@ struct SearchBookDetailPage {
   @State wordCount: string = '';
   @State isInShelf: boolean = false;
   @State isSaving: boolean = false;
+  @State promptAddToShelfOnBackFromResult: boolean = false;
+  @State showAddToShelfOnBackDialog: boolean = false;
+  @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
 
   aboutToAppear() {
     this.syncBars();
@@ -42,6 +45,7 @@ struct SearchBookDetailPage {
       this.intro = params['intro'] || '';
       this.latestChapterTitle = params['latestChapterTitle'] || '';
       this.wordCount = params['wordCount'] || '';
+      this.promptAddToShelfOnBackFromResult = params['promptAddToShelfOnBack'] === 'true';
       this.checkShelf();
     }
   }
@@ -52,99 +56,128 @@ struct SearchBookDetailPage {
   }
 
   build() {
-    Column() {
-      Row() {
-        Text('<')
-          .fontSize(28)
-          .fontColor(this.primaryTextColor())
-          .width(40)
-          .height(56)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            router.back();
-          })
-
-        Text('书籍详情')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .layoutWeight(1)
-      }
-      .width('100%')
-      .height(56)
-      .padding({ left: 12, right: 16 })
-      .alignItems(VerticalAlign.Center)
-      .backgroundColor(this.cardColor())
-
-      Scroll() {
-        Column() {
-          Row() {
-            Column() {
-              Text(this.name || '未知书名')
-                .fontSize(22)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.primaryTextColor())
-                .maxLines(2)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-              Text(this.author || '作者未知')
-                .fontSize(15)
-                .fontColor(this.secondaryTextColor())
-                .margin({ top: 8 })
-
-              Text(this.originName || this.origin)
-                .fontSize(13)
-                .fontColor(this.subTextColor())
-                .margin({ top: 8 })
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-          }
-          .width('100%')
-          .padding(16)
-          .backgroundColor(this.cardColor())
-          .borderRadius(8)
-
-          Flex({ wrap: FlexWrap.Wrap }) {
-            ForEach(this.getTags(), (tag: string, index: number) => {
-              this.tagChip(tag, index)
+    Stack() {
+      Column() {
+        Row() {
+          Text('<')
+            .fontSize(28)
+            .fontColor(this.primaryTextColor())
+            .width(40)
+            .height(56)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.handleBack();
             })
 
-            if (this.wordCount) {
-              Text(this.wordCount)
-                .fontSize(13)
-                .fontColor(this.secondaryTextColor())
-                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                .backgroundColor(this.inputColor())
-                .borderRadius(14)
-                .margin({ right: 8, bottom: 8 })
+          Text('书籍详情')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
+            .layoutWeight(1)
+        }
+        .width('100%')
+        .height(56)
+        .padding({ left: 12, right: 16 })
+        .alignItems(VerticalAlign.Center)
+        .backgroundColor(this.cardColor())
+
+        Scroll() {
+          Column() {
+            Row() {
+              Column() {
+                Text(this.name || '未知书名')
+                  .fontSize(22)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(this.primaryTextColor())
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+                Text(this.author || '作者未知')
+                  .fontSize(15)
+                  .fontColor(this.secondaryTextColor())
+                  .margin({ top: 8 })
+
+                Text(this.originName || this.origin)
+                  .fontSize(13)
+                  .fontColor(this.subTextColor())
+                  .margin({ top: 8 })
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+            }
+            .width('100%')
+            .padding(16)
+            .backgroundColor(this.cardColor())
+            .borderRadius(8)
+
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(this.getTags(), (tag: string, index: number) => {
+                this.tagChip(tag, index)
+              })
+
+              if (this.wordCount) {
+                Text(this.wordCount)
+                  .fontSize(13)
+                  .fontColor(this.secondaryTextColor())
+                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                  .backgroundColor(this.inputColor())
+                  .borderRadius(14)
+                  .margin({ right: 8, bottom: 8 })
+              }
+
+              if (this.isInShelf) {
+                Text('已在书架')
+                  .fontSize(13)
+                  .fontColor(this.appDarkMode ? '#7DD89B' : '#0A7D36')
+                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                  .backgroundColor(this.appDarkMode ? '#173B24' : '#E8F5E9')
+                  .borderRadius(14)
+                  .margin({ right: 8, bottom: 8 })
+              }
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16, top: 16 })
+
+            if (this.latestChapterTitle) {
+              Column() {
+                Text('最新章节')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(this.primaryTextColor())
+                  .width('100%')
+                Text(this.latestChapterTitle)
+                  .fontSize(14)
+                  .fontColor(this.secondaryTextColor())
+                  .width('100%')
+                  .margin({ top: 8 })
+              }
+              .width('100%')
+              .padding(16)
+              .backgroundColor(this.cardColor())
+              .borderRadius(8)
+              .margin({ top: 12 })
             }
 
-            if (this.isInShelf) {
-              Text('已在书架')
-                .fontSize(13)
-                .fontColor(this.appDarkMode ? '#7DD89B' : '#0A7D36')
-                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                .backgroundColor(this.appDarkMode ? '#173B24' : '#E8F5E9')
-                .borderRadius(14)
-                .margin({ right: 8, bottom: 8 })
-            }
-          }
-          .width('100%')
-          .padding({ left: 16, right: 16, top: 16 })
+            Row({ space: 14 }) {
+              this.coverView(this.name, this.coverUrl, 88, 118)
 
-          if (this.latestChapterTitle) {
-            Column() {
-              Text('最新章节')
-                .fontSize(15)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.primaryTextColor())
-                .width('100%')
-              Text(this.latestChapterTitle)
-                .fontSize(14)
-                .fontColor(this.secondaryTextColor())
-                .width('100%')
-                .margin({ top: 8 })
+              Column() {
+                Text('简介')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(this.primaryTextColor())
+                  .width('100%')
+                Text(this.intro || '暂无简介')
+                  .fontSize(14)
+                  .fontColor(this.secondaryTextColor())
+                  .lineHeight(22)
+                  .width('100%')
+                  .maxLines(8)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .margin({ top: 8 })
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
             }
             .width('100%')
             .padding(16)
@@ -152,67 +185,55 @@ struct SearchBookDetailPage {
             .borderRadius(8)
             .margin({ top: 12 })
           }
-
-          Row({ space: 14 }) {
-            this.coverView(this.name, this.coverUrl, 88, 118)
-
-            Column() {
-              Text('简介')
-                .fontSize(15)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.primaryTextColor())
-                .width('100%')
-              Text(this.intro || '暂无简介')
-                .fontSize(14)
-                .fontColor(this.secondaryTextColor())
-                .lineHeight(22)
-                .width('100%')
-                .maxLines(8)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .margin({ top: 8 })
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-          }
           .width('100%')
-          .padding(16)
-          .backgroundColor(this.cardColor())
-          .borderRadius(8)
-          .margin({ top: 12 })
+          .padding({ left: 16, right: 16, top: 16, bottom: 96 })
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 16, bottom: 96 })
+        .layoutWeight(1)
+        .backgroundColor(this.pageColor())
+
+        Row() {
+          Button(this.isInShelf ? '已加入书架' : '加入书架')
+            .enabled(!this.isInShelf && !this.isSaving)
+            .height(44)
+            .layoutWeight(1)
+            .margin({ right: 10 })
+            .onClick(() => {
+              this.addToShelf();
+            })
+
+          Button('开始阅读')
+            .height(44)
+            .layoutWeight(1)
+            .onClick(() => {
+              this.startRead();
+            })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+        .backgroundColor(this.cardColor())
       }
       .width('100%')
-      .layoutWeight(1)
+      .height('100%')
+      .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
       .backgroundColor(this.pageColor())
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
 
-      Row() {
-        Button(this.isInShelf ? '已加入书架' : '加入书架')
-          .enabled(!this.isInShelf && !this.isSaving)
-          .height(44)
-          .layoutWeight(1)
-          .margin({ right: 10 })
-          .onClick(() => {
-            this.addToShelf();
-          })
-
-        Button('开始阅读')
-          .height(44)
-          .layoutWeight(1)
-          .onClick(() => {
-            this.startRead();
-          })
+      if (this.showAddToShelfOnBackDialog) {
+        this.addToShelfOnBackDialog()
       }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-      .backgroundColor(this.cardColor())
     }
     .width('100%')
     .height('100%')
-    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
-    .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  onBackPress(): boolean {
+    if (this.shouldPromptAddToShelfOnBack()) {
+      this.showAddToShelfOnBackPrompt();
+      return true;
+    }
+    return false;
   }
 
   async checkShelf() {
@@ -330,6 +351,92 @@ struct SearchBookDetailPage {
     } finally {
       this.isSaving = false;
     }
+  }
+
+  handleBack(): void {
+    if (this.shouldPromptAddToShelfOnBack()) {
+      this.showAddToShelfOnBackPrompt();
+      return;
+    }
+    router.back();
+  }
+
+  shouldPromptAddToShelfOnBack(): boolean {
+    return this.promptAddToShelfOnBackFromResult && this.searchExplorePromptAddToShelfOnBack &&
+      !this.isInShelf && !this.isSaving && !this.showAddToShelfOnBackDialog && !!this.bookUrl;
+  }
+
+  showAddToShelfOnBackPrompt(): void {
+    this.showAddToShelfOnBackDialog = true;
+  }
+
+  dismissAddToShelfOnBackPrompt(): void {
+    this.showAddToShelfOnBackDialog = false;
+    router.back();
+  }
+
+  async confirmAddToShelfOnBack(): Promise<void> {
+    this.showAddToShelfOnBackDialog = false;
+    const ok = await this.addToShelf();
+    if (ok) {
+      router.back();
+    }
+  }
+
+  @Builder
+  addToShelfOnBackDialog() {
+    Column() {
+      Column() {
+        Text('加入书架')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .margin({ bottom: 12 })
+
+        Text(`是否将《${this.name || '这本书'}》加入书架？`)
+          .fontSize(15)
+          .fontColor(this.secondaryTextColor())
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .margin({ bottom: 20 })
+
+        Row() {
+          Button('不加入')
+            .width('45%')
+            .height(44)
+            .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
+            .fontColor(this.primaryTextColor())
+            .onClick(() => {
+              this.dismissAddToShelfOnBackPrompt();
+            })
+
+          Button('加入书架')
+            .width('45%')
+            .height(44)
+            .backgroundColor('#007DFF')
+            .onClick(() => {
+              this.confirmAddToShelfOnBack();
+            })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.SpaceBetween)
+      }
+      .width('85%')
+      .padding(24)
+      .backgroundColor(this.cardColor())
+      .borderRadius(12)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#80000000')
+    .justifyContent(FlexAlign.Center)
+    .onClick(() => {
+      if (!this.isSaving) {
+        router.back();
+      }
+    })
   }
 
   async findShelfBookByKey(bookKey: string): Promise<Book | null> {

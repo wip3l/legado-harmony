@@ -1,4 +1,5 @@
 import { SearchBook } from '../../model/data/Book';
+import { BookDisplayHelper } from '../../utils/BookDisplayHelper';
 import { SearchBookShelfHelper } from '../../utils/SearchBookShelfHelper';
 
 export type SearchBookAction = (book: SearchBook) => void;
@@ -10,6 +11,8 @@ export struct SearchBookResultList {
   @Prop busyBookKeys: string[] = [];
   @Prop showLoadingMore: boolean = false;
   @Prop showKind: boolean = false;
+  @Prop showResultCover: boolean = true;
+  @Prop showResultTags: boolean = true;
   @Prop pageColor: string = '#F5F5F5';
   @Prop cardColor: string = '#FFFFFF';
   @Prop itemBorderColor: string = '#00000000';
@@ -27,6 +30,10 @@ export struct SearchBookResultList {
       ForEach(this.books, (book: SearchBook) => {
         ListItem() {
           Row() {
+            if (this.showResultCover) {
+              this.coverView(book)
+            }
+
             Column() {
               Text(book.name)
                 .fontSize(16)
@@ -40,14 +47,25 @@ export struct SearchBookResultList {
                 .fontColor(this.secondaryTextColor)
                 .margin({ top: 4 })
 
+              if (this.showResultTags && this.getTags(book).length > 0) {
+                Flex({ wrap: FlexWrap.Wrap }) {
+                  ForEach(this.getTags(book), (tag: string, index: number) => {
+                    this.tagChip(tag, index)
+                  })
+                }
+                .width('100%')
+                .margin({ top: 7 })
+              }
+
               Text(this.sourceLine(book))
                 .fontSize(12)
                 .fontColor(this.subTextColor)
-                .margin({ top: 4 })
+                .margin({ top: this.showResultTags && this.getTags(book).length > 0 ? 6 : 4 })
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
             }
             .layoutWeight(1)
+            .margin({ left: this.showResultCover ? 12 : 0 })
             .alignItems(HorizontalAlign.Start)
 
             Button(SearchBookShelfHelper.buttonText(book, this.shelfBookKeys, this.busyBookKeys))
@@ -99,10 +117,56 @@ export struct SearchBookResultList {
   }
 
   sourceLine(book: SearchBook): string {
-    if (!this.showKind) {
-      return book.originName;
+    return book.originName;
+  }
+
+  getTags(book: SearchBook): string[] {
+    if (!this.showResultTags) {
+      return [];
     }
-    return `${book.originName}${book.kind ? ' · ' + book.kind : ''}`;
+    return BookDisplayHelper.splitTags(book.kind, '');
+  }
+
+  @Builder
+  tagChip(tag: string, index: number) {
+    Text(tag)
+      .fontSize(11)
+      .fontColor(BookDisplayHelper.getTagTextColor(index, this.isDarkMode()))
+      .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+      .backgroundColor(BookDisplayHelper.getTagBackgroundColor(index, this.isDarkMode()))
+      .borderRadius(10)
+      .margin({ right: 6, bottom: 4 })
+  }
+
+  @Builder
+  coverView(book: SearchBook) {
+    Stack() {
+      Column() {
+        Text(book.name ? book.name.substring(0, 1) : '书')
+          .fontSize(22)
+          .fontColor('#FFFFFF')
+      }
+      .width(54)
+      .height(72)
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor('#6B50B6')
+
+      if (book.coverUrl) {
+        Image(book.coverUrl)
+          .width(54)
+          .height(72)
+          .objectFit(ImageFit.Cover)
+      }
+    }
+    .width(54)
+    .height(72)
+    .borderRadius(6)
+    .clip(true)
+    .backgroundColor(this.subTextColor)
+  }
+
+  isDarkMode(): boolean {
+    return this.pageColor === '#101113' || this.cardColor === '#191B1F';
   }
 
   itemKey(book: SearchBook): string {

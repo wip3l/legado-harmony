@@ -1576,6 +1576,9 @@ struct ExplorePage {
   @StorageLink('explorePlatform') selectedPlatform: string = '番茄';
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
+  @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
+  @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   private coordinator: ExploreCoordinator = new ExploreCoordinator();
   private hasLoaded: boolean = false;
   private shelfStatusVersion: number = 0;
@@ -1815,6 +1818,8 @@ struct ExplorePage {
           shelfBookKeys: this.shelfBookKeys,
           busyBookKeys: this.addingShelfBookKeys,
           showKind: true,
+          showResultCover: this.searchExploreShowResultCover,
+          showResultTags: this.searchExploreShowResultTags,
           pageColor: this.pageColor(),
           cardColor: this.glassCardColor(),
           itemBorderColor: this.glassBorderColor(),
@@ -1880,7 +1885,8 @@ struct ExplorePage {
         coverUrl: book.coverUrl,
         intro: book.intro,
         latestChapterTitle: book.latestChapterTitle,
-        wordCount: book.wordCount
+        wordCount: book.wordCount,
+        promptAddToShelfOnBack: this.searchExplorePromptAddToShelfOnBack ? 'true' : 'false'
       }
     });
   }
@@ -2119,6 +2125,9 @@ struct SearchPage {
   @State verificationTitle: string = '';
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
+  @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
+  @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   private coordinator: SearchCoordinator | null = null;
   private hasInitialized: boolean = false;
   private shelfStatusVersion: number = 0;
@@ -2218,6 +2227,8 @@ struct SearchPage {
           shelfBookKeys: this.shelfBookKeys,
           busyBookKeys: this.addingShelfBookKeys,
           showLoadingMore: this.isSearching,
+          showResultCover: this.searchExploreShowResultCover,
+          showResultTags: this.searchExploreShowResultTags,
           pageColor: this.pageColor(),
           cardColor: this.glassCardColor(),
           itemBorderColor: this.glassBorderColor(),
@@ -2441,7 +2452,8 @@ struct SearchPage {
         coverUrl: book.coverUrl,
         intro: book.intro,
         latestChapterTitle: book.latestChapterTitle,
-        wordCount: book.wordCount
+        wordCount: book.wordCount,
+        promptAddToShelfOnBack: this.searchExplorePromptAddToShelfOnBack ? 'true' : 'false'
       }
     });
   }
@@ -2624,6 +2636,33 @@ struct SettingsPage {
           .border({ width: 1, color: this.glassBorderColor() })
           .onClick(() => {
             router.pushUrl({ url: 'pages/BookshelfSettings' });
+          })
+        }
+
+        ListItem() {
+          Row() {
+            Column() {
+              Text('搜索/发现配置')
+                .fontSize(16)
+                .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
+              Text('封面、标签与返回加入书架提示')
+                .fontSize(12)
+                .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
+                .margin({ top: 4 })
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            Text('>')
+              .fontSize(16)
+              .fontColor(this.appDarkMode ? '#777D87' : '#999')
+          }
+          .width('100%')
+          .height(64)
+          .padding({ left: 16, right: 16 })
+          .backgroundColor(this.glassCardColor())
+          .border({ width: 1, color: this.glassBorderColor() })
+          .onClick(() => {
+            router.pushUrl({ url: 'pages/SearchExploreSettings' });
           })
         }
 

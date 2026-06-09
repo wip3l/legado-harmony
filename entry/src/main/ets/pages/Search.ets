@@ -25,6 +25,9 @@ struct SearchPage {
   @State verificationUrl: string = '';
   @State verificationTitle: string = '';
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
+  @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
+  @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
+  @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   private shelfStatusVersion: number = 0;
   private shelfSyncRunning: boolean = false;
   private pendingShelfSyncBooks: SearchBook[] = [];
@@ -117,6 +120,8 @@ struct SearchPage {
           shelfBookKeys: this.shelfBookKeys,
           busyBookKeys: this.addingShelfBookKeys,
           showLoadingMore: this.isSearching,
+          showResultCover: this.searchExploreShowResultCover,
+          showResultTags: this.searchExploreShowResultTags,
           pageColor: this.pageColor(),
           cardColor: this.cardColor(),
           primaryTextColor: this.primaryTextColor(),
@@ -402,7 +407,8 @@ struct SearchPage {
         coverUrl: book.coverUrl,
         intro: book.intro,
         latestChapterTitle: book.latestChapterTitle,
-        wordCount: book.wordCount
+        wordCount: book.wordCount,
+        promptAddToShelfOnBack: this.searchExplorePromptAddToShelfOnBack ? 'true' : 'false'
       }
     });
   }
