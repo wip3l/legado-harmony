@@ -28,6 +28,7 @@ export class JsRuntime {
       expr = this.replaceFunctionCalls(expr, 'java.md5Encode', (v: string) => this.md5(this.evalStr(v)));
       expr = this.replaceFunctionCalls(expr, 'java.getCookie', (v: string) => CookieStore.getCookie(this.evalStr(v)));
       expr = this.replaceFunctionCalls(expr, 'cookie.getCookie', (v: string) => CookieStore.getCookie(this.evalStr(v)));
+      expr = this.replaceFunctionCalls(expr, 'java.timeFormat', (v: string) => this.timeFormat(this.evalNumber(this.evalStr(v))));
       expr = this.replaceFunctionCalls(expr, 'java.getString', (_v: string) => '');
       expr = this.replaceFunctionCalls(expr, 'java.getElement', (_v: string) => '');
       expr = this.replaceFunctionCalls(expr, 'java.t2s', (v: string) => this.evalStr(v));
@@ -291,6 +292,14 @@ export class JsRuntime {
       }
       return hex;
     } catch (_) { return input; }
+  }
+
+  private timeFormat(timestamp: number): string {
+    if (!timestamp || Number.isNaN(timestamp)) return '';
+    const millis = timestamp < 100000000000 ? timestamp * 1000 : timestamp;
+    const date = new Date(millis);
+    const pad = (value: number): string => value < 10 ? `0${value}` : String(value);
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   }
 
   private androidId(): string {

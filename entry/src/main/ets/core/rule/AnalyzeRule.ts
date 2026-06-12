@@ -1291,6 +1291,8 @@ export class AnalyzeRule {
     if (!jsCode) return value;
     const encodedDataUrl = this.evalEncodedDataUrlJs(jsCode, value);
     if (encodedDataUrl) return encodedDataUrl;
+    const replaceChainValue = this.evalResultReplaceChain(jsCode, value);
+    if (replaceChainValue !== null) return replaceChainValue;
     const legacyValue = this.evalCommonLegacyJs(jsCode, value);
     if (legacyValue) return legacyValue;
     const putMatch = jsCode.match(/java\.put\(\s*['"]([^'"]+)['"]\s*,\s*result\s*\)/);
@@ -1328,6 +1330,72 @@ export class AnalyzeRule {
     if (jsCode.includes('java.t2s')) return value;
     if (/book\.origin\s*\+\s*result/.test(jsCode)) return this.resolveUrl(value);
     return value;
+  }
+
+  private evalResultReplaceChain(jsCode: string, value: string): string | null {
+    if (!jsCode || !jsCode.includes('result.replace')) return null;
+    const vars = this.evalSimpleJsVariables(jsCode, value);
+    let current = value;
+    const replaceRe = /(?:result|String\s*\(\s*result\s*\)|\))\.replace\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)/g;
+    let matched = false;
+    let match: RegExpExecArray | null;
+    while ((match = replaceRe.exec(jsCode)) !== null) {
+      const pattern = this.parseReplacePattern(match[1]);
+      if (!pattern) continue;
+      matched = true;
+      current = current.replace(pattern, this.evalReplaceArgument(match[2], vars));
+    }
+    return matched ? current : null;
+  }
+
+  private evalSimpleJsVariables(jsCode: string, resultValue: string): Record<string, string> {
+    const vars: Record<string, string> = { result: resultValue };
+    const getStringAssignRe = /\b(?:let|var|const)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*java\.getString\(\s*["']([^"']+)["']\s*\)\s*;?/g;
+    let getMatch: RegExpExecArray | null;
+    while ((getMatch = getStringAssignRe.exec(jsCode)) !== null) {
+      vars[getMatch[1]] = this.getJavaString(getMatch[2]);
+    }
+
+    const wanMatch = jsCode.match(/if\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*>\s*10000\s*\)\s*\1\s*=\s*\(Number\(\s*\1\s*\)\s*\/\s*10000\s*\)\.toFixed\(\s*(\d+)\s*\)\s*\+\s*['"]万['"]/);
+    if (wanMatch) {
+      const key = wanMatch[1];
+      const digits = parseInt(wanMatch[2]);
+      const num = Number(vars[key] || '0');
+      if (num > 10000) vars[key] = `${(num / 10000).toFixed(Number.isNaN(digits) ? 2 : digits)}万`;
+    }
+
+    const timeMatch = jsCode.match(/java\.timeFormat\(\s*result\.match\((\/[\s\S]*?\/[gimsuy]*)\)\s*\[\s*(\d+)\s*\]\s*\*\s*1000\s*\)/);
+    if (timeMatch) {
+      const re = this.parseJsRegex(timeMatch[1]);
+      const idx = parseInt(timeMatch[2]);
+      const found = re ? resultValue.match(re) : null;
+      const raw = found && found[idx] !== undefined ? found[idx] : '';
+      vars['__timeFormatMatch'] = this.formatTimestamp(Number(raw) * 1000);
+    }
+    return vars;
+  }
+
+  private parseReplacePattern(raw: string): RegExp | null {
+    const text = raw.trim();
+    const re = this.parseJsRegex(text);
+    if (re) return new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+    const literal = this.stripQuotes(text);
+    if (!literal) return null;
+    return new RegExp(this.escapeRegex(literal), 'g');
+  }
+
+  private evalReplaceArgument(raw: string, vars: Record<string, string>): string {
+    let text = raw.trim();
+    if (text.includes('java.timeFormat') && vars['__timeFormatMatch'] !== undefined) {
+      text = text.replace(/java\.timeFormat\([\s\S]*?\)/, vars['__timeFormatMatch']);
+    }
+    const parts = this.splitJsConcat(text);
+    if (parts.length > 1) {
+      return parts.map((part: string) => this.evalReplaceArgument(part, vars)).join('');
+    }
+    text = this.stripQuotes(text);
+    if (vars[text] !== undefined) return vars[text];
+    return text;
   }
 
   private evalCommonLegacyJs(jsCode: string, value: string): string {
@@ -1432,6 +1500,8 @@ export class AnalyzeRule {
   private evalTemplateRule(template: string): string {
     let result = template.replace(/\{\{([\s\S]*?)\}\}/g, (_: string, expr: string) => {
       const rule = expr.trim();
+      const javaTime = this.evalJavaTimeFormatTemplate(rule);
+      if (javaTime !== null) return javaTime;
       const sourceValue = this.evalSourceVariable(rule);
       if (sourceValue !== null) return sourceValue;
       if (rule.startsWith('@get:{')) {
@@ -1460,6 +1530,37 @@ export class AnalyzeRule {
       result = result.substring(0, jsIndex);
     }
     return result;
+  }
+
+  private evalJavaTimeFormatTemplate(rule: string): string | null {
+    if (!rule.startsWith('java.timeFormat')) return null;
+    const match = rule.match(/^java\.timeFormat\(\s*java\.getString\(\s*["']([^"']+)["']\s*\)\s*(?:\*\s*(\d+))?\s*\)$/);
+    if (!match) return '';
+    const raw = this.getJavaString(match[1]);
+    const multiplier = match[2] ? Number(match[2]) : 1;
+    const timestamp = Number(raw) * multiplier;
+    return this.formatTimestamp(timestamp);
+  }
+
+  private getJavaString(pathOrKey: string): string {
+    const data = this.parseContentObject();
+    let value: Object | string | undefined = undefined;
+    if (pathOrKey.startsWith('$')) {
+      value = this.getByPath(data, pathOrKey);
+    } else {
+      value = (data as Record<string, Object>)[pathOrKey] as Object | string;
+      if (value === undefined) value = this.deepFind(data, pathOrKey);
+    }
+    if (Array.isArray(value)) return value.map(item => String(item)).join(',');
+    return value === undefined || value === null ? '' : String(value);
+  }
+
+  private formatTimestamp(timestamp: number): string {
+    if (!timestamp || Number.isNaN(timestamp)) return '';
+    const millis = timestamp < 100000000000 ? timestamp * 1000 : timestamp;
+    const date = new Date(millis);
+    const pad = (value: number): string => value < 10 ? `0${value}` : String(value);
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   }
 
   private evalSourceVariable(rule: string): string | null {

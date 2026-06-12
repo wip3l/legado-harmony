@@ -1,13 +1,16 @@
 import { router, window, promptAction, MeasureOptions, font } from '@kit.ArkUI';
-import { common } from '@kit.AbilityKit';
+import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
 import { inputConsumer, KeyCode, Action, KeyEvent } from '@kit.InputKit';
+import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
+import { avSession } from '@kit.AVSessionKit';
 import graphicsText from '@ohos.graphics.text';
 import { Book, BookChapter } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
-import { RecentReadShortcut } from '../utils/RecentReadShortcut';
+import { OPEN_BOOK_SHORTCUT_ACTION, RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { SystemTtsReader, TtsChunk } from '../utils/SystemTtsReader';
+import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 
 interface ReadTextSlice {
   text: string;
@@ -59,6 +62,7 @@ struct ReadBookPage {
   private pendingRestoreScrollOffset: number = -1;
   private currentScrollOffset: number = 0;
   private contentScroller: Scroller = new Scroller();
+  private tocScroller: Scroller = new Scroller();
   private ttsReader: SystemTtsReader = new SystemTtsReader();
   private ttsAutoContinue: boolean = false;
   private ttsReadToken: number = 0;
@@ -66,6 +70,11 @@ struct ReadBookPage {
   private ttsAutoTurningPage: boolean = false;
   private ttsPendingTargetPageIndex: number = -1;
   private ttsPendingHighlightChunk: TtsChunk | null = null;
+  private ttsBackgroundRunning: boolean = false;
+  private ttsBackgroundRequesting: boolean = false;
+  private ttsBackgroundDesired: boolean = false;
+  private ttsAvSession: avSession.AVSession | null = null;
+  private ttsAvSessionRequesting: boolean = false;
   private contentPageStarts: number[] = [];
   private contentPageEnds: number[] = [];
   private pagedContentText: string = '';
@@ -120,6 +129,7 @@ struct ReadBookPage {
     this.registerReaderFont();
     this.enterReaderImmersive();
     this.updateVolumeKeySubscription();
+    this.loadReaderSettings();
     const params = router.getParams() as Record<string, string>;
     if (params && params['bookUrl']) {
       this.bookUrl = params['bookUrl'];
@@ -128,8 +138,9 @@ struct ReadBookPage {
   }
 
   aboutToDisappear() {
-    this.stopTtsReading();
-    this.ttsReader.shutdown();
+    if (!this.isTtsSpeaking && !this.ttsReader.isSpeaking()) {
+      this.ttsReader.shutdown();
+    }
     this.saveReadingProgress();
     this.unregisterVolumeKeyTurn();
     this.exitReaderImmersive();
@@ -614,8 +625,7 @@ struct ReadBookPage {
               .layoutWeight(1)
               .margin({ right: 8 })
               .onClick(() => {
-                this.showToc = true;
-                this.showMenu = false;
+                this.openTocPanel();
               })
 
             Button('下一章')
@@ -685,7 +695,7 @@ struct ReadBookPage {
             .height(this.getTopOverlayHeight())
             .padding({ left: 16, right: 16, top: this.getTopControlSafePadding() })
 
-            List({ space: 2 }) {
+            List({ space: 2, scroller: this.tocScroller, initialIndex: this.getTocInitialIndex() }) {
               ForEach(this.chapters, (chapter: BookChapter, index: number) => {
                 ListItem() {
                   Row({ space: 8 }) {
@@ -1041,6 +1051,33 @@ struct ReadBookPage {
       return (this.appDarkMode || this.readerThemeIndex === 3) ? '#DDEFE5' : '#244B35';
     }
     return (this.appDarkMode || this.readerThemeIndex === 3) ? '#B8BDC7' : '#333333';
+  }
+
+  openTocPanel(): void {
+    this.showToc = true;
+    this.showMenu = false;
+    this.scrollTocToCurrentChapter(false);
+  }
+
+  getTocInitialIndex(): number {
+    if (this.chapters.length === 0) {
+      return 0;
+    }
+    return Math.max(0, Math.min(this.currentChapterIndex - 4, this.chapters.length - 1));
+  }
+
+  scrollTocToCurrentChapter(smooth: boolean = true): void {
+    if (this.chapters.length === 0) {
+      return;
+    }
+    const index = Math.max(0, Math.min(this.currentChapterIndex, this.chapters.length - 1));
+    setTimeout(() => {
+      try {
+        this.tocScroller.scrollToIndex(index, smooth, ScrollAlign.CENTER);
+      } catch (e) {
+        console.warn('定位目录当前章节失败:', e);
+      }
+    }, 50);
   }
 
   getSubTextColor(): string {
@@ -1619,6 +1656,9 @@ struct ReadBookPage {
     }
     this.stopTtsReading();
     this.readerPageTurnMode = mode;
+    ReaderSettingsStore.savePageTurnMode(getContext(this), mode).catch((e: Error) => {
+      console.error('保存翻页方式失败:', e);
+    });
     this.currentPageIndex = 0;
     this.currentScrollOffset = 0;
     this.pendingRestorePageIndex = 0;
@@ -1651,6 +1691,12 @@ struct ReadBookPage {
     this.ttsHighlightStart = -1;
     this.ttsHighlightEnd = -1;
     try {
+      this.isTtsSpeaking = true;
+      await this.startTtsBackgroundRunning();
+      if (token !== this.ttsReadToken || !this.ttsAutoContinue) {
+        this.stopTtsReading(false);
+        return;
+      }
       await this.ttsReader.start(text, {
         onFinished: () => {
           this.continueTtsReading(token);
@@ -1669,7 +1715,6 @@ struct ReadBookPage {
           this.followTtsChunk(chunk);
         }
       });
-      this.isTtsSpeaking = true;
       if (showToast) {
         promptAction.showToast({ message: this.readerPageTurnMode === 0 ? '开始连续朗读' : '开始连续朗读' });
       }
@@ -1691,6 +1736,7 @@ struct ReadBookPage {
     this.ttsAutoTurningPage = false;
     this.ttsPendingTargetPageIndex = -1;
     this.ttsPendingHighlightChunk = null;
+    this.stopTtsBackgroundRunning();
     if (!this.isTtsSpeaking && !this.ttsReader.isSpeaking()) {
       this.clearTtsHighlight();
       return;
@@ -1744,7 +1790,215 @@ struct ReadBookPage {
   finishTtsReading(): void {
     this.ttsAutoContinue = false;
     this.isTtsSpeaking = false;
+    this.stopTtsBackgroundRunning();
     this.clearTtsHighlight();
+  }
+
+  async loadReaderSettings(): Promise<void> {
+    try {
+      const settings = await ReaderSettingsStore.load(getContext(this));
+      ReaderSettingsStore.applyToStorage(settings);
+    } catch (e) {
+      console.warn('读取阅读设置失败:', e);
+    }
+  }
+
+  async startTtsBackgroundRunning(): Promise<void> {
+    this.ttsBackgroundDesired = true;
+    if (this.ttsBackgroundRunning) {
+      await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY);
+      return;
+    }
+    if (this.ttsBackgroundRequesting) {
+      return;
+    }
+    this.ttsBackgroundRequesting = true;
+    try {
+      const agent = await this.createTtsBackgroundWantAgent();
+      await this.startTtsAvSession(agent);
+      await backgroundTaskManager.startBackgroundRunning(
+        getContext(this),
+        ['audioPlayback'],
+        agent
+      );
+      if (this.ttsBackgroundDesired) {
+        this.ttsBackgroundRunning = true;
+      } else {
+        await backgroundTaskManager.stopBackgroundRunning(getContext(this));
+      }
+    } catch (error) {
+      console.warn('启动后台听书任务失败:', error);
+    } finally {
+      this.ttsBackgroundRequesting = false;
+    }
+  }
+
+  async stopTtsBackgroundRunning(): Promise<void> {
+    this.ttsBackgroundDesired = false;
+    this.stopTtsAvSession();
+    if (!this.ttsBackgroundRunning && !this.ttsBackgroundRequesting) {
+      return;
+    }
+    if (this.ttsBackgroundRequesting && !this.ttsBackgroundRunning) {
+      return;
+    }
+    this.ttsBackgroundRunning = false;
+    try {
+      await backgroundTaskManager.stopBackgroundRunning(getContext(this));
+    } catch (error) {
+      console.warn('停止后台听书任务失败:', error);
+    }
+  }
+
+  async startTtsAvSession(agent: WantAgent): Promise<void> {
+    if (this.ttsAvSessionRequesting) {
+      return;
+    }
+    this.ttsAvSessionRequesting = true;
+    try {
+      if (!this.ttsAvSession) {
+        this.ttsAvSession = await avSession.createAVSession(getContext(this), 'LegadoReaderTts', 'audio');
+        this.registerTtsAvSessionCommands(this.ttsAvSession);
+      }
+      await this.ttsAvSession.setLaunchAbility(agent);
+      await this.ttsAvSession.setAVQueueTitle(this.book?.name || '听书');
+      await this.ttsAvSession.setAVMetadata({
+        assetId: this.getTtsAvAssetId(),
+        title: this.book?.name || '朗读',
+        subtitle: this.getTtsAvSubtitle(),
+        artist: this.book?.author || '阅读',
+        author: this.book?.author || '阅读',
+        avQueueName: this.book?.name || '听书',
+        avQueueId: this.bookUrl || 'reader_tts'
+      });
+      await this.ttsAvSession.setExtras({
+        bookUrl: this.bookUrl || '',
+        chapterIndex: this.currentChapterIndex,
+        chapterTitle: this.getChapterTitle()
+      });
+      await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY);
+      await this.ttsAvSession.activate();
+    } catch (error) {
+      console.warn('启动朗读媒体会话失败:', error);
+    } finally {
+      this.ttsAvSessionRequesting = false;
+    }
+  }
+
+  registerTtsAvSessionCommands(session: avSession.AVSession): void {
+    session.on('play', () => {
+      if (!this.isTtsSpeaking && !this.ttsReader.isSpeaking()) {
+        this.startTtsReadingFromCurrentPosition(false);
+      }
+    });
+    session.on('pause', () => {
+      this.stopTtsReading();
+    });
+    session.on('stop', () => {
+      this.stopTtsReading();
+    });
+    session.on('playNext', () => {
+      this.playNextChapterFromMediaSession();
+    });
+    session.on('playPrevious', () => {
+      this.playPreviousChapterFromMediaSession();
+    });
+  }
+
+  async playNextChapterFromMediaSession(): Promise<void> {
+    if (this.chapters.length === 0 || this.currentChapterIndex >= this.chapters.length - 1) {
+      return;
+    }
+    const shouldResume = this.isTtsSpeaking || this.ttsReader.isSpeaking();
+    this.stopTtsReading();
+    await this.loadNextChapter();
+    if (shouldResume) {
+      await this.startTtsReadingFromCurrentPosition(false);
+    }
+  }
+
+  async playPreviousChapterFromMediaSession(): Promise<void> {
+    if (this.chapters.length === 0 || this.currentChapterIndex <= 0) {
+      return;
+    }
+    const shouldResume = this.isTtsSpeaking || this.ttsReader.isSpeaking();
+    this.stopTtsReading();
+    await this.loadPrevChapter();
+    if (shouldResume) {
+      await this.startTtsReadingFromCurrentPosition(false);
+    }
+  }
+
+  async updateTtsAvSessionPlaybackState(state: avSession.PlaybackState): Promise<void> {
+    if (!this.ttsAvSession) {
+      return;
+    }
+    try {
+      await this.ttsAvSession.setAVMetadata({
+        assetId: this.getTtsAvAssetId(),
+        title: this.book?.name || '朗读',
+        subtitle: this.getTtsAvSubtitle(),
+        artist: this.book?.author || '阅读',
+        author: this.book?.author || '阅读',
+        avQueueName: this.book?.name || '听书',
+        avQueueId: this.bookUrl || 'reader_tts'
+      });
+      await this.ttsAvSession.setAVPlaybackState({
+        state: state,
+        speed: AppStorage.get<number>('ttsSpeed') || 1,
+        position: {
+          elapsedTime: Date.now(),
+          updateTime: Date.now()
+        },
+        activeItemId: this.currentChapterIndex
+      });
+    } catch (error) {
+      console.warn('更新朗读媒体状态失败:', error);
+    }
+  }
+
+  getTtsAvAssetId(): string {
+    return `${this.bookUrl || 'reader_tts'}_${this.currentChapterIndex}_${this.currentPageIndex}`;
+  }
+
+  getTtsAvSubtitle(): string {
+    const progress = this.getProgressText();
+    const chapter = this.getChapterTitle();
+    return progress ? `${chapter} · ${progress}` : chapter;
+  }
+
+  async stopTtsAvSession(): Promise<void> {
+    if (!this.ttsAvSession) {
+      return;
+    }
+    const session = this.ttsAvSession;
+    this.ttsAvSession = null;
+    try {
+      await session.setAVPlaybackState({
+        state: avSession.PlaybackState.PLAYBACK_STATE_STOP
+      });
+      await session.deactivate();
+      await session.destroy();
+    } catch (error) {
+      console.warn('停止朗读媒体会话失败:', error);
+    }
+  }
+
+  async createTtsBackgroundWantAgent(): Promise<WantAgent> {
+    const context = getContext(this) as common.UIAbilityContext;
+    return await wantAgent.getWantAgent({
+      wants: [{
+        bundleName: context.abilityInfo.bundleName,
+        abilityName: 'EntryAbility',
+        parameters: {
+          shortcutAction: OPEN_BOOK_SHORTCUT_ACTION,
+          bookUrl: this.bookUrl
+        }
+      }],
+      actionType: wantAgent.OperationType.START_ABILITY,
+      requestCode: 1001,
+      actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
+    });
   }
 
   clearTtsHighlight(): void {
