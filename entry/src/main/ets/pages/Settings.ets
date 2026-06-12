@@ -1,6 +1,7 @@
 import { router, promptAction, font } from '@kit.ArkUI';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 import { syncSystemBars } from '../utils/SystemBars';
+import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import fs from '@ohos.file.fs';
 import graphicsText from '@ohos.graphics.text';
 
@@ -49,14 +50,25 @@ struct SettingsPage {
 
   aboutToAppear() {
     this.applyThemeMode(this.appThemeMode);
+    this.loadReaderSettings();
     this.loadSystemFonts();
     this.reloadCustomFonts();
     this.syncBars();
   }
 
   onPageShow(): void {
+    this.loadReaderSettings();
     this.reloadCustomFonts();
     this.syncBars();
+  }
+
+  async loadReaderSettings(): Promise<void> {
+    try {
+      const settings = await ReaderSettingsStore.load(getContext(this));
+      ReaderSettingsStore.applyToStorage(settings);
+    } catch (e) {
+      console.warn('读取阅读设置失败:', e);
+    }
   }
 
   build() {
@@ -571,6 +583,13 @@ struct SettingsPage {
     return '滚动阅读';
   }
 
+  setReaderPageTurnMode(mode: number): void {
+    this.readerPageTurnMode = mode;
+    ReaderSettingsStore.savePageTurnMode(getContext(this), mode).catch((e: Error) => {
+      console.error('保存翻页方式失败:', e);
+    });
+  }
+
   pageColor(): string {
     return this.appDarkMode ? '#101113' : '#F5F5F5';
   }
@@ -752,7 +771,7 @@ struct SettingsPage {
         .borderRadius(19)
         .backgroundColor(this.readerPageTurnMode === 0 ? '#007DFF' : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
         .onClick(() => {
-          this.readerPageTurnMode = 0;
+          this.setReaderPageTurnMode(0);
         })
       Text('滑动翻页')
         .fontSize(14)
@@ -763,7 +782,7 @@ struct SettingsPage {
         .borderRadius(19)
         .backgroundColor(this.readerPageTurnMode === 1 ? '#007DFF' : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
         .onClick(() => {
-          this.readerPageTurnMode = 1;
+          this.setReaderPageTurnMode(1);
         })
       Text('点击翻页 ')
         .fontSize(14)
@@ -774,7 +793,7 @@ struct SettingsPage {
         .borderRadius(19)
         .backgroundColor(this.readerPageTurnMode === 2 ? '#007DFF' : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
         .onClick(() => {
-          this.readerPageTurnMode = 2;
+          this.setReaderPageTurnMode(2);
         })
     }
     .width('100%')

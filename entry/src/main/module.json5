@@ -14,6 +14,9 @@
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING"
       }
     ],
     "abilities": [
@@ -25,6 +28,9 @@
         "label": "$string:EntryAbility_label",
         "startWindowIcon": "$media:ic_startup_blank",
         "startWindowBackground": "$color:start_window_background",
+        "backgroundModes": [
+          "audioPlayback"
+        ],
         "exported": true,
         "metadata": [
           {

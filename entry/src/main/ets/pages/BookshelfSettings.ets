@@ -190,12 +190,19 @@ struct BookshelfSettingsPage {
   }
 
   toggleTargetBook(book: Book, selected: boolean): void {
+    this.toggleTargetBookUrl(book.bookUrl, selected);
+  }
+
+  toggleTargetBookUrl(bookUrl: string, selected: boolean): void {
+    if (!bookUrl) {
+      return;
+    }
     const targets = CoverGallerySettings.parseTargetBooks(this.bookshelfCoverTargetBooks);
-    if (selected && !targets.includes(book.bookUrl)) {
-      targets.push(book.bookUrl);
+    if (selected && !targets.includes(bookUrl)) {
+      targets.push(bookUrl);
     }
     if (!selected) {
-      const index = targets.indexOf(book.bookUrl);
+      const index = targets.indexOf(bookUrl);
       if (index >= 0) {
         targets.splice(index, 1);
       }
@@ -229,7 +236,15 @@ struct BookshelfSettingsPage {
   }
 
   isTargetBook(book: Book): boolean {
-    return CoverGallerySettings.parseTargetBooks(this.bookshelfCoverTargetBooks).includes(book.bookUrl);
+    return this.isTargetBookUrl(book.bookUrl);
+  }
+
+  isTargetBookUrl(bookUrl: string): boolean {
+    return !!bookUrl && CoverGallerySettings.parseTargetBooks(this.bookshelfCoverTargetBooks).includes(bookUrl);
+  }
+
+  targetBookKey(book: Book): string {
+    return book.bookUrl || `${book.origin}_${book.name}_${book.author}`;
   }
 
   modeOptions(): SelectOption[] {
@@ -416,18 +431,35 @@ struct BookshelfSettingsPage {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
-          Toggle({ type: ToggleType.Switch, isOn: this.isTargetBook(book) })
-            .onChange((checked: boolean) => {
-              this.toggleTargetBook(book, checked);
-            })
+          this.targetBookSwitch(book, this.isTargetBook(book))
         }
         .width('100%')
         .height(48)
         .padding({ left: 16, right: 16 })
-      })
+      }, (book: Book) => this.targetBookKey(book))
     }
     .width('100%')
     .backgroundColor(this.cardColor())
+  }
+
+  @Builder
+  targetBookSwitch(book: Book, selected: boolean) {
+    Row() {
+      Circle()
+        .width(22)
+        .height(22)
+        .fill('#FFFFFF')
+        .shadow({ radius: 2, color: '#33000000', offsetX: 0, offsetY: 1 })
+    }
+    .width(48)
+    .height(28)
+    .padding(3)
+    .borderRadius(14)
+    .backgroundColor(selected ? '#007DFF' : (this.appDarkMode ? '#3A3D44' : '#D8DCE3'))
+    .justifyContent(selected ? FlexAlign.End : FlexAlign.Start)
+    .onClick(() => {
+      this.toggleTargetBook(book, !selected);
+    })
   }
 
   @Builder

@@ -1,4 +1,5 @@
 import { textToSpeech } from '@kit.CoreSpeechKit';
+import { TtsPcmAudioPlayer } from './TtsPcmAudioPlayer';
 
 export interface TtsChunk {
   text: string;
@@ -40,6 +41,7 @@ export class SystemTtsReader {
   private static readonly LEGACY_ONLINE_MODE: number = 0;
   private static readonly OFFLINE_MODE: number = 1;
   private engine: textToSpeech.TextToSpeechEngine | null = null;
+  private pcmPlayer: TtsPcmAudioPlayer = new TtsPcmAudioPlayer();
   private chunks: TtsChunk[] = [];
   private chunkIndex: number = 0;
   private active: boolean = false;
@@ -51,6 +53,8 @@ export class SystemTtsReader {
   private currentSpeakStartedAt: number = 0;
   private currentSpeakMinDuration: number = 0;
   private completionPending: boolean = false;
+  private currentAudioSampleRate: number = 16000;
+  private chunkFocusChain: Promise<void> = Promise.resolve();
   private enginePerson: number = -1;
   private engineOnline: number = -1;
   private engineStyle: string = '';
@@ -272,6 +276,7 @@ export class SystemTtsReader {
     this.onFinished = options?.onFinished;
     this.onError = options?.onError;
     this.onChunkStart = options?.onChunkStart;
+    this.chunkFocusChain = Promise.resolve();
     this.optionPerson = options?.person ?? null;
     this.optionOnline = options?.online ?? null;
     this.optionStyle = options?.style ?? null;
@@ -297,7 +302,8 @@ export class SystemTtsReader {
       return;
     }
     engine.setListener({
-      onStart: (_utteranceId: string, _response: textToSpeech.StartResponse) => {
+      onStart: (_utteranceId: string, response: textToSpeech.StartResponse) => {
+        this.currentAudioSampleRate = response && response.sampleRate ? response.sampleRate : 16000;
       },
       onComplete: (_utteranceId: string, _response: textToSpeech.CompleteResponse) => {
         if (this.readGeneration !== generation || !this.active || !this.currentRequestId) {
@@ -321,7 +327,14 @@ export class SystemTtsReader {
         console.error('[TTS] speak error:', message);
         if (this.onError) this.onError(message);
       },
-      onData: (_utteranceId: string, _audio: ArrayBuffer, _response: textToSpeech.SynthesisResponse) => {
+      onData: (_utteranceId: string, audioData: ArrayBuffer, response: textToSpeech.SynthesisResponse) => {
+        if (this.readGeneration !== generation || !this.active || !audioData || audioData.byteLength === 0) {
+          return;
+        }
+        this.pcmPlayer.write(audioData, this.currentAudioSampleRate)
+          .catch((error: Error) => {
+            console.warn(`[TTS] write synthesis data failed: sequence=${response ? response.sequence : -1}`, error);
+          });
       }
     });
     this.speakNext(generation);
@@ -342,6 +355,8 @@ export class SystemTtsReader {
     this.currentSpeakStartedAt = 0;
     this.currentSpeakMinDuration = 0;
     this.completionPending = false;
+    this.chunkFocusChain = Promise.resolve();
+    this.pcmPlayer.stop();
     try {
       this.engine?.stop();
     } catch (_) {
@@ -354,6 +369,7 @@ export class SystemTtsReader {
       this.engine?.shutdown();
     } catch (_) {
     }
+    this.pcmPlayer.release();
     this.engine = null;
   }
 
@@ -412,9 +428,6 @@ export class SystemTtsReader {
       this.speakNext(generation);
       return;
     }
-    if (this.onChunkStart) {
-      this.onChunkStart(chunk, index);
-    }
     const extraParams: Record<string, Object> = {};
     extraParams['queueMode'] = 0 as Object;
     extraParams['speed'] = this.getTtsSpeed() as Object;
@@ -422,7 +435,7 @@ export class SystemTtsReader {
     extraParams['pitch'] = 1 as Object;
     extraParams['languageContext'] = this.getTtsLanguage() as Object;
     extraParams['audioType'] = 'pcm' as Object;
-    extraParams['soundChannel'] = 1 as Object;
+    extraParams['soundChannel'] = 3 as Object;
     extraParams['playType'] = 1 as Object;
     try {
       const requestId = this.createRequestId();
@@ -430,6 +443,8 @@ export class SystemTtsReader {
       this.currentSpeakStartedAt = Date.now();
       this.currentSpeakMinDuration = this.estimateSpeakDuration(speakText);
       this.completionPending = false;
+      this.currentAudioSampleRate = 16000;
+      this.queueChunkFocus(generation, chunk, index, this.currentSpeakMinDuration);
       this.engine.speak(speakText, {
         requestId: requestId,
         extraParams: extraParams
@@ -456,6 +471,8 @@ export class SystemTtsReader {
     this.currentSpeakStartedAt = 0;
     this.currentSpeakMinDuration = 0;
     this.completionPending = false;
+    this.chunkFocusChain = Promise.resolve();
+    this.pcmPlayer.stop();
     if (notify && this.onFinished) this.onFinished();
   }
 
@@ -466,16 +483,54 @@ export class SystemTtsReader {
     this.completionPending = true;
     const elapsed = Date.now() - this.currentSpeakStartedAt;
     const waitMs = Math.max(0, this.currentSpeakMinDuration - elapsed);
-    setTimeout(() => {
-      if (this.readGeneration !== generation || !this.active) {
-        return;
-      }
+    if (this.chunkIndex < this.chunks.length) {
       this.currentRequestId = '';
       this.currentSpeakStartedAt = 0;
       this.currentSpeakMinDuration = 0;
       this.completionPending = false;
       this.speakNext(generation);
+      return;
+    }
+    this.pcmPlayer.drain()
+      .then(() => {
+        this.finishCurrentRead(generation, 0);
+      })
+      .catch((error: Error) => {
+        console.warn('[TTS] drain pcm audio failed:', error);
+        this.finishCurrentRead(generation, waitMs);
+      });
+  }
+
+  private finishCurrentRead(generation: number, waitMs: number): void {
+    setTimeout(() => {
+      if (this.readGeneration !== generation || !this.active) {
+        return;
+      }
+      this.finish(true);
     }, waitMs);
+  }
+
+  private queueChunkFocus(generation: number, chunk: TtsChunk, index: number, duration: number): void {
+    const waitMs = Math.max(120, duration);
+    this.chunkFocusChain = this.chunkFocusChain
+      .then(async () => {
+        if (this.readGeneration !== generation || !this.active) {
+          return;
+        }
+        if (this.onChunkStart) {
+          this.onChunkStart(chunk, index);
+        }
+        await this.sleep(waitMs);
+      })
+      .catch((error: Error) => {
+        console.warn('[TTS] update chunk focus failed:', error);
+      });
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 
   private normalizeText(text: string): string {
@@ -560,6 +615,7 @@ export class SystemTtsReader {
     }
     extraParam['locate'] = SystemTtsReader.localeToLocate(language) as Object;
     extraParam['name'] = 'LegadoReaderTts' as Object;
+    extraParam['isBackStage'] = true as Object;
     return extraParam;
   }
 
