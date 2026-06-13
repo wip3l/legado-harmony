@@ -24,6 +24,8 @@ struct CustomFontManagerPage {
   @StorageLink('readerSystemFontFamily') readerSystemFontFamily: string = '';
   @StorageLink('readerCustomFontsRaw') readerCustomFontsRaw: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
 
@@ -293,6 +295,10 @@ struct CustomFontManagerPage {
     return this.appDarkMode ? '#24272D' : '#F0F2F5';
   }
 
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  }
+
   syncBars(): void {
     syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
@@ -353,7 +359,7 @@ struct CustomFontManagerPage {
         .width(40)
         .height(40)
         .borderRadius(20)
-        .backgroundColor('#007DFF')
+        .backgroundColor(this.buttonColor())
     }
     .width('100%')
     .constraintSize({ minHeight: 72 })

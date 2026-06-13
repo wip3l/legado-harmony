@@ -12,6 +12,7 @@
     "pages/TtsSettings",
     "pages/BookshelfSettings",
     "pages/SearchExploreSettings",
+    "pages/OtherSettings",
     "pages/CoverGalleryManager",
     "pages/About",
     "pages/VerifyWeb"

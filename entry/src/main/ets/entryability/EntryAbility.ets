@@ -6,6 +6,7 @@ import { CoverGalleryStore } from '../utils/CoverGalleryStore';
 import { BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettingsStore';
 import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
+import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -53,6 +54,10 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('searchExploreShowResultCover', true);
     PersistentStorage.persistProp('searchExploreShowResultTags', true);
     PersistentStorage.persistProp('searchExplorePromptAddToShelfOnBack', true);
+    PersistentStorage.persistProp('appLightAccentColor', '#007DFF');
+    PersistentStorage.persistProp('appDarkAccentColor', '#4E9BFF');
+    PersistentStorage.persistProp('appLightButtonColor', '#007DFF');
+    PersistentStorage.persistProp('appDarkButtonColor', '#3F8CFF');
     PersistentStorage.persistProp('explorePlatform', '番茄');
     CoverGalleryStore.load(this.context).then((snapshot) => {
       CoverGalleryStore.applyToStorage(snapshot);
@@ -74,6 +79,11 @@ export default class EntryAbility extends UIAbility {
       ReaderSettingsStore.applyToStorage(settings);
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Sync reader settings failed: %{public}s', JSON.stringify(e));
+    });
+    AppThemeSettingsStore.load(this.context).then((settings) => {
+      AppThemeSettingsStore.applyToStorage(settings);
+    }).catch((e: Error) => {
+      hilog.warn(0x0000, 'testTag', 'Sync app theme settings failed: %{public}s', JSON.stringify(e));
     });
     this.handleLaunchWant(want);
   }

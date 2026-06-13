@@ -16,6 +16,10 @@ struct CoverGalleryManagerPage {
   @StorageLink('bookshelfLightCoverAlbumId') bookshelfLightCoverAlbumId: string = '';
   @StorageLink('bookshelfDarkCoverAlbumId') bookshelfDarkCoverAlbumId: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
 
@@ -497,6 +501,14 @@ struct CoverGalleryManagerPage {
     return this.appDarkMode ? '#12304D' : '#E8F2FF';
   }
 
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+  }
+
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  }
+
   primaryTextColor(): string {
     return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
   }
@@ -532,7 +544,7 @@ struct CoverGalleryManagerPage {
         .fontColor('#FFFFFF')
         .padding({ left: 10, right: 10, top: 4, bottom: 4 })
         .borderRadius(6)
-        .backgroundColor('#007DFF')
+        .backgroundColor(this.accentColor())
         .margin({ left: 10 })
 
       Blank()
@@ -628,7 +640,7 @@ struct CoverGalleryManagerPage {
         .height(28)
         .width(64)
         .fontSize(13)
-        .backgroundColor('#007DFF')
+        .backgroundColor(this.buttonColor())
         .fontColor('#FFFFFF')
         .onClick(() => {
           this.newAlbumName = '';
@@ -693,7 +705,7 @@ struct CoverGalleryManagerPage {
       if (this.selectedAlbumId === album.id) {
         Text('已选')
           .fontSize(12)
-          .fontColor('#007DFF')
+          .fontColor(this.accentColor())
           .padding({ left: 8, right: 8, top: 4, bottom: 4 })
           .borderRadius(5)
           .backgroundColor(this.selectedColor())
@@ -755,9 +767,9 @@ struct CoverGalleryManagerPage {
       .width('100%')
 
       Row({ space: 8 }) {
-        this.actionButton('重命名', '#007DFF', () => this.renameSelectedAlbum())
-        this.actionButton('上传图片', '#007DFF', () => this.pickAlbumImages())
-        this.actionButton('上传 ZIP', '#007DFF', () => this.pickAlbumZip())
+        this.actionButton('重命名', this.buttonColor(), () => this.renameSelectedAlbum())
+        this.actionButton('上传图片', this.buttonColor(), () => this.pickAlbumImages())
+        this.actionButton('上传 ZIP', this.buttonColor(), () => this.pickAlbumZip())
       }
 
       Row({ space: 8 }) {
@@ -842,7 +854,7 @@ struct CoverGalleryManagerPage {
           Button('新建')
             .height(42)
             .layoutWeight(1)
-            .backgroundColor('#007DFF')
+            .backgroundColor(this.buttonColor())
             .fontColor('#FFFFFF')
             .onClick(() => {
               this.createAlbum();
@@ -940,7 +952,7 @@ struct CoverGalleryManagerPage {
         .width('100%')
 
         Row({ space: 8 }) {
-          this.imageManageButton('全选', '#007DFF', () => this.selectAllImages())
+          this.imageManageButton('全选', this.buttonColor(), () => this.selectAllImages())
           this.imageManageButton('取消选择', '#60656F', () => this.clearImageSelection())
           this.imageManageButton('删除所选', '#E53935', () => this.deleteSelectedImages())
         }

@@ -12,6 +12,10 @@ struct TtsSettingsPage {
   @StorageLink('ttsSpeed') ttsSpeed: number = 1;
   @StorageLink('ttsInstalledVoiceKeys') ttsInstalledVoiceKeys: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
 
@@ -108,6 +112,8 @@ struct TtsSettingsPage {
             Button(this.isPreviewing ? '停止试听' : '试听')
               .width('100%')
               .height(42)
+              .backgroundColor(this.isPreviewing ? '#E53935' : this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.togglePreview();
               })
@@ -141,6 +147,14 @@ struct TtsSettingsPage {
 
   subTextColor(): string {
     return this.appDarkMode ? '#8A8F98' : '#888';
+  }
+
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+  }
+
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
   }
 
   syncBars(): void {
@@ -549,7 +563,7 @@ struct TtsSettingsPage {
 
       Text(this.voiceTrailingText(voice))
         .fontSize(this.voiceTrailingFontSize(voice))
-      .fontColor('#007DFF')
+      .fontColor(this.accentColor())
       .width(48)
       .textAlign(TextAlign.Center)
     }
@@ -582,7 +596,7 @@ struct TtsSettingsPage {
       .layoutWeight(1)
       .height(32)
       .borderRadius(16)
-      .backgroundColor(Math.abs(this.ttsSpeed - value) < 0.01 ? '#007DFF' : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+      .backgroundColor(Math.abs(this.ttsSpeed - value) < 0.01 ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
       .onClick(() => {
         this.ttsSpeed = value;
       })
