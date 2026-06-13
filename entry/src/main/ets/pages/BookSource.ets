@@ -28,6 +28,8 @@ struct BookSourcePage {
   @State selectionMode: boolean = false;
   @State selectedSourceUrls: string[] = [];
   @State showBatchDeleteDialog: boolean = false;
+  @State showGroupDialog: boolean = false;
+  @State groupNameInput: string = '';
   @State importUrl: string = '';
   @State isImporting: boolean = false;
 
@@ -293,6 +295,18 @@ struct BookSourcePage {
                 this.batchSetEnabled(false);
               })
 
+            Button('分组')
+              .layoutWeight(1)
+              .height(42)
+              .margin({ left: 8 })
+              .enabled(this.selectedSourceUrls.length > 0)
+              .backgroundColor(this.inputColor())
+              .fontColor(this.primaryTextColor())
+              .onClick(() => {
+                this.groupNameInput = this.commonSelectedGroupName();
+                this.showGroupDialog = true;
+              })
+
             Button('删除')
               .layoutWeight(1)
               .height(42)
@@ -498,6 +512,91 @@ struct BookSourcePage {
         })
       }
 
+      if (this.showGroupDialog) {
+        Column() {
+          Column() {
+            Text('设置书源分组')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 12 })
+
+            Text(`已选择 ${this.selectedSourceUrls.length} 个书源`)
+              .fontSize(13)
+              .fontColor(this.subTextColor())
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 14 })
+
+            TextInput({ placeholder: '输入新分组名称，留空为未分组', text: this.groupNameInput })
+              .width('100%')
+              .height(44)
+              .borderRadius(8)
+              .backgroundColor(this.inputColor())
+              .fontColor(this.primaryTextColor())
+              .placeholderColor(this.placeholderTextColor())
+              .padding({ left: 12, right: 12 })
+              .onChange((value: string) => {
+                this.groupNameInput = value;
+              })
+
+            if (this.getSourceGroups().length > 0) {
+              Flex({ wrap: FlexWrap.Wrap }) {
+                ForEach(this.getSourceGroups(), (group: string) => {
+                  Text(group)
+                    .fontSize(13)
+                    .fontColor(this.secondaryTextColor())
+                    .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                    .backgroundColor(this.inputColor())
+                    .borderRadius(14)
+                    .margin({ right: 8, top: 10 })
+                    .onClick(() => {
+                      this.groupNameInput = group;
+                    })
+                })
+              }
+              .width('100%')
+            }
+
+            Row() {
+              Button('取消')
+                .width('45%')
+                .height(44)
+                .backgroundColor(this.inputColor())
+                .fontColor(this.primaryTextColor())
+                .onClick(() => {
+                  this.showGroupDialog = false;
+                })
+
+              Button('保存')
+                .width('45%')
+                .height(44)
+                .backgroundColor(this.buttonColor())
+                .fontColor('#FFFFFF')
+                .onClick(() => {
+                  this.applySelectedSourceGroup();
+                })
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.SpaceBetween)
+            .margin({ top: 18 })
+          }
+          .width('88%')
+          .padding(24)
+          .backgroundColor(this.cardColor())
+          .borderRadius(12)
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#80000000')
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          this.showGroupDialog = false;
+        })
+      }
+
       if (this.isImporting) {
         Column() {
           Column() {
@@ -668,6 +767,60 @@ struct BookSourcePage {
 
   getSelectedSources(): BookSource[] {
     return this.sources.filter((source: BookSource) => this.isSourceSelected(source.bookSourceUrl));
+  }
+
+  getSourceGroups(): string[] {
+    const groups: string[] = [];
+    for (const source of this.sources) {
+      const group = (source.bookSourceGroup || '').trim();
+      if (group && !groups.includes(group)) {
+        groups.push(group);
+      }
+    }
+    return groups.sort((a: string, b: string) => a.localeCompare(b));
+  }
+
+  commonSelectedGroupName(): string {
+    const selected = this.getSelectedSources();
+    if (selected.length === 0) {
+      return '';
+    }
+    const first = selected[0].bookSourceGroup || '';
+    for (const source of selected) {
+      if ((source.bookSourceGroup || '') !== first) {
+        return '';
+      }
+    }
+    return first;
+  }
+
+  async applySelectedSourceGroup(): Promise<void> {
+    const selectedSources = this.getSelectedSources();
+    if (selectedSources.length === 0) {
+      promptAction.showToast({ message: '请先选择书源' });
+      return;
+    }
+
+    const groupName = this.groupNameInput.trim();
+    try {
+      const db = AppDatabase.getInstance();
+      for (const source of selectedSources) {
+        source.bookSourceGroup = groupName;
+        source.lastUpdateTime = Date.now();
+        await db.updateBookSource(source);
+      }
+      this.sources = this.sources.map((source: BookSource) => {
+        if (this.isSourceSelected(source.bookSourceUrl)) {
+          source.bookSourceGroup = groupName;
+        }
+        return source;
+      });
+      this.showGroupDialog = false;
+      promptAction.showToast({ message: groupName ? `已加入分组：${groupName}` : '已移出分组' });
+    } catch (e) {
+      console.error('设置书源分组失败:', e);
+      promptAction.showToast({ message: '设置分组失败' });
+    }
   }
 
   async batchSetEnabled(enabled: boolean): Promise<void> {

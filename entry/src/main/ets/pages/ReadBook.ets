@@ -4,13 +4,17 @@ import { inputConsumer, KeyCode, Action, KeyEvent } from '@kit.InputKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { avSession } from '@kit.AVSessionKit';
 import graphicsText from '@ohos.graphics.text';
-import { Book, BookChapter } from '../model/data/Book';
+import { Book, BookChapter, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
+import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
+import { WebBookService } from '../core/book/WebBookService';
 import { OPEN_BOOK_SHORTCUT_ACTION, RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { SystemTtsReader, TtsChunk } from '../utils/SystemTtsReader';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
+import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
+import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 
 interface ReadTextSlice {
   text: string;
@@ -47,6 +51,10 @@ struct ReadBookPage {
   @State loadStatus: string = '';
   @State verificationUrl: string = '';
   @State verificationTitle: string = '网页验证';
+  @State showChangeSourceDialog: boolean = false;
+  @State changeSourceResults: SearchBook[] = [];
+  @State isChangingSource: boolean = false;
+  @State changeSourceStatus: string = '';
   @State contentPages: string[] = [];
   @State currentPageIndex: number = 0;
   @State currentPageText: string = '';
@@ -567,6 +575,18 @@ struct ReadBookPage {
                 })
             }
 
+            if (this.book && this.book.origin !== 'local') {
+              Button('换源')
+                .height(36)
+                .fontSize(14)
+                .margin({ right: 8 })
+                .backgroundColor(this.buttonColor())
+                .fontColor('#FFFFFF')
+                .onClick(() => {
+                  this.openChangeSourceDialog();
+                })
+            }
+
             if (this.verificationUrl) {
               Button('验证')
                 .height(36)
@@ -897,6 +917,10 @@ struct ReadBookPage {
         .backgroundColor(this.readerSolidPanelColor())
         .position({ x: 0, y: '100%' })
         .translate({ y: '-100%' })
+      }
+
+      if (this.showChangeSourceDialog) {
+        this.changeSourceDialog()
       }
     }
     .width('100%')
@@ -1289,6 +1313,305 @@ struct ReadBookPage {
     setTimeout(() => {
       this.contentScroller.scrollTo({ xOffset: 0, yOffset: yOffset });
     }, 0);
+  }
+
+  @Builder
+  changeSourceDialog() {
+    Column() {
+      Column() {
+        Row() {
+          Text('选择新书源')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.getTextColor())
+            .layoutWeight(1)
+
+          Text('×')
+            .fontSize(24)
+            .fontColor(this.getSubTextColor())
+            .width(36)
+            .height(36)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.closeChangeSourceDialog();
+            })
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        Text(this.changeSourceStatus || '将使用当前书名进行全词匹配搜索')
+          .fontSize(13)
+          .fontColor(this.getSubTextColor())
+          .width('100%')
+          .margin({ top: 6, bottom: 10 })
+
+        if (this.isChangingSource && this.changeSourceResults.length === 0) {
+          Column() {
+            LoadingProgress()
+              .width(36)
+              .height(36)
+            Text('正在搜索可用书源...')
+              .fontSize(13)
+              .fontColor(this.getSubTextColor())
+              .margin({ top: 8 })
+          }
+          .width('100%')
+          .height(220)
+          .justifyContent(FlexAlign.Center)
+        } else if (this.changeSourceResults.length === 0) {
+          Column() {
+            Text('暂无可切换书源')
+              .fontSize(15)
+              .fontColor(this.getSubTextColor())
+          }
+          .width('100%')
+          .height(220)
+          .justifyContent(FlexAlign.Center)
+        } else {
+          List({ space: 8 }) {
+            ForEach(this.changeSourceResults, (book: SearchBook) => {
+              ListItem() {
+                Row() {
+                  Column() {
+                    Text(book.originName || book.origin)
+                      .fontSize(15)
+                      .fontWeight(FontWeight.Bold)
+                      .fontColor(this.getTextColor())
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+                    Text(`${book.author || '作者未知'} ${book.latestChapterTitle || ''}`)
+                      .fontSize(12)
+                      .fontColor(this.getSubTextColor())
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .margin({ top: 4 })
+                  }
+                  .layoutWeight(1)
+                  .alignItems(HorizontalAlign.Start)
+
+                  Button('切换')
+                    .width(64)
+                    .height(32)
+                    .fontSize(13)
+                    .borderRadius(16)
+                    .backgroundColor(this.buttonColor())
+                    .fontColor('#FFFFFF')
+                    .onClick(() => {
+                      this.switchToSearchBook(book);
+                    })
+                }
+                .width('100%')
+                .padding(12)
+                .backgroundColor(this.readerSolidPanelColor())
+                .borderRadius(8)
+                .onClick(() => {
+                  this.switchToSearchBook(book);
+                })
+              }
+            }, (book: SearchBook) => `${book.origin}|${book.bookUrl}`)
+
+            if (this.isChangingSource) {
+              ListItem() {
+                Row() {
+                  LoadingProgress()
+                    .width(20)
+                    .height(20)
+                  Text('继续搜索中...')
+                    .fontSize(13)
+                    .fontColor(this.getSubTextColor())
+                    .margin({ left: 8 })
+                }
+                .width('100%')
+                .height(42)
+                .justifyContent(FlexAlign.Center)
+              }
+            }
+          }
+          .width('100%')
+          .height(320)
+        }
+      }
+      .width('90%')
+      .padding(20)
+      .backgroundColor(this.getBackgroundColor())
+      .borderRadius(12)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#80000000')
+    .justifyContent(FlexAlign.Center)
+  }
+
+  openChangeSourceDialog(): void {
+    if (!this.book || !this.book.name) {
+      promptAction.showToast({ message: '当前书籍信息不完整' });
+      return;
+    }
+    this.showChangeSourceDialog = true;
+    this.showMenu = false;
+    this.showToc = false;
+    this.showSettings = false;
+    this.changeSourceResults = [];
+    this.searchChangeSource();
+  }
+
+  closeChangeSourceDialog(): void {
+    this.showChangeSourceDialog = false;
+    this.changeSourceResults = [];
+    this.changeSourceStatus = '';
+  }
+
+  async searchChangeSource(): Promise<void> {
+    if (!this.book) {
+      return;
+    }
+    this.isChangingSource = true;
+    this.changeSourceStatus = '正在搜索可用书源...';
+    try {
+      const currentBookUrl = this.book.bookUrl;
+      const currentOrigin = this.book.origin;
+      const coordinator = new SearchCoordinator(10);
+      const results = await coordinator.search(this.book.name, (progress: SearchProgress) => {
+        this.changeSourceResults = this.filterChangeSourceResults(progress.results, currentBookUrl, currentOrigin);
+        this.changeSourceStatus = progress.status;
+        if (progress.finished) {
+          this.isChangingSource = false;
+        }
+      }, { exactMatch: true });
+      this.changeSourceResults = this.filterChangeSourceResults(results, currentBookUrl, currentOrigin);
+      this.changeSourceStatus = this.changeSourceResults.length > 0 ?
+        `搜索完成，找到 ${this.changeSourceResults.length} 个可切换书源` : '搜索完成，未找到可切换书源';
+    } catch (e) {
+      console.error('搜索换源失败:', e);
+      this.changeSourceStatus = '搜索换源失败';
+    } finally {
+      this.isChangingSource = false;
+    }
+  }
+
+  filterChangeSourceResults(results: SearchBook[], currentBookUrl: string, currentOrigin: string): SearchBook[] {
+    const filtered: SearchBook[] = [];
+    for (const result of results) {
+      if (!result.bookUrl || (result.bookUrl === currentBookUrl && result.origin === currentOrigin)) {
+        continue;
+      }
+      if (!filtered.some((item: SearchBook) => item.bookUrl === result.bookUrl && item.origin === result.origin)) {
+        filtered.push(result);
+      }
+    }
+    return filtered;
+  }
+
+  async switchToSearchBook(searchBook: SearchBook): Promise<void> {
+    if (!this.book || this.isChangingSource) {
+      return;
+    }
+    this.isChangingSource = true;
+    this.changeSourceStatus = '正在切换书源...';
+    await this.saveReadingProgress();
+    const oldBook = this.book;
+    const oldBookUrl = oldBook.bookUrl;
+    const chapterIndex = this.clampChapterIndex(this.currentChapterIndex);
+    const pageIndex = this.readerPageTurnMode === 0 ? Math.max(0, Math.round(this.currentScrollOffset)) :
+      Math.max(0, this.currentPageIndex);
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const source = searchBook.origin ? await db.getBookSource(searchBook.origin) : null;
+      if (!source) {
+        promptAction.showToast({ message: '书源不存在或已删除' });
+        return;
+      }
+
+      const nextBook = this.buildBookFromSearchResult(searchBook, oldBook, chapterIndex, pageIndex);
+      const service = new WebBookService();
+      const fullBook = await service.getBookInfo(source, nextBook);
+      this.preserveSwitchBookState(fullBook, nextBook, oldBook, chapterIndex, pageIndex);
+      const chapters = await service.getChapterList(source, fullBook);
+      fullBook.totalChapterNum = chapters.length;
+      if (chapters.length > 0) {
+        const safeIndex = Math.max(0, Math.min(chapterIndex, chapters.length - 1));
+        fullBook.durChapterIndex = safeIndex;
+        fullBook.durChapterTitle = chapters[safeIndex].title;
+        fullBook.latestChapterTitle = chapters[chapters.length - 1].title;
+      }
+
+      if (oldBookUrl !== fullBook.bookUrl) {
+        await db.deleteBook(oldBookUrl);
+        const existing = await db.getBook(fullBook.bookUrl);
+        if (existing) {
+          await db.deleteBook(existing.bookUrl);
+        }
+        await db.insertBook(fullBook);
+      } else {
+        await db.updateBook(fullBook);
+        await db.deleteBookChapters(fullBook.bookUrl);
+        await db.deleteBookCachedContent(fullBook.bookUrl);
+      }
+      if (chapters.length > 0) {
+        await db.insertBookChapters(chapters);
+      }
+
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      this.bookUrl = fullBook.bookUrl;
+      this.book = fullBook;
+      this.closeChangeSourceDialog();
+      promptAction.showToast({ message: `已切换至 ${fullBook.originName || searchBook.originName}` });
+      await this.loadBook();
+    } catch (e) {
+      console.error('切换书源失败:', e);
+      promptAction.showToast({ message: '切换书源失败' });
+    } finally {
+      this.isChangingSource = false;
+    }
+  }
+
+  buildBookFromSearchResult(searchBook: SearchBook, oldBook: Book, chapterIndex: number, pageIndex: number): Book {
+    const book = new Book();
+    book.bookUrl = searchBook.bookUrl;
+    book.tocUrl = searchBook.tocUrl;
+    book.origin = searchBook.origin;
+    book.originName = searchBook.originName;
+    book.name = searchBook.name || oldBook.name;
+    book.author = searchBook.author || oldBook.author;
+    book.kind = BookFieldSanitizer.prefer(searchBook.kind, oldBook.kind);
+    book.coverUrl = CoverUrlNormalizer.prefer(searchBook.coverUrl, oldBook.coverUrl);
+    book.customCoverUrl = oldBook.customCoverUrl;
+    book.intro = BookFieldSanitizer.prefer(searchBook.intro, oldBook.intro);
+    book.customIntro = oldBook.customIntro;
+    book.latestChapterTitle = BookFieldSanitizer.prefer(searchBook.latestChapterTitle, oldBook.latestChapterTitle);
+    book.wordCount = BookFieldSanitizer.prefer(searchBook.wordCount, oldBook.wordCount);
+    book.variable = searchBook.variable || '';
+    book.group = oldBook.group;
+    book.order = oldBook.order;
+    book.originOrder = oldBook.originOrder;
+    book.readConfig = oldBook.readConfig;
+    book.canUpdate = oldBook.canUpdate;
+    book.durChapterIndex = chapterIndex;
+    book.durChapterPos = pageIndex;
+    book.durChapterTitle = oldBook.durChapterTitle;
+    book.durChapterTime = Date.now();
+    book.putVariable('lastReadTime', `${Date.now()}`);
+    return book;
+  }
+
+  preserveSwitchBookState(target: Book, source: Book, oldBook: Book, chapterIndex: number, pageIndex: number): void {
+    target.origin = source.origin;
+    target.originName = source.originName;
+    target.group = oldBook.group;
+    target.order = oldBook.order;
+    target.originOrder = oldBook.originOrder;
+    target.customCoverUrl = oldBook.customCoverUrl;
+    target.customIntro = oldBook.customIntro;
+    target.readConfig = oldBook.readConfig;
+    target.canUpdate = oldBook.canUpdate;
+    target.durChapterIndex = chapterIndex;
+    target.durChapterPos = pageIndex;
+    target.durChapterTitle = oldBook.durChapterTitle;
+    target.durChapterTime = Date.now();
+    target.syncTime = oldBook.syncTime;
+    target.putVariable('lastReadTime', `${Date.now()}`);
   }
 
   async saveReadingProgress() {

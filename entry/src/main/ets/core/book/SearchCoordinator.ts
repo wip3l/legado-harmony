@@ -25,6 +25,11 @@ export type SearchCallback = (progress: SearchProgress) => void;
 
 const MAX_SEARCH_CONCURRENCY = 12;
 
+export interface SearchOptions {
+  exactMatch?: boolean;
+  sourceGroups?: string[];
+}
+
 interface ScoredSearchBook {
   book: SearchBook;
   index: number;
@@ -45,12 +50,16 @@ export class SearchCoordinator {
     this.cancelled = true;
   }
 
-  async search(keyword: string, callback: SearchCallback): Promise<SearchBook[]> {
+  async search(keyword: string, callback: SearchCallback, options: SearchOptions = {}): Promise<SearchBook[]> {
     this.cancelled = false;
     VerificationSupport.clearVerification();
-    const sources = await appDb.getEnabledBookSources();
+    const enabledSources = await appDb.getEnabledBookSources();
+    const selectedGroups = this.normalizeSelectedGroups(options.sourceGroups || []);
+    const sources = selectedGroups.length > 0 ?
+      enabledSources.filter((source: BookSource) => selectedGroups.includes(this.normalizeGroupName(source.bookSourceGroup))) :
+      enabledSources;
     if (sources.length === 0) {
-      callback({ done: 0, total: 0, results: [], finished: true, status: '没有启用的书源' });
+      callback({ done: 0, total: 0, results: [], finished: true, status: '没有符合设置的启用书源' });
       return [];
     }
 
@@ -62,7 +71,7 @@ export class SearchCoordinator {
     const emitProgress = (): void => {
       const verifyUrl = AppStorage.get<string>('pendingVerificationUrl') || '';
       callback({
-        done: done, total: sources.length, results: this.sortSearchResults(all, keyword),
+        done: done, total: sources.length, results: this.filterAndSortSearchResults(all, keyword, options),
         finished: done >= sources.length,
         status: verifyUrl ? `已搜索 ${done}/${sources.length}，找到 ${all.length} 本；有书源需要网页验证` :
           `已搜索 ${done}/${sources.length}，找到 ${all.length} 本`,
@@ -93,7 +102,7 @@ export class SearchCoordinator {
     }
     await Promise.all(workers);
 
-    return this.sortSearchResults(all, keyword);
+    return this.filterAndSortSearchResults(all, keyword, options);
   }
 
   private async searchOne(source: BookSource, keyword: string): Promise<SearchBook[]> {
@@ -273,6 +282,31 @@ export class SearchCoordinator {
     return (value || '').trim().toLowerCase()
       .replace(/\s+/g, '')
       .replace(/[《》【】\[\]（）()「」『』"“”'‘’.,，。:：;；!！?？、·_\-]/g, '');
+  }
+
+  private filterAndSortSearchResults(results: SearchBook[], keyword: string, options: SearchOptions): SearchBook[] {
+    const sorted = this.sortSearchResults(results, keyword);
+    if (!options.exactMatch) {
+      return sorted;
+    }
+    const normalizedKeyword = this.normalizeSearchText(keyword);
+    return sorted.filter((book: SearchBook) => this.normalizeSearchText(book.name) === normalizedKeyword);
+  }
+
+  private normalizeSelectedGroups(groups: string[]): string[] {
+    const result: string[] = [];
+    for (const group of groups) {
+      const normalized = this.normalizeGroupName(group);
+      if (normalized && !result.includes(normalized)) {
+        result.push(normalized);
+      }
+    }
+    return result;
+  }
+
+  private normalizeGroupName(group: string): string {
+    const value = (group || '').trim();
+    return value || '未分组';
   }
 
   private extractBookId(ir: AnalyzeRule, itemJson: string, bookUrl: string): string {
