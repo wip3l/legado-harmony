@@ -119,6 +119,10 @@ struct ReadBookPage {
   @StorageLink('readerFontFamily') @Watch('onReaderFontChanged') readerFontFamily: string = '';
   @StorageLink('readerFontFilePath') @Watch('onReaderFontChanged') readerFontFilePath: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageLink('launchShortcutNonce') @Watch('onLaunchShortcutChanged') launchShortcutNonce: number = 0;
   private themeBackgrounds: string[] = ['#F6F0E5', '#F5F5F5', '#E8F1EA', '#1F1F1F'];
   private themeTextColors: string[] = ['#2F261D', '#333333', '#26352A', '#D8D8D8'];
@@ -555,6 +559,8 @@ struct ReadBookPage {
                 .height(36)
                 .fontSize(14)
                 .margin({ right: 8 })
+                .backgroundColor(this.buttonColor())
+                .fontColor('#FFFFFF')
                 .onClick(() => {
                   this.hideReaderPanels();
                   this.refreshCurrentChapter();
@@ -566,6 +572,8 @@ struct ReadBookPage {
                 .height(36)
                 .fontSize(14)
                 .margin({ right: 8 })
+                .backgroundColor(this.buttonColor())
+                .fontColor('#FFFFFF')
                 .onClick(() => {
                   this.openVerificationPage();
                 })
@@ -575,6 +583,8 @@ struct ReadBookPage {
               Button('重试')
                 .height(36)
                 .fontSize(14)
+                .backgroundColor(this.buttonColor())
+                .fontColor('#FFFFFF')
                 .onClick(() => {
                   this.hideReaderPanels();
                   if (this.chapters.length === 0) {
@@ -615,6 +625,8 @@ struct ReadBookPage {
               .fontSize(14)
               .layoutWeight(1)
               .margin({ right: 8 })
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(async () => {
                 await this.loadPrevChapter();
                 this.hideReaderPanels();
@@ -624,6 +636,8 @@ struct ReadBookPage {
               .fontSize(14)
               .layoutWeight(1)
               .margin({ right: 8 })
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.openTocPanel();
               })
@@ -631,6 +645,8 @@ struct ReadBookPage {
             Button('下一章')
               .fontSize(14)
               .layoutWeight(1)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(async () => {
                 await this.loadNextChapter();
                 this.hideReaderPanels();
@@ -644,6 +660,8 @@ struct ReadBookPage {
               .fontSize(14)
               .layoutWeight(1)
               .margin({ right: 8 })
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.showSettings = true;
                 this.showMenu = false;
@@ -653,6 +671,8 @@ struct ReadBookPage {
               .fontSize(14)
               .layoutWeight(1)
               .margin({ right: 8 })
+              .backgroundColor(this.isTtsSpeaking ? '#E53935' : this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.toggleTtsReading();
               })
@@ -660,6 +680,8 @@ struct ReadBookPage {
             Button('刷新目录')
               .fontSize(14)
               .layoutWeight(1)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.hideReaderPanels();
                 this.retryFetchChapters();
@@ -687,6 +709,8 @@ struct ReadBookPage {
                 .height(34)
                 .fontSize(13)
                 .borderRadius(17)
+                .backgroundColor(this.buttonColor())
+                .fontColor('#FFFFFF')
                 .onClick(() => {
                   this.showToc = false;
                 })
@@ -717,7 +741,7 @@ struct ReadBookPage {
                   }
                   .width('100%')
                   .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-                  .backgroundColor(index === this.currentChapterIndex ? '#11007DFF' : '#00000000')
+                  .backgroundColor(index === this.currentChapterIndex ? this.tocSelectedBackgroundColor() : '#00000000')
                     .onClick(async () => {
                       this.currentChapterIndex = index;
                       this.currentPageIndex = 0;
@@ -762,6 +786,8 @@ struct ReadBookPage {
               .height(34)
               .fontSize(13)
               .borderRadius(17)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.showSettings = false;
                 this.saveReadConfig();
@@ -777,6 +803,8 @@ struct ReadBookPage {
             Button('-')
               .width(44)
               .height(36)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.readerFontSize = Math.max(16, this.readerFontSize - 1);
                 this.readerLineHeight = Math.max(24, this.readerLineHeight - 1);
@@ -788,6 +816,8 @@ struct ReadBookPage {
             Button('+')
               .width(44)
               .height(36)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.readerFontSize = Math.min(30, this.readerFontSize + 1);
                 this.readerLineHeight = Math.min(52, this.readerLineHeight + 1);
@@ -802,6 +832,8 @@ struct ReadBookPage {
             Button('-')
               .width(44)
               .height(36)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.readerLineHeight = Math.max(24, this.readerLineHeight - 2);
               })
@@ -812,6 +844,8 @@ struct ReadBookPage {
             Button('+')
               .width(44)
               .height(36)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.readerLineHeight = Math.min(52, this.readerLineHeight + 2);
               })
@@ -844,7 +878,7 @@ struct ReadBookPage {
                 .backgroundColor(bg)
                 .border({
                   width: this.readerThemeIndex === index ? 3 : 1,
-                  color: this.readerThemeIndex === index ? '#007DFF' : '#22000000'
+                  color: this.readerThemeIndex === index ? this.accentColor() : '#22000000'
                 })
                 .onClick(() => {
                   this.readerThemeIndex = index;
@@ -1045,7 +1079,7 @@ struct ReadBookPage {
 
   getTocTitleColor(chapter: BookChapter, index: number): string {
     if (index === this.currentChapterIndex) {
-      return '#007DFF';
+      return this.accentColor();
     }
     if (chapter.cacheDate > 0) {
       return (this.appDarkMode || this.readerThemeIndex === 3) ? '#DDEFE5' : '#244B35';
@@ -1082,6 +1116,22 @@ struct ReadBookPage {
 
   getSubTextColor(): string {
     return (this.appDarkMode || this.readerThemeIndex === 3) ? '#888888' : '#7A6F63';
+  }
+
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+  }
+
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  }
+
+  tocSelectedBackgroundColor(): string {
+    const color = this.accentColor();
+    if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
+      return `#11${color.substring(1)}`;
+    }
+    return this.appDarkMode ? '#112A6FCC' : '#11007DFF';
   }
 
   readerGlassPanelColor(): string {
@@ -1619,7 +1669,7 @@ struct ReadBookPage {
       .layoutWeight(1)
       .height(36)
       .borderRadius(18)
-      .backgroundColor(this.readerPageTurnMode === mode ? '#007DFF' : '#EEF0F3')
+      .backgroundColor(this.readerPageTurnMode === mode ? this.accentColor() : '#EEF0F3')
       .onClick(() => {
         this.switchPageTurnMode(mode);
       })
@@ -1641,6 +1691,7 @@ struct ReadBookPage {
       .alignItems(HorizontalAlign.Start)
 
       Toggle({ type: ToggleType.Switch, isOn: checked })
+        .selectedColor(this.buttonColor())
         .onChange((value: boolean) => {
           onChange(value);
         })

@@ -10,6 +10,8 @@ import { syncSystemBars } from '../utils/SystemBars';
 @Component
 struct VerifyWebPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State url: string = '';
@@ -79,7 +81,7 @@ struct VerifyWebPage {
 
         Text('完成')
           .fontSize(15)
-          .fontColor('#007DFF')
+          .fontColor(this.accentColor())
           .width(56)
           .height(56)
           .textAlign(TextAlign.Center)
@@ -320,6 +322,10 @@ struct VerifyWebPage {
 
   subTextColor(): string {
     return this.appDarkMode ? '#8A8F98' : '#888888';
+  }
+
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
   }
 
   syncBars(): void {

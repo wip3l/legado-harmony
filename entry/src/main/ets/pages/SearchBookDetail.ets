@@ -13,6 +13,8 @@ import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 @Component
 struct SearchBookDetailPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State bookUrl: string = '';
@@ -592,7 +594,7 @@ struct SearchBookDetailPage {
           Button('加入书架')
             .width('45%')
             .height(44)
-            .backgroundColor('#007DFF')
+            .backgroundColor(this.buttonColor())
             .onClick(() => {
               this.confirmAddToShelfOnBack();
             })
@@ -719,6 +721,10 @@ struct SearchBookDetailPage {
 
   subTextColor(): string {
     return this.appDarkMode ? '#8A8F98' : '#999999';
+  }
+
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
   }
 
   syncBars(): void {

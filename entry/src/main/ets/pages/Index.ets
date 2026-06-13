@@ -26,6 +26,8 @@ struct Index {
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageLink('appDarkMode') @Watch('onAppDarkModeChanged') appDarkMode: boolean = false;
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('launchShortcutNonce') @Watch('onLaunchShortcutChanged') launchShortcutNonce: number = 0;
 
   aboutToAppear() {
@@ -293,7 +295,7 @@ struct Index {
   }
 
   tabBarActiveColor(): string {
-    return '#007DFF';
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
   }
 
   tabBarTextColor(): string {
@@ -437,6 +439,10 @@ struct BookshelfPage {
   @StorageLink('bookshelfCoverTargetBooks') @Watch('onShelfCoverSettingsChanged') bookshelfCoverTargetBooks: string = '';
   @StorageLink('bookshelfIgnoreSourceCover') @Watch('onShelfCoverSettingsChanged') bookshelfIgnoreSourceCover: boolean = false;
   @StorageLink('bookshelfCoverMode') @Watch('onShelfCoverSettingsChanged') bookshelfCoverMode: string = 'sequence';
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   private loadTimer: number = -1;
   private cacheTocLoadToken: number = 0;
   private cacheTocLoadBookUrl: string = '';
@@ -1446,7 +1452,7 @@ struct BookshelfPage {
       .fontSize(13)
       .fontColor(this.sortMode === mode ? '#FFFFFF' : this.secondaryTextColor())
       .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-      .backgroundColor(this.sortMode === mode ? '#007DFF' : this.glassCardColor())
+      .backgroundColor(this.sortMode === mode ? this.accentColor() : this.glassCardColor())
       .borderRadius(16)
       .border({ width: this.sortMode === mode ? 0 : 1, color: this.glassBorderColor() })
       .onClick(() => {
@@ -1540,7 +1546,7 @@ struct BookshelfPage {
   }
 
   sourceTagTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#007DFF';
+    return this.appDarkMode ? '#8A8F98' : this.accentColor();
   }
 
   primaryTextColor(): string {
@@ -1553,6 +1559,14 @@ struct BookshelfPage {
 
   subTextColor(): string {
     return this.appDarkMode ? '#8A8F98' : '#999';
+  }
+
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+  }
+
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
   }
 }
 
@@ -1580,6 +1594,10 @@ struct ExplorePage {
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   private coordinator: ExploreCoordinator = new ExploreCoordinator();
   private hasLoaded: boolean = false;
   private shelfStatusVersion: number = 0;
@@ -1697,7 +1715,7 @@ struct ExplorePage {
           .height(36)
           .fontSize(14)
           .borderRadius(18)
-          .backgroundColor('#007DFF')
+          .backgroundColor(this.buttonColor())
           .onClick(() => {
             this.loadEntries();
           })
@@ -1715,7 +1733,7 @@ struct ExplorePage {
                 .fontSize(13)
                 .fontColor(this.selectedSourceName === name ? '#FFFFFF' : this.primaryTextColor())
                 .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                .backgroundColor(this.selectedSourceName === name ? '#007DFF' : this.glassCardColor())
+                .backgroundColor(this.selectedSourceName === name ? this.accentColor() : this.glassCardColor())
                 .borderRadius(18)
                 .border({ width: this.selectedSourceName === name ? 0 : 1, color: this.glassBorderColor() })
                 .onClick(() => {
@@ -1739,7 +1757,7 @@ struct ExplorePage {
                 .fontSize(13)
                 .fontColor(this.selectedPlatform === name ? '#FFFFFF' : this.primaryTextColor())
                 .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                .backgroundColor(this.selectedPlatform === name ? '#007DFF' : this.glassCardColor())
+                .backgroundColor(this.selectedPlatform === name ? this.accentColor() : this.glassCardColor())
                 .borderRadius(18)
                 .border({ width: this.selectedPlatform === name ? 0 : 1, color: this.glassBorderColor() })
                 .onClick(() => {
@@ -1763,7 +1781,7 @@ struct ExplorePage {
                 .fontSize(13)
                 .fontColor(this.selectedIndex === index ? '#FFFFFF' : this.secondaryTextColor())
                 .padding({ left: 12, right: 12, top: 7, bottom: 7 })
-                .backgroundColor(this.selectedIndex === index ? '#007DFF' : this.glassCardColor())
+                .backgroundColor(this.selectedIndex === index ? this.accentColor() : this.glassCardColor())
                 .borderRadius(17)
                 .border({ width: this.selectedIndex === index ? 0 : 1, color: this.glassBorderColor() })
                 .onClick(() => {
@@ -1857,7 +1875,7 @@ struct ExplorePage {
               .fontSize(14)
               .borderRadius(18)
               .margin({ top: 14 })
-              .backgroundColor('#007DFF')
+              .backgroundColor(this.buttonColor())
               .onClick(() => {
                 this.openVerification();
               })
@@ -2120,6 +2138,14 @@ struct ExplorePage {
   subTextColor(): string {
     return this.appDarkMode ? '#8A8F98' : '#999';
   }
+
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+  }
+
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  }
 }
 
 @Component
@@ -2141,6 +2167,8 @@ struct SearchPage {
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   private coordinator: SearchCoordinator | null = null;
   private hasInitialized: boolean = false;
   private shelfStatusVersion: number = 0;
@@ -2194,7 +2222,7 @@ struct SearchPage {
           .height(40)
           .margin({ left: 8 })
           .borderRadius(20)
-          .backgroundColor(this.isSearching ? '#E53935' : '#007DFF')
+          .backgroundColor(this.isSearching ? '#E53935' : this.buttonColor())
           .onClick(() => {
             if (this.isSearching) {
               this.coordinator?.cancel();
@@ -2522,6 +2550,10 @@ struct SearchPage {
     return this.appDarkMode ? '#14251B' : '#E8F5E9';
   }
 
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  }
+
   resultListBottomInset(): number {
     const comfortableGap = 20;
     if (deviceInfo.sdkApiVersion < 23) {
@@ -2537,6 +2569,8 @@ struct SettingsPage {
   @Prop statusBarHeight: number = 0;
   @Prop navBarHeight: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
 
   build() {
     Column() {
@@ -2691,6 +2725,33 @@ struct SettingsPage {
         ListItem() {
           Row() {
             Column() {
+              Text('其他设置')
+                .fontSize(16)
+                .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
+              Text('主题色、按钮色与通用偏好')
+                .fontSize(12)
+                .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
+                .margin({ top: 4 })
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            Text('>')
+              .fontSize(16)
+              .fontColor(this.accentColor())
+          }
+          .width('100%')
+          .height(64)
+          .padding({ left: 16, right: 16 })
+          .backgroundColor(this.glassCardColor())
+          .border({ width: 1, color: this.glassBorderColor() })
+          .onClick(() => {
+            router.pushUrl({ url: 'pages/OtherSettings' });
+          })
+        }
+
+        ListItem() {
+          Row() {
+            Column() {
               Text('关于')
                 .fontSize(16)
                 .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
@@ -2732,5 +2793,9 @@ struct SettingsPage {
 
   glassBorderColor(): string {
     return this.appDarkMode ? '#262A31' : '#FFFFFF';
+  }
+
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
   }
 }

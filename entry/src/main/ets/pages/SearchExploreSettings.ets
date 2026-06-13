@@ -9,6 +9,8 @@ struct SearchExploreSettingsPage {
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
 
@@ -97,6 +99,10 @@ struct SearchExploreSettingsPage {
     return this.appDarkMode ? '#8A8F98' : '#888';
   }
 
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  }
+
   syncBars(): void {
     syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
@@ -150,6 +156,7 @@ struct SearchExploreSettingsPage {
       .alignItems(HorizontalAlign.Start)
 
       Toggle({ type: ToggleType.Switch, isOn: value })
+        .selectedColor(this.buttonColor())
         .onChange((checked: boolean) => {
           onChange(checked);
         })

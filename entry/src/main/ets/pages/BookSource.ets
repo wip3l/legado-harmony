@@ -14,6 +14,10 @@ const BOOK_SOURCE_IMPORT_TIMEOUT_MS = 20000;
 @Component
 struct BookSourcePage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State sources: BookSource[] = [];
@@ -125,7 +129,7 @@ struct BookSourcePage {
           Row() {
             Text(this.isAllSelected() ? '☑' : '☐')
               .fontSize(20)
-              .fontColor('#007DFF')
+              .fontColor(this.accentColor())
               .width(28)
               .textAlign(TextAlign.Center)
               .onClick(() => {
@@ -140,7 +144,7 @@ struct BookSourcePage {
 
             Text(this.isAllSelected() ? '取消全选' : '全选')
               .fontSize(14)
-              .fontColor('#007DFF')
+              .fontColor(this.accentColor())
               .onClick(() => {
                 this.toggleAllSources();
               })
@@ -183,6 +187,7 @@ struct BookSourcePage {
                 Row() {
                   if (this.selectionMode) {
                     Toggle({ type: ToggleType.Checkbox, isOn: this.isSourceSelected(source.bookSourceUrl) })
+                      .selectedColor(this.buttonColor())
                       .margin({ right: 12 })
                       .onChange((isOn: boolean) => {
                         this.setSourceSelected(source.bookSourceUrl, isOn);
@@ -217,6 +222,7 @@ struct BookSourcePage {
                   Column() {
                     if (!this.selectionMode) {
                       Toggle({ type: ToggleType.Switch, isOn: source.enabled })
+                        .selectedColor(this.buttonColor())
                         .onChange((isOn: boolean) => {
                           source.enabled = isOn;
                           this.updateSource(source);
@@ -224,7 +230,7 @@ struct BookSourcePage {
 
                       Text('编辑')
                         .fontSize(12)
-                        .fontColor('#007DFF')
+                        .fontColor(this.accentColor())
                         .margin({ top: 8 })
                         .onClick(() => {
                           router.pushUrl({
@@ -270,6 +276,8 @@ struct BookSourcePage {
               .layoutWeight(1)
               .height(42)
               .enabled(this.selectedSourceUrls.length > 0)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.batchSetEnabled(true);
               })
@@ -320,6 +328,8 @@ struct BookSourcePage {
               .width('100%')
               .height(48)
               .margin({ bottom: 8 })
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.showAddDialog = false;
                 router.pushUrl({
@@ -332,6 +342,8 @@ struct BookSourcePage {
               .width('100%')
               .height(48)
               .margin({ bottom: 8 })
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.showAddDialog = false;
                 this.showImportUrlDialog = true;
@@ -341,6 +353,8 @@ struct BookSourcePage {
               .width('100%')
               .height(48)
               .margin({ bottom: 8 })
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.showAddDialog = false;
                 this.importFromFile();
@@ -407,6 +421,8 @@ struct BookSourcePage {
               Button('导入')
                 .width('45%')
                 .height(44)
+                .backgroundColor(this.buttonColor())
+                .fontColor('#FFFFFF')
                 .onClick(() => {
                   this.importFromUrl();
                 })
@@ -488,7 +504,7 @@ struct BookSourcePage {
             LoadingProgress()
               .width(46)
               .height(46)
-              .color('#007DFF')
+              .color(this.accentColor())
 
             Text('正在导入书源...')
               .fontSize(16)
@@ -568,6 +584,14 @@ struct BookSourcePage {
 
   placeholderTextColor(): string {
     return this.appDarkMode ? '#6F7480' : '#999999';
+  }
+
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+  }
+
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
   }
 
   async searchSources() {

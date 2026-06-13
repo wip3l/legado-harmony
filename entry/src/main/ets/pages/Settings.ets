@@ -42,6 +42,10 @@ struct SettingsPage {
   @StorageLink('readerVolumeTurnPage') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
   @StorageLink('readerExtendToStatusBar') readerExtendToStatusBar: boolean = false;
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
 
   private themes: string[] = ['#F7F1E3', '#FFFFFF', '#E9F3E5', '#1F2329'];
   private themeNames: string[] = ['米黄', '素白', '青绿', '夜间'];
@@ -98,7 +102,7 @@ struct SettingsPage {
                   .backgroundColor(color)
                   .border({
                     width: this.readerThemeIndex === index ? 3 : 1,
-                    color: this.readerThemeIndex === index ? '#007DFF' : '#22000000'
+                    color: this.readerThemeIndex === index ? this.accentColor() : '#22000000'
                   })
                 Text(this.themeNames[index])
                   .fontSize(12)
@@ -606,6 +610,14 @@ struct SettingsPage {
     return this.appDarkMode ? '#8A8F98' : '#888';
   }
 
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+  }
+
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  }
+
   previewBackgroundColor(): string {
     return this.themes[this.effectivePreviewThemeIndex()] || this.themes[0];
   }
@@ -727,7 +739,7 @@ struct SettingsPage {
         .layoutWeight(1)
         .height(38)
         .borderRadius(19)
-        .backgroundColor(this.appThemeMode === 'system' ? '#007DFF' : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+        .backgroundColor(this.appThemeMode === 'system' ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
         .onClick(() => {
           this.applyThemeMode('system');
         })
@@ -738,7 +750,7 @@ struct SettingsPage {
         .layoutWeight(1)
         .height(38)
         .borderRadius(19)
-        .backgroundColor(this.appThemeMode === 'light' ? '#007DFF' : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+        .backgroundColor(this.appThemeMode === 'light' ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
         .onClick(() => {
           this.applyThemeMode('light');
         })
@@ -749,7 +761,7 @@ struct SettingsPage {
         .layoutWeight(1)
         .height(38)
         .borderRadius(19)
-        .backgroundColor(this.appThemeMode === 'dark' ? '#007DFF' : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+        .backgroundColor(this.appThemeMode === 'dark' ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
         .onClick(() => {
           this.applyThemeMode('dark');
         })
@@ -769,7 +781,7 @@ struct SettingsPage {
         .layoutWeight(1)
         .height(38)
         .borderRadius(19)
-        .backgroundColor(this.readerPageTurnMode === 0 ? '#007DFF' : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+        .backgroundColor(this.readerPageTurnMode === 0 ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
         .onClick(() => {
           this.setReaderPageTurnMode(0);
         })
@@ -780,7 +792,7 @@ struct SettingsPage {
         .layoutWeight(1)
         .height(38)
         .borderRadius(19)
-        .backgroundColor(this.readerPageTurnMode === 1 ? '#007DFF' : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+        .backgroundColor(this.readerPageTurnMode === 1 ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
         .onClick(() => {
           this.setReaderPageTurnMode(1);
         })
@@ -791,7 +803,7 @@ struct SettingsPage {
         .layoutWeight(1)
         .height(38)
         .borderRadius(19)
-        .backgroundColor(this.readerPageTurnMode === 2 ? '#007DFF' : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+        .backgroundColor(this.readerPageTurnMode === 2 ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
         .onClick(() => {
           this.setReaderPageTurnMode(2);
         })
@@ -895,6 +907,7 @@ struct SettingsPage {
       .alignItems(HorizontalAlign.Start)
 
       Toggle({ type: ToggleType.Switch, isOn: value })
+        .selectedColor(this.buttonColor())
         .onChange((checked: boolean) => {
           onChange(checked);
         })

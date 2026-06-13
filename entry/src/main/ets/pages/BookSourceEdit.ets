@@ -9,6 +9,10 @@ import { HttpClient } from '../core/http/HttpClient';
 @Component
 struct BookSourceEditPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State bookSourceUrl: string = '';
@@ -102,7 +106,7 @@ struct BookSourceEditPage {
 
         Text('保存')
           .fontSize(16)
-          .fontColor('#007DFF')
+          .fontColor(this.accentColor())
           .width(60)
           .height(56)
           .textAlign(TextAlign.Center)
@@ -119,72 +123,72 @@ struct BookSourceEditPage {
       Row() {
         Text('基本')
           .fontSize(14)
-          .fontColor(this.currentTab === 0 ? '#007DFF' : this.secondaryTextColor())
+          .fontColor(this.currentTab === 0 ? this.accentColor() : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
           .borderWidth({ bottom: this.currentTab === 0 ? 2 : 0 })
-          .borderColor('#007DFF')
+          .borderColor(this.accentColor())
           .onClick(() => {
             this.currentTab = 0;
           })
 
         Text('搜索')
           .fontSize(14)
-          .fontColor(this.currentTab === 1 ? '#007DFF' : this.secondaryTextColor())
+          .fontColor(this.currentTab === 1 ? this.accentColor() : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
           .borderWidth({ bottom: this.currentTab === 1 ? 2 : 0 })
-          .borderColor('#007DFF')
+          .borderColor(this.accentColor())
           .onClick(() => {
             this.currentTab = 1;
           })
 
         Text('发现')
           .fontSize(14)
-          .fontColor(this.currentTab === 2 ? '#007DFF' : this.secondaryTextColor())
+          .fontColor(this.currentTab === 2 ? this.accentColor() : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
           .borderWidth({ bottom: this.currentTab === 2 ? 2 : 0 })
-          .borderColor('#007DFF')
+          .borderColor(this.accentColor())
           .onClick(() => {
             this.currentTab = 2;
           })
 
         Text('详情')
           .fontSize(14)
-          .fontColor(this.currentTab === 3 ? '#007DFF' : this.secondaryTextColor())
+          .fontColor(this.currentTab === 3 ? this.accentColor() : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
           .borderWidth({ bottom: this.currentTab === 3 ? 2 : 0 })
-          .borderColor('#007DFF')
+          .borderColor(this.accentColor())
           .onClick(() => {
             this.currentTab = 3;
           })
 
         Text('目录')
           .fontSize(14)
-          .fontColor(this.currentTab === 4 ? '#007DFF' : this.secondaryTextColor())
+          .fontColor(this.currentTab === 4 ? this.accentColor() : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
           .borderWidth({ bottom: this.currentTab === 4 ? 2 : 0 })
-          .borderColor('#007DFF')
+          .borderColor(this.accentColor())
           .onClick(() => {
             this.currentTab = 4;
           })
 
         Text('正文')
           .fontSize(14)
-          .fontColor(this.currentTab === 5 ? '#007DFF' : this.secondaryTextColor())
+          .fontColor(this.currentTab === 5 ? this.accentColor() : this.secondaryTextColor())
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .padding({ top: 12, bottom: 12 })
           .borderWidth({ bottom: this.currentTab === 5 ? 2 : 0 })
-          .borderColor('#007DFF')
+          .borderColor(this.accentColor())
           .onClick(() => {
             this.currentTab = 5;
           })
@@ -306,6 +310,7 @@ struct BookSourceEditPage {
           .layoutWeight(1)
 
         Toggle({ type: ToggleType.Switch, isOn: this.source.enabled })
+          .selectedColor(this.buttonColor())
           .onChange((isOn: boolean) => {
             this.source.enabled = isOn;
           })
@@ -320,6 +325,7 @@ struct BookSourceEditPage {
           .layoutWeight(1)
 
         Toggle({ type: ToggleType.Switch, isOn: this.source.enabledExplore })
+          .selectedColor(this.buttonColor())
           .onChange((isOn: boolean) => {
             this.source.enabledExplore = isOn;
           })
@@ -372,7 +378,7 @@ struct BookSourceEditPage {
         .width('100%')
         .height(40)
         .borderRadius(8)
-        .backgroundColor('#007DFF')
+        .backgroundColor(this.buttonColor())
         .fontColor('#FFFFFF')
         .enabled(!this.shushanLoggingIn)
         .onClick(() => {
@@ -759,6 +765,14 @@ struct BookSourceEditPage {
 
   placeholderTextColor(): string {
     return this.appDarkMode ? '#6F7480' : '#999999';
+  }
+
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+  }
+
+  buttonColor(): string {
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
   }
 
   syncBars(): void {
