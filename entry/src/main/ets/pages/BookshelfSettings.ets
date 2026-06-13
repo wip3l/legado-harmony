@@ -30,18 +30,21 @@ struct BookshelfSettingsPage {
   @State albums: CoverAlbum[] = [];
   @State albumSelectOptions: SelectOption[] = [{ value: '不使用图集' }];
   @State books: Book[] = [];
+  @State targetBookUrls: string[] = [];
+  @State targetBooksLoading: boolean = false;
+  @State showTargetBookList: boolean = false;
+  @State settingsRenderTick: number = 0;
+  private skipNextCoverGalleryReload: boolean = false;
 
   aboutToAppear(): void {
     this.reloadCoverSettings();
     this.reloadDisplaySettings();
-    this.loadBooks();
     this.syncBars();
   }
 
   onPageShow(): void {
     this.reloadCoverSettings();
     this.reloadDisplaySettings();
-    this.loadBooks();
     this.syncBars();
   }
 
@@ -87,11 +90,10 @@ struct BookshelfSettingsPage {
             })
           this.selectItem('图集应用范围', '选择图集作用于全部书籍或指定书籍',
             this.scopeOptions(), this.scopeSelectedIndex(), (index: number) => {
-              this.bookshelfCoverApplyScope = index === 1 ? 'books' : 'all';
-              this.onCoverSettingChanged();
+              this.setCoverApplyScope(index === 1 ? 'books' : 'all');
             })
 
-          if (this.bookshelfCoverApplyScope === 'books') {
+          if (this.showTargetBookList) {
             this.targetBooksPanel()
           }
 
@@ -119,6 +121,10 @@ struct BookshelfSettingsPage {
   }
 
   onCoverGalleryUpdateTimeChanged(): void {
+    if (this.skipNextCoverGalleryReload) {
+      this.skipNextCoverGalleryReload = false;
+      return;
+    }
     this.reloadCoverSettings();
   }
 
@@ -163,21 +169,49 @@ struct BookshelfSettingsPage {
     this.bookshelfLightCoverAlbumId = snapshot.lightAlbumId;
     this.bookshelfDarkCoverAlbumId = snapshot.darkAlbumId;
     this.bookshelfCoverApplyScope = snapshot.applyScope;
+    this.showTargetBookList = snapshot.applyScope === 'books';
     this.bookshelfCoverTargetBooks = snapshot.targetBooksRaw;
+    this.targetBookUrls = CoverGallerySettings.parseTargetBooks(snapshot.targetBooksRaw);
     this.bookshelfIgnoreSourceCover = snapshot.ignoreSourceCover;
     this.bookshelfCoverMode = snapshot.coverMode;
     this.syncAlbums(albumsRaw);
+    this.bumpSettingsRender();
+    if (this.showTargetBookList) {
+      this.loadBooks();
+    } else {
+      this.books = [];
+      this.targetBooksLoading = false;
+    }
   }
 
   async loadBooks(): Promise<void> {
+    this.targetBooksLoading = true;
+    this.bumpSettingsRender();
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      this.books = SearchExplorePendingBook.filterShelfBooks(await db.getAllBooks());
+      this.books = SearchExplorePendingBook.filterShelfBooks(await db.getAllBooks()).slice();
     } catch (e) {
       console.warn('加载书籍列表失败:', e);
       this.books = [];
+    } finally {
+      this.targetBooksLoading = false;
+      this.bumpSettingsRender();
     }
+  }
+
+  setCoverApplyScope(scope: string): void {
+    const nextScope = scope === 'books' ? 'books' : 'all';
+    this.showTargetBookList = nextScope === 'books';
+    this.bookshelfCoverApplyScope = nextScope;
+    this.bumpSettingsRender();
+    if (this.showTargetBookList) {
+      this.loadBooks();
+    } else {
+      this.books = [];
+      this.targetBooksLoading = false;
+    }
+    this.onCoverSettingChanged();
   }
 
   setThemeAlbum(dark: boolean, albumId: string): void {
@@ -197,7 +231,7 @@ struct BookshelfSettingsPage {
     if (!bookUrl) {
       return;
     }
-    const targets = CoverGallerySettings.parseTargetBooks(this.bookshelfCoverTargetBooks);
+    const targets = this.targetBookUrls.slice();
     if (selected && !targets.includes(bookUrl)) {
       targets.push(bookUrl);
     }
@@ -207,15 +241,22 @@ struct BookshelfSettingsPage {
         targets.splice(index, 1);
       }
     }
-    this.bookshelfCoverTargetBooks = CoverGallerySettings.encodeTargetBooks(targets);
+    this.targetBookUrls = targets.slice();
+    this.bookshelfCoverTargetBooks = CoverGallerySettings.encodeTargetBooks(this.targetBookUrls);
+    this.bumpSettingsRender();
     this.onCoverSettingChanged();
   }
 
+  bumpSettingsRender(): void {
+    this.settingsRenderTick++;
+  }
+
   onCoverSettingChanged(): void {
-    AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-    AppStorage.setOrCreate('coverGalleryUpdateTime', Date.now());
     const snapshot = this.currentSnapshot();
     CoverGalleryStore.applyToStorage(snapshot);
+    AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+    this.skipNextCoverGalleryReload = true;
+    AppStorage.setOrCreate('coverGalleryUpdateTime', Date.now());
     CoverGalleryStore.save(getContext(this), snapshot).then(() => {
       RecentReadCardUpdater.reload(getContext(this) as common.UIAbilityContext);
     }).catch((e: Error) => {
@@ -228,7 +269,7 @@ struct BookshelfSettingsPage {
     snapshot.albumsRaw = this.bookshelfCoverAlbums;
     snapshot.lightAlbumId = this.bookshelfLightCoverAlbumId;
     snapshot.darkAlbumId = this.bookshelfDarkCoverAlbumId;
-    snapshot.applyScope = this.bookshelfCoverApplyScope;
+    snapshot.applyScope = this.showTargetBookList ? 'books' : 'all';
     snapshot.targetBooksRaw = this.bookshelfCoverTargetBooks;
     snapshot.ignoreSourceCover = this.bookshelfIgnoreSourceCover;
     snapshot.coverMode = this.bookshelfCoverMode;
@@ -240,11 +281,12 @@ struct BookshelfSettingsPage {
   }
 
   isTargetBookUrl(bookUrl: string): boolean {
-    return !!bookUrl && CoverGallerySettings.parseTargetBooks(this.bookshelfCoverTargetBooks).includes(bookUrl);
+    return !!bookUrl && this.targetBookUrls.includes(bookUrl);
   }
 
   targetBookKey(book: Book): string {
-    return book.bookUrl || `${book.origin}_${book.name}_${book.author}`;
+    const bookUrl = book.bookUrl || `${book.origin}_${book.name}_${book.author}`;
+    return `${bookUrl}_${this.settingsRenderTick}_${this.isTargetBookUrl(book.bookUrl) ? 'on' : 'off'}`;
   }
 
   modeOptions(): SelectOption[] {
@@ -294,7 +336,7 @@ struct BookshelfSettingsPage {
   }
 
   scopeSelectedIndex(): number {
-    return this.bookshelfCoverApplyScope === 'books' ? 1 : 0;
+    return this.showTargetBookList ? 1 : 0;
   }
 
   optionValue(options: SelectOption[], index: number): ResourceStr {
@@ -423,20 +465,38 @@ struct BookshelfSettingsPage {
   @Builder
   targetBooksPanel() {
     Column({ space: 2 }) {
-      ForEach(this.books, (book: Book) => {
-        Row() {
-          Text(book.name || '未命名书籍')
-            .fontSize(14)
-            .fontColor(this.primaryTextColor())
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1)
-          this.targetBookSwitch(book, this.isTargetBook(book))
-        }
-        .width('100%')
-        .height(48)
-        .padding({ left: 16, right: 16 })
-      }, (book: Book) => this.targetBookKey(book))
+      if (this.targetBooksLoading) {
+        Text('正在加载书籍...')
+          .fontSize(13)
+          .fontColor(this.subTextColor())
+          .width('100%')
+          .height(48)
+          .padding({ left: 16, right: 16 })
+          .textAlign(TextAlign.Start)
+      } else if (this.books.length === 0) {
+        Text('暂无可选择书籍')
+          .fontSize(13)
+          .fontColor(this.subTextColor())
+          .width('100%')
+          .height(48)
+          .padding({ left: 16, right: 16 })
+          .textAlign(TextAlign.Start)
+      } else {
+        ForEach(this.books, (book: Book) => {
+          Row() {
+            Text(book.name || '未命名书籍')
+              .fontSize(14)
+              .fontColor(this.primaryTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+            this.targetBookSwitch(book, this.isTargetBook(book))
+          }
+          .width('100%')
+          .height(48)
+          .padding({ left: 16, right: 16 })
+        }, (book: Book) => this.targetBookKey(book))
+      }
     }
     .width('100%')
     .backgroundColor(this.cardColor())
@@ -444,22 +504,10 @@ struct BookshelfSettingsPage {
 
   @Builder
   targetBookSwitch(book: Book, selected: boolean) {
-    Row() {
-      Circle()
-        .width(22)
-        .height(22)
-        .fill('#FFFFFF')
-        .shadow({ radius: 2, color: '#33000000', offsetX: 0, offsetY: 1 })
-    }
-    .width(48)
-    .height(28)
-    .padding(3)
-    .borderRadius(14)
-    .backgroundColor(selected ? '#007DFF' : (this.appDarkMode ? '#3A3D44' : '#D8DCE3'))
-    .justifyContent(selected ? FlexAlign.End : FlexAlign.Start)
-    .onClick(() => {
-      this.toggleTargetBook(book, !selected);
-    })
+    Toggle({ type: ToggleType.Switch, isOn: selected })
+      .onChange((checked: boolean) => {
+        this.toggleTargetBook(book, checked);
+      })
   }
 
   @Builder
