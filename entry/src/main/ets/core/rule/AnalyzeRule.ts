@@ -83,7 +83,7 @@ export class AnalyzeRule {
 
     if (/^\$\d+$/.test(effective)) {
       const jsonV = this.evalJsonPath(effective);
-      if (jsonV !== undefined && jsonV !== null) return [String(jsonV)];
+      if (jsonV !== undefined && jsonV !== null) return [this.jsonValueToString(jsonV)];
     }
 
     const xpathV = this.evalXPathBasic(effective);
@@ -95,7 +95,7 @@ export class AnalyzeRule {
     // JSONPath
     const jsonV = this.evalJsonPath(effective);
     if (Array.isArray(jsonV)) return this.jsonPathArrayToStrings(jsonV as Object[]);
-    if (jsonV !== undefined && jsonV !== null) return [String(jsonV)];
+    if (jsonV !== undefined && jsonV !== null) return [this.jsonValueToString(jsonV)];
 
     // CSS 选择器
     const cssV = this.evalCss(effective);
@@ -292,7 +292,7 @@ export class AnalyzeRule {
       data = sourceJson.substring(offset);
     }
     const key = this.stripQuotes(args[1]);
-    const iv = args.length >= 3 ? this.stripQuotes(args[2]) : '';
+    const iv = args.length >= 4 ? this.stripQuotes(args[3]) : (args.length >= 3 ? this.stripQuotes(args[2]) : '');
     return this.js.aesBase64DecodeToString(data, key, iv);
   }
 
@@ -472,6 +472,11 @@ export class AnalyzeRule {
       }
     }
     return result;
+  }
+
+  private jsonValueToString(value: Object | string | undefined): string {
+    if (value === undefined || value === null) return '';
+    return typeof value === 'string' ? value as string : JSON.stringify(value);
   }
 
   private parseJsonSafe(text: string): EncodedJsonMap {
@@ -733,12 +738,12 @@ export class AnalyzeRule {
     });
     text = text.replace(/\$\.\.(\w+)/g, (_: string, key: string) => {
       const v = this.deepFind(this.parseContentObject(), key);
-      return v === undefined || v === null ? '' : String(v);
+      return this.jsonValueToString(v);
     });
     text = text.replace(/\$\.(\w+)/g, (_: string, key: string) => {
       const data = EncodedSourceUrl.asMap(this.parseContentObject());
       const v = data ? data[key] : undefined;
-      return v === undefined || v === null ? '' : String(v);
+      return this.jsonValueToString(v);
     });
     text = text.replace(/\bresult\b/g, this.ctx.get('result'));
     text = this.js.evalTemplate(`{{${text}}}`);
@@ -753,8 +758,8 @@ export class AnalyzeRule {
     }
     if (rule.startsWith('$') || rule.startsWith('@.')) {
       const v = this.evalJsonPath(rule);
-      if (Array.isArray(v)) return v.map(item => String(item)).join(',');
-      return v === undefined || v === null ? '' : String(v);
+      if (Array.isArray(v)) return this.jsonPathArrayToStrings(v as Object[]).join(',');
+      return this.jsonValueToString(v);
     }
     const ctxVal = this.ctx.get(rule);
     if (ctxVal) return ctxVal;
@@ -1513,8 +1518,8 @@ export class AnalyzeRule {
       }
       if (rule.startsWith('$') || rule.startsWith('@.')) {
         const v = this.evalJsonPath(rule);
-        if (Array.isArray(v)) return v.map(item => String(item)).join(',');
-        return v === undefined || v === null ? '' : String(v);
+        if (Array.isArray(v)) return this.jsonPathArrayToStrings(v as Object[]).join(',');
+        return this.jsonValueToString(v);
       }
       if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(rule)) {
         const ctxVal = this.ctx.get(rule);
@@ -1551,8 +1556,8 @@ export class AnalyzeRule {
       value = (data as Record<string, Object>)[pathOrKey] as Object | string;
       if (value === undefined) value = this.deepFind(data, pathOrKey);
     }
-    if (Array.isArray(value)) return value.map(item => String(item)).join(',');
-    return value === undefined || value === null ? '' : String(value);
+    if (Array.isArray(value)) return this.jsonPathArrayToStrings(value as Object[]).join(',');
+    return this.jsonValueToString(value);
   }
 
   private formatTimestamp(timestamp: number): string {
@@ -1635,7 +1640,7 @@ export class AnalyzeRule {
     // args[0] 通常是 result（已由 value 提供），args[1] 是 key，args[2] 是 iv
     if (args.length >= 2) {
       const key = this.stripQuotes(args[1]);
-      const iv = args.length >= 3 ? this.stripQuotes(args[2]) : '';
+      const iv = args.length >= 4 ? this.stripQuotes(args[3]) : (args.length >= 3 ? this.stripQuotes(args[2]) : '');
       return this.js.aesBase64DecodeToString(value, key, iv);
     }
     return value;

@@ -127,6 +127,7 @@ export class ReadBookEngine {
   private isBrokenChapterUrl(url: string): boolean {
     if (!url) return true;
     if (url.includes('@get:') || url.includes('{{')) return true;
+    if (url.includes('@js:') || url.includes('java.')) return true;
     if (url.startsWith('data:')) return false;
     if (!url.startsWith('http://') && !url.startsWith('https://')) return true;
     return /https?:\/\/[^/]+\/{2,}/.test(url);

@@ -188,7 +188,15 @@ export class WebBookService {
       chap.title = ir.getString(tocRule.chapterName) || `第${i + 1}章`;
       let rawUrl = ir.getString(tocRule.chapterUrl);
 
-      // 如果 URL 含 @js: 或未解析的 JSONPath，从 item/TOC 数据解析
+      // 如果规则引擎没有完整处理 URL，再从 item/TOC 数据兜底修复。
+      if (rawUrl && (rawUrl.startsWith('@js:') || rawUrl.includes('$..') || rawUrl.includes('$.'))) {
+        const repairedUrl = ir.getString(tocRule.chapterUrl, true);
+        if (repairedUrl && !repairedUrl.includes('@js:') && !repairedUrl.includes('$..') && !repairedUrl.includes('$.')) {
+          rawUrl = repairedUrl;
+        }
+      }
+
+      // 如果 URL 仍含 @js: 或未解析的 JSONPath，从 item/TOC 数据解析
       if (rawUrl && (rawUrl.startsWith('@js:') || rawUrl.includes('$..') || rawUrl.includes('$.'))) {
         // 解析 item 为 JSON（通常 chapterList 提取的是 JSON 片段）
         let itemData: Record<string, Object> | null = null;
