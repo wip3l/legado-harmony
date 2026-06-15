@@ -9,6 +9,7 @@ export class SearchExploreSettings {
   exactSearchMatchAuthor: boolean = true;
   showSearchProgress: boolean = true;
   selectedSourceGroupsRaw: string = '';
+  sourceSortRaw: string = '';
 }
 
 export class SearchExploreSettingsStore {
@@ -19,6 +20,7 @@ export class SearchExploreSettingsStore {
   static readonly KEY_EXACT_SEARCH_MATCH_AUTHOR: string = 'searchExploreExactSearchMatchAuthor';
   static readonly KEY_SHOW_SEARCH_PROGRESS: string = 'searchExploreShowSearchProgress';
   static readonly KEY_SELECTED_SOURCE_GROUPS: string = 'searchExploreSelectedSourceGroups';
+  static readonly KEY_SOURCE_SORT: string = 'searchExploreSourceSort';
   private static readonly STORE_NAME: string = 'search_explore_settings';
   private static cachedSettings: SearchExploreSettings | null = null;
 
@@ -42,6 +44,8 @@ export class SearchExploreSettingsStore {
       store, SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, true);
     settings.selectedSourceGroupsRaw = await SearchExploreSettingsStore.getString(
       store, SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, '');
+    settings.sourceSortRaw = await SearchExploreSettingsStore.getString(
+      store, SearchExploreSettingsStore.KEY_SOURCE_SORT, '');
     SearchExploreSettingsStore.cachedSettings = SearchExploreSettingsStore.clone(settings);
     return settings;
   }
@@ -56,6 +60,7 @@ export class SearchExploreSettingsStore {
     await store.put(SearchExploreSettingsStore.KEY_EXACT_SEARCH_MATCH_AUTHOR, settings.exactSearchMatchAuthor);
     await store.put(SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, settings.showSearchProgress);
     await store.put(SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, settings.selectedSourceGroupsRaw);
+    await store.put(SearchExploreSettingsStore.KEY_SOURCE_SORT, settings.sourceSortRaw);
     await store.flush();
   }
 
@@ -72,6 +77,7 @@ export class SearchExploreSettingsStore {
       settings.exactSearchMatchAuthor);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, settings.showSearchProgress);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, settings.selectedSourceGroupsRaw);
+    AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SOURCE_SORT, settings.sourceSortRaw);
   }
 
   private static async getBoolean(
@@ -92,6 +98,7 @@ export class SearchExploreSettingsStore {
     settings.exactSearchMatchAuthor = source.exactSearchMatchAuthor;
     settings.showSearchProgress = source.showSearchProgress;
     settings.selectedSourceGroupsRaw = source.selectedSourceGroupsRaw;
+    settings.sourceSortRaw = source.sourceSortRaw;
     return settings;
   }
 

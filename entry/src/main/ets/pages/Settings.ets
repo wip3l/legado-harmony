@@ -42,6 +42,8 @@ struct SettingsPage {
   @StorageLink('readerVolumeTurnPage') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
   @StorageLink('readerExtendToStatusBar') readerExtendToStatusBar: boolean = false;
+  @StorageLink('readerPreloadEnabled') readerPreloadEnabled: boolean = true;
+  @StorageLink('readerPreloadChapterCount') readerPreloadChapterCount: number = 1;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
@@ -133,6 +135,7 @@ struct SettingsPage {
           this.switchItem('正文扩展至状态栏', '开启后正文阅读区域会延伸到顶部状态栏安全区', this.readerExtendToStatusBar, (value: boolean) => {
             this.readerExtendToStatusBar = value;
           })
+          this.preloadSettingPanel()
 
           this.sectionTitle('预览')
           Column() {
@@ -594,6 +597,21 @@ struct SettingsPage {
     });
   }
 
+  setReaderPreloadEnabled(enabled: boolean): void {
+    this.readerPreloadEnabled = enabled;
+    ReaderSettingsStore.savePreloadEnabled(getContext(this), enabled).catch((e: Error) => {
+      console.error('保存预缓存开关失败:', e);
+    });
+  }
+
+  setReaderPreloadChapterCount(count: number): void {
+    const value = Math.max(1, Math.min(Math.round(count), 10));
+    this.readerPreloadChapterCount = value;
+    ReaderSettingsStore.savePreloadChapterCount(getContext(this), value).catch((e: Error) => {
+      console.error('保存预缓存章节数失败:', e);
+    });
+  }
+
   pageColor(): string {
     return this.appDarkMode ? '#101113' : '#F5F5F5';
   }
@@ -830,6 +848,7 @@ struct SettingsPage {
       Slider({ value: this.readerFontSize, min: 14, max: 30, step: 1 })
         .width('100%')
         .margin({ top: 8 })
+        .selectedColor(this.accentColor())
         .onChange((sliderValue: number) => {
           this.readerFontSize = Math.round(sliderValue);
         })
@@ -856,6 +875,7 @@ struct SettingsPage {
       Slider({ value: this.readerLineHeight, min: 24, max: 52, step: 1 })
         .width('100%')
         .margin({ top: 8 })
+        .selectedColor(this.accentColor())
         .onChange((sliderValue: number) => {
           this.readerLineHeight = Math.round(sliderValue);
         })
@@ -882,9 +902,62 @@ struct SettingsPage {
       Slider({ value: this.readerParagraphSpacing, min: 0, max: 32, step: 1 })
         .width('100%')
         .margin({ top: 8 })
+        .selectedColor(this.accentColor())
         .onChange((sliderValue: number) => {
           this.readerParagraphSpacing = Math.round(sliderValue);
         })
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .backgroundColor(this.cardColor())
+  }
+
+  @Builder
+  preloadSettingPanel() {
+    Column() {
+      Row() {
+        Column() {
+          Text('预缓存设置')
+            .fontSize(16)
+            .fontColor(this.primaryTextColor())
+          Text(this.readerPreloadEnabled ? '阅读过程中提前缓存后续章节' : '已关闭阅读过程中的自动预缓存')
+            .fontSize(12)
+            .fontColor(this.subTextColor())
+            .margin({ top: 4 })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        Toggle({ type: ToggleType.Switch, isOn: this.readerPreloadEnabled })
+          .selectedColor(this.buttonColor())
+          .onChange((checked: boolean) => {
+            this.setReaderPreloadEnabled(checked);
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.readerPreloadEnabled) {
+        Row() {
+          Text('下一章节数')
+            .fontSize(14)
+            .fontColor(this.primaryTextColor())
+            .layoutWeight(1)
+          Text(`${this.readerPreloadChapterCount}章`)
+            .fontSize(14)
+            .fontColor(this.subTextColor())
+        }
+        .width('100%')
+        .margin({ top: 12 })
+
+        Slider({ value: this.readerPreloadChapterCount, min: 1, max: 10, step: 1 })
+          .width('100%')
+          .margin({ top: 8 })
+          .selectedColor(this.accentColor())
+          .onChange((sliderValue: number) => {
+            this.setReaderPreloadChapterCount(sliderValue);
+          })
+      }
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })

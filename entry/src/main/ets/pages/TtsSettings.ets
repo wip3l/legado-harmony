@@ -83,6 +83,7 @@ struct TtsSettingsPage {
             Slider({ value: this.ttsSpeed, min: 0.5, max: 2, step: 0.1 })
               .width('100%')
               .margin({ top: 10 })
+              .selectedColor(this.accentColor())
               .onChange((value: number) => {
                 this.ttsSpeed = Math.round(value * 10) / 10;
               })

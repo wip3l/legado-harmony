@@ -124,6 +124,8 @@ struct ReadBookPage {
   @StorageLink('readerVolumeTurnPage') @Watch('onReaderVolumeTurnPageChanged') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
   @StorageLink('readerExtendToStatusBar') @Watch('onReaderExtendToStatusBarChanged') readerExtendToStatusBar: boolean = false;
+  @StorageLink('readerPreloadEnabled') @Watch('onReaderPreloadChanged') readerPreloadEnabled: boolean = true;
+  @StorageLink('readerPreloadChapterCount') @Watch('onReaderPreloadChanged') readerPreloadChapterCount: number = 1;
   @StorageLink('readerFontFamily') @Watch('onReaderFontChanged') readerFontFamily: string = '';
   @StorageLink('readerFontFilePath') @Watch('onReaderFontChanged') readerFontFilePath: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
@@ -911,6 +913,8 @@ struct ReadBookPage {
             (checked: boolean) => {
               this.readerExtendToStatusBar = checked;
             })
+
+          this.readerPreloadSettingItem()
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 18, bottom: 24 })
@@ -1214,6 +1218,10 @@ struct ReadBookPage {
 
   onReaderPageTurnAnimationChanged(): void {
     this.resetSlidePageEffect();
+  }
+
+  onReaderPreloadChanged(): void {
+    this.preloadReaderContentLater();
   }
 
   updateVolumeKeySubscription(): void {
@@ -2024,6 +2032,57 @@ struct ReadBookPage {
     .alignItems(VerticalAlign.Center)
   }
 
+  @Builder
+  readerPreloadSettingItem() {
+    Column() {
+      Row() {
+        Column() {
+          Text('预缓存设置')
+            .fontSize(15)
+            .fontColor('#333333')
+          Text(this.readerPreloadEnabled ? '阅读过程中提前缓存后续章节' : '已关闭自动预缓存')
+            .fontSize(12)
+            .fontColor('#777777')
+            .margin({ top: 4 })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        Toggle({ type: ToggleType.Switch, isOn: this.readerPreloadEnabled })
+          .selectedColor(this.buttonColor())
+          .onChange((value: boolean) => {
+            this.setReaderPreloadEnabled(value);
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.readerPreloadEnabled) {
+        Row() {
+          Text('下一章节数')
+            .fontSize(13)
+            .fontColor('#333333')
+            .layoutWeight(1)
+          Text(`${this.readerPreloadChapterCount}章`)
+            .fontSize(13)
+            .fontColor('#777777')
+        }
+        .width('100%')
+        .margin({ top: 10 })
+
+        Slider({ value: this.readerPreloadChapterCount, min: 1, max: 10, step: 1 })
+          .width('100%')
+          .margin({ top: 6 })
+          .selectedColor(this.accentColor())
+          .onChange((sliderValue: number) => {
+            this.setReaderPreloadChapterCount(sliderValue);
+          })
+      }
+    }
+    .width('100%')
+    .constraintSize({ minHeight: 56 })
+  }
+
   switchPageTurnMode(mode: number) {
     if (this.readerPageTurnMode === mode) {
       return;
@@ -2039,6 +2098,25 @@ struct ReadBookPage {
     this.pendingRestoreScrollOffset = 0;
     this.paginateContent(this.content);
     this.saveReadingProgress();
+  }
+
+  setReaderPreloadEnabled(enabled: boolean): void {
+    this.readerPreloadEnabled = enabled;
+    ReaderSettingsStore.savePreloadEnabled(getContext(this), enabled).catch((e: Error) => {
+      console.error('保存预缓存开关失败:', e);
+    });
+    if (enabled) {
+      this.preloadReaderContentLater();
+    }
+  }
+
+  setReaderPreloadChapterCount(count: number): void {
+    const value = Math.max(1, Math.min(Math.round(count), 10));
+    this.readerPreloadChapterCount = value;
+    ReaderSettingsStore.savePreloadChapterCount(getContext(this), value).catch((e: Error) => {
+      console.error('保存预缓存章节数失败:', e);
+    });
+    this.preloadReaderContentLater();
   }
 
   async toggleTtsReading(): Promise<void> {
@@ -3121,11 +3199,15 @@ struct ReadBookPage {
   }
 
   preloadReaderContent(): void {
-    if (this.chapters.length === 0) {
+    if (this.chapters.length === 0 || !this.readerPreloadEnabled) {
       return;
     }
     const engine = ReadBookEngine.get();
-    engine.preloadAround(this.currentChapterIndex, 2, 1);
+    engine.preloadAround(this.currentChapterIndex, this.normalizePreloadChapterCount(this.readerPreloadChapterCount), 0);
+  }
+
+  normalizePreloadChapterCount(count: number): number {
+    return Math.max(1, Math.min(Math.round(count), 10));
   }
 
   preloadReaderContentLater(): void {

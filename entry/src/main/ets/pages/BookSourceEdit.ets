@@ -23,6 +23,8 @@ struct BookSourceEditPage {
   @State shushanEmail: string = '';
   @State shushanPassword: string = '';
   @State shushanLoggingIn: boolean = false;
+  @State savedSourceSnapshot: string = '';
+  @State showUnsavedDialog: boolean = false;
 
   aboutToAppear() {
     this.syncBars();
@@ -31,7 +33,11 @@ struct BookSourceEditPage {
       this.bookSourceUrl = params['bookSourceUrl'];
       if (this.bookSourceUrl) {
         this.loadSource();
+      } else {
+        this.markSourceSaved();
       }
+    } else {
+      this.markSourceSaved();
     }
   }
 
@@ -47,6 +53,7 @@ struct BookSourceEditPage {
       const source = await db.getBookSource(this.bookSourceUrl);
       if (source) {
         this.source = source;
+        this.markSourceSaved();
         this.restoreShushanLoginFields();
         this.currentTab = 0;
         this.sourceLoadedVersion++;
@@ -77,6 +84,7 @@ struct BookSourceEditPage {
         await db.insertBookSource(this.source);
       }
       this.clearShushanPendingVerificationIfReady();
+      this.markSourceSaved();
       promptAction.showToast({ message: '保存成功' });
       router.back();
     } catch (e) {
@@ -85,162 +93,339 @@ struct BookSourceEditPage {
     }
   }
 
+  async saveSourceAndBackFromDialog(): Promise<void> {
+    if (!this.source.bookSourceUrl) {
+      promptAction.showToast({ message: '请输入书源地址' });
+      return;
+    }
+    if (!this.source.bookSourceName) {
+      promptAction.showToast({ message: '请输入书源名称' });
+      return;
+    }
+    this.showUnsavedDialog = false;
+    await this.saveSource();
+  }
+
   build() {
-    Column() {
-      Row() {
-        Text('<')
-          .fontSize(24)
-          .fontColor(this.primaryTextColor())
-          .width(40)
-          .height(56)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            router.back();
-          })
-
-        Text(this.bookSourceUrl ? '编辑书源' : '新建书源')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .layoutWeight(1)
-
-        Text('保存')
-          .fontSize(16)
-          .fontColor(this.accentColor())
-          .width(60)
-          .height(56)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            this.saveSource();
-          })
-      }
-      .width('100%')
-      .height(56)
-      .backgroundColor(this.cardColor())
-      .alignItems(VerticalAlign.Center)
-
-      // Tab栏
-      Row() {
-        Text('基本')
-          .fontSize(14)
-          .fontColor(this.currentTab === 0 ? this.accentColor() : this.secondaryTextColor())
-          .layoutWeight(1)
-          .textAlign(TextAlign.Center)
-          .padding({ top: 12, bottom: 12 })
-          .borderWidth({ bottom: this.currentTab === 0 ? 2 : 0 })
-          .borderColor(this.accentColor())
-          .onClick(() => {
-            this.currentTab = 0;
-          })
-
-        Text('搜索')
-          .fontSize(14)
-          .fontColor(this.currentTab === 1 ? this.accentColor() : this.secondaryTextColor())
-          .layoutWeight(1)
-          .textAlign(TextAlign.Center)
-          .padding({ top: 12, bottom: 12 })
-          .borderWidth({ bottom: this.currentTab === 1 ? 2 : 0 })
-          .borderColor(this.accentColor())
-          .onClick(() => {
-            this.currentTab = 1;
-          })
-
-        Text('发现')
-          .fontSize(14)
-          .fontColor(this.currentTab === 2 ? this.accentColor() : this.secondaryTextColor())
-          .layoutWeight(1)
-          .textAlign(TextAlign.Center)
-          .padding({ top: 12, bottom: 12 })
-          .borderWidth({ bottom: this.currentTab === 2 ? 2 : 0 })
-          .borderColor(this.accentColor())
-          .onClick(() => {
-            this.currentTab = 2;
-          })
-
-        Text('详情')
-          .fontSize(14)
-          .fontColor(this.currentTab === 3 ? this.accentColor() : this.secondaryTextColor())
-          .layoutWeight(1)
-          .textAlign(TextAlign.Center)
-          .padding({ top: 12, bottom: 12 })
-          .borderWidth({ bottom: this.currentTab === 3 ? 2 : 0 })
-          .borderColor(this.accentColor())
-          .onClick(() => {
-            this.currentTab = 3;
-          })
-
-        Text('目录')
-          .fontSize(14)
-          .fontColor(this.currentTab === 4 ? this.accentColor() : this.secondaryTextColor())
-          .layoutWeight(1)
-          .textAlign(TextAlign.Center)
-          .padding({ top: 12, bottom: 12 })
-          .borderWidth({ bottom: this.currentTab === 4 ? 2 : 0 })
-          .borderColor(this.accentColor())
-          .onClick(() => {
-            this.currentTab = 4;
-          })
-
-        Text('正文')
-          .fontSize(14)
-          .fontColor(this.currentTab === 5 ? this.accentColor() : this.secondaryTextColor())
-          .layoutWeight(1)
-          .textAlign(TextAlign.Center)
-          .padding({ top: 12, bottom: 12 })
-          .borderWidth({ bottom: this.currentTab === 5 ? 2 : 0 })
-          .borderColor(this.accentColor())
-          .onClick(() => {
-            this.currentTab = 5;
-          })
-      }
-      .width('100%')
-      .backgroundColor(this.cardColor())
-      .borderWidth({ bottom: 1 })
-      .borderColor(this.dividerColor())
-
-      if (this.isLoading) {
-        Column() {
-          LoadingProgress()
+    Stack() {
+      Column() {
+        Row() {
+          Text('<')
+            .fontSize(24)
+            .fontColor(this.primaryTextColor())
             .width(40)
-            .height(40)
-          Text('加载书源中...')
-            .fontSize(14)
-            .fontColor(this.secondaryTextColor())
-            .margin({ top: 8 })
+            .height(56)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.requestBack();
+            })
+
+          Text(this.bookSourceUrl ? '编辑书源' : '新建书源')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
+            .layoutWeight(1)
+
+          Text('保存')
+            .fontSize(16)
+            .fontColor(this.accentColor())
+            .width(60)
+            .height(56)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.saveSource();
+            })
         }
-        .layoutWeight(1)
         .width('100%')
-        .justifyContent(FlexAlign.Center)
-      } else {
-        // 内容区域
-        Scroll() {
-          Column() {
-            if (this.currentTab === 0) {
-              this.basicTabBuilder()
-            } else if (this.currentTab === 1) {
-              this.searchTabBuilder()
-            } else if (this.currentTab === 2) {
-              this.exploreTabBuilder()
-            } else if (this.currentTab === 3) {
-              this.infoTabBuilder()
-            } else if (this.currentTab === 4) {
-              this.tocTabBuilder()
-            } else if (this.currentTab === 5) {
-              this.contentTabBuilder()
-            }
-          }
-          .width('100%')
-          .padding(16)
+        .height(56)
+        .backgroundColor(this.cardColor())
+        .alignItems(VerticalAlign.Center)
+
+        // Tab栏
+        Row() {
+          Text('基本')
+            .fontSize(14)
+            .fontColor(this.currentTab === 0 ? this.accentColor() : this.secondaryTextColor())
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+            .padding({ top: 12, bottom: 12 })
+            .borderWidth({ bottom: this.currentTab === 0 ? 2 : 0 })
+            .borderColor(this.accentColor())
+            .onClick(() => {
+              this.currentTab = 0;
+            })
+
+          Text('搜索')
+            .fontSize(14)
+            .fontColor(this.currentTab === 1 ? this.accentColor() : this.secondaryTextColor())
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+            .padding({ top: 12, bottom: 12 })
+            .borderWidth({ bottom: this.currentTab === 1 ? 2 : 0 })
+            .borderColor(this.accentColor())
+            .onClick(() => {
+              this.currentTab = 1;
+            })
+
+          Text('发现')
+            .fontSize(14)
+            .fontColor(this.currentTab === 2 ? this.accentColor() : this.secondaryTextColor())
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+            .padding({ top: 12, bottom: 12 })
+            .borderWidth({ bottom: this.currentTab === 2 ? 2 : 0 })
+            .borderColor(this.accentColor())
+            .onClick(() => {
+              this.currentTab = 2;
+            })
+
+          Text('详情')
+            .fontSize(14)
+            .fontColor(this.currentTab === 3 ? this.accentColor() : this.secondaryTextColor())
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+            .padding({ top: 12, bottom: 12 })
+            .borderWidth({ bottom: this.currentTab === 3 ? 2 : 0 })
+            .borderColor(this.accentColor())
+            .onClick(() => {
+              this.currentTab = 3;
+            })
+
+          Text('目录')
+            .fontSize(14)
+            .fontColor(this.currentTab === 4 ? this.accentColor() : this.secondaryTextColor())
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+            .padding({ top: 12, bottom: 12 })
+            .borderWidth({ bottom: this.currentTab === 4 ? 2 : 0 })
+            .borderColor(this.accentColor())
+            .onClick(() => {
+              this.currentTab = 4;
+            })
+
+          Text('正文')
+            .fontSize(14)
+            .fontColor(this.currentTab === 5 ? this.accentColor() : this.secondaryTextColor())
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+            .padding({ top: 12, bottom: 12 })
+            .borderWidth({ bottom: this.currentTab === 5 ? 2 : 0 })
+            .borderColor(this.accentColor())
+            .onClick(() => {
+              this.currentTab = 5;
+            })
         }
-        .layoutWeight(1)
-        .scrollBar(BarState.Off)
+        .width('100%')
+        .backgroundColor(this.cardColor())
+        .borderWidth({ bottom: 1 })
+        .borderColor(this.dividerColor())
+
+        if (this.isLoading) {
+          Column() {
+            LoadingProgress()
+              .width(40)
+              .height(40)
+            Text('加载书源中...')
+              .fontSize(14)
+              .fontColor(this.secondaryTextColor())
+              .margin({ top: 8 })
+          }
+          .layoutWeight(1)
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+        } else {
+          // 内容区域
+          Scroll() {
+            Column() {
+              if (this.currentTab === 0) {
+                this.basicTabBuilder()
+              } else if (this.currentTab === 1) {
+                this.searchTabBuilder()
+              } else if (this.currentTab === 2) {
+                this.exploreTabBuilder()
+              } else if (this.currentTab === 3) {
+                this.infoTabBuilder()
+              } else if (this.currentTab === 4) {
+                this.tocTabBuilder()
+              } else if (this.currentTab === 5) {
+                this.contentTabBuilder()
+              }
+            }
+            .width('100%')
+            .padding(16)
+          }
+          .layoutWeight(1)
+          .scrollBar(BarState.Off)
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
+      .backgroundColor(this.pageColor())
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+
+      if (this.showUnsavedDialog) {
+        this.unsavedChangesDialog()
       }
     }
     .width('100%')
     .height('100%')
-    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
-    .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  onBackPress(): boolean {
+    return this.requestBack();
+  }
+
+  requestBack(): boolean {
+    if (this.hasUnsavedChanges()) {
+      this.showUnsavedDialog = true;
+      return true;
+    }
+    router.back();
+    return true;
+  }
+
+  hasUnsavedChanges(): boolean {
+    return this.sourceSnapshot() !== this.savedSourceSnapshot;
+  }
+
+  markSourceSaved(): void {
+    this.savedSourceSnapshot = this.sourceSnapshot();
+  }
+
+  sourceSnapshot(): string {
+    const parts: string[] = [];
+    this.appendSnapshotPart(parts, this.source.bookSourceUrl);
+    this.appendSnapshotPart(parts, this.source.bookSourceName);
+    this.appendSnapshotPart(parts, this.source.bookSourceGroup);
+    this.appendSnapshotPart(parts, this.source.bookSourceComment);
+    this.appendSnapshotPart(parts, this.source.loginUrl);
+    this.appendSnapshotPart(parts, this.source.loginCheckJs);
+    this.appendSnapshotPart(parts, this.source.loginHeader);
+    this.appendSnapshotPart(parts, this.source.bookUrlPattern);
+    this.appendSnapshotPart(parts, this.source.searchUrl);
+    this.appendSnapshotPart(parts, this.source.exploreUrl);
+    this.appendSnapshotPart(parts, this.source.jsLib);
+    this.appendSnapshotPart(parts, this.source.header);
+    this.appendSnapshotPart(parts, this.source.enabled ? '1' : '0');
+    this.appendSnapshotPart(parts, this.source.enabledExplore ? '1' : '0');
+    this.appendSnapshotPart(parts, String(this.source.weight));
+
+    this.appendSnapshotPart(parts, this.source.searchRule.bookList);
+    this.appendSnapshotPart(parts, this.source.searchRule.name);
+    this.appendSnapshotPart(parts, this.source.searchRule.author);
+    this.appendSnapshotPart(parts, this.source.searchRule.coverUrl);
+    this.appendSnapshotPart(parts, this.source.searchRule.intro);
+    this.appendSnapshotPart(parts, this.source.searchRule.kind);
+    this.appendSnapshotPart(parts, this.source.searchRule.lastChapter);
+    this.appendSnapshotPart(parts, this.source.searchRule.bookUrl);
+    this.appendSnapshotPart(parts, this.source.searchRule.wordCount);
+
+    this.appendSnapshotPart(parts, this.source.exploreRule.bookList);
+    this.appendSnapshotPart(parts, this.source.exploreRule.name);
+    this.appendSnapshotPart(parts, this.source.exploreRule.author);
+    this.appendSnapshotPart(parts, this.source.exploreRule.coverUrl);
+    this.appendSnapshotPart(parts, this.source.exploreRule.intro);
+    this.appendSnapshotPart(parts, this.source.exploreRule.kind);
+    this.appendSnapshotPart(parts, this.source.exploreRule.lastChapter);
+    this.appendSnapshotPart(parts, this.source.exploreRule.bookUrl);
+    this.appendSnapshotPart(parts, this.source.exploreRule.wordCount);
+
+    this.appendSnapshotPart(parts, this.source.bookInfoRule.init);
+    this.appendSnapshotPart(parts, this.source.bookInfoRule.name);
+    this.appendSnapshotPart(parts, this.source.bookInfoRule.author);
+    this.appendSnapshotPart(parts, this.source.bookInfoRule.coverUrl);
+    this.appendSnapshotPart(parts, this.source.bookInfoRule.intro);
+    this.appendSnapshotPart(parts, this.source.bookInfoRule.kind);
+    this.appendSnapshotPart(parts, this.source.bookInfoRule.lastChapter);
+    this.appendSnapshotPart(parts, this.source.bookInfoRule.wordCount);
+    this.appendSnapshotPart(parts, this.source.bookInfoRule.updateTime);
+    this.appendSnapshotPart(parts, this.source.bookInfoRule.tocUrl);
+
+    this.appendSnapshotPart(parts, this.source.tocRule.chapterList);
+    this.appendSnapshotPart(parts, this.source.tocRule.chapterName);
+    this.appendSnapshotPart(parts, this.source.tocRule.chapterUrl);
+    this.appendSnapshotPart(parts, this.source.tocRule.isVip);
+    this.appendSnapshotPart(parts, this.source.tocRule.isPay);
+    this.appendSnapshotPart(parts, this.source.tocRule.updateTime);
+
+    this.appendSnapshotPart(parts, this.source.contentRule.content);
+    this.appendSnapshotPart(parts, this.source.contentRule.title);
+    this.appendSnapshotPart(parts, this.source.contentRule.images);
+    this.appendSnapshotPart(parts, this.source.contentRule.replaceRegex);
+    this.appendSnapshotPart(parts, this.source.contentRule.imageStyle);
+    return parts.join('');
+  }
+
+  appendSnapshotPart(parts: string[], value: string): void {
+    const text = value || '';
+    parts.push(`${text.length}:${text};`);
+  }
+
+  @Builder
+  unsavedChangesDialog() {
+    Column() {
+      Column() {
+        Text('保存书源修改？')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .margin({ bottom: 10 })
+
+        Text('当前书源有未保存的编辑，返回前请选择是否保存。')
+          .fontSize(14)
+          .fontColor(this.secondaryTextColor())
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .margin({ bottom: 18 })
+
+        Button('保存并返回')
+          .width('100%')
+          .height(44)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .margin({ bottom: 10 })
+          .onClick(() => {
+            this.saveSourceAndBackFromDialog();
+          })
+
+        Button('放弃修改')
+          .width('100%')
+          .height(44)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .margin({ bottom: 10 })
+          .onClick(() => {
+            this.showUnsavedDialog = false;
+            router.back();
+          })
+
+        Button('取消')
+          .width('100%')
+          .height(44)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.showUnsavedDialog = false;
+          })
+      }
+      .width('88%')
+      .padding(22)
+      .backgroundColor(this.cardColor())
+      .borderRadius(14)
+      .onClick(() => {
+      })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#80000000')
+    .justifyContent(FlexAlign.Center)
+    .onClick(() => {
+      this.showUnsavedDialog = false;
+    })
   }
 
   @Builder
@@ -664,6 +849,7 @@ struct BookSourceEditPage {
     } else {
       await db.insertBookSource(this.source);
     }
+    this.markSourceSaved();
   }
 
   clearShushanPendingVerificationIfReady(): void {
@@ -749,6 +935,10 @@ struct BookSourceEditPage {
 
   cardColor(): string {
     return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+  }
+
+  inputColor(): string {
+    return this.appDarkMode ? '#24272D' : '#F5F5F5';
   }
 
   primaryTextColor(): string {

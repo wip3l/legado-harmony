@@ -1596,6 +1596,7 @@ struct ExplorePage {
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
+  @StorageLink('searchExploreSourceSort') searchExploreSourceSort: string = '';
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
@@ -1640,8 +1641,8 @@ struct ExplorePage {
       const previousSourceName = this.selectedSourceName;
       const sourceOptions = await this.coordinator.getExploreSources();
       if (!this.isCurrentExploreLoad(loadVersion)) return;
-      this.sourceOptions = sourceOptions;
-      this.sourceNames = sourceOptions.map((option: ExploreSourceOption) => option.sourceName);
+      this.sourceOptions = this.sortExploreSourceOptions(sourceOptions);
+      this.sourceNames = this.sourceOptions.map((option: ExploreSourceOption) => option.sourceName);
       this.selectedSourceName = previousSourceName && this.sourceNames.includes(previousSourceName) ?
         previousSourceName : (this.sourceNames.length > 0 ? this.sourceNames[0] : '');
       this.platformNames = this.getSelectedSourcePlatforms();
@@ -1707,17 +1708,39 @@ struct ExplorePage {
   build() {
     Column() {
       Row() {
-        Text('发现')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
+        Row() {
+          Select(this.exploreSourceSelectOptions())
+            .selected(this.selectedExploreSourceIndex())
+            .value(this.selectedSourceName || '发现')
+            .font({ size: 16 })
+            .fontColor(this.primaryTextColor())
+            .selectedOptionFontColor(this.accentColor())
+            .selectedOptionBgColor(this.exploreSelectedBackgroundColor())
+            .backgroundColor('#00000000')
+            .width('100%')
+            .onSelect((index: number) => {
+              const name = this.sourceNames[index] || '';
+              if (name) {
+                this.switchExploreSource(name);
+              }
+            })
+        }
           .layoutWeight(1)
+          .height(40)
+          .borderRadius(20)
+          .backgroundColor(this.glassCardColor())
+          .border({ width: 1, color: this.glassBorderColor() })
+          .shadow({ radius: 8, color: this.glassShadowColor(), offsetX: 0, offsetY: 3 })
+          .padding({ left: 8, right: 8 })
+          .alignItems(VerticalAlign.Center)
 
         Button('刷新')
           .height(36)
           .fontSize(14)
           .borderRadius(18)
           .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .margin({ left: 8 })
           .onClick(() => {
             this.loadEntries();
           })
@@ -1726,30 +1749,6 @@ struct ExplorePage {
       .height(56)
       .padding({ left: 16, right: 16 })
       .alignItems(VerticalAlign.Center)
-
-      if (this.sourceNames.length > 0) {
-        Scroll() {
-          Row({ space: 8 }) {
-            ForEach(this.sourceNames, (name: string) => {
-              Text(name)
-                .fontSize(13)
-                .fontColor(this.selectedSourceName === name ? '#FFFFFF' : this.primaryTextColor())
-                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                .backgroundColor(this.selectedSourceName === name ? this.accentColor() : this.glassCardColor())
-                .borderRadius(18)
-                .border({ width: this.selectedSourceName === name ? 0 : 1, color: this.glassBorderColor() })
-                .onClick(() => {
-                  this.switchExploreSource(name);
-                })
-            })
-          }
-          .padding({ left: 16, right: 16 })
-        }
-        .width('100%')
-        .height(48)
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-      }
 
       if (this.platformNames.length > 0) {
         Scroll() {
@@ -1800,7 +1799,7 @@ struct ExplorePage {
         .scrollBar(BarState.Off)
       }
 
-      if (this.status) {
+      if (this.shouldShowExploreStatus()) {
         Row() {
           Text(this.status)
             .fontSize(13)
@@ -2062,6 +2061,57 @@ struct ExplorePage {
     return names;
   }
 
+  sortExploreSourceOptions(sourceOptions: ExploreSourceOption[]): ExploreSourceOption[] {
+    const order = (this.searchExploreSourceSort || '').split('\n')
+      .map((url: string) => url.trim())
+      .filter((url: string) => !!url);
+    if (order.length === 0) {
+      return sourceOptions;
+    }
+    const result: ExploreSourceOption[] = [];
+    for (const url of order) {
+      const option = sourceOptions.find((item: ExploreSourceOption) => item.sourceUrl === url);
+      if (option && !result.some((item: ExploreSourceOption) => item.sourceUrl === option.sourceUrl)) {
+        result.push(option);
+      }
+    }
+    for (const option of sourceOptions) {
+      if (!result.some((item: ExploreSourceOption) => item.sourceUrl === option.sourceUrl)) {
+        result.push(option);
+      }
+    }
+    return result;
+  }
+
+  exploreSourceSelectOptions(): SelectOption[] {
+    const options: SelectOption[] = [];
+    if (this.sourceNames.length === 0) {
+      const option: SelectOption = { value: '发现' };
+      options.push(option);
+      return options;
+    }
+    for (const name of this.sourceNames) {
+      const option: SelectOption = { value: name };
+      options.push(option);
+    }
+    return options;
+  }
+
+  selectedExploreSourceIndex(): number {
+    const index = this.sourceNames.indexOf(this.selectedSourceName);
+    return index >= 0 ? index : 0;
+  }
+
+  shouldShowExploreStatus(): boolean {
+    if (!this.status) {
+      return false;
+    }
+    if (this.verificationUrl) {
+      return true;
+    }
+    return this.books.length === 0;
+  }
+
   getSelectedSourcePlatforms(): string[] {
     const option = this.getSelectedSourceOption();
     return option ? option.platforms : [];
@@ -2150,6 +2200,14 @@ struct ExplorePage {
 
   buttonColor(): string {
     return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  }
+
+  exploreSelectedBackgroundColor(): string {
+    const color = this.accentColor();
+    if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
+      return `#11${color.substring(1)}`;
+    }
+    return this.appDarkMode ? '#112A6FCC' : '#11007DFF';
   }
 }
 
@@ -2259,7 +2317,9 @@ struct SearchPage {
             })
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 16, bottom: 8 })
+        .height(56)
+        .padding({ left: 16, right: 16 })
+        .alignItems(VerticalAlign.Center)
 
         if (this.statusMessage) {
           Row() {
@@ -2643,6 +2703,7 @@ struct SearchPage {
     settings.exactSearchMatchAuthor = this.exactSearchMatchAuthor;
     settings.showSearchProgress = this.showSearchProgress;
     settings.selectedSourceGroupsRaw = this.selectedSourceGroupsRaw;
+    settings.sourceSortRaw = AppStorage.get<string>('searchExploreSourceSort') || '';
     SearchExploreSettingsStore.applyToStorage(settings);
     SearchExploreSettingsStore.save(getContext(this), settings).catch((e: Error) => {
       console.warn('保存搜索设置失败:', e);
@@ -2734,7 +2795,7 @@ struct SearchPage {
           .width('100%')
         }
         .width('100%')
-        .height(180)
+        .constraintSize({ maxHeight: 180 })
         .margin({ top: 4 })
 
         Button('完成')

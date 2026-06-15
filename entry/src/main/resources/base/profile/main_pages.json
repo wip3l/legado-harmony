@@ -12,6 +12,7 @@
     "pages/TtsSettings",
     "pages/BookshelfSettings",
     "pages/SearchExploreSettings",
+    "pages/ExploreSourceSort",
     "pages/OtherSettings",
     "pages/CoverGalleryManager",
     "pages/About",

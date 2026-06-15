@@ -15,6 +15,8 @@ export default class EntryAbility extends UIAbility {
     hilog.info(0x0000, 'testTag', 'StartupTrace onCreate %{public}d', Date.now());
     this.syncSystemColorMode(this.context.config);
     PersistentStorage.persistProp('readerPageTurnMode', 1);
+    PersistentStorage.persistProp('readerPreloadEnabled', true);
+    PersistentStorage.persistProp('readerPreloadChapterCount', 1);
     if (AppStorage.get<number>('statusBarHeight') === undefined) {
       AppStorage.setOrCreate('statusBarHeight', 32);
     }
@@ -58,6 +60,7 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('searchExploreExactSearchMatchAuthor', true);
     PersistentStorage.persistProp('searchExploreShowSearchProgress', true);
     PersistentStorage.persistProp('searchExploreSelectedSourceGroups', '');
+    PersistentStorage.persistProp('searchExploreSourceSort', '');
     PersistentStorage.persistProp('appLightAccentColor', '#007DFF');
     PersistentStorage.persistProp('appDarkAccentColor', '#4E9BFF');
     PersistentStorage.persistProp('appLightButtonColor', '#007DFF');

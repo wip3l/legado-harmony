@@ -29,6 +29,7 @@ struct BookSourcePage {
   @State selectedSourceUrls: string[] = [];
   @State showBatchDeleteDialog: boolean = false;
   @State showGroupDialog: boolean = false;
+  @State showMoreActionDialog: boolean = false;
   @State groupNameInput: string = '';
   @State importUrl: string = '';
   @State isImporting: boolean = false;
@@ -244,6 +245,10 @@ struct BookSourcePage {
                       Text(source.enabled ? '已启用' : '已禁用')
                         .fontSize(12)
                         .fontColor(source.enabled ? '#1E8E3E' : this.subTextColor())
+                      Text(source.enabledExplore ? '发现已启用' : '发现已禁用')
+                        .fontSize(12)
+                        .fontColor(source.enabledExplore ? '#1E8E3E' : this.subTextColor())
+                        .margin({ top: 4 })
                     }
                   }
                   .alignItems(HorizontalAlign.End)
@@ -307,14 +312,15 @@ struct BookSourcePage {
                 this.showGroupDialog = true;
               })
 
-            Button('删除')
+            Button('更多')
               .layoutWeight(1)
               .height(42)
               .margin({ left: 8 })
               .enabled(this.selectedSourceUrls.length > 0)
-              .backgroundColor('#E53935')
+              .backgroundColor(this.inputColor())
+              .fontColor(this.primaryTextColor())
               .onClick(() => {
-                this.showBatchDeleteDialog = true;
+                this.showMoreActionDialog = true;
               })
           }
           .width('100%')
@@ -597,6 +603,82 @@ struct BookSourcePage {
         })
       }
 
+      if (this.showMoreActionDialog) {
+        Column() {
+          Column() {
+            Text('更多操作')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 8 })
+
+            Text(`已选择 ${this.selectedSourceUrls.length} 个书源`)
+              .fontSize(13)
+              .fontColor(this.subTextColor())
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 16 })
+
+            Button('启用发现')
+              .width('100%')
+              .height(44)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
+              .margin({ bottom: 10 })
+              .onClick(() => {
+                this.showMoreActionDialog = false;
+                this.batchSetExploreEnabled(true);
+              })
+
+            Button('禁用发现')
+              .width('100%')
+              .height(44)
+              .backgroundColor(this.inputColor())
+              .fontColor(this.primaryTextColor())
+              .margin({ bottom: 10 })
+              .onClick(() => {
+                this.showMoreActionDialog = false;
+                this.batchSetExploreEnabled(false);
+              })
+
+            Button('删除')
+              .width('100%')
+              .height(44)
+              .backgroundColor('#E53935')
+              .fontColor('#FFFFFF')
+              .margin({ bottom: 10 })
+              .onClick(() => {
+                this.showMoreActionDialog = false;
+                this.showBatchDeleteDialog = true;
+              })
+
+            Button('取消')
+              .width('100%')
+              .height(44)
+              .backgroundColor(this.inputColor())
+              .fontColor(this.primaryTextColor())
+              .onClick(() => {
+                this.showMoreActionDialog = false;
+              })
+          }
+          .width('88%')
+          .padding(24)
+          .backgroundColor(this.cardColor())
+          .borderRadius(12)
+          .onClick(() => {
+          })
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#80000000')
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          this.showMoreActionDialog = false;
+        })
+      }
+
       if (this.isImporting) {
         Column() {
           Column() {
@@ -717,6 +799,7 @@ struct BookSourcePage {
     this.selectionMode = false;
     this.selectedSourceUrls = [];
     this.showBatchDeleteDialog = false;
+    this.showMoreActionDialog = false;
   }
 
   isSourceSelected(bookSourceUrl: string): boolean {
@@ -846,6 +929,33 @@ struct BookSourcePage {
       promptAction.showToast({ message: `已${enabled ? '启用' : '禁用'} ${selectedSources.length} 个书源` });
     } catch (e) {
       console.error('批量更新书源失败:', e);
+      promptAction.showToast({ message: '批量操作失败' });
+    }
+  }
+
+  async batchSetExploreEnabled(enabled: boolean): Promise<void> {
+    const selectedSources = this.getSelectedSources();
+    if (selectedSources.length === 0) {
+      promptAction.showToast({ message: '请先选择书源' });
+      return;
+    }
+
+    try {
+      const db = AppDatabase.getInstance();
+      for (const source of selectedSources) {
+        source.enabledExplore = enabled;
+        source.lastUpdateTime = Date.now();
+        await db.updateBookSource(source);
+      }
+      this.sources = this.sources.map((source: BookSource) => {
+        if (this.isSourceSelected(source.bookSourceUrl)) {
+          source.enabledExplore = enabled;
+        }
+        return source;
+      });
+      promptAction.showToast({ message: `已${enabled ? '启用' : '禁用'} ${selectedSources.length} 个书源的发现` });
+    } catch (e) {
+      console.error('批量更新发现状态失败:', e);
       promptAction.showToast({ message: '批量操作失败' });
     }
   }

@@ -14,6 +14,7 @@ struct SearchExploreSettingsPage {
   @StorageLink('searchExploreExactSearchMatchAuthor') searchExploreExactSearchMatchAuthor: boolean = true;
   @StorageLink('searchExploreShowSearchProgress') searchExploreShowSearchProgress: boolean = true;
   @StorageLink('searchExploreSelectedSourceGroups') searchExploreSelectedSourceGroups: string = '';
+  @StorageLink('searchExploreSourceSort') searchExploreSourceSort: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
@@ -76,6 +77,9 @@ struct SearchExploreSettingsPage {
               this.onSettingChanged();
             })
           this.sourceGroupSettings()
+
+          this.sectionTitle('发现设置')
+          this.navItem('书源排序', '调整发现页书源下拉列表顺序', 'pages/ExploreSourceSort')
         }
         .width('100%')
         .padding({ bottom: 32 })
@@ -99,6 +103,7 @@ struct SearchExploreSettingsPage {
       this.searchExploreExactSearchMatchAuthor = settings.exactSearchMatchAuthor;
       this.searchExploreShowSearchProgress = settings.showSearchProgress;
       this.searchExploreSelectedSourceGroups = settings.selectedSourceGroupsRaw;
+      this.searchExploreSourceSort = settings.sourceSortRaw;
     } catch (e) {
       console.warn('重新加载搜索/发现配置失败:', e);
     }
@@ -135,6 +140,7 @@ struct SearchExploreSettingsPage {
     settings.exactSearchMatchAuthor = this.searchExploreExactSearchMatchAuthor;
     settings.showSearchProgress = this.searchExploreShowSearchProgress;
     settings.selectedSourceGroupsRaw = this.searchExploreSelectedSourceGroups;
+    settings.sourceSortRaw = this.searchExploreSourceSort;
     SearchExploreSettingsStore.applyToStorage(settings);
     SearchExploreSettingsStore.save(getContext(this), settings).catch((e: Error) => {
       console.warn('保存搜索/发现配置失败:', e);
@@ -297,6 +303,35 @@ struct SearchExploreSettingsPage {
     .padding({ left: 16, right: 16, top: 10, bottom: 10 })
     .backgroundColor(this.cardColor())
     .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  navItem(title: string, desc: string, url: string) {
+    Row() {
+      Column() {
+        Text(title)
+          .fontSize(16)
+          .fontColor(this.primaryTextColor())
+        Text(desc)
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+          .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Text('>')
+        .fontSize(18)
+        .fontColor(this.subTextColor())
+    }
+    .width('100%')
+    .height(64)
+    .padding({ left: 16, right: 16 })
+    .backgroundColor(this.cardColor())
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      router.pushUrl({ url: url });
+    })
   }
 
   @Builder

@@ -83,14 +83,16 @@ struct SearchPage {
               .onChange((value: string) => {
                 this.keyword = value;
               })
+
+            this.searchSettingIcon()
           }
           .layoutWeight(1)
           .height(40)
           .borderRadius(20)
-          .backgroundColor(this.inputColor())
+          .backgroundColor(this.glassCardColor())
+          .border({ width: 1, color: this.glassBorderColor() })
+          .shadow({ radius: 8, color: this.glassShadowColor(), offsetX: 0, offsetY: 3 })
           .alignItems(VerticalAlign.Center)
-
-          this.searchSettingIcon()
 
         Button('搜索')
           .height(36)
@@ -554,6 +556,7 @@ struct SearchPage {
     settings.exactSearchMatchAuthor = this.exactSearchMatchAuthor;
     settings.showSearchProgress = this.showSearchProgress;
     settings.selectedSourceGroupsRaw = this.selectedSourceGroupsRaw;
+    settings.sourceSortRaw = AppStorage.get<string>('searchExploreSourceSort') || '';
     SearchExploreSettingsStore.applyToStorage(settings);
     SearchExploreSettingsStore.save(getContext(this), settings).catch((e: Error) => {
       console.warn('保存搜索设置失败:', e);
@@ -645,7 +648,7 @@ struct SearchPage {
           .width('100%')
         }
         .width('100%')
-        .height(180)
+        .constraintSize({ maxHeight: 180 })
         .margin({ top: 4 })
 
         Button('完成')
@@ -733,6 +736,18 @@ struct SearchPage {
 
   cardColor(): string {
     return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+  }
+
+  glassCardColor(): string {
+    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+  }
+
+  glassBorderColor(): string {
+    return this.appDarkMode ? '#262A31' : '#FFFFFF';
+  }
+
+  glassShadowColor(): string {
+    return '#00000000';
   }
 
   inputColor(): string {
