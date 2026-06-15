@@ -13,6 +13,8 @@ import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 @Component
 struct SearchBookDetailPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
@@ -208,6 +210,8 @@ struct SearchBookDetailPage {
             .height(44)
             .layoutWeight(1)
             .margin({ right: 10 })
+            .backgroundColor(this.buttonColor())
+            .fontColor('#FFFFFF')
             .onClick(() => {
               this.addToShelf();
             })
@@ -215,6 +219,8 @@ struct SearchBookDetailPage {
           Button('开始阅读')
             .height(44)
             .layoutWeight(1)
+            .backgroundColor(this.buttonColor())
+            .fontColor('#FFFFFF')
             .onClick(() => {
               this.startRead();
             })
@@ -683,7 +689,7 @@ struct SearchBookDetailPage {
       .width(width)
       .height(height)
       .justifyContent(FlexAlign.Center)
-      .backgroundColor('#6B50B6')
+      .backgroundColor(this.accentColor())
 
       if (coverUrl) {
         Image(coverUrl)
@@ -725,6 +731,10 @@ struct SearchBookDetailPage {
 
   buttonColor(): string {
     return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  }
+
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
   }
 
   syncBars(): void {

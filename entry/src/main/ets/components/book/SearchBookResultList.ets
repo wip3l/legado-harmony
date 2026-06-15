@@ -6,6 +6,8 @@ export type SearchBookAction = (book: SearchBook) => void;
 
 @Component
 export struct SearchBookResultList {
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @Prop books: SearchBook[] = [];
   @Prop shelfBookKeys: string[] = [];
   @Prop busyBookKeys: string[] = [];
@@ -149,7 +151,7 @@ export struct SearchBookResultList {
       .width(54)
       .height(72)
       .justifyContent(FlexAlign.Center)
-      .backgroundColor('#6B50B6')
+      .backgroundColor(this.accentColor())
 
       if (book.coverUrl) {
         Image(book.coverUrl)
@@ -167,6 +169,10 @@ export struct SearchBookResultList {
 
   isDarkMode(): boolean {
     return this.pageColor === '#101113' || this.cardColor === '#191B1F';
+  }
+
+  accentColor(): string {
+    return this.isDarkMode() ? this.appDarkAccentColor : this.appLightAccentColor;
   }
 
   itemKey(book: SearchBook): string {

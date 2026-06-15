@@ -8,11 +8,14 @@ import { SearchBookResultList } from '../components/book/SearchBookResultList';
 import { syncSystemBars } from '../utils/SystemBars';
 import { SearchBookShelfHelper } from '../utils/SearchBookShelfHelper';
 import { SearchExploreSettings, SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
+import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 
 @Entry
 @Component
 struct SearchPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
+  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State keyword: string = '';
@@ -33,6 +36,7 @@ struct SearchPage {
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   @StorageLink('searchExploreExactSearch') exactSearch: boolean = false;
+  @StorageLink('searchExploreExactSearchMatchAuthor') exactSearchMatchAuthor: boolean = true;
   @StorageLink('searchExploreShowSearchProgress') showSearchProgress: boolean = true;
   @StorageLink('searchExploreSelectedSourceGroups') selectedSourceGroupsRaw: string = '';
   private shelfStatusVersion: number = 0;
@@ -89,9 +93,12 @@ struct SearchPage {
           this.searchSettingIcon()
 
         Button('搜索')
-          .height(40)
+          .height(36)
+          .fontSize(14)
           .margin({ left: 8 })
-          .borderRadius(20)
+          .borderRadius(18)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
           .onClick(() => {
             this.hideKeyboard();
             console.log('搜索按钮被点击, keyword:', this.keyword);
@@ -119,6 +126,8 @@ struct SearchPage {
               .height(28)
               .fontSize(12)
               .borderRadius(14)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .margin({ right: 12 })
               .onClick(() => {
                 this.openVerification();
@@ -291,6 +300,7 @@ struct SearchPage {
         }
       }, {
         exactMatch: this.exactSearch,
+        exactMatchAuthor: this.exactSearchMatchAuthor,
         sourceGroups: this.searchSourceGroups()
       });
 
@@ -541,6 +551,7 @@ struct SearchPage {
     settings.showResultTags = this.searchExploreShowResultTags;
     settings.promptAddToShelfOnBack = this.searchExplorePromptAddToShelfOnBack;
     settings.exactSearch = this.exactSearch;
+    settings.exactSearchMatchAuthor = this.exactSearchMatchAuthor;
     settings.showSearchProgress = this.showSearchProgress;
     settings.selectedSourceGroupsRaw = this.selectedSourceGroupsRaw;
     SearchExploreSettingsStore.applyToStorage(settings);
@@ -563,6 +574,11 @@ struct SearchPage {
 
         this.switchSettingRow('精准搜索', this.exactSearch, (checked: boolean) => {
           this.exactSearch = checked;
+          this.saveSearchExploreSettings();
+        })
+
+        this.switchSettingRow('匹配作者', this.exactSearchMatchAuthor, (checked: boolean) => {
+          this.exactSearchMatchAuthor = checked;
           this.saveSearchExploreSettings();
         })
 
@@ -667,7 +683,7 @@ struct SearchPage {
       .width(36)
       .height(36)
       .textAlign(TextAlign.Center)
-      .backgroundColor(this.appDarkMode ? '#203753' : '#EAF2FF')
+      .backgroundColor(this.buttonBackgroundColor())
       .borderRadius(18)
       .margin({ right: 2 })
       .onClick(() => {
@@ -740,7 +756,12 @@ struct SearchPage {
   }
 
   buttonColor(): string {
-    return this.appDarkMode ? '#3F8CFF' : '#007DFF';
+    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  }
+
+  buttonBackgroundColor(): string {
+    const normalized = AppThemeSettingsStore.normalizeColor(this.buttonColor(), AppThemeSettingsStore.DEFAULT_LIGHT_BUTTON_COLOR);
+    return `#${this.appDarkMode ? '33' : '1A'}${normalized.substring(1)}`;
   }
 
   searchResultBottomInset(): number {

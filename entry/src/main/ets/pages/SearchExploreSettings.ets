@@ -11,6 +11,7 @@ struct SearchExploreSettingsPage {
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   @StorageLink('searchExploreExactSearch') searchExploreExactSearch: boolean = false;
+  @StorageLink('searchExploreExactSearchMatchAuthor') searchExploreExactSearchMatchAuthor: boolean = true;
   @StorageLink('searchExploreShowSearchProgress') searchExploreShowSearchProgress: boolean = true;
   @StorageLink('searchExploreSelectedSourceGroups') searchExploreSelectedSourceGroups: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
@@ -64,6 +65,11 @@ struct SearchExploreSettingsPage {
               this.searchExploreExactSearch = value;
               this.onSettingChanged();
             })
+          this.switchItem('匹配作者', '精准搜索开启时，关键词同时匹配作者',
+            this.searchExploreExactSearchMatchAuthor, (value: boolean) => {
+              this.searchExploreExactSearchMatchAuthor = value;
+              this.onSettingChanged();
+            })
           this.switchItem('显示搜索进度', '开启后搜索过程中显示已搜索书源数量和结果数量',
             this.searchExploreShowSearchProgress, (value: boolean) => {
               this.searchExploreShowSearchProgress = value;
@@ -90,6 +96,7 @@ struct SearchExploreSettingsPage {
       this.searchExploreShowResultTags = settings.showResultTags;
       this.searchExplorePromptAddToShelfOnBack = settings.promptAddToShelfOnBack;
       this.searchExploreExactSearch = settings.exactSearch;
+      this.searchExploreExactSearchMatchAuthor = settings.exactSearchMatchAuthor;
       this.searchExploreShowSearchProgress = settings.showSearchProgress;
       this.searchExploreSelectedSourceGroups = settings.selectedSourceGroupsRaw;
     } catch (e) {
@@ -125,6 +132,7 @@ struct SearchExploreSettingsPage {
     settings.showResultTags = this.searchExploreShowResultTags;
     settings.promptAddToShelfOnBack = this.searchExplorePromptAddToShelfOnBack;
     settings.exactSearch = this.searchExploreExactSearch;
+    settings.exactSearchMatchAuthor = this.searchExploreExactSearchMatchAuthor;
     settings.showSearchProgress = this.searchExploreShowSearchProgress;
     settings.selectedSourceGroupsRaw = this.searchExploreSelectedSourceGroups;
     SearchExploreSettingsStore.applyToStorage(settings);

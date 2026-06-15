@@ -29,6 +29,8 @@ struct RecentReadCard {
   @LocalStorageProp('updatedAt') updatedAt: string = '';
   @LocalStorageProp('emptyTitle') emptyTitle: string = '暂无最近阅读';
   @LocalStorageProp('emptySubtitle') emptySubtitle: string = '打开书架阅读后会显示在这里';
+  @LocalStorageProp('accentColor') accentColor: string = '#007DFF';
+  @LocalStorageProp('accentBackgroundColor') accentBackgroundColor: string = '#1A007DFF';
 
   @LocalStorageProp('book0Name') book0Name: string = '';
   @LocalStorageProp('book0Meta') book0Meta: string = '';
@@ -42,14 +44,14 @@ struct RecentReadCard {
   @LocalStorageProp('book1Progress') book1Progress: string = '';
   @LocalStorageProp('book1Url') book1Url: string = '';
   @LocalStorageProp('book1Cover') book1Cover: string = '';
-  @LocalStorageProp('book1Accent') book1Accent: string = '#2E7D68';
+  @LocalStorageProp('book1Accent') book1Accent: string = '#007DFF';
 
   @LocalStorageProp('book2Name') book2Name: string = '';
   @LocalStorageProp('book2Meta') book2Meta: string = '';
   @LocalStorageProp('book2Progress') book2Progress: string = '';
   @LocalStorageProp('book2Url') book2Url: string = '';
   @LocalStorageProp('book2Cover') book2Cover: string = '';
-  @LocalStorageProp('book2Accent') book2Accent: string = '#7A5AF8';
+  @LocalStorageProp('book2Accent') book2Accent: string = '#007DFF';
 
   build() {
     Column() {
@@ -106,10 +108,10 @@ struct RecentReadCard {
 
       Button('刷新', { type: ButtonType.Capsule })
         .fontSize(12)
-        .fontColor('#007DFF')
+        .fontColor(this.accentColor)
         .height(30)
         .padding({ left: 10, right: 10 })
-        .backgroundColor(this.darkMode ? '#253041' : '#E7F0FF')
+        .backgroundColor(this.accentBackgroundColor)
         .stateEffect(true)
         .onClick(() => {
           postCardAction(this, {
@@ -191,7 +193,7 @@ struct RecentReadCard {
       .width('100%')
       .height('100%')
       .justifyContent(FlexAlign.Center)
-      .backgroundColor(accent || '#007DFF')
+      .backgroundColor(accent || this.accentColor)
 
       if (cover) {
         Image(cover)

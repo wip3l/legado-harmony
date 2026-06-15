@@ -6,6 +6,7 @@ export class SearchExploreSettings {
   showResultTags: boolean = true;
   promptAddToShelfOnBack: boolean = true;
   exactSearch: boolean = false;
+  exactSearchMatchAuthor: boolean = true;
   showSearchProgress: boolean = true;
   selectedSourceGroupsRaw: string = '';
 }
@@ -15,6 +16,7 @@ export class SearchExploreSettingsStore {
   static readonly KEY_SHOW_RESULT_TAGS: string = 'searchExploreShowResultTags';
   static readonly KEY_PROMPT_ADD_TO_SHELF_ON_BACK: string = 'searchExplorePromptAddToShelfOnBack';
   static readonly KEY_EXACT_SEARCH: string = 'searchExploreExactSearch';
+  static readonly KEY_EXACT_SEARCH_MATCH_AUTHOR: string = 'searchExploreExactSearchMatchAuthor';
   static readonly KEY_SHOW_SEARCH_PROGRESS: string = 'searchExploreShowSearchProgress';
   static readonly KEY_SELECTED_SOURCE_GROUPS: string = 'searchExploreSelectedSourceGroups';
   private static readonly STORE_NAME: string = 'search_explore_settings';
@@ -34,6 +36,8 @@ export class SearchExploreSettingsStore {
       store, SearchExploreSettingsStore.KEY_PROMPT_ADD_TO_SHELF_ON_BACK, true);
     settings.exactSearch = await SearchExploreSettingsStore.getBoolean(
       store, SearchExploreSettingsStore.KEY_EXACT_SEARCH, false);
+    settings.exactSearchMatchAuthor = await SearchExploreSettingsStore.getBoolean(
+      store, SearchExploreSettingsStore.KEY_EXACT_SEARCH_MATCH_AUTHOR, true);
     settings.showSearchProgress = await SearchExploreSettingsStore.getBoolean(
       store, SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, true);
     settings.selectedSourceGroupsRaw = await SearchExploreSettingsStore.getString(
@@ -49,6 +53,7 @@ export class SearchExploreSettingsStore {
     await store.put(SearchExploreSettingsStore.KEY_SHOW_RESULT_TAGS, settings.showResultTags);
     await store.put(SearchExploreSettingsStore.KEY_PROMPT_ADD_TO_SHELF_ON_BACK, settings.promptAddToShelfOnBack);
     await store.put(SearchExploreSettingsStore.KEY_EXACT_SEARCH, settings.exactSearch);
+    await store.put(SearchExploreSettingsStore.KEY_EXACT_SEARCH_MATCH_AUTHOR, settings.exactSearchMatchAuthor);
     await store.put(SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, settings.showSearchProgress);
     await store.put(SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, settings.selectedSourceGroupsRaw);
     await store.flush();
@@ -62,6 +67,9 @@ export class SearchExploreSettingsStore {
       SearchExploreSettingsStore.KEY_PROMPT_ADD_TO_SHELF_ON_BACK,
       settings.promptAddToShelfOnBack);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_EXACT_SEARCH, settings.exactSearch);
+    AppStorage.setOrCreate(
+      SearchExploreSettingsStore.KEY_EXACT_SEARCH_MATCH_AUTHOR,
+      settings.exactSearchMatchAuthor);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, settings.showSearchProgress);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, settings.selectedSourceGroupsRaw);
   }
@@ -81,6 +89,7 @@ export class SearchExploreSettingsStore {
     settings.showResultTags = source.showResultTags;
     settings.promptAddToShelfOnBack = source.promptAddToShelfOnBack;
     settings.exactSearch = source.exactSearch;
+    settings.exactSearchMatchAuthor = source.exactSearchMatchAuthor;
     settings.showSearchProgress = source.showSearchProgress;
     settings.selectedSourceGroupsRaw = source.selectedSourceGroupsRaw;
     return settings;

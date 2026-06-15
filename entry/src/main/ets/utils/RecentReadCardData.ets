@@ -8,6 +8,7 @@ import { BookshelfSortHelper } from './BookshelfSortHelper';
 import { CoverGallerySettings } from './CoverGallerySettings';
 import { CoverGallerySnapshot, CoverGalleryStore } from './CoverGalleryStore';
 import { SearchExplorePendingBook } from './SearchExplorePendingBook';
+import { AppThemeSettingsStore } from './AppThemeSettingsStore';
 
 export const RECENT_READ_FORM_NAME = 'RecentReadForm';
 export const RECENT_READ_FORM_ABILITY = 'RecentReadFormAbility';
@@ -23,6 +24,8 @@ export class RecentReadCardData {
   updatedAt: string = '';
   emptyTitle: string = '暂无最近阅读';
   emptySubtitle: string = '打开书架阅读后会显示在这里';
+  accentColor: string = '#007DFF';
+  accentBackgroundColor: string = '#1A007DFF';
 
   book0Name: string = '';
   book0Meta: string = '';
@@ -38,7 +41,7 @@ export class RecentReadCardData {
   book1Url: string = '';
   book1Cover: string = '';
   book1ReadTime: number = 0;
-  book1Accent: string = '#2E7D68';
+  book1Accent: string = '#007DFF';
 
   book2Name: string = '';
   book2Meta: string = '';
@@ -46,7 +49,7 @@ export class RecentReadCardData {
   book2Url: string = '';
   book2Cover: string = '';
   book2ReadTime: number = 0;
-  book2Accent: string = '#7A5AF8';
+  book2Accent: string = '#007DFF';
   formImages: Record<string, number> = {};
 }
 
@@ -78,7 +81,8 @@ export class RecentReadCardDataProvider {
     } catch (e) {
       console.warn('加载卡片封面图集设置失败:', e);
     }
-    return await RecentReadCardDataProvider.fromBooks(context, books, dimension, darkMode, coverSettings);
+    const accent = await RecentReadCardDataProvider.themeAccentColor(context, darkMode);
+    return await RecentReadCardDataProvider.fromBooks(context, books, dimension, darkMode, coverSettings, accent);
   }
 
   private static async fromBooks(
@@ -86,9 +90,12 @@ export class RecentReadCardDataProvider {
     books: Book[],
     dimension: number,
     darkMode: boolean,
-    coverSettings: CoverGallerySnapshot
+    coverSettings: CoverGallerySnapshot,
+    accent: string
   ): Promise<RecentReadCardData> {
     const data = RecentReadCardDataProvider.empty(dimension, darkMode);
+    data.accentColor = accent;
+    data.accentBackgroundColor = RecentReadCardDataProvider.alphaColor(accent, darkMode ? '33' : '1A');
     data.count = books.length;
     data.orderSignature = books
       .map((book: Book) => `${book.bookUrl}#${BookshelfSortHelper.getBookReadTime(book)}`)
@@ -96,13 +103,13 @@ export class RecentReadCardDataProvider {
     if (books.length > 0) {
       data.emptyTitle = '';
       data.emptySubtitle = '';
-      await RecentReadCardDataProvider.fillBook(context, data, 0, books[0], darkMode, coverSettings);
+      await RecentReadCardDataProvider.fillBook(context, data, 0, books[0], darkMode, coverSettings, accent);
     }
     if (books.length > 1) {
-      await RecentReadCardDataProvider.fillBook(context, data, 1, books[1], darkMode, coverSettings);
+      await RecentReadCardDataProvider.fillBook(context, data, 1, books[1], darkMode, coverSettings, accent);
     }
     if (books.length > 2) {
-      await RecentReadCardDataProvider.fillBook(context, data, 2, books[2], darkMode, coverSettings);
+      await RecentReadCardDataProvider.fillBook(context, data, 2, books[2], darkMode, coverSettings, accent);
     }
     return data;
   }
@@ -113,14 +120,14 @@ export class RecentReadCardDataProvider {
     index: number,
     book: Book,
     darkMode: boolean,
-    coverSettings: CoverGallerySnapshot
+    coverSettings: CoverGallerySnapshot,
+    accent: string
   ): Promise<void> {
     const name = book.name || '未命名书籍';
     const meta = RecentReadCardDataProvider.bookMeta(book);
     const progress = RecentReadCardDataProvider.progressText(book);
     const url = book.bookUrl;
     const cover = await RecentReadCardDataProvider.resolveCover(context, data, book, index, darkMode, coverSettings);
-    const accent = RecentReadCardDataProvider.accentColor(index);
     const readTime = BookshelfSortHelper.getBookReadTime(book);
 
     if (index === 0) {
@@ -215,9 +222,19 @@ export class RecentReadCardDataProvider {
     return '继续阅读';
   }
 
-  private static accentColor(index: number): string {
-    const colors = ['#007DFF', '#2E7D68', '#7A5AF8'];
-    return colors[index % colors.length];
+  private static async themeAccentColor(context: Context, darkMode: boolean): Promise<string> {
+    try {
+      const settings = await AppThemeSettingsStore.load(context);
+      return darkMode ? settings.darkAccentColor : settings.lightAccentColor;
+    } catch (e) {
+      console.warn('加载最近阅读卡片主题色失败:', e);
+      return darkMode ? AppThemeSettingsStore.DEFAULT_DARK_ACCENT_COLOR : AppThemeSettingsStore.DEFAULT_LIGHT_ACCENT_COLOR;
+    }
+  }
+
+  private static alphaColor(color: string, alpha: string): string {
+    const normalized = AppThemeSettingsStore.normalizeColor(color, AppThemeSettingsStore.DEFAULT_LIGHT_ACCENT_COLOR);
+    return `#${alpha}${normalized.substring(1)}`;
   }
 
   private static coverImageKey(index: number, version: number): string {

@@ -27,6 +27,7 @@ const MAX_SEARCH_CONCURRENCY = 12;
 
 export interface SearchOptions {
   exactMatch?: boolean;
+  exactMatchAuthor?: boolean;
   sourceGroups?: string[];
 }
 
@@ -290,7 +291,13 @@ export class SearchCoordinator {
       return sorted;
     }
     const normalizedKeyword = this.normalizeSearchText(keyword);
-    return sorted.filter((book: SearchBook) => this.normalizeSearchText(book.name) === normalizedKeyword);
+    return sorted.filter((book: SearchBook) => {
+      if (this.normalizeSearchText(book.name) === normalizedKeyword) {
+        return true;
+      }
+      return options.exactMatchAuthor === true &&
+        this.normalizeSearchText(book.author) === normalizedKeyword;
+    });
   }
 
   private normalizeSelectedGroups(groups: string[]): string[] {

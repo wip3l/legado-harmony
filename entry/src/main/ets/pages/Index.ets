@@ -19,6 +19,7 @@ import { SearchBookShelfHelper } from '../utils/SearchBookShelfHelper';
 import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 import { BookshelfSortHelper } from '../utils/BookshelfSortHelper';
 import { SearchExploreSettings, SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
+import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 
 @Entry
 @Component
@@ -1811,6 +1812,8 @@ struct ExplorePage {
               .height(28)
               .fontSize(12)
               .borderRadius(14)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .margin({ left: 12 })
               .onClick(() => {
                 this.openVerification();
@@ -1877,6 +1880,7 @@ struct ExplorePage {
               .borderRadius(18)
               .margin({ top: 14 })
               .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
               .onClick(() => {
                 this.openVerification();
               })
@@ -2171,6 +2175,7 @@ struct SearchPage {
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   @StorageLink('searchExploreExactSearch') exactSearch: boolean = false;
+  @StorageLink('searchExploreExactSearchMatchAuthor') exactSearchMatchAuthor: boolean = true;
   @StorageLink('searchExploreShowSearchProgress') showSearchProgress: boolean = true;
   @StorageLink('searchExploreSelectedSourceGroups') selectedSourceGroupsRaw: string = '';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
@@ -2236,10 +2241,12 @@ struct SearchPage {
           .alignItems(VerticalAlign.Center)
 
           Button(this.isSearching ? '停止' : '搜索')
-            .height(40)
+            .height(36)
+            .fontSize(14)
             .margin({ left: 8 })
-            .borderRadius(20)
+            .borderRadius(18)
             .backgroundColor(this.isSearching ? '#E53935' : this.buttonColor())
+            .fontColor('#FFFFFF')
             .onClick(() => {
               if (this.isSearching) {
                 this.coordinator?.cancel();
@@ -2267,6 +2274,8 @@ struct SearchPage {
                 .height(28)
                 .fontSize(12)
                 .borderRadius(14)
+                .backgroundColor(this.buttonColor())
+                .fontColor('#FFFFFF')
                 .margin({ right: 12 })
                 .onClick(() => {
                   this.openVerification();
@@ -2384,6 +2393,7 @@ struct SearchPage {
       this.coordinator = new SearchCoordinator(10);
       const allBooks = await this.coordinator.search(keyword, callback, {
         exactMatch: this.exactSearch,
+        exactMatchAuthor: this.exactSearchMatchAuthor,
         sourceGroups: this.searchSourceGroups()
       });
       const verifyUrl = this.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
@@ -2630,6 +2640,7 @@ struct SearchPage {
     settings.showResultTags = this.searchExploreShowResultTags;
     settings.promptAddToShelfOnBack = this.searchExplorePromptAddToShelfOnBack;
     settings.exactSearch = this.exactSearch;
+    settings.exactSearchMatchAuthor = this.exactSearchMatchAuthor;
     settings.showSearchProgress = this.showSearchProgress;
     settings.selectedSourceGroupsRaw = this.selectedSourceGroupsRaw;
     SearchExploreSettingsStore.applyToStorage(settings);
@@ -2652,6 +2663,11 @@ struct SearchPage {
 
         this.switchSettingRow('精准搜索', this.exactSearch, (checked: boolean) => {
           this.exactSearch = checked;
+          this.saveSearchExploreSettings();
+        })
+
+        this.switchSettingRow('匹配作者', this.exactSearchMatchAuthor, (checked: boolean) => {
+          this.exactSearchMatchAuthor = checked;
           this.saveSearchExploreSettings();
         })
 
@@ -2756,7 +2772,7 @@ struct SearchPage {
       .width(36)
       .height(36)
       .textAlign(TextAlign.Center)
-      .backgroundColor(this.appDarkMode ? '#203753' : '#EAF2FF')
+      .backgroundColor(this.buttonBackgroundColor())
       .borderRadius(18)
       .margin({ right: 2 })
       .onClick(() => {
@@ -2838,6 +2854,11 @@ struct SearchPage {
 
   buttonColor(): string {
     return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  }
+
+  buttonBackgroundColor(): string {
+    const normalized = AppThemeSettingsStore.normalizeColor(this.buttonColor(), AppThemeSettingsStore.DEFAULT_LIGHT_BUTTON_COLOR);
+    return `#${this.appDarkMode ? '33' : '1A'}${normalized.substring(1)}`;
   }
 
   resultListBottomInset(): number {
