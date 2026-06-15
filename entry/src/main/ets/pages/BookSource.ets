@@ -1,7 +1,8 @@
 import { router, promptAction } from '@kit.ArkUI';
-import { BookSource, BookListRule, SearchRule, ExploreRule, BookInfoRule, TocRule, ContentRule } from '../model/data/Book';
+import { BookSource, SearchBook, BookListRule, SearchRule, ExploreRule, BookInfoRule, TocRule, ContentRule } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { HttpClient } from '../core/http/HttpClient';
+import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
 import { syncSystemBars } from '../utils/SystemBars';
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
@@ -9,6 +10,7 @@ import { util } from '@kit.ArkTS';
 
 const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const BOOK_SOURCE_IMPORT_TIMEOUT_MS = 20000;
+const BOOK_SOURCE_CHECK_KEYWORD = '斗破苍穹';
 
 @Entry
 @Component
@@ -33,6 +35,14 @@ struct BookSourcePage {
   @State groupNameInput: string = '';
   @State importUrl: string = '';
   @State isImporting: boolean = false;
+  @State showCheckDialog: boolean = false;
+  @State isCheckingSources: boolean = false;
+  @State checkDone: number = 0;
+  @State checkTotal: number = 0;
+  @State checkOkCount: number = 0;
+  @State checkBadUrls: string[] = [];
+  @State checkBadNames: string[] = [];
+  @State checkStatus: string = '';
 
   aboutToAppear() {
     this.syncBars();
@@ -92,6 +102,16 @@ struct BookSourcePage {
             })
 
           if (!this.selectionMode) {
+            Text('校验')
+              .fontSize(15)
+              .fontColor(this.isCheckingSources ? this.subTextColor() : this.primaryTextColor())
+              .width(52)
+              .height(56)
+              .textAlign(TextAlign.Center)
+              .onClick(() => {
+                this.startCheckEnabledSources();
+              })
+
             Text('+')
               .fontSize(24)
               .fontColor(this.primaryTextColor())
@@ -679,6 +699,115 @@ struct BookSourcePage {
         })
       }
 
+      if (this.showCheckDialog) {
+        Column() {
+          Column() {
+            Text(this.isCheckingSources ? '正在校验书源' : '校验完成')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 12 })
+
+            if (this.isCheckingSources) {
+              LoadingProgress()
+                .width(42)
+                .height(42)
+                .color(this.accentColor())
+                .margin({ bottom: 12 })
+            }
+
+            Text(this.checkStatus || (this.isCheckingSources ? '准备中...' : this.checkSummaryText()))
+              .fontSize(14)
+              .fontColor(this.secondaryTextColor())
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 12 })
+
+            Progress({ value: this.checkDone, total: Math.max(this.checkTotal, 1), type: ProgressType.Linear })
+              .width('100%')
+              .height(8)
+              .color(this.buttonColor())
+              .backgroundColor(this.inputColor())
+              .margin({ bottom: 12 })
+
+            Text(`${this.checkDone}/${this.checkTotal}`)
+              .fontSize(13)
+              .fontColor(this.subTextColor())
+              .margin({ bottom: this.isCheckingSources ? 0 : 12 })
+
+            if (!this.isCheckingSources) {
+              Text(this.checkResultText())
+                .fontSize(14)
+                .fontColor(this.secondaryTextColor())
+                .width('100%')
+                .textAlign(TextAlign.Center)
+                .margin({ bottom: 12 })
+
+              if (this.checkBadUrls.length > 0) {
+                Column() {
+                  ForEach(this.checkBadNames, (name: string) => {
+                    Text(name)
+                      .fontSize(13)
+                      .fontColor(this.subTextColor())
+                      .width('100%')
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .margin({ bottom: 6 })
+                  }, (name: string) => name)
+                }
+                .width('100%')
+                .constraintSize({ maxHeight: 120 })
+                .padding(10)
+                .backgroundColor(this.inputColor())
+                .borderRadius(8)
+                .margin({ bottom: 16 })
+              }
+
+              Row() {
+                Button('一键禁用')
+                  .width('45%')
+                  .height(44)
+                  .enabled(this.checkBadUrls.length > 0)
+                  .backgroundColor(this.checkBadUrls.length > 0 ? '#E53935' : this.inputColor())
+                  .fontColor(this.checkBadUrls.length > 0 ? '#FFFFFF' : this.subTextColor())
+                  .onClick(() => {
+                    this.disableFailedCheckedSources();
+                  })
+
+                Button('取消')
+                  .width('45%')
+                  .height(44)
+                  .backgroundColor(this.inputColor())
+                  .fontColor(this.primaryTextColor())
+                  .onClick(() => {
+                    this.showCheckDialog = false;
+                  })
+              }
+              .width('100%')
+              .justifyContent(FlexAlign.SpaceBetween)
+            }
+          }
+          .width('88%')
+          .padding(24)
+          .backgroundColor(this.cardColor())
+          .borderRadius(12)
+          .alignItems(HorizontalAlign.Center)
+          .onClick(() => {
+          })
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#80000000')
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          if (!this.isCheckingSources) {
+            this.showCheckDialog = false;
+          }
+        })
+      }
+
       if (this.isImporting) {
         Column() {
           Column() {
@@ -988,6 +1117,111 @@ struct BookSourcePage {
       await db.updateBookSource(source);
     } catch (e) {
       console.error('更新书源失败:', e);
+    }
+  }
+
+  async startCheckEnabledSources(): Promise<void> {
+    if (this.selectionMode) {
+      return;
+    }
+    if (this.isCheckingSources) {
+      promptAction.showToast({ message: '正在校验中' });
+      return;
+    }
+
+    const db = AppDatabase.getInstance();
+    const enabledSources = await db.getEnabledBookSources();
+    if (enabledSources.length === 0) {
+      promptAction.showToast({ message: '暂无启用书源' });
+      return;
+    }
+
+    this.showCheckDialog = true;
+    this.isCheckingSources = true;
+    this.checkDone = 0;
+    this.checkTotal = enabledSources.length;
+    this.checkOkCount = 0;
+    this.checkBadUrls = [];
+    this.checkBadNames = [];
+    this.checkStatus = `准备校验 ${enabledSources.length} 个启用书源`;
+
+    try {
+      const coordinator = new SearchCoordinator(8);
+      const results = await coordinator.search(BOOK_SOURCE_CHECK_KEYWORD, (progress: SearchProgress) => {
+        this.checkDone = progress.done;
+        this.checkTotal = progress.total;
+        this.checkStatus = this.formatCheckProgressStatus(progress);
+      });
+
+      const okUrls = this.uniqueResultOrigins(results);
+      const badSources = enabledSources.filter((source: BookSource) => !okUrls.includes(source.bookSourceUrl));
+      this.checkOkCount = Math.max(0, enabledSources.length - badSources.length);
+      this.checkBadUrls = badSources.map((source: BookSource) => source.bookSourceUrl);
+      this.checkBadNames = badSources.map((source: BookSource) => source.bookSourceName || source.bookSourceUrl);
+      this.checkDone = enabledSources.length;
+      this.checkTotal = enabledSources.length;
+      this.checkStatus = this.checkSummaryText();
+    } catch (e) {
+      console.error('校验书源失败:', e);
+      this.checkStatus = '校验失败，请稍后重试';
+      promptAction.showToast({ message: '校验失败' });
+    } finally {
+      this.isCheckingSources = false;
+    }
+  }
+
+  uniqueResultOrigins(results: SearchBook[]): string[] {
+    const origins: string[] = [];
+    for (const book of results) {
+      const origin = book.origin || '';
+      if (origin && !origins.includes(origin)) {
+        origins.push(origin);
+      }
+    }
+    return origins;
+  }
+
+  checkSummaryText(): string {
+    return `已校验 ${this.checkTotal} 个启用书源`;
+  }
+
+  formatCheckProgressStatus(progress: SearchProgress): string {
+    const verifyText = progress.needVerification ? '；有书源需要网页验证' : '';
+    return `已校验 ${progress.done}/${progress.total}，命中 ${progress.results.length} 本${verifyText}`;
+  }
+
+  checkResultText(): string {
+    if (this.checkTotal === 0) {
+      return '没有需要校验的启用书源';
+    }
+    if (this.checkBadUrls.length === 0) {
+      return `全部可用，共 ${this.checkOkCount} 个书源通过校验`;
+    }
+    return `可用 ${this.checkOkCount} 个，异常 ${this.checkBadUrls.length} 个`;
+  }
+
+  async disableFailedCheckedSources(): Promise<void> {
+    if (this.checkBadUrls.length === 0) {
+      return;
+    }
+
+    try {
+      const db = AppDatabase.getInstance();
+      for (const url of this.checkBadUrls) {
+        const source = await db.getBookSource(url);
+        if (source) {
+          source.enabled = false;
+          source.lastUpdateTime = Date.now();
+          await db.updateBookSource(source);
+        }
+      }
+      const disabledCount = this.checkBadUrls.length;
+      this.showCheckDialog = false;
+      await this.loadSources();
+      promptAction.showToast({ message: `已禁用 ${disabledCount} 个异常书源` });
+    } catch (e) {
+      console.error('禁用异常书源失败:', e);
+      promptAction.showToast({ message: '禁用失败' });
     }
   }
 
