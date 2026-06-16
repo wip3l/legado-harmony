@@ -3,6 +3,7 @@ import preferences from '@ohos.data.preferences';
 
 export class SearchExploreSettings {
   showResultCover: boolean = true;
+  useBookshelfCoverGallery: boolean = true;
   showResultTags: boolean = true;
   promptAddToShelfOnBack: boolean = true;
   exactSearch: boolean = false;
@@ -14,6 +15,7 @@ export class SearchExploreSettings {
 
 export class SearchExploreSettingsStore {
   static readonly KEY_SHOW_RESULT_COVER: string = 'searchExploreShowResultCover';
+  static readonly KEY_USE_BOOKSHELF_COVER_GALLERY: string = 'searchExploreUseBookshelfCoverGallery';
   static readonly KEY_SHOW_RESULT_TAGS: string = 'searchExploreShowResultTags';
   static readonly KEY_PROMPT_ADD_TO_SHELF_ON_BACK: string = 'searchExplorePromptAddToShelfOnBack';
   static readonly KEY_EXACT_SEARCH: string = 'searchExploreExactSearch';
@@ -32,6 +34,8 @@ export class SearchExploreSettingsStore {
     const settings = new SearchExploreSettings();
     settings.showResultCover = await SearchExploreSettingsStore.getBoolean(
       store, SearchExploreSettingsStore.KEY_SHOW_RESULT_COVER, true);
+    settings.useBookshelfCoverGallery = await SearchExploreSettingsStore.getBoolean(
+      store, SearchExploreSettingsStore.KEY_USE_BOOKSHELF_COVER_GALLERY, true);
     settings.showResultTags = await SearchExploreSettingsStore.getBoolean(
       store, SearchExploreSettingsStore.KEY_SHOW_RESULT_TAGS, true);
     settings.promptAddToShelfOnBack = await SearchExploreSettingsStore.getBoolean(
@@ -54,6 +58,7 @@ export class SearchExploreSettingsStore {
     SearchExploreSettingsStore.cachedSettings = SearchExploreSettingsStore.clone(settings);
     const store = await preferences.getPreferences(context, SearchExploreSettingsStore.STORE_NAME);
     await store.put(SearchExploreSettingsStore.KEY_SHOW_RESULT_COVER, settings.showResultCover);
+    await store.put(SearchExploreSettingsStore.KEY_USE_BOOKSHELF_COVER_GALLERY, settings.useBookshelfCoverGallery);
     await store.put(SearchExploreSettingsStore.KEY_SHOW_RESULT_TAGS, settings.showResultTags);
     await store.put(SearchExploreSettingsStore.KEY_PROMPT_ADD_TO_SHELF_ON_BACK, settings.promptAddToShelfOnBack);
     await store.put(SearchExploreSettingsStore.KEY_EXACT_SEARCH, settings.exactSearch);
@@ -67,6 +72,9 @@ export class SearchExploreSettingsStore {
   static applyToStorage(settings: SearchExploreSettings): void {
     SearchExploreSettingsStore.cachedSettings = SearchExploreSettingsStore.clone(settings);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SHOW_RESULT_COVER, settings.showResultCover);
+    AppStorage.setOrCreate(
+      SearchExploreSettingsStore.KEY_USE_BOOKSHELF_COVER_GALLERY,
+      settings.useBookshelfCoverGallery);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SHOW_RESULT_TAGS, settings.showResultTags);
     AppStorage.setOrCreate(
       SearchExploreSettingsStore.KEY_PROMPT_ADD_TO_SHELF_ON_BACK,
@@ -92,6 +100,7 @@ export class SearchExploreSettingsStore {
   private static clone(source: SearchExploreSettings): SearchExploreSettings {
     const settings = new SearchExploreSettings();
     settings.showResultCover = source.showResultCover;
+    settings.useBookshelfCoverGallery = source.useBookshelfCoverGallery;
     settings.showResultTags = source.showResultTags;
     settings.promptAddToShelfOnBack = source.promptAddToShelfOnBack;
     settings.exactSearch = source.exactSearch;

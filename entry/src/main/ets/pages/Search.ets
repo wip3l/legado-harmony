@@ -33,6 +33,7 @@ struct SearchPage {
   @State sourceGroups: string[] = [];
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
+  @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = true;
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   @StorageLink('searchExploreExactSearch') exactSearch: boolean = false;
@@ -150,6 +151,7 @@ struct SearchPage {
           busyBookKeys: this.addingShelfBookKeys,
           showLoadingMore: this.isSearching,
           showResultCover: this.searchExploreShowResultCover,
+          useBookshelfCoverGallery: this.searchExploreUseBookshelfCoverGallery,
           showResultTags: this.searchExploreShowResultTags,
           pageColor: this.pageColor(),
           cardColor: this.cardColor(),
@@ -550,6 +552,7 @@ struct SearchPage {
   saveSearchExploreSettings(): void {
     const settings = new SearchExploreSettings();
     settings.showResultCover = this.searchExploreShowResultCover;
+    settings.useBookshelfCoverGallery = this.searchExploreUseBookshelfCoverGallery;
     settings.showResultTags = this.searchExploreShowResultTags;
     settings.promptAddToShelfOnBack = this.searchExplorePromptAddToShelfOnBack;
     settings.exactSearch = this.exactSearch;

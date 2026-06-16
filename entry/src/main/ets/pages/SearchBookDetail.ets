@@ -6,6 +6,7 @@ import { syncSystemBars } from '../utils/SystemBars';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
 import { BookIdentity } from '../utils/BookIdentity';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
+import { CoverGallerySettings } from '../utils/CoverGallerySettings';
 import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
 import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 
@@ -17,6 +18,11 @@ struct SearchBookDetailPage {
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
+  @StorageLink('bookshelfCoverAlbums') bookshelfCoverAlbums: string = '';
+  @StorageLink('bookshelfLightCoverAlbumId') bookshelfLightCoverAlbumId: string = '';
+  @StorageLink('bookshelfDarkCoverAlbumId') bookshelfDarkCoverAlbumId: string = '';
+  @StorageLink('bookshelfCoverMode') bookshelfCoverMode: string = 'sequence';
+  @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = true;
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State bookUrl: string = '';
@@ -171,7 +177,7 @@ struct SearchBookDetailPage {
             }
 
             Row({ space: 14 }) {
-              this.coverView(this.name, this.coverUrl, 88, 118)
+              this.coverView(this.name, this.displayCoverUrl(), 88, 118)
 
               Column() {
                 Text('简介')
@@ -665,6 +671,36 @@ struct SearchBookDetailPage {
 
   getTags(): string[] {
     return BookDisplayHelper.splitTags(this.kind, '');
+  }
+
+  displayCoverUrl(): string {
+    if (this.searchExploreUseBookshelfCoverGallery) {
+      const galleryCover = this.bookshelfGalleryCoverUrl();
+      if (galleryCover) {
+        return galleryCover;
+      }
+    }
+    return this.coverUrl;
+  }
+
+  bookshelfGalleryCoverUrl(): string {
+    const book = new Book();
+    book.name = this.name;
+    book.author = this.author;
+    book.bookUrl = this.bookUrl;
+    book.coverUrl = this.coverUrl;
+    const covers = CoverGallerySettings.getDisplayCoverList(
+      book,
+      this.appDarkMode,
+      this.bookshelfCoverAlbums,
+      this.bookshelfLightCoverAlbumId,
+      this.bookshelfDarkCoverAlbumId,
+      'all',
+      '',
+      true,
+      this.bookshelfCoverMode
+    );
+    return BookDisplayHelper.pickCover(covers);
   }
 
   @Builder

@@ -1,5 +1,6 @@
-import { SearchBook } from '../../model/data/Book';
+import { Book, SearchBook } from '../../model/data/Book';
 import { BookDisplayHelper } from '../../utils/BookDisplayHelper';
+import { CoverGallerySettings } from '../../utils/CoverGallerySettings';
 import { SearchBookShelfHelper } from '../../utils/SearchBookShelfHelper';
 
 export type SearchBookAction = (book: SearchBook) => void;
@@ -8,12 +9,17 @@ export type SearchBookAction = (book: SearchBook) => void;
 export struct SearchBookResultList {
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
+  @StorageLink('bookshelfCoverAlbums') bookshelfCoverAlbums: string = '';
+  @StorageLink('bookshelfLightCoverAlbumId') bookshelfLightCoverAlbumId: string = '';
+  @StorageLink('bookshelfDarkCoverAlbumId') bookshelfDarkCoverAlbumId: string = '';
+  @StorageLink('bookshelfCoverMode') bookshelfCoverMode: string = 'sequence';
   @Prop books: SearchBook[] = [];
   @Prop shelfBookKeys: string[] = [];
   @Prop busyBookKeys: string[] = [];
   @Prop showLoadingMore: boolean = false;
   @Prop showKind: boolean = false;
   @Prop showResultCover: boolean = true;
+  @Prop useBookshelfCoverGallery: boolean = true;
   @Prop showResultTags: boolean = true;
   @Prop showSourceLine: boolean = true;
   @Prop pageColor: string = '#F5F5F5';
@@ -156,8 +162,8 @@ export struct SearchBookResultList {
       .justifyContent(FlexAlign.Center)
       .backgroundColor(this.accentColor())
 
-      if (book.coverUrl) {
-        Image(book.coverUrl)
+      if (this.displayCover(book)) {
+        Image(this.displayCover(book))
           .width(54)
           .height(72)
           .objectFit(ImageFit.Cover)
@@ -176,6 +182,36 @@ export struct SearchBookResultList {
 
   accentColor(): string {
     return this.isDarkMode() ? this.appDarkAccentColor : this.appLightAccentColor;
+  }
+
+  displayCover(book: SearchBook): string {
+    if (this.useBookshelfCoverGallery) {
+      const galleryCover = this.bookshelfGalleryCover(book);
+      if (galleryCover) {
+        return galleryCover;
+      }
+    }
+    return book.coverUrl;
+  }
+
+  bookshelfGalleryCover(searchBook: SearchBook): string {
+    const book = new Book();
+    book.name = searchBook.name;
+    book.author = searchBook.author;
+    book.bookUrl = searchBook.bookUrl;
+    book.coverUrl = searchBook.coverUrl;
+    const covers = CoverGallerySettings.getDisplayCoverList(
+      book,
+      this.isDarkMode(),
+      this.bookshelfCoverAlbums,
+      this.bookshelfLightCoverAlbumId,
+      this.bookshelfDarkCoverAlbumId,
+      'all',
+      '',
+      true,
+      this.bookshelfCoverMode
+    );
+    return BookDisplayHelper.pickCover(covers);
   }
 
   itemKey(book: SearchBook): string {

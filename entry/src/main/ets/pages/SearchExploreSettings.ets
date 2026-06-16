@@ -8,6 +8,7 @@ import { AppDatabase } from '../model/data/AppDatabase';
 @Component
 struct SearchExploreSettingsPage {
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
+  @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = true;
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   @StorageLink('searchExploreExactSearch') searchExploreExactSearch: boolean = false;
@@ -47,6 +48,13 @@ struct SearchExploreSettingsPage {
               this.searchExploreShowResultCover = value;
               this.onSettingChanged();
             })
+          if (this.searchExploreShowResultCover) {
+            this.switchItem('使用书架图集', '开启后结果列表封面使用书架封面设置的浅色/深色图集',
+              this.searchExploreUseBookshelfCoverGallery, (value: boolean) => {
+                this.searchExploreUseBookshelfCoverGallery = value;
+                this.onSettingChanged();
+              })
+          }
           this.switchItem('显示结果标签', '开启后搜索和发现结果展示书籍标签',
             this.searchExploreShowResultTags, (value: boolean) => {
               this.searchExploreShowResultTags = value;
@@ -97,6 +105,7 @@ struct SearchExploreSettingsPage {
     try {
       const settings = await SearchExploreSettingsStore.load(getContext(this));
       this.searchExploreShowResultCover = settings.showResultCover;
+      this.searchExploreUseBookshelfCoverGallery = settings.useBookshelfCoverGallery;
       this.searchExploreShowResultTags = settings.showResultTags;
       this.searchExplorePromptAddToShelfOnBack = settings.promptAddToShelfOnBack;
       this.searchExploreExactSearch = settings.exactSearch;
@@ -134,6 +143,7 @@ struct SearchExploreSettingsPage {
   onSettingChanged(): void {
     const settings = new SearchExploreSettings();
     settings.showResultCover = this.searchExploreShowResultCover;
+    settings.useBookshelfCoverGallery = this.searchExploreUseBookshelfCoverGallery;
     settings.showResultTags = this.searchExploreShowResultTags;
     settings.promptAddToShelfOnBack = this.searchExplorePromptAddToShelfOnBack;
     settings.exactSearch = this.searchExploreExactSearch;
