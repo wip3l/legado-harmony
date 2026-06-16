@@ -43,6 +43,7 @@ struct BookSourcePage {
   @State checkBadUrls: string[] = [];
   @State checkBadNames: string[] = [];
   @State checkStatus: string = '';
+  private hasShownOnce: boolean = false;
 
   aboutToAppear() {
     this.syncBars();
@@ -51,6 +52,19 @@ struct BookSourcePage {
 
   onPageShow(): void {
     this.syncBars();
+    if (!this.hasShownOnce) {
+      this.hasShownOnce = true;
+      return;
+    }
+    this.refreshSources();
+  }
+
+  async refreshSources(): Promise<void> {
+    if (this.searchText) {
+      await this.searchSources();
+    } else {
+      await this.loadSources();
+    }
   }
 
   async loadSources() {
@@ -290,7 +304,7 @@ struct BookSourcePage {
                   }
                 })
               }
-            })
+            }, (source: BookSource) => this.sourceListItemKey(source))
           }
           .width('100%')
           .layoutWeight(1)
@@ -746,23 +760,28 @@ struct BookSourcePage {
                 .margin({ bottom: 12 })
 
               if (this.checkBadUrls.length > 0) {
-                Column() {
-                  ForEach(this.checkBadNames, (name: string) => {
-                    Text(name)
-                      .fontSize(13)
-                      .fontColor(this.subTextColor())
-                      .width('100%')
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                      .margin({ bottom: 6 })
-                  }, (name: string) => name)
+                Scroll() {
+                  Column() {
+                    ForEach(this.checkBadNames, (name: string, index: number) => {
+                      Text(name)
+                        .fontSize(13)
+                        .fontColor(this.subTextColor())
+                        .width('100%')
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .margin({ bottom: index === this.checkBadNames.length - 1 ? 0 : 6 })
+                    }, (name: string, index: number) => `${index}-${name}`)
+                  }
+                  .width('100%')
+                  .alignItems(HorizontalAlign.Start)
                 }
                 .width('100%')
-                .constraintSize({ maxHeight: 120 })
+                .height(Math.min(this.checkBadNames.length * 25 + 20, 120))
                 .padding(10)
                 .backgroundColor(this.inputColor())
                 .borderRadius(8)
                 .margin({ bottom: 16 })
+                .scrollBar(BarState.Auto)
               }
 
               Row() {
@@ -790,6 +809,7 @@ struct BookSourcePage {
             }
           }
           .width('88%')
+          .constraintSize({ maxHeight: '78%' })
           .padding(24)
           .backgroundColor(this.cardColor())
           .borderRadius(12)
@@ -929,6 +949,10 @@ struct BookSourcePage {
     this.selectedSourceUrls = [];
     this.showBatchDeleteDialog = false;
     this.showMoreActionDialog = false;
+  }
+
+  sourceListItemKey(source: BookSource): string {
+    return `${source.bookSourceUrl}_${source.bookSourceGroup || ''}_${source.enabled ? '1' : '0'}_${source.enabledExplore ? '1' : '0'}_${source.bookSourceName || ''}`;
   }
 
   isSourceSelected(bookSourceUrl: string): boolean {

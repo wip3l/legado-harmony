@@ -1845,6 +1845,7 @@ struct ExplorePage {
           showKind: true,
           showResultCover: this.searchExploreShowResultCover,
           showResultTags: this.searchExploreShowResultTags,
+          showSourceLine: false,
           pageColor: this.pageColor(),
           cardColor: this.glassCardColor(),
           itemBorderColor: this.glassBorderColor(),

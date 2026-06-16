@@ -99,6 +99,7 @@ struct VerifyWebPage {
         Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
           .width('100%')
           .height(2)
+          .color(this.accentColor())
       }
 
       Web({ src: this.url, controller: this.controller })

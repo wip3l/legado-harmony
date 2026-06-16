@@ -15,6 +15,7 @@ export struct SearchBookResultList {
   @Prop showKind: boolean = false;
   @Prop showResultCover: boolean = true;
   @Prop showResultTags: boolean = true;
+  @Prop showSourceLine: boolean = true;
   @Prop pageColor: string = '#F5F5F5';
   @Prop cardColor: string = '#FFFFFF';
   @Prop itemBorderColor: string = '#00000000';
@@ -59,12 +60,14 @@ export struct SearchBookResultList {
                 .margin({ top: 7 })
               }
 
-              Text(this.sourceLine(book))
-                .fontSize(12)
-                .fontColor(this.subTextColor)
-                .margin({ top: this.showResultTags && this.getTags(book).length > 0 ? 6 : 4 })
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              if (this.showSourceLine) {
+                Text(this.sourceLine(book))
+                  .fontSize(12)
+                  .fontColor(this.subTextColor)
+                  .margin({ top: this.showResultTags && this.getTags(book).length > 0 ? 6 : 4 })
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
             }
             .layoutWeight(1)
             .margin({ left: this.showResultCover ? 12 : 0 })
