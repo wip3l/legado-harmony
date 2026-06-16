@@ -36,6 +36,12 @@ interface PageTurnPreview {
   pageIndex: number;
 }
 
+interface ScrollParagraph {
+  key: string;
+  text: string;
+  isTitle: boolean;
+}
+
 @Entry
 @Component
 struct ReadBookPage {
@@ -59,6 +65,9 @@ struct ReadBookPage {
   @State currentPageIndex: number = 0;
   @State currentPageText: string = '';
   @State pageRenderVersion: number = 0;
+  @State scrollContentText: string = '';
+  @State scrollParagraphs: ScrollParagraph[] = [];
+  @State scrollRenderVersion: number = 0;
   @State pageViewWidth: number = 0;
   @State pageViewHeight: number = 0;
   @State statusBarSafeHeight: number = 0;
@@ -103,6 +112,7 @@ struct ReadBookPage {
   private isPageTurning: boolean = false;
   private isAutoLoadingScrollChapter: boolean = false;
   private suppressScrollReachStart: boolean = false;
+  private suppressScrollReachEnd: boolean = false;
   private lastRecentReadCardReloadAt: number = 0;
   private lastRecentReadCardChapterIndex: number = -1;
   private readerTouchStartX: number = 0;
@@ -239,7 +249,7 @@ struct ReadBookPage {
         return;
       }
       if (!this.book) {
-        this.content = '书籍不存在，请先从搜索结果加入书架。';
+        this.setReaderContent('书籍不存在，请先从搜索结果加入书架。');
         this.isLoading = false;
         return;
       }
@@ -264,16 +274,16 @@ struct ReadBookPage {
       if (this.chapters.length > 0) {
         await this.loadContent();
       } else if (this.book.origin !== 'local' && this.book.origin) {
-        this.content = `《${this.book.name}》\n\n作者：${this.book.author || '未知'}\n来源：${this.book.originName || this.book.origin}\n\n正在尝试解析目录...`;
+        this.setReaderContent(`《${this.book.name}》\n\n作者：${this.book.author || '未知'}\n来源：${this.book.originName || this.book.origin}\n\n正在尝试解析目录...`);
         this.loadStatus = '正在获取目录...';
         await this.retryFetchChapters();
       } else {
-        this.content = this.buildBookPreview();
+        this.setReaderContent(this.buildBookPreview());
         this.isLoading = false;
       }
     } catch (e) {
       console.error('加载书籍失败:', e);
-      this.content = '加载失败,请重试';
+      this.setReaderContent('加载失败,请重试');
       this.isLoading = false;
     } finally {
       this.updatePendingVerification();
@@ -290,13 +300,13 @@ struct ReadBookPage {
         await this.loadContent();
       } else {
         this.updatePendingVerification();
-        this.content = this.buildBookPreview();
+        this.setReaderContent(this.buildBookPreview());
         this.isLoading = false;
       }
     } catch (e) {
       console.error('重试获取目录失败:', e);
       this.updatePendingVerification();
-      this.content = this.buildBookPreview();
+      this.setReaderContent(this.buildBookPreview());
       this.isLoading = false;
     }
   }
@@ -312,6 +322,9 @@ struct ReadBookPage {
     this.pagedContentText = '';
     this.currentPageIndex = 0;
     this.currentPageText = '';
+    this.scrollContentText = '';
+    this.scrollParagraphs = [];
+    this.scrollRenderVersion = 0;
     this.pageViewWidth = 0;
     this.pageViewHeight = 0;
     this.currentScrollOffset = 0;
@@ -333,37 +346,39 @@ struct ReadBookPage {
     this.pageRenderVersion++;
   }
 
-  async loadContent(silent: boolean = false) {
+  async loadContent(silent: boolean = false, targetChapterIndex: number = this.currentChapterIndex) {
     if (this.chapters.length === 0) {
-      this.content = this.buildBookPreview();
+      this.setReaderContent(this.buildBookPreview());
       this.isLoading = false;
       return;
     }
     
     const engine = ReadBookEngine.get();
+    const chapterIndex = this.clampChapterIndex(targetChapterIndex);
     const loadSerial = ++this.contentLoadSerial;
-    const showLoading = !silent && !engine.hasCachedContent(this.currentChapterIndex);
+    const showLoading = !silent && !engine.hasCachedContent(chapterIndex);
     if (showLoading) {
       this.isLoading = true;
       this.loadStatus = '正在加载章节内容...';
     }
     try {
-      const body = await engine.loadContent(this.currentChapterIndex);
+      const body = await engine.loadContent(chapterIndex);
       if (loadSerial !== this.contentLoadSerial) {
         return;
       }
+      this.currentChapterIndex = chapterIndex;
       let loadedContent = body;
       if (body) {
         this.content = body;
         this.chapters = [...engine.chapters];
       } else {
         this.updatePendingVerification();
-        const c = this.chapters[this.currentChapterIndex];
+        const c = this.chapters[chapterIndex];
         loadedContent = this.verificationUrl ? `${c ? c.title : '当前章节'}\n\n该书源需要先完成网页验证。请点击阅读菜单里的「验证」，完成后返回并重试。` :
           (c ? `${c.title}\n\n章节内容加载失败，请稍后重试或尝试换源。` : '加载失败');
         this.content = loadedContent;
       }
-      this.paginateContent(loadedContent);
+      this.paginateContent(loadedContent, chapterIndex);
       this.preloadReaderContent();
     } catch (e) {
       console.error('加载内容失败:', e);
@@ -462,33 +477,7 @@ struct ReadBookPage {
         if (!this.shouldRenderPrimaryReaderContent()) {
           this.readerLoadingPanel()
         } else if (this.readerPageTurnMode === 0) {
-          Column() {
-            Scroll(this.contentScroller) {
-            Column() {
-              this.readingText(this.getPagedSourceText(), 24 + this.readerParagraphSpacing + this.getReaderContentBottomReserve())
-            }
-            .width('100%')
-            }
-            .width('100%')
-            .layoutWeight(1)
-            .scrollBar(BarState.Off)
-            .onScroll((xOffset: number, yOffset: number) => {
-              this.currentScrollOffset = Math.max(0, yOffset);
-            })
-            .onScrollStop(() => {
-              this.saveReadingProgress();
-            })
-            .onReachEnd(() => {
-              this.loadNextChapterOnScrollEnd();
-            })
-            .onReachStart(() => {
-              this.loadPrevChapterOnScrollStart();
-            })
-
-            this.readerBottomInfoBar()
-          }
-          .width('100%')
-          .height('100%')
+          this.readerScrollModeContent(this.scrollRenderVersion)
         } else {
           Column() {
             Stack() {
@@ -770,9 +759,10 @@ struct ReadBookPage {
                       this.pendingRestorePageIndex = 0;
                       this.currentScrollOffset = 0;
                       this.pendingRestoreScrollOffset = 0;
+                      this.prepareScrollChapterReload(index);
                       this.showToc = false;
                       this.showMenu = false;
-                      await this.loadContent();
+                      await this.loadContent(false, index);
                       await this.saveReadingProgress();
                     })
                 }
@@ -1113,6 +1103,11 @@ struct ReadBookPage {
       return (this.appDarkMode || this.readerThemeIndex === 3) ? '#DDEFE5' : '#244B35';
     }
     return (this.appDarkMode || this.readerThemeIndex === 3) ? '#B8BDC7' : '#333333';
+  }
+
+  setReaderContent(text: string): void {
+    this.content = text;
+    this.paginateContent(text);
   }
 
   openTocPanel(): void {
@@ -2951,6 +2946,151 @@ struct ReadBookPage {
   }
 
   @Builder
+  readerScrollModeContent(renderVersion: number) {
+    Column() {
+      if (renderVersion % 2 === 0) {
+        this.readerScrollContainerEven(renderVersion)
+      } else {
+        this.readerScrollContainerOdd(renderVersion)
+      }
+
+      this.readerBottomInfoBar()
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  readerScrollContainerEven(renderVersion: number) {
+    Scroll(this.contentScroller) {
+      Column() {
+        this.readerScrollContentLayer(renderVersion)
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .scrollBar(BarState.Off)
+    .onScroll((xOffset: number, yOffset: number) => {
+      this.currentScrollOffset = Math.max(0, yOffset);
+    })
+    .onScrollStop(() => {
+      this.saveReadingProgress();
+    })
+    .onReachEnd(() => {
+      this.loadNextChapterOnScrollEnd();
+    })
+    .onReachStart(() => {
+      this.loadPrevChapterOnScrollStart();
+    })
+  }
+
+  @Builder
+  readerScrollContainerOdd(renderVersion: number) {
+    Scroll(this.contentScroller) {
+      Column() {
+        this.readerScrollContentLayer(renderVersion)
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .scrollBar(BarState.Off)
+    .onScroll((xOffset: number, yOffset: number) => {
+      this.currentScrollOffset = Math.max(0, yOffset);
+    })
+    .onScrollStop(() => {
+      this.saveReadingProgress();
+    })
+    .onReachEnd(() => {
+      this.loadNextChapterOnScrollEnd();
+    })
+    .onReachStart(() => {
+      this.loadPrevChapterOnScrollStart();
+    })
+  }
+
+  refreshScrollReaderContent(text: string, chapterIndex: number = this.currentChapterIndex): void {
+    this.scrollContentText = text;
+    this.scrollRenderVersion++;
+    this.scrollParagraphs = this.buildScrollParagraphs(text, this.scrollRenderVersion, chapterIndex);
+    this.contentScroller = new Scroller();
+  }
+
+  prepareScrollChapterReload(chapterIndex: number = this.currentChapterIndex): void {
+    if (this.readerPageTurnMode !== 0) {
+      return;
+    }
+    this.refreshScrollReaderContent('', chapterIndex);
+  }
+
+  buildScrollParagraphs(text: string, renderVersion: number, chapterIndex: number = this.currentChapterIndex): ScrollParagraph[] {
+    const safeChapterIndex = this.clampChapterIndex(chapterIndex);
+    const title = this.getChapterTitle(safeChapterIndex).trim();
+    const chapter = this.chapters[safeChapterIndex];
+    const chapterIdentity = `${safeChapterIndex}_${this.buildTextSliceKey(chapter?.url || '')}`;
+    const displayText = this.getReadingRenderText(text || '');
+    const bodySource = title ? this.stripDuplicatedChapterTitle(displayText, title) : displayText;
+    const normalizedBody = this.normalizeChapterBody(bodySource);
+    const result: ScrollParagraph[] = [];
+    const keyPrefix = `${chapterIdentity}_${renderVersion}_${this.buildTextSliceKey(displayText)}`;
+    if (title) {
+      result.push({
+        key: `${keyPrefix}_title_${this.buildTextSliceKey(title)}`,
+        text: title,
+        isTitle: true
+      });
+    }
+    const lines = normalizedBody ? normalizedBody.split('\n') : [];
+    for (let i = 0; i < lines.length; i++) {
+      const rawLine = lines[i] || '';
+      if (!rawLine.trim()) {
+        continue;
+      }
+      const line = this.indentReaderLine(rawLine);
+      result.push({
+        key: `${keyPrefix}_body_${i}_${this.buildTextSliceKey(line)}`,
+        text: line,
+        isTitle: false
+      });
+    }
+    if (result.length === 0 && displayText) {
+      result.push({
+        key: `${keyPrefix}_empty_${this.buildTextSliceKey(displayText)}`,
+        text: displayText,
+        isTitle: false
+      });
+    }
+    return result;
+  }
+
+  @Builder
+  readerScrollContentLayer(renderVersion: number) {
+    Column() {
+      ForEach(this.scrollParagraphs, (paragraph: ScrollParagraph) => {
+        Text(paragraph.text)
+          .fontSize(paragraph.isTitle ? Math.max(this.readerFontSize + 2, 18) : this.readerFontSize)
+          .fontFamily(this.getReaderFontFamily())
+          .lineHeight(paragraph.isTitle ? Math.ceil(this.readerLineHeight * 1.1) : this.readerLineHeight)
+          .fontColor(this.getTextColor())
+          .fontWeight(paragraph.isTitle ? FontWeight.Medium : FontWeight.Normal)
+          .padding({
+            left: 18,
+            right: 18,
+            top: paragraph.isTitle ? 18 : Math.max(0, Math.floor(this.readerParagraphSpacing / 2)),
+            bottom: paragraph.isTitle ? this.readerParagraphSpacing : Math.max(0, Math.ceil(this.readerParagraphSpacing / 2))
+          })
+          .width('100%')
+      }, (paragraph: ScrollParagraph) => paragraph.key)
+
+      Blank()
+        .height(24 + this.readerParagraphSpacing + this.getReaderContentBottomReserve())
+        .width('100%')
+    }
+    .width('100%')
+  }
+
+  @Builder
   readingText(text: string, bottomPadding: number) {
     if (this.hasActiveTtsHighlight(text)) {
       Text() {
@@ -3136,23 +3276,27 @@ struct ReadBookPage {
     };
   }
 
-  paginateContent(sourceContent?: string) {
+  paginateContent(sourceContent?: string, chapterIndex: number = this.currentChapterIndex) {
     const content = sourceContent !== undefined ? sourceContent : this.content;
     if (!content) {
       this.contentPages = [];
       this.pagedContentText = '';
       this.contentPageStarts = [];
       this.contentPageEnds = [];
+      this.refreshScrollReaderContent('', chapterIndex);
       this.setCurrentPageText('');
       return;
     }
 
     if (this.readerPageTurnMode === 0) {
+      const safeChapterIndex = this.clampChapterIndex(chapterIndex);
+      const scrollText = this.buildPagedSourceText(safeChapterIndex, content);
       const pages: string[] = content ? [content] : [];
       this.contentPages = pages;
       this.pagedContentText = content || '';
       this.contentPageStarts = content ? [0] : [];
       this.contentPageEnds = content ? [content.length] : [];
+      this.refreshScrollReaderContent(scrollText, safeChapterIndex);
       this.currentPageIndex = 0;
       this.restorePendingScrollOffset();
       this.setCurrentPageText(pages[0] || '');
@@ -3217,7 +3361,7 @@ struct ReadBookPage {
   }
 
   async loadNextChapterOnScrollEnd(): Promise<void> {
-    if (this.readerPageTurnMode !== 0 || this.isLoading || this.isAutoLoadingScrollChapter) {
+    if (this.readerPageTurnMode !== 0 || this.isLoading || this.isAutoLoadingScrollChapter || this.suppressScrollReachEnd) {
       return;
     }
     if (this.currentChapterIndex >= this.chapters.length - 1) {
@@ -3227,6 +3371,7 @@ struct ReadBookPage {
     try {
       await this.saveReadingProgress();
       this.suppressScrollReachStart = true;
+      this.suppressScrollReachEnd = true;
       await this.loadNextChapter();
       setTimeout(() => {
         this.contentScroller.scrollTo({ xOffset: 0, yOffset: 0 });
@@ -3235,6 +3380,7 @@ struct ReadBookPage {
       setTimeout(() => {
         this.isAutoLoadingScrollChapter = false;
         this.suppressScrollReachStart = false;
+        this.suppressScrollReachEnd = false;
       }, 350);
     }
   }
@@ -3249,6 +3395,7 @@ struct ReadBookPage {
     this.isAutoLoadingScrollChapter = true;
     try {
       await this.saveReadingProgress();
+      this.suppressScrollReachEnd = true;
       await this.loadPrevChapter();
       setTimeout(() => {
         this.contentScroller.scrollTo({ xOffset: 0, yOffset: Number.MAX_SAFE_INTEGER });
@@ -3256,8 +3403,18 @@ struct ReadBookPage {
     } finally {
       setTimeout(() => {
         this.isAutoLoadingScrollChapter = false;
+        this.suppressScrollReachEnd = false;
       }, 350);
     }
+  }
+
+  suppressScrollBoundaryAutoLoad(duration: number = 500): void {
+    this.suppressScrollReachStart = true;
+    this.suppressScrollReachEnd = true;
+    setTimeout(() => {
+      this.suppressScrollReachStart = false;
+      this.suppressScrollReachEnd = false;
+    }, duration);
   }
 
   canTurnPage(direction: number): boolean {
@@ -3683,23 +3840,34 @@ struct ReadBookPage {
 
   async loadNextChapter() {
     if (this.currentChapterIndex < this.chapters.length - 1) {
-      this.currentChapterIndex++;
+      if (this.readerPageTurnMode === 0 && !this.isAutoLoadingScrollChapter) {
+        this.suppressScrollBoundaryAutoLoad();
+      }
+      const targetChapterIndex = this.currentChapterIndex + 1;
+      this.currentChapterIndex = targetChapterIndex;
       this.currentPageIndex = 0;
       this.pendingRestorePageIndex = 0;
       this.currentScrollOffset = 0;
       this.pendingRestoreScrollOffset = 0;
-      await this.loadContent(true);
+      this.prepareScrollChapterReload(targetChapterIndex);
+      await this.loadContent(true, targetChapterIndex);
       await this.saveReadingProgress();
     }
   }
 
   async loadPrevChapter() {
     if (this.currentChapterIndex > 0) {
-      this.currentChapterIndex--;
-      this.pendingRestorePageIndex = Number.MAX_SAFE_INTEGER;
+      if (this.readerPageTurnMode === 0 && !this.isAutoLoadingScrollChapter) {
+        this.suppressScrollBoundaryAutoLoad();
+      }
+      const targetChapterIndex = this.currentChapterIndex - 1;
+      this.currentChapterIndex = targetChapterIndex;
+      this.currentPageIndex = 0;
+      this.pendingRestorePageIndex = 0;
       this.currentScrollOffset = 0;
       this.pendingRestoreScrollOffset = 0;
-      await this.loadContent(true);
+      this.prepareScrollChapterReload(targetChapterIndex);
+      await this.loadContent(true, targetChapterIndex);
       await this.saveReadingProgress();
     }
   }
