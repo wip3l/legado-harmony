@@ -8,6 +8,7 @@ import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore'
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
+import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -15,6 +16,7 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('startupT0', Date.now());
     hilog.info(0x0000, 'testTag', 'StartupTrace onCreate %{public}d', Date.now());
     this.syncSystemColorMode(this.context.config);
+    AppStorage.setOrCreate('readerSystemFontFamily', ReaderSystemFontHelper.FALLBACK_SYSTEM_FONT_FAMILY);
     AppStorage.setOrCreate('readerActiveFontFamily', '');
     AppStorage.setOrCreate('readerFontRegistered', false);
     PersistentStorage.persistProp('readerPageTurnMode', 1);

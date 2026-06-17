@@ -2,6 +2,7 @@ import { router, promptAction } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
+import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
 import fileUri from '@ohos.file.fileuri';
@@ -36,13 +37,21 @@ struct CustomFontManagerPage {
   @State customFonts: ReaderCustomFontItem[] = [];
 
   aboutToAppear(): void {
+    this.refreshSystemFontFamily();
     this.reloadCustomFonts();
     this.syncBars();
   }
 
   onPageShow(): void {
+    this.refreshSystemFontFamily();
     this.reloadCustomFonts();
     this.syncBars();
+  }
+
+  refreshSystemFontFamily(): string {
+    const family = ReaderSystemFontHelper.applyToStorage(this.getUIContext());
+    this.readerSystemFontFamily = family;
+    return family;
   }
 
   build() {
@@ -227,14 +236,14 @@ struct CustomFontManagerPage {
       fontItem.familyName !== item.familyName && fontItem.filePath !== item.filePath);
     this.saveCustomFonts(next);
     if (this.readerFontFilePath === item.filePath || this.readerFontFamily === item.familyName) {
+      const systemFontFamily = this.refreshSystemFontFamily();
       this.readerFontMode = 'system';
-      this.readerSystemFontFamily = '';
       this.readerFontFamily = '';
       this.readerFontFilePath = '';
       this.readerFontSourceName = '系统默认';
       this.readerActiveFontFamily = '';
       this.readerFontRegistered = false;
-      this.applyApplicationFont('');
+      this.applyApplicationFont(systemFontFamily);
     }
     this.saveFontSettings();
     try {
@@ -274,19 +283,14 @@ struct CustomFontManagerPage {
       }
       return result.familyName;
     }
-    return '';
+    return this.readerSystemFontFamily || ReaderSystemFontHelper.currentFromStorage(this.getUIContext());
   }
 
   applyApplicationFont(familyName: string): void {
-    const targetFamily = familyName || 'HarmonyOS Sans';
     try {
-      getContext(this).getApplicationContext().setFont(targetFamily);
+      getContext(this).getApplicationContext().setFont(familyName || '');
     } catch (e) {
-      try {
-        getContext(this).getApplicationContext().setFont('HarmonyOS Sans');
-      } catch (err) {
-        console.warn('应用阅读字体失败:', err);
-      }
+      console.warn('应用阅读字体失败:', e);
     }
   }
 
@@ -334,7 +338,7 @@ struct CustomFontManagerPage {
     if (item && item.filePath === this.readerFontFilePath && this.readerActiveFontFamily) {
       return this.readerActiveFontFamily;
     }
-    return 'HarmonyOS Sans';
+    return '';
   }
 
   syncSelectedCustomFont(): void {

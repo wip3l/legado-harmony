@@ -3,6 +3,7 @@ import { UIContext } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ReaderFontHelper, ReaderFontItem } from './ReaderFontHelper';
 import { ReaderSettings, ReaderSettingsStore } from './ReaderSettingsStore';
+import { ReaderSystemFontHelper } from './ReaderSystemFontHelper';
 
 export class ReaderFontBootstrap {
   static async registerFromSettings(context: Context, uiContext: UIContext | null, source: string): Promise<boolean> {
@@ -23,13 +24,29 @@ export class ReaderFontBootstrap {
     source: string
   ): boolean {
     if (!settings.fontFilePath) {
+      const systemFontFamily = ReaderSystemFontHelper.applyToStorage(uiContext);
       AppStorage.setOrCreate('readerActiveFontFamily', '');
       AppStorage.setOrCreate('readerFontRegistered', false);
       try {
-        context.getApplicationContext().setFont('HarmonyOS Sans');
+        context.getApplicationContext().setFont(systemFontFamily);
       } catch (err) {
         hilog.warn(0x0000, 'testTag', 'Reader font bootstrap reset default failed source=%{public}s err=%{public}s',
           source, JSON.stringify(err));
+      }
+      if (settings.systemFontFamily !== systemFontFamily) {
+        ReaderSettingsStore.saveFontSettings(
+          context,
+          '',
+          '',
+          settings.fontSourceName,
+          settings.fontMode,
+          systemFontFamily,
+          settings.customFontsRaw
+        ).catch((err: Error) => {
+          hilog.warn(0x0000, 'testTag',
+            'Reader font bootstrap save system font failed source=%{public}s err=%{public}s',
+            source, JSON.stringify(err));
+        });
       }
       return false;
     }

@@ -2,6 +2,7 @@ import { router, promptAction } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
+import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import fs from '@ohos.file.fs';
 
 class ReaderCustomFontItem {
@@ -33,13 +34,21 @@ struct FontSettingsPage {
   @State customFonts: ReaderCustomFontItem[] = [];
 
   aboutToAppear(): void {
+    this.refreshSystemFontFamily();
     this.reloadCustomFonts();
     this.syncBars();
   }
 
   onPageShow(): void {
+    this.refreshSystemFontFamily();
     this.reloadCustomFonts();
     this.syncBars();
+  }
+
+  refreshSystemFontFamily(): string {
+    const family = ReaderSystemFontHelper.applyToStorage(this.getUIContext());
+    this.readerSystemFontFamily = family;
+    return family;
   }
 
   build() {
@@ -187,14 +196,14 @@ struct FontSettingsPage {
   }
 
   selectSystemFont(): void {
+    const systemFontFamily = this.refreshSystemFontFamily();
     this.readerFontMode = 'system';
-    this.readerSystemFontFamily = '';
     this.readerFontFamily = '';
     this.readerFontFilePath = '';
     this.readerFontSourceName = '系统默认';
     this.readerActiveFontFamily = '';
     this.readerFontRegistered = false;
-    this.applyApplicationFont('');
+    this.applyApplicationFont(systemFontFamily);
     this.saveFontSettings();
     promptAction.showToast({ message: '已恢复系统默认字体' });
   }
@@ -237,15 +246,10 @@ struct FontSettingsPage {
   }
 
   applyApplicationFont(familyName: string): void {
-    const targetFamily = familyName || 'HarmonyOS Sans';
     try {
-      getContext(this).getApplicationContext().setFont(targetFamily);
+      getContext(this).getApplicationContext().setFont(familyName || '');
     } catch (e) {
-      try {
-        getContext(this).getApplicationContext().setFont('HarmonyOS Sans');
-      } catch (err) {
-        console.warn('应用阅读字体失败:', err);
-      }
+      console.warn('应用阅读字体失败:', e);
     }
   }
 

@@ -3,6 +3,7 @@ import { ConfigurationConstant } from '@kit.AbilityKit';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
+import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import fs from '@ohos.file.fs';
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -48,6 +49,7 @@ struct SettingsPage {
   private themes: string[] = ['#F7F1E3', '#FFFFFF', '#E9F3E5', '#1F2329'];
   private themeNames: string[] = ['米黄', '素白', '青绿', '夜间'];
   @State customFonts: ReaderCustomFontItem[] = [];
+  @State previewFontRenderVersion: number = 0;
 
   aboutToAppear() {
     this.applyThemeMode(this.appThemeMode);
@@ -57,9 +59,16 @@ struct SettingsPage {
   }
 
   onPageShow(): void {
+    this.refreshSystemFontFamily();
     this.loadReaderSettings();
     this.reloadCustomFonts();
     this.syncBars();
+  }
+
+  refreshSystemFontFamily(): string {
+    const family = ReaderSystemFontHelper.applyToStorage(this.getUIContext());
+    this.readerSystemFontFamily = family;
+    return family;
   }
 
   async loadReaderSettings(): Promise<void> {
@@ -140,18 +149,11 @@ struct SettingsPage {
               .width('100%')
               .margin({ bottom: 12 })
 
-            Text('窗外的风掠过树梢，纸页在指尖轻轻翻动。夜色渐深，故事也在这一刻慢慢展开。')
-              .fontSize(this.readerFontSize)
-              .fontFamily(this.getPreviewFontFamily())
-              .fontColor(this.previewTextColor())
-              .lineHeight(this.readerLineHeight)
-              .padding({ bottom: this.readerParagraphSpacing })
-
-            Text('他停在灯下，听见远处传来的脚步声，像是某个被遗忘的约定终于抵达。')
-              .fontSize(this.readerFontSize)
-              .fontFamily(this.getPreviewFontFamily())
-              .fontColor(this.previewTextColor())
-              .lineHeight(this.readerLineHeight)
+            if (this.previewFontRenderVersion % 2 === 0) {
+              this.previewReaderText()
+            } else {
+              this.previewReaderText()
+            }
 
             Text(`当前字体：${this.readerFontSourceName || '系统默认'} · 当前翻页：${this.pageTurnModeText()}`)
               .fontSize(12)
@@ -269,7 +271,7 @@ struct SettingsPage {
       this.readerFontSourceName = '系统默认';
     }
     this.readerFontMode = 'system';
-    this.readerSystemFontFamily = '';
+    this.refreshSystemFontFamily();
     if (this.readerFontFamily) {
       this.readerFontFamily = '';
       this.readerFontSourceName = '系统默认';
@@ -368,9 +370,9 @@ struct SettingsPage {
       return this.readerActiveFontFamily;
     }
     if (this.readerFontFilePath) {
-      return 'HarmonyOS Sans';
+      return this.readerSystemFontFamily || ReaderSystemFontHelper.currentFromStorage(this.getUIContext());
     }
-    return this.readerFontFamily || 'HarmonyOS Sans';
+    return this.readerFontFamily || this.readerSystemFontFamily || ReaderSystemFontHelper.currentFromStorage(this.getUIContext());
   }
 
   applyLoadedReaderSettings(settings: ReaderSettings): void {
@@ -404,34 +406,30 @@ struct SettingsPage {
   }
 
   applyApplicationFont(familyName: string): void {
-    const targetFamily = familyName || 'HarmonyOS Sans';
     try {
-      getContext(this).getApplicationContext().setFont(targetFamily);
+      getContext(this).getApplicationContext().setFont(familyName || '');
     } catch (e) {
-      try {
-        getContext(this).getApplicationContext().setFont('HarmonyOS Sans');
-      } catch (err) {
-        console.warn('应用阅读字体失败:', err);
-      }
+      console.warn('应用阅读字体失败:', e);
     }
   }
 
   selectSystemFont(name: string): void {
+    const systemFontFamily = this.refreshSystemFontFamily();
     this.readerFontMode = 'system';
-    this.readerSystemFontFamily = '';
     this.readerFontFamily = '';
     this.readerFontFilePath = '';
     this.readerFontSourceName = '系统默认';
     this.readerActiveFontFamily = '';
     this.readerFontRegistered = false;
-    this.applyApplicationFont('');
+    this.previewFontRenderVersion++;
+    this.applyApplicationFont(systemFontFamily);
     this.saveFontSettings();
     promptAction.showToast({ message: '已恢复系统默认字体' });
   }
 
   rememberCurrentSystemFont(): void {
     if (!this.readerFontFilePath) {
-      this.readerSystemFontFamily = '';
+      this.refreshSystemFontFamily();
     }
   }
 
@@ -454,11 +452,28 @@ struct SettingsPage {
     this.readerFontFamily = item.familyName;
     this.readerFontFilePath = item.filePath;
     this.readerFontSourceName = item.sourceName || this.fileNameFromUri(item.filePath);
+    this.previewFontRenderVersion++;
     this.applyApplicationFont(registeredFamily);
     this.saveFontSettings();
     if (showToast) {
       promptAction.showToast({ message: `已选择字体：${this.readerFontSourceName}` });
     }
+  }
+
+  @Builder
+  previewReaderText() {
+    Text('窗外的风掠过树梢，纸页在指尖轻轻翻动。夜色渐深，故事也在这一刻慢慢展开。')
+      .fontSize(this.readerFontSize)
+      .fontFamily(this.getPreviewFontFamily())
+      .fontColor(this.previewTextColor())
+      .lineHeight(this.readerLineHeight)
+      .padding({ bottom: this.readerParagraphSpacing })
+
+    Text('他停在灯下，听见远处传来的脚步声，像是某个被遗忘的约定终于抵达。')
+      .fontSize(this.readerFontSize)
+      .fontFamily(this.getPreviewFontFamily())
+      .fontColor(this.previewTextColor())
+      .lineHeight(this.readerLineHeight)
   }
 
   saveFontSettings(): void {

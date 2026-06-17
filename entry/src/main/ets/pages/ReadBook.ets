@@ -15,6 +15,7 @@ import { SystemTtsReader, TtsChunk } from '../utils/SystemTtsReader';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper } from '../utils/ReaderFontHelper';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
+import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 
@@ -150,8 +151,9 @@ struct ReadBookPage {
   @StorageLink('readerPreloadChapterCount') @Watch('onReaderPreloadChanged') readerPreloadChapterCount: number = 1;
   @StorageLink('readerFontFamily') @Watch('onReaderFontChanged') readerFontFamily: string = '';
   @StorageLink('readerFontFilePath') @Watch('onReaderFontChanged') readerFontFilePath: string = '';
-  @StorageLink('readerActiveFontFamily') readerActiveFontFamily: string = '';
-  @StorageLink('readerFontRegistered') readerStoredFontRegistered: boolean = false;
+  @StorageLink('readerSystemFontFamily') @Watch('onReaderActiveFontChanged') readerSystemFontFamily: string = '';
+  @StorageLink('readerActiveFontFamily') @Watch('onReaderActiveFontChanged') readerActiveFontFamily: string = '';
+  @StorageLink('readerFontRegistered') @Watch('onReaderActiveFontChanged') readerStoredFontRegistered: boolean = false;
   @State activeReaderFontFamily: string = '';
   @State readerFontRegistered: boolean = false;
   @State readerFontRenderReady: boolean = false;
@@ -166,6 +168,7 @@ struct ReadBookPage {
   private volumeUpCallback?: (event: KeyEvent) => void;
   private volumeDownCallback?: (event: KeyEvent) => void;
   private lastLoggedReaderFontFamily: string = '';
+  private readerFontChangeSerial: number = 0;
 
   async aboutToAppear() {
     this.enterReaderImmersive();
@@ -185,7 +188,10 @@ struct ReadBookPage {
 
   reregisterReaderFontAfterShow(delayMs: number): void {
     setTimeout(() => {
-      this.registerReaderFontAsync(`readbook-onPageShow-${delayMs}`);
+      if (!this.readerFontFilePath) {
+        this.readerSystemFontFamily = ReaderSystemFontHelper.applyToStorage(this.getUIContext());
+      }
+      this.registerReaderFont();
     }, delayMs);
   }
 
@@ -1116,7 +1122,7 @@ struct ReadBookPage {
 
   resolveReaderFontFamily(): string {
     if (this.readerFontFilePath && !this.readerFontRenderReady) {
-      return 'HarmonyOS Sans';
+      return this.getSystemReaderFontFamily();
     }
     if (this.activeReaderFontFamily) {
       return this.activeReaderFontFamily;
@@ -1125,23 +1131,31 @@ struct ReadBookPage {
       return this.readerActiveFontFamily;
     }
     if (this.readerFontFilePath) {
-      return 'HarmonyOS Sans';
+      return this.getSystemReaderFontFamily();
     }
-    return this.readerFontFamily || 'HarmonyOS Sans';
+    return this.readerFontFamily || this.getSystemReaderFontFamily();
+  }
+
+  getSystemReaderFontFamily(): string {
+    return this.readerSystemFontFamily || ReaderSystemFontHelper.currentFromStorage(this.getUIContext());
   }
 
   isReaderFontReady(): boolean {
     return !!this.activeReaderFontFamily || !!this.readerActiveFontFamily;
   }
 
+  clearReaderFontState(): void {
+    this.activeReaderFontFamily = '';
+    this.readerFontRegistered = false;
+    this.readerActiveFontFamily = '';
+    this.readerStoredFontRegistered = false;
+    this.readerFontRenderReady = false;
+    this.applyReaderApplicationFont(this.getSystemReaderFontFamily());
+  }
+
   async registerReaderFont(): Promise<boolean> {
     if (!this.readerFontFilePath) {
-      this.activeReaderFontFamily = '';
-      this.readerFontRegistered = false;
-      this.readerActiveFontFamily = '';
-      this.readerStoredFontRegistered = false;
-      this.readerFontRenderReady = false;
-      this.applyReaderApplicationFont('');
+      this.clearReaderFontState();
       return false;
     }
     return await this.registerReaderFontAsync('readbook-sync-request');
@@ -1149,12 +1163,7 @@ struct ReadBookPage {
 
   async registerReaderFontBySettings(fontFamily: string, fontFilePath: string, fontSourceName: string): Promise<boolean> {
     if (!fontFilePath) {
-      this.activeReaderFontFamily = '';
-      this.readerFontRegistered = false;
-      this.readerActiveFontFamily = '';
-      this.readerStoredFontRegistered = false;
-      this.readerFontRenderReady = false;
-      this.applyReaderApplicationFont('');
+      this.clearReaderFontState();
       return false;
     }
     this.readerFontFamily = fontFamily || ReaderFontHelper.normalizeFontFamily(fontFilePath);
@@ -1164,7 +1173,19 @@ struct ReadBookPage {
   }
 
   async registerReaderFontAsync(source: string): Promise<boolean> {
+    if (!this.readerFontFilePath) {
+      this.clearReaderFontState();
+      return false;
+    }
+    const requestedPath = this.readerFontFilePath;
     const registered = await ReaderFontBootstrap.registerFromSettings(getContext(this), this.getUIContext(), source);
+    if (!this.readerFontFilePath) {
+      this.clearReaderFontState();
+      return false;
+    }
+    if (requestedPath !== this.readerFontFilePath) {
+      return false;
+    }
     if (!registered) {
       if (this.readerFontFilePath) {
         this.readerFontRegistered = false;
@@ -1232,7 +1253,8 @@ struct ReadBookPage {
     this.readerFontFilePath = settings.fontFilePath || '';
     AppStorage.setOrCreate<string>('readerFontSourceName', settings.fontSourceName || '系统默认');
     AppStorage.setOrCreate<string>('readerFontMode', settings.fontMode || (settings.fontFilePath ? 'custom' : 'system'));
-    AppStorage.setOrCreate<string>('readerSystemFontFamily', settings.systemFontFamily || '');
+    this.readerSystemFontFamily = settings.systemFontFamily || ReaderSystemFontHelper.currentFromStorage(this.getUIContext());
+    AppStorage.setOrCreate<string>('readerSystemFontFamily', this.readerSystemFontFamily);
     AppStorage.setOrCreate<string>('readerCustomFontsRaw', settings.customFontsRaw || '');
   }
 
@@ -1266,15 +1288,10 @@ struct ReadBookPage {
   }
 
   applyReaderApplicationFont(familyName: string): void {
-    const targetFamily = familyName || 'HarmonyOS Sans';
     try {
-      getContext(this).getApplicationContext().setFont(targetFamily);
+      getContext(this).getApplicationContext().setFont(familyName || '');
     } catch (e) {
-      try {
-        getContext(this).getApplicationContext().setFont('HarmonyOS Sans');
-      } catch (err) {
-        console.warn('应用阅读字体失败:', err);
-      }
+      console.warn('应用阅读字体失败:', e);
     }
   }
 
@@ -1285,7 +1302,7 @@ struct ReadBookPage {
       this.readerFontFilePath,
       AppStorage.get<string>('readerFontSourceName') || '系统默认',
       AppStorage.get<string>('readerFontMode') || (this.readerFontFilePath ? 'custom' : 'system'),
-      AppStorage.get<string>('readerSystemFontFamily') || '',
+      AppStorage.get<string>('readerSystemFontFamily') || this.getSystemReaderFontFamily(),
       AppStorage.get<string>('readerCustomFontsRaw') || ''
     ).catch((e: Error) => {
       console.warn('保存阅读字体设置失败:', e);
@@ -1397,12 +1414,30 @@ struct ReadBookPage {
   }
 
   onReaderFontChanged(): void {
+    const serial = ++this.readerFontChangeSerial;
+    if (!this.readerFontFilePath) {
+      this.clearReaderFontState();
+      this.refreshReaderTextRender();
+      this.onReadLayoutChanged();
+      return;
+    }
     this.registerReaderFont().then((registered: boolean) => {
+      if (serial !== this.readerFontChangeSerial) {
+        return;
+      }
       if (registered || !this.readerFontFilePath) {
         this.refreshReaderTextRender();
       }
       this.onReadLayoutChanged();
     });
+  }
+
+  onReaderActiveFontChanged(): void {
+    if (!this.readerFontFilePath && !this.readerActiveFontFamily && !this.readerStoredFontRegistered) {
+      this.clearReaderFontState();
+      this.refreshReaderTextRender();
+      this.onReadLayoutChanged();
+    }
   }
 
   onReaderExtendToStatusBarChanged(): void {
