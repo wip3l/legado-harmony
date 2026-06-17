@@ -1,4 +1,4 @@
-import { router, window, promptAction, MeasureOptions, font } from '@kit.ArkUI';
+import { router, window, promptAction, MeasureOptions } from '@kit.ArkUI';
 import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
 import { inputConsumer, KeyCode, Action, KeyEvent } from '@kit.InputKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
@@ -12,7 +12,9 @@ import { WebBookService } from '../core/book/WebBookService';
 import { OPEN_BOOK_SHORTCUT_ACTION, RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { SystemTtsReader, TtsChunk } from '../utils/SystemTtsReader';
-import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
+import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
+import { ReaderFontHelper } from '../utils/ReaderFontHelper';
+import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 
@@ -29,6 +31,16 @@ interface ReaderPaginationResult {
   pages: string[];
   starts: number[];
   ends: number[];
+}
+
+class ReaderCustomFontItem {
+  familyName: string = '';
+  filePath: string = '';
+  sourceName: string = '';
+}
+
+class ReaderCustomFontData {
+  fonts: ReaderCustomFontItem[] = [];
 }
 
 interface PageTurnPreview {
@@ -138,6 +150,11 @@ struct ReadBookPage {
   @StorageLink('readerPreloadChapterCount') @Watch('onReaderPreloadChanged') readerPreloadChapterCount: number = 1;
   @StorageLink('readerFontFamily') @Watch('onReaderFontChanged') readerFontFamily: string = '';
   @StorageLink('readerFontFilePath') @Watch('onReaderFontChanged') readerFontFilePath: string = '';
+  @StorageLink('readerActiveFontFamily') readerActiveFontFamily: string = '';
+  @StorageLink('readerFontRegistered') readerStoredFontRegistered: boolean = false;
+  @State activeReaderFontFamily: string = '';
+  @State readerFontRegistered: boolean = false;
+  @State readerFontRenderReady: boolean = false;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
@@ -148,17 +165,28 @@ struct ReadBookPage {
   private themeTextColors: string[] = ['#2F261D', '#333333', '#26352A', '#D8D8D8'];
   private volumeUpCallback?: (event: KeyEvent) => void;
   private volumeDownCallback?: (event: KeyEvent) => void;
+  private lastLoggedReaderFontFamily: string = '';
 
-  aboutToAppear() {
-    this.registerReaderFont();
+  async aboutToAppear() {
     this.enterReaderImmersive();
     this.updateVolumeKeySubscription();
-    this.loadReaderSettings();
+    await this.loadReaderSettings();
     const params = router.getParams() as Record<string, string>;
     if (params && params['bookUrl']) {
       this.bookUrl = params['bookUrl'];
       this.loadBook();
     }
+  }
+
+  onPageShow(): void {
+    this.reregisterReaderFontAfterShow(0);
+    this.reregisterReaderFontAfterShow(120);
+  }
+
+  reregisterReaderFontAfterShow(delayMs: number): void {
+    setTimeout(() => {
+      this.registerReaderFontAsync(`readbook-onPageShow-${delayMs}`);
+    }, delayMs);
   }
 
   aboutToDisappear() {
@@ -1078,21 +1106,190 @@ struct ReadBookPage {
   }
 
   getReaderFontFamily(): string {
+    const family = this.resolveReaderFontFamily();
+    if (family !== this.lastLoggedReaderFontFamily) {
+      this.lastLoggedReaderFontFamily = family;
+      console.info(`阅读正文使用字体: ${family}`);
+    }
+    return family;
+  }
+
+  resolveReaderFontFamily(): string {
+    if (this.readerFontFilePath && !this.readerFontRenderReady) {
+      return 'HarmonyOS Sans';
+    }
+    if (this.activeReaderFontFamily) {
+      return this.activeReaderFontFamily;
+    }
+    if (this.readerActiveFontFamily) {
+      return this.readerActiveFontFamily;
+    }
+    if (this.readerFontFilePath) {
+      return 'HarmonyOS Sans';
+    }
     return this.readerFontFamily || 'HarmonyOS Sans';
   }
 
-  registerReaderFont(): void {
-    if (!this.readerFontFamily || !this.readerFontFilePath) {
+  isReaderFontReady(): boolean {
+    return !!this.activeReaderFontFamily || !!this.readerActiveFontFamily;
+  }
+
+  async registerReaderFont(): Promise<boolean> {
+    if (!this.readerFontFilePath) {
+      this.activeReaderFontFamily = '';
+      this.readerFontRegistered = false;
+      this.readerActiveFontFamily = '';
+      this.readerStoredFontRegistered = false;
+      this.readerFontRenderReady = false;
+      this.applyReaderApplicationFont('');
+      return false;
+    }
+    return await this.registerReaderFontAsync('readbook-sync-request');
+  }
+
+  async registerReaderFontBySettings(fontFamily: string, fontFilePath: string, fontSourceName: string): Promise<boolean> {
+    if (!fontFilePath) {
+      this.activeReaderFontFamily = '';
+      this.readerFontRegistered = false;
+      this.readerActiveFontFamily = '';
+      this.readerStoredFontRegistered = false;
+      this.readerFontRenderReady = false;
+      this.applyReaderApplicationFont('');
+      return false;
+    }
+    this.readerFontFamily = fontFamily || ReaderFontHelper.normalizeFontFamily(fontFilePath);
+    this.readerFontFilePath = fontFilePath;
+    AppStorage.setOrCreate<string>('readerFontSourceName', fontSourceName || this.fileNameFromPath(fontFilePath));
+    return await this.registerReaderFontAsync('readbook-register-by-settings');
+  }
+
+  async registerReaderFontAsync(source: string): Promise<boolean> {
+    const registered = await ReaderFontBootstrap.registerFromSettings(getContext(this), this.getUIContext(), source);
+    if (!registered) {
+      if (this.readerFontFilePath) {
+        this.readerFontRegistered = false;
+        this.readerStoredFontRegistered = false;
+        this.readerActiveFontFamily = '';
+        this.activeReaderFontFamily = '';
+        this.readerFontRenderReady = false;
+      }
+      return false;
+    }
+    const activeFamily = AppStorage.get<string>('readerActiveFontFamily') || '';
+    const activePath = AppStorage.get<string>('readerFontFilePath') || this.readerFontFilePath;
+    if (activePath && activePath !== this.readerFontFilePath) {
+      this.replaceReaderCustomFontPath(this.readerFontFilePath, activePath, ReaderFontHelper.normalizeFontFamily(activePath));
+      this.readerFontFilePath = activePath;
+    }
+    const stableFamily = activePath ? ReaderFontHelper.normalizeFontFamily(activePath) : this.readerFontFamily;
+    if (stableFamily && this.readerFontFamily !== stableFamily) {
+      this.readerFontFamily = stableFamily;
+    }
+    this.activateRegisteredReaderFont(activeFamily);
+    this.refreshReaderTextRender();
+    this.paginateContent(this.content);
+    return true;
+  }
+
+  activateRegisteredReaderFont(familyName: string): void {
+    if (this.readerFontRegistered && this.activeReaderFontFamily === familyName) {
+      this.readerFontRenderReady = false;
+      this.refreshRegisteredReaderFontLater(familyName, 80);
+      this.refreshRegisteredReaderFontLater(familyName, 240);
+      return;
+    }
+    this.readerActiveFontFamily = familyName;
+    this.readerStoredFontRegistered = true;
+    this.readerFontRegistered = true;
+    this.activeReaderFontFamily = familyName;
+    this.readerFontRenderReady = false;
+    setTimeout(() => {
+      this.activeReaderFontFamily = familyName;
+      this.readerFontRegistered = true;
+      this.readerActiveFontFamily = familyName;
+      this.readerStoredFontRegistered = true;
+      this.refreshReaderTextRender();
+      this.paginateContent(this.content);
+    }, 0);
+    this.refreshRegisteredReaderFontLater(familyName, 80);
+    this.refreshRegisteredReaderFontLater(familyName, 240);
+  }
+
+  refreshRegisteredReaderFontLater(familyName: string, delayMs: number): void {
+    setTimeout(() => {
+      if (!familyName || this.activeReaderFontFamily !== familyName) {
+        return;
+      }
+      this.readerFontRenderReady = true;
+      console.info(`阅读字体延迟刷新: family=${familyName}, delay=${delayMs}`);
+      this.refreshReaderTextRender();
+      this.paginateContent(this.content);
+    }, delayMs);
+  }
+
+  applyLoadedReaderSettings(settings: ReaderSettings): void {
+    this.readerFontFamily = settings.fontFamily || '';
+    this.readerFontFilePath = settings.fontFilePath || '';
+    AppStorage.setOrCreate<string>('readerFontSourceName', settings.fontSourceName || '系统默认');
+    AppStorage.setOrCreate<string>('readerFontMode', settings.fontMode || (settings.fontFilePath ? 'custom' : 'system'));
+    AppStorage.setOrCreate<string>('readerSystemFontFamily', settings.systemFontFamily || '');
+    AppStorage.setOrCreate<string>('readerCustomFontsRaw', settings.customFontsRaw || '');
+  }
+
+  replaceReaderCustomFontPath(oldPath: string, newPath: string, familyName: string): void {
+    const raw = AppStorage.get<string>('readerCustomFontsRaw') || '';
+    if (!raw.trim()) {
       return;
     }
     try {
-      font.registerFont({
-        familyName: this.readerFontFamily,
-        familySrc: this.readerFontFilePath
-      });
+      const parsed = JSON.parse(raw) as ReaderCustomFontData | ReaderCustomFontItem[];
+      const source = Array.isArray(parsed) ? parsed as ReaderCustomFontItem[] : ((parsed as ReaderCustomFontData).fonts || []);
+      const data = new ReaderCustomFontData();
+      for (const item of source) {
+        if (!item || !item.filePath) {
+          continue;
+        }
+        const next = new ReaderCustomFontItem();
+        next.filePath = item.filePath === oldPath ? newPath : item.filePath;
+        next.familyName = item.filePath === oldPath ? familyName : (item.familyName || ReaderFontHelper.normalizeFontFamily(next.filePath));
+        next.sourceName = item.sourceName || this.fileNameFromPath(next.filePath);
+        data.fonts.push(next);
+      }
+      AppStorage.setOrCreate<string>('readerCustomFontsRaw', JSON.stringify(data));
     } catch (e) {
-      console.warn('注册阅读字体失败:', e);
+      console.warn('更新阅读字体列表失败:', e);
     }
+  }
+
+  fileNameFromPath(path: string): string {
+    return ReaderFontHelper.fileNameFromPath(path);
+  }
+
+  applyReaderApplicationFont(familyName: string): void {
+    const targetFamily = familyName || 'HarmonyOS Sans';
+    try {
+      getContext(this).getApplicationContext().setFont(targetFamily);
+    } catch (e) {
+      try {
+        getContext(this).getApplicationContext().setFont('HarmonyOS Sans');
+      } catch (err) {
+        console.warn('应用阅读字体失败:', err);
+      }
+    }
+  }
+
+  saveReaderFontSettings(): void {
+    ReaderSettingsStore.saveFontSettings(
+      getContext(this),
+      this.readerFontFamily,
+      this.readerFontFilePath,
+      AppStorage.get<string>('readerFontSourceName') || '系统默认',
+      AppStorage.get<string>('readerFontMode') || (this.readerFontFilePath ? 'custom' : 'system'),
+      AppStorage.get<string>('readerSystemFontFamily') || '',
+      AppStorage.get<string>('readerCustomFontsRaw') || ''
+    ).catch((e: Error) => {
+      console.warn('保存阅读字体设置失败:', e);
+    });
   }
 
   getTocTitleColor(chapter: BookChapter, index: number): string {
@@ -1190,9 +1387,22 @@ struct ReadBookPage {
     this.saveReadingProgress();
   }
 
+  refreshReaderTextRender(): void {
+    if (this.readerPageTurnMode === 0) {
+      this.scrollRenderVersion++;
+    } else {
+      this.pageRenderVersion++;
+      this.pageTurnIncomingRenderVersion++;
+    }
+  }
+
   onReaderFontChanged(): void {
-    this.registerReaderFont();
-    this.onReadLayoutChanged();
+    this.registerReaderFont().then((registered: boolean) => {
+      if (registered || !this.readerFontFilePath) {
+        this.refreshReaderTextRender();
+      }
+      this.onReadLayoutChanged();
+    });
   }
 
   onReaderExtendToStatusBarChanged(): void {
@@ -2245,6 +2455,16 @@ struct ReadBookPage {
     try {
       const settings = await ReaderSettingsStore.load(getContext(this));
       ReaderSettingsStore.applyToStorage(settings);
+      this.applyLoadedReaderSettings(settings);
+      const registered = await this.registerReaderFontBySettings(
+        settings.fontFamily,
+        settings.fontFilePath,
+        settings.fontSourceName
+      );
+      if (registered || !this.readerFontFilePath) {
+        this.refreshReaderTextRender();
+      }
+      this.paginateContent(this.content);
     } catch (e) {
       console.warn('读取阅读设置失败:', e);
     }
@@ -3634,7 +3854,7 @@ struct ReadBookPage {
 
   buildPageTurnPreviewKey(direction: number, chapterIndex: number): string {
     return `${direction}_${chapterIndex}_${this.pageViewWidth}_${this.pageViewHeight}_${this.readerFontSize}_` +
-      `${this.readerLineHeight}_${this.readerParagraphSpacing}_${this.readerFontFamily}`;
+      `${this.readerLineHeight}_${this.readerParagraphSpacing}_${this.getReaderFontFamily()}`;
   }
 
   buildCachedAdjacentPageTurnPreview(direction: number, chapterIndex: number): PageTurnPreview {

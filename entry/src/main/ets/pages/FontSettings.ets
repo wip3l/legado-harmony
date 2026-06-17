@@ -2,9 +2,7 @@ import { router, promptAction } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
-import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
-import fileUri from '@ohos.file.fileuri';
 
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -18,7 +16,8 @@ class ReaderCustomFontData {
 
 @Entry
 @Component
-struct CustomFontManagerPage {
+struct FontSettingsPage {
+  @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('readerFontFamily') readerFontFamily: string = '';
   @StorageLink('readerFontFilePath') readerFontFilePath: string = '';
   @StorageLink('readerFontSourceName') readerFontSourceName: string = '系统默认';
@@ -27,12 +26,10 @@ struct CustomFontManagerPage {
   @StorageLink('readerCustomFontsRaw') readerCustomFontsRaw: string = '';
   @StorageLink('readerActiveFontFamily') readerActiveFontFamily: string = '';
   @StorageLink('readerFontRegistered') readerFontRegistered: boolean = false;
-  @StorageLink('appDarkMode') appDarkMode: boolean = false;
-  @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
-  @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
+  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
+  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
-
   @State customFonts: ReaderCustomFontItem[] = [];
 
   aboutToAppear(): void {
@@ -51,20 +48,9 @@ struct CustomFontManagerPage {
 
       Scroll() {
         Column() {
-          this.uploadPanel()
-
-          this.sectionTitle('已上传字体')
-          if (this.customFonts.length > 0) {
-            Column({ space: 1 }) {
-              ForEach(this.customFonts, (item: ReaderCustomFontItem) => {
-                this.fontItem(item)
-              })
-            }
-            .width('100%')
-            .backgroundColor(this.cardColor())
-          } else {
-            this.emptyPanel()
-          }
+          this.sectionTitle('全局字体设置')
+          this.fontSettingPanel()
+          this.customFontEntryItem()
         }
         .width('100%')
         .padding({ bottom: 32 })
@@ -99,15 +85,14 @@ struct CustomFontManagerPage {
       const parsed = JSON.parse(raw) as ReaderCustomFontData | ReaderCustomFontItem[];
       const source = Array.isArray(parsed) ? parsed as ReaderCustomFontItem[] : ((parsed as ReaderCustomFontData).fonts || []);
       this.customFonts = this.cleanCustomFonts(source);
-      this.saveCustomFonts(this.customFonts);
     } catch (e) {
       this.customFonts = [];
     }
   }
 
-  saveCustomFonts(fonts: ReaderCustomFontItem[]): void {
+  saveCustomFonts(fonts?: ReaderCustomFontItem[]): void {
     const data = new ReaderCustomFontData();
-    data.fonts = this.cleanCustomFonts(fonts);
+    data.fonts = this.cleanCustomFonts(fonts ?? this.customFonts);
     this.customFonts = data.fonts;
     this.readerCustomFontsRaw = JSON.stringify(data);
     this.saveFontSettings();
@@ -156,21 +141,6 @@ struct CustomFontManagerPage {
         }
         changed = true;
       } else if (familyName && !this.hasCustomFont(next, familyName, filePath)) {
-        const oldPath = `${dir}/${name}`;
-        const oldIndex = this.findCustomFontIndexByFilePath(next, oldPath);
-        if (oldIndex >= 0) {
-          next[oldIndex].familyName = familyName;
-          next[oldIndex].filePath = filePath;
-          if (!next[oldIndex].sourceName || next[oldIndex].sourceName === name) {
-            next[oldIndex].sourceName = name;
-          }
-          if (this.readerFontFilePath === oldPath) {
-            this.readerFontFilePath = filePath;
-            this.readerFontFamily = familyName;
-          }
-          changed = true;
-          continue;
-        }
         const item = new ReaderCustomFontItem();
         item.familyName = familyName;
         item.filePath = filePath;
@@ -182,67 +152,6 @@ struct CustomFontManagerPage {
     if (changed) {
       this.saveCustomFonts(next);
     }
-  }
-
-  async pickCustomFont(): Promise<void> {
-    try {
-      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
-      options.fileSuffixFilters = ['字体文件|.ttf', '字体文件|.otf', '字体文件|.ttc'];
-      options.maxSelectNumber = 1;
-      const result = await new picker.DocumentViewPicker(getContext(this)).select(options);
-      if (!result || result.length === 0) {
-        return;
-      }
-      const sourceUri = result[0];
-      const context = getContext(this);
-      const dir = `${context.filesDir}/reader_fonts`;
-      await this.ensureDir(dir);
-      const sourceName = this.fileNameFromUri(sourceUri);
-      const destName = await this.uniqueFontFileName(dir, this.asciiStoredFontName(sourceName, Date.now()));
-      const destPath = `${dir}/${destName}`;
-      const copySource = sourceUri.startsWith('/') ? fileUri.getUriFromPath(sourceUri) : sourceUri;
-      await fs.copy(copySource, fileUri.getUriFromPath(destPath));
-      const familyName = this.familyNameForPath(destPath);
-
-      const item = new ReaderCustomFontItem();
-      item.familyName = familyName;
-      item.filePath = destPath;
-      item.sourceName = sourceName;
-      const next = this.customFonts.slice();
-      next.push(item);
-      this.saveCustomFonts(next);
-      if (this.registerCustomFont(item)) {
-        promptAction.showToast({ message: '已上传字体，可返回阅读设置选择' });
-      } else {
-        promptAction.showToast({ message: '字体已保存，但注册失败' });
-      }
-    } catch (e) {
-      console.error('上传字体失败:', e);
-      promptAction.showToast({ message: '上传字体失败' });
-    }
-  }
-
-  deleteCustomFont(item: ReaderCustomFontItem): void {
-    const next = this.customFonts.filter((fontItem: ReaderCustomFontItem) =>
-      fontItem.familyName !== item.familyName && fontItem.filePath !== item.filePath);
-    this.saveCustomFonts(next);
-    if (this.readerFontFilePath === item.filePath || this.readerFontFamily === item.familyName) {
-      this.readerFontMode = 'system';
-      this.readerSystemFontFamily = '';
-      this.readerFontFamily = '';
-      this.readerFontFilePath = '';
-      this.readerFontSourceName = '系统默认';
-      this.readerActiveFontFamily = '';
-      this.readerFontRegistered = false;
-      this.applyApplicationFont('');
-    }
-    this.saveFontSettings();
-    try {
-      fs.unlinkSync(item.filePath);
-    } catch (e) {
-      console.warn('删除字体文件失败:', e);
-    }
-    promptAction.showToast({ message: '已删除字体' });
   }
 
   registerCustomFonts(): void {
@@ -259,10 +168,10 @@ struct CustomFontManagerPage {
     fontItem.familyName = item.familyName;
     fontItem.filePath = item.filePath;
     fontItem.sourceName = item.sourceName;
-    const oldPath = item.filePath;
-    const oldFamilyName = item.familyName;
     const result = ReaderFontHelper.registerFont(this.getUIContext(), fontItem);
     if (result.registered) {
+      const oldPath = item.filePath;
+      const oldFamilyName = item.familyName;
       item.filePath = result.filePath;
       item.familyName = this.familyNameForPath(result.filePath);
       if (this.readerFontFilePath === item.filePath || this.readerFontFilePath === oldPath ||
@@ -277,79 +186,40 @@ struct CustomFontManagerPage {
     return '';
   }
 
-  applyApplicationFont(familyName: string): void {
-    const targetFamily = familyName || 'HarmonyOS Sans';
-    try {
-      getContext(this).getApplicationContext().setFont(targetFamily);
-    } catch (e) {
-      try {
-        getContext(this).getApplicationContext().setFont('HarmonyOS Sans');
-      } catch (err) {
-        console.warn('应用阅读字体失败:', err);
-      }
-    }
-  }
-
-  async ensureDir(path: string): Promise<void> {
-    try {
-      await fs.mkdir(path, true);
-    } catch (e) {
-    }
-  }
-
-  fontExt(uri: string): string {
-    const lower = uri.toLowerCase();
-    if (lower.includes('.otf')) return '.otf';
-    if (lower.includes('.ttc')) return '.ttc';
-    return '.ttf';
-  }
-
-  isFontFile(name: string): boolean {
-    const lower = (name || '').toLowerCase();
-    return lower.endsWith('.ttf') || lower.endsWith('.otf') || lower.endsWith('.ttc');
-  }
-
-  fontFileExists(path: string): boolean {
-    try {
-      return fs.accessSync(path);
-    } catch (e) {
-      return false;
-    }
-  }
-
-  familyNameFromFontFileName(name: string): string {
-    const index = name.lastIndexOf('.');
-    return index > 0 ? name.substring(0, index) : name;
-  }
-
-  familyNameForPath(filePath: string): string {
-    return ReaderFontHelper.normalizeFontFamily(filePath);
-  }
-
-  normalizedFontFamily(filePath: string): string {
-    return ReaderFontHelper.normalizeFontFamily(filePath);
-  }
-
-  previewFontFamily(item: ReaderCustomFontItem): string {
-    if (item && item.filePath === this.readerFontFilePath && this.readerActiveFontFamily) {
-      return this.readerActiveFontFamily;
-    }
-    return 'HarmonyOS Sans';
-  }
-
-  syncSelectedCustomFont(): void {
-    if (!this.readerFontFilePath) {
-      return;
-    }
-    const index = this.findCustomFontIndexByFilePath(this.customFonts, this.readerFontFilePath);
-    if (index < 0) {
-      return;
-    }
-    const item = this.customFonts[index];
-    this.readerFontFamily = item.familyName;
-    this.readerFontSourceName = item.sourceName || this.fileNameFromUri(item.filePath);
-    this.readerFontMode = 'custom';
+  selectSystemFont(): void {
+    this.readerFontMode = 'system';
+    this.readerSystemFontFamily = '';
+    this.readerFontFamily = '';
+    this.readerFontFilePath = '';
+    this.readerFontSourceName = '系统默认';
+    this.readerActiveFontFamily = '';
+    this.readerFontRegistered = false;
+    this.applyApplicationFont('');
     this.saveFontSettings();
+    promptAction.showToast({ message: '已恢复系统默认字体' });
+  }
+
+  selectCustomFont(item: ReaderCustomFontItem): void {
+    if (!item || !item.familyName || !item.filePath) {
+      return;
+    }
+    if (!this.fontFileExists(item.filePath)) {
+      this.reloadCustomFonts();
+      promptAction.showToast({ message: '字体文件不存在' });
+      return;
+    }
+    this.readerFontMode = 'custom';
+    const registeredFamily = this.registerCustomFont(item);
+    if (!registeredFamily) {
+      promptAction.showToast({ message: '字体注册失败，请更换字体文件' });
+      return;
+    }
+    this.readerFontFamily = item.familyName;
+    this.readerFontFilePath = item.filePath;
+    this.readerFontSourceName = item.sourceName || this.fileNameFromUri(item.filePath);
+    this.applyApplicationFont(registeredFamily);
+    this.saveFontSettings();
+    promptAction.showToast({ message: `已选择字体：${this.readerFontSourceName}` });
   }
 
   saveFontSettings(): void {
@@ -366,18 +236,103 @@ struct CustomFontManagerPage {
     });
   }
 
-  async uniqueFontFileName(dir: string, sourceName: string): Promise<string> {
-    const safeName = this.sanitizeFontFileName(sourceName || `custom${this.fontExt(sourceName)}`);
-    const dotIndex = safeName.lastIndexOf('.');
-    const base = dotIndex > 0 ? safeName.substring(0, dotIndex) : safeName;
-    const ext = dotIndex > 0 ? safeName.substring(dotIndex) : this.fontExt(safeName);
-    let candidate = `${base}${ext}`;
-    let index = 1;
-    while (this.fontFileExists(`${dir}/${candidate}`)) {
-      candidate = `${base}_${index}${ext}`;
-      index++;
+  applyApplicationFont(familyName: string): void {
+    const targetFamily = familyName || 'HarmonyOS Sans';
+    try {
+      getContext(this).getApplicationContext().setFont(targetFamily);
+    } catch (e) {
+      try {
+        getContext(this).getApplicationContext().setFont('HarmonyOS Sans');
+      } catch (err) {
+        console.warn('应用阅读字体失败:', err);
+      }
     }
-    return candidate;
+  }
+
+  syncSelectedCustomFont(): void {
+    if (!this.readerFontFilePath) {
+      return;
+    }
+    const index = this.findCustomFontIndexByFilePath(this.customFonts, this.readerFontFilePath);
+    if (index < 0) {
+      return;
+    }
+    const item = this.customFonts[index];
+    this.readerFontFamily = item.familyName;
+    this.readerFontSourceName = item.sourceName || this.fileNameFromUri(item.filePath);
+    this.readerFontMode = 'custom';
+  }
+
+  readerFontOptions(): SelectOption[] {
+    const options: SelectOption[] = [{ value: '系统默认' }];
+    for (const item of this.customFonts) {
+      options.push({ value: item.sourceName || item.familyName });
+    }
+    return options;
+  }
+
+  readerFontSelectedIndex(): number {
+    if (this.readerFontFilePath) {
+      for (let i = 0; i < this.customFonts.length; i++) {
+        const item = this.customFonts[i];
+        if (item.filePath === this.readerFontFilePath || item.familyName === this.readerFontFamily) {
+          return i + 1;
+        }
+      }
+    }
+    return 0;
+  }
+
+  readerFontValue(): string {
+    const index = this.readerFontSelectedIndex();
+    if (index <= 0) {
+      return '系统默认';
+    }
+    const customIndex = index - 1;
+    if (customIndex >= 0 && customIndex < this.customFonts.length) {
+      const item = this.customFonts[customIndex];
+      return item.sourceName || item.familyName || '自定义字体';
+    }
+    return '系统默认';
+  }
+
+  selectReaderFontByIndex(index: number): void {
+    if (index <= 0) {
+      this.selectSystemFont();
+      return;
+    }
+    const customIndex = index - 1;
+    if (customIndex >= 0 && customIndex < this.customFonts.length) {
+      this.selectCustomFont(this.customFonts[customIndex]);
+    }
+  }
+
+  isFontFile(name: string): boolean {
+    const lower = (name || '').toLowerCase();
+    return lower.endsWith('.ttf') || lower.endsWith('.otf') || lower.endsWith('.ttc');
+  }
+
+  fontExt(value: string): string {
+    const lower = (value || '').toLowerCase();
+    if (lower.includes('.otf')) return '.otf';
+    if (lower.includes('.ttc')) return '.ttc';
+    return '.ttf';
+  }
+
+  fontFileExists(path: string): boolean {
+    try {
+      return fs.accessSync(path);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  familyNameForPath(filePath: string): string {
+    return ReaderFontHelper.normalizeFontFamily(filePath);
+  }
+
+  normalizedFontFamily(filePath: string): string {
+    return ReaderFontHelper.normalizeFontFamily(filePath);
   }
 
   ensureAsciiStoredFontName(dir: string, name: string): string {
@@ -428,20 +383,6 @@ struct CustomFontManagerPage {
     return true;
   }
 
-  sanitizeFontFileName(name: string): string {
-    const source = this.fileNameFromUri(name || 'custom.ttf');
-    const ext = this.fontExt(source);
-    const rawBase = this.familyNameFromFontFileName(source).trim() || 'custom';
-    const invalidChars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
-    let base = '';
-    for (let i = 0; i < rawBase.length; i++) {
-      const ch = rawBase.charAt(i);
-      base += invalidChars.includes(ch) ? '_' : ch;
-    }
-    base = base.trim() || 'custom';
-    return `${base}${ext}`;
-  }
-
   fileNameFromUri(uri: string): string {
     const decoded = decodeURIComponent(uri || '');
     const index = Math.max(decoded.lastIndexOf('/'), decoded.lastIndexOf('\\'));
@@ -474,6 +415,10 @@ struct CustomFontManagerPage {
     return this.appDarkMode ? '#191B1F' : '#FFFFFF';
   }
 
+  inputColor(): string {
+    return this.appDarkMode ? '#24272D' : '#F0F2F5';
+  }
+
   primaryTextColor(): string {
     return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
   }
@@ -482,12 +427,8 @@ struct CustomFontManagerPage {
     return this.appDarkMode ? '#8A8F98' : '#888';
   }
 
-  inputColor(): string {
-    return this.appDarkMode ? '#24272D' : '#F0F2F5';
-  }
-
-  buttonColor(): string {
-    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+  accentColor(): string {
+    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
   }
 
   syncBars(): void {
@@ -507,7 +448,7 @@ struct CustomFontManagerPage {
           router.back();
         })
 
-      Text('自定义字体')
+      Text('全局字体设置')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
         .fontColor(this.primaryTextColor())
@@ -529,91 +470,55 @@ struct CustomFontManagerPage {
   }
 
   @Builder
-  uploadPanel() {
+  fontSettingPanel() {
     Row() {
-      Column() {
-        Text('上传字体')
-          .fontSize(16)
-          .fontColor(this.primaryTextColor())
-        Text('支持 ttf / otf / ttc，上传后会出现在阅读设置的字体下拉框中')
-          .fontSize(12)
-          .fontColor(this.subTextColor())
-          .margin({ top: 4 })
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-
-      Text('+')
-        .fontSize(24)
-        .fontColor('#FFFFFF')
-        .textAlign(TextAlign.Center)
-        .width(40)
-        .height(40)
-        .borderRadius(20)
-        .backgroundColor(this.buttonColor())
-    }
-    .width('100%')
-    .constraintSize({ minHeight: 72 })
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor(this.cardColor())
-    .alignItems(VerticalAlign.Center)
-    .onClick(() => {
-      this.pickCustomFont();
-    })
-  }
-
-  @Builder
-  emptyPanel() {
-    Column() {
-      Text('还没有上传字体')
+      Text('全局字体设置')
         .fontSize(16)
-        .fontColor(this.subTextColor())
-      Text('点击上方上传按钮添加字体文件')
-        .fontSize(13)
-        .fontColor(this.subTextColor())
-        .margin({ top: 6 })
-    }
-    .width('100%')
-    .padding({ top: 28, bottom: 28 })
-    .backgroundColor(this.cardColor())
-  }
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
 
-  @Builder
-  fontItem(item: ReaderCustomFontItem) {
-    Row() {
-      Column() {
-        Text(item.sourceName || item.familyName)
-          .fontSize(16)
-          .fontFamily(this.previewFontFamily(item))
-          .fontColor(this.primaryTextColor())
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(item.filePath)
-          .fontSize(11)
-          .fontColor(this.subTextColor())
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 4 })
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-
-      Text('删除')
-        .fontSize(13)
-        .fontColor('#FFFFFF')
-        .textAlign(TextAlign.Center)
-        .width(54)
-        .height(32)
-        .borderRadius(16)
-        .backgroundColor('#E53935')
-        .onClick(() => {
-          this.deleteCustomFont(item);
+      Select(this.readerFontOptions())
+        .selected(this.readerFontSelectedIndex())
+        .value(this.readerFontValue())
+        .font({ size: 14 })
+        .fontColor(this.primaryTextColor())
+        .backgroundColor(this.inputColor())
+        .borderRadius(8)
+        .constraintSize({ minWidth: 156, maxWidth: 220 })
+        .margin({ left: 12 })
+        .onSelect((index: number) => {
+          this.selectReaderFontByIndex(index);
         })
     }
     .width('100%')
-    .constraintSize({ minHeight: 68 })
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+    .constraintSize({ minHeight: 56 })
+    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     .backgroundColor(this.cardColor())
     .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  customFontEntryItem() {
+    Row() {
+      Text('自定义字体')
+        .fontColor(this.primaryTextColor())
+        .fontSize(16)
+        .layoutWeight(1)
+      Text('上传 / 删除')
+        .fontSize(13)
+        .fontColor(this.subTextColor())
+        .margin({ right: 8 })
+      Text('>')
+        .fontSize(18)
+        .fontColor(this.subTextColor())
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 16, right: 16 })
+    .backgroundColor(this.cardColor())
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      router.pushUrl({ url: 'pages/CustomFontManager' });
+    })
   }
 }

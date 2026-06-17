@@ -549,6 +549,7 @@ struct BookshelfPage {
     const context = getContext(this);
     const nextMap: Map<string, string> = new Map(this.shelfCoverMap);
     const pending: Array<[string, string]> = [];
+    let hasCachedChange = false;
     for (const book of books) {
       const covers = CoverGallerySettings.getDisplayCoverList(
         book,
@@ -570,11 +571,14 @@ struct BookshelfPage {
         const cached = BookCoverCache.resolveCachedCover(context, raw);
         if (cached && nextMap.get(key) !== cached) {
           nextMap.set(key, cached);
-          this.shelfCoverMap = new Map(nextMap);
+          hasCachedChange = true;
           continue;
         }
         pending.push([key, raw]);
       }
+    }
+    if (hasCachedChange) {
+      this.shelfCoverMap = new Map(nextMap);
     }
     for (const item of pending) {
       const key = item[0];
@@ -1161,17 +1165,22 @@ struct BookshelfPage {
   @Builder
   coverView(book: Book, width: number, height: number) {
     Stack() {
-      Column() {
-        Text(book.name ? book.name.substring(0, 1) : '书')
-          .fontSize(28)
-          .fontColor('#FFFFFF')
-      }
-      .width(width)
-      .height(height)
-      .backgroundColor(this.getBookColor(book.name))
-      .justifyContent(FlexAlign.Center)
-
-      if (this.getShelfCoverList(book).length > 1) {
+      if (this.getShelfCoverList(book).length === 0) {
+        Column() {
+          Text(book.name ? book.name.substring(0, 1) : '书')
+            .fontSize(28)
+            .fontColor('#FFFFFF')
+        }
+        .width(width)
+        .height(height)
+        .backgroundColor(this.getBookColor(book.name))
+        .justifyContent(FlexAlign.Center)
+      } else if (this.getShelfCoverList(book).length === 1) {
+        Image(this.getShelfCover(book))
+          .width(width)
+          .height(height)
+          .objectFit(ImageFit.Cover)
+      } else {
         Swiper() {
           ForEach(this.getShelfCoverList(book), (cover: string) => {
             Image(cover)
@@ -1186,11 +1195,6 @@ struct BookshelfPage {
         .interval(3500)
         .indicator(false)
         .loop(true)
-      } else if (this.getShelfCoverList(book).length === 1) {
-        Image(this.getShelfCover(book))
-          .width(width)
-          .height(height)
-          .objectFit(ImageFit.Cover)
       }
     }
     .width(width)
@@ -1218,8 +1222,11 @@ struct BookshelfPage {
       this.bookshelfCoverMode
     );
     const displayCovers: string[] = [];
+    const context = getContext(this);
     for (let i = 0; i < covers.length; i++) {
-      displayCovers.push(this.shelfCoverMap.get(this.shelfCoverKey(book, i)) || covers[i]);
+      const raw = covers[i];
+      const cached = this.shelfCoverMap.get(this.shelfCoverKey(book, i)) || BookCoverCache.resolveCachedCover(context, raw);
+      displayCovers.push(cached || raw);
     }
     return displayCovers;
   }

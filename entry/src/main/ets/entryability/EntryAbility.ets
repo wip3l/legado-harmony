@@ -7,6 +7,7 @@ import { BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettings
 import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
+import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -14,6 +15,8 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('startupT0', Date.now());
     hilog.info(0x0000, 'testTag', 'StartupTrace onCreate %{public}d', Date.now());
     this.syncSystemColorMode(this.context.config);
+    AppStorage.setOrCreate('readerActiveFontFamily', '');
+    AppStorage.setOrCreate('readerFontRegistered', false);
     PersistentStorage.persistProp('readerPageTurnMode', 1);
     PersistentStorage.persistProp('readerPreloadEnabled', true);
     PersistentStorage.persistProp('readerPreloadChapterCount', 1);
@@ -36,12 +39,6 @@ export default class EntryAbility extends UIAbility {
       }
       AppStorage.setOrCreate('ttsOfflineSdkModeMigrated', true);
     }
-    PersistentStorage.persistProp('readerFontFamily', '');
-    PersistentStorage.persistProp('readerFontFilePath', '');
-    PersistentStorage.persistProp('readerFontSourceName', '系统默认');
-    PersistentStorage.persistProp('readerFontMode', 'system');
-    PersistentStorage.persistProp('readerSystemFontFamily', '');
-    PersistentStorage.persistProp('readerCustomFontsRaw', '');
     PersistentStorage.persistProp('readerPageTurnAnimation', true);
     PersistentStorage.persistProp('bookshelfShowTags', true);
     PersistentStorage.persistProp('bookshelfShowIntro', true);
@@ -104,6 +101,12 @@ export default class EntryAbility extends UIAbility {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
     hilog.info(0x0000, 'testTag', 'StartupTrace onWindowStageCreate %{public}d', Date.now());
 
+    ReaderFontBootstrap.registerFromSettings(this.context, null, 'ability-onWindowStageCreate').finally(() => {
+      this.loadStartupContent(windowStage);
+    });
+  }
+
+  private loadStartupContent(windowStage: window.WindowStage): void {
     windowStage.loadContent('pages/Startup', (err) => {
       if (err.code) {
         hilog.error(0x0000, 'testTag', 'Failed to load content: %{public}s', JSON.stringify(err));
@@ -214,4 +217,5 @@ export default class EntryAbility extends UIAbility {
       });
     }, 0);
   }
+
 }

@@ -1,6 +1,7 @@
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
+import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 
 @Entry
 @Component
@@ -14,6 +15,7 @@ struct StartupPage {
     if (this.jumpTimer >= 0) {
       return;
     }
+    ReaderFontBootstrap.registerFromSettings(getContext(this), this.getUIContext(), 'startup-aboutToAppear');
     this.jumpTimer = setTimeout(() => {
       this.jumpTimer = -1;
       hilog.info(0x0000, 'testTag', 'StartupTrace replace Index %{public}d', Date.now());
