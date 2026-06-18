@@ -13,9 +13,11 @@ import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 @Component
 struct BookshelfSettingsPage {
   @StorageLink('bookshelfShowTags') bookshelfShowTags: boolean = true;
+  @StorageLink('bookshelfShowSource') bookshelfShowSource: boolean = true;
   @StorageLink('bookshelfShowIntro') bookshelfShowIntro: boolean = true;
   @StorageLink('bookshelfShowFullIntro') bookshelfShowFullIntro: boolean = false;
   @StorageLink('bookshelfShowProgressBar') bookshelfShowProgressBar: boolean = false;
+  @StorageLink('bookshelfLayoutMode') bookshelfLayoutMode: string = 'compact';
   @StorageLink('bookshelfCoverAlbums') @Watch('onCoverAlbumsChanged') bookshelfCoverAlbums: string = '';
   @StorageLink('bookshelfLightCoverAlbumId') bookshelfLightCoverAlbumId: string = '';
   @StorageLink('bookshelfDarkCoverAlbumId') bookshelfDarkCoverAlbumId: string = '';
@@ -62,6 +64,10 @@ struct BookshelfSettingsPage {
             this.bookshelfShowTags = value;
             this.onDisplaySettingChanged();
           })
+          this.switchItem('书籍来源', '控制书架卡片是否显示书籍来源', this.bookshelfShowSource, (value: boolean) => {
+            this.bookshelfShowSource = value;
+            this.onDisplaySettingChanged();
+          })
           this.switchItem('书籍简介', '开启后显示书源抓取的简介内容', this.bookshelfShowIntro, (value: boolean) => {
             this.bookshelfShowIntro = value;
             this.onDisplaySettingChanged();
@@ -76,6 +82,11 @@ struct BookshelfSettingsPage {
             this.bookshelfShowProgressBar = value;
             this.onDisplaySettingChanged();
           })
+          this.selectItem('书架布局', '切换书架卡片的信息排布密度',
+            this.bookshelfLayoutOptions(), this.bookshelfLayoutSelectedIndex(), (index: number) => {
+              this.bookshelfLayoutMode = index === 1 ? 'loose' : 'compact';
+              this.onDisplaySettingChanged();
+            })
 
           this.sectionTitle('封面设置')
           this.switchItem('忽略书源封面', '开启后书架封面只使用当前应用的封面图集', this.bookshelfIgnoreSourceCover, (value: boolean) => {
@@ -149,9 +160,11 @@ struct BookshelfSettingsPage {
     try {
       const settings = await BookshelfDisplaySettingsStore.load(getContext(this));
       this.bookshelfShowTags = settings.showTags;
+      this.bookshelfShowSource = settings.showSource;
       this.bookshelfShowIntro = settings.showIntro;
       this.bookshelfShowFullIntro = settings.showFullIntro;
       this.bookshelfShowProgressBar = settings.showProgressBar;
+      this.bookshelfLayoutMode = settings.layoutMode;
     } catch (e) {
       console.warn('重新加载书架显示设置失败:', e);
     }
@@ -161,9 +174,11 @@ struct BookshelfSettingsPage {
     AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     const settings = new BookshelfDisplaySettings();
     settings.showTags = this.bookshelfShowTags;
+    settings.showSource = this.bookshelfShowSource;
     settings.showIntro = this.bookshelfShowIntro;
     settings.showFullIntro = this.bookshelfShowFullIntro;
     settings.showProgressBar = this.bookshelfShowProgressBar;
+    settings.layoutMode = this.bookshelfLayoutMode;
     BookshelfDisplaySettingsStore.applyToStorage(settings);
     BookshelfDisplaySettingsStore.save(getContext(this), settings).catch((e: Error) => {
       console.warn('保存书架显示设置失败:', e);
@@ -342,6 +357,14 @@ struct BookshelfSettingsPage {
 
   scopeOptions(): SelectOption[] {
     return [{ value: '全部应用' }, { value: '指定书籍' }];
+  }
+
+  bookshelfLayoutOptions(): SelectOption[] {
+    return [{ value: '紧凑' }, { value: '宽松' }];
+  }
+
+  bookshelfLayoutSelectedIndex(): number {
+    return this.bookshelfLayoutMode === 'loose' ? 1 : 0;
   }
 
   scopeSelectedIndex(): number {

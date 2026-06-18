@@ -432,9 +432,11 @@ struct BookshelfPage {
   @StorageLink('bookshelfSortMode') sortMode: string = 'recentRead';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('bookshelfShowTags') bookshelfShowTags: boolean = true;
+  @StorageLink('bookshelfShowSource') bookshelfShowSource: boolean = true;
   @StorageLink('bookshelfShowIntro') bookshelfShowIntro: boolean = true;
   @StorageLink('bookshelfShowFullIntro') bookshelfShowFullIntro: boolean = false;
   @StorageLink('bookshelfShowProgressBar') bookshelfShowProgressBar: boolean = false;
+  @StorageLink('bookshelfLayoutMode') bookshelfLayoutMode: string = 'compact';
   @StorageLink('bookshelfCoverAlbums') @Watch('onShelfCoverSettingsChanged') bookshelfCoverAlbums: string = '';
   @StorageLink('bookshelfLightCoverAlbumId') @Watch('onShelfCoverSettingsChanged') bookshelfLightCoverAlbumId: string = '';
   @StorageLink('bookshelfDarkCoverAlbumId') @Watch('onShelfCoverSettingsChanged') bookshelfDarkCoverAlbumId: string = '';
@@ -460,9 +462,11 @@ struct BookshelfPage {
     try {
       const settings = await BookshelfDisplaySettingsStore.load(getContext(this));
       this.bookshelfShowTags = settings.showTags;
+      this.bookshelfShowSource = settings.showSource;
       this.bookshelfShowIntro = settings.showIntro;
       this.bookshelfShowFullIntro = settings.showFullIntro;
       this.bookshelfShowProgressBar = settings.showProgressBar;
+      this.bookshelfLayoutMode = settings.layoutMode;
     } catch (e) {
       console.warn('恢复书架显示设置失败:', e);
     }
@@ -662,71 +666,11 @@ struct BookshelfPage {
             ForEach(this.books, (book: Book) => {
               ListItem() {
                 Column() {
-                  Column({ space: 8 }) {
-                    Row() {
-                      this.coverView(book, 56, 72)
-
-                      Column({ space: 4 }) {
-                        Text(book.name)
-                          .fontSize(16)
-                          .fontWeight(FontWeight.Bold)
-                          .fontColor(this.primaryTextColor())
-                          .maxLines(1)
-                          .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-                        Text(this.getAuthorAndUpdateText(book))
-                          .fontSize(14)
-                          .fontColor(this.secondaryTextColor())
-
-                        Row() {
-                          if (book.origin !== 'local') {
-                            Text(book.originName || book.origin)
-                              .fontSize(12)
-                              .fontColor(this.sourceTagTextColor())
-                              .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-                              .backgroundColor(this.sourceTagBackgroundColor())
-                              .borderRadius(4)
-                              .margin({ right: 8 })
-                          }
-
-                          Text(this.getShelfProgressText(book))
-                            .fontSize(12)
-                            .fontColor(this.subTextColor())
-                        }
-                      }
-                      .layoutWeight(1)
-                      .margin({ left: 12 })
-                      .alignItems(HorizontalAlign.Start)
-                    }
-                    .width('100%')
-                    .alignItems(VerticalAlign.Top)
-
-                    if (this.bookshelfShowIntro && this.getBookIntroText(book)) {
-                      Text(this.getBookIntroText(book))
-                        .fontSize(12)
-                        .fontColor(this.subTextColor())
-                        .lineHeight(18)
-                        .maxLines(this.bookshelfShowFullIntro ? 999 : 2)
-                        .textOverflow({ overflow: TextOverflow.Ellipsis })
-                        .width('100%')
-                    }
-
-                    if (this.bookshelfShowTags && this.getDisplayTags(book).length > 0) {
-                      Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
-                        ForEach(this.getDisplayTags(book), (tag: string, index: number) => {
-                          this.tagChip(tag, index, 11)
-                        })
-                      }
-                      .width('100%')
-                    }
-
-                    if (this.bookshelfShowProgressBar) {
-                      this.readProgressPanel(book)
-                    }
+                  if (this.isCompactLayout()) {
+                    this.compactBookContent(book)
+                  } else {
+                    this.looseBookContent(book)
                   }
-                  .width('100%')
-                  .alignItems(HorizontalAlign.Start)
-                  .padding(12)
                 }
                 .width('100%')
                 .alignItems(HorizontalAlign.Start)
@@ -1166,6 +1110,151 @@ struct BookshelfPage {
     return updateText ? `${author} · 最后更新 ${updateText}` : author;
   }
 
+  isCompactLayout(): boolean {
+    return this.bookshelfLayoutMode !== 'loose';
+  }
+
+  @Builder
+  compactBookContent(book: Book) {
+    Column({ space: 8 }) {
+      Row() {
+        this.coverView(book, 56, 72)
+
+        Column({ space: 4 }) {
+          Row() {
+            Text(book.name)
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+
+            if (this.shouldShowBookSource(book)) {
+              Text(this.getBookSourceText(book))
+                .fontSize(11)
+                .fontColor(this.sourceTagTextColor())
+                .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                .backgroundColor(this.sourceTagBackgroundColor())
+                .borderRadius(4)
+                .margin({ left: 8 })
+            }
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+
+          Text(this.getAuthorAndUpdateText(book))
+            .fontSize(14)
+            .fontColor(this.secondaryTextColor())
+
+          if (this.bookshelfShowProgressBar) {
+            Blank()
+            this.readProgressPanel(book)
+          } else {
+            Row() {
+              Text(this.getShelfProgressText(book))
+                .fontSize(12)
+                .fontColor(this.subTextColor())
+            }
+          }
+        }
+        .layoutWeight(1)
+        .height(72)
+        .margin({ left: 12 })
+        .alignItems(HorizontalAlign.Start)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Top)
+
+      this.bookExtraContent(book)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding(12)
+  }
+
+  @Builder
+  looseBookContent(book: Book) {
+    Column({ space: 8 }) {
+      Row() {
+        this.coverView(book, 56, 72)
+
+        Column({ space: 4 }) {
+          Text(book.name)
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+          Text(this.getAuthorAndUpdateText(book))
+            .fontSize(14)
+            .fontColor(this.secondaryTextColor())
+
+          Row() {
+            if (this.shouldShowBookSource(book)) {
+              Text(this.getBookSourceText(book))
+                .fontSize(12)
+                .fontColor(this.sourceTagTextColor())
+                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                .backgroundColor(this.sourceTagBackgroundColor())
+                .borderRadius(4)
+                .margin({ right: 8 })
+            }
+
+            Text(this.getShelfProgressText(book))
+              .fontSize(12)
+              .fontColor(this.subTextColor())
+          }
+        }
+        .layoutWeight(1)
+        .margin({ left: 12 })
+        .alignItems(HorizontalAlign.Start)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Top)
+
+      this.bookExtraContent(book)
+
+      if (this.bookshelfShowProgressBar) {
+        this.looseReadProgressPanel(book)
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding(12)
+  }
+
+  @Builder
+  bookExtraContent(book: Book) {
+    if (this.bookshelfShowIntro && this.getBookIntroText(book)) {
+      Text(this.getBookIntroText(book))
+        .fontSize(12)
+        .fontColor(this.subTextColor())
+        .lineHeight(18)
+        .maxLines(this.bookshelfShowFullIntro ? 999 : 2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+    }
+
+    if (this.bookshelfShowTags && this.getDisplayTags(book).length > 0) {
+      Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+        ForEach(this.getDisplayTags(book), (tag: string, index: number) => {
+          this.tagChip(tag, index, 11)
+        })
+      }
+      .width('100%')
+    }
+  }
+
+  shouldShowBookSource(book: Book): boolean {
+    return this.bookshelfShowSource && book.origin !== 'local' && this.getBookSourceText(book).length > 0;
+  }
+
+  getBookSourceText(book: Book): string {
+    return (book.originName || book.origin || '').trim();
+  }
+
   getBookIntroText(book: Book): string {
     return (book.getDisplayIntro() || '')
       .replace(/\s+/g, ' ')
@@ -1550,20 +1639,20 @@ struct BookshelfPage {
   getReadProgressPercentText(book: Book): string {
     const progress = this.getReadProgressValue(book);
     if (progress <= 0) {
-      return '已读 0%';
+      return '已读0%';
     }
     if (progress >= 100) {
-      return '已读 100%';
+      return '已读100%';
     }
-    return progress % 1 === 0 ? `已读 ${progress.toFixed(0)}%` : `已读 ${progress.toFixed(1)}%`;
+    return progress % 1 === 0 ? `已读${progress.toFixed(0)}%` : `已读${progress.toFixed(1)}%`;
   }
 
   getLastReadTimeText(book: Book): string {
     const readTime = this.getBookReadTime(book);
     if (readTime <= 0) {
-      return '最后阅读 未读';
+      return '未读';
     }
-    return `最后阅读 ${this.formatShelfTime(readTime)}`;
+    return this.formatShelfTime(readTime);
   }
 
   formatShelfTime(time: number): string {
@@ -1594,26 +1683,54 @@ struct BookshelfPage {
 
   @Builder
   readProgressPanel(book: Book) {
-    Column({ space: 6 }) {
+    Column({ space: 4 }) {
+      Text(this.getReadProgressInfoText(book))
+        .fontSize(12)
+        .fontColor(this.subTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Start)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
       Progress({ value: this.getReadProgressValue(book), total: 100, type: ProgressType.Linear })
         .width('100%')
-        .height(4)
+        .height(3)
+        .color(this.accentColor())
+        .backgroundColor(this.appDarkMode ? '#2D3138' : '#E8EAED')
+    }
+    .width('100%')
+  }
+
+  @Builder
+  looseReadProgressPanel(book: Book) {
+    Column({ space: 4 }) {
+      Progress({ value: this.getReadProgressValue(book), total: 100, type: ProgressType.Linear })
+        .width('100%')
+        .height(3)
         .color(this.accentColor())
         .backgroundColor(this.appDarkMode ? '#2D3138' : '#E8EAED')
 
-      Row() {
-        Text(this.getReadProgressPercentText(book))
-          .fontSize(12)
-          .fontColor(this.subTextColor())
-        Blank()
-        Text(this.getLastReadTimeText(book))
-          .fontSize(12)
-          .fontColor(this.subTextColor())
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
+      Text(this.getReadProgressInfoText(book))
+        .fontSize(12)
+        .fontColor(this.subTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
     .width('100%')
+  }
+
+  getReadProgressInfoText(book: Book): string {
+    const chapterText = this.getReadChapterText(book);
+    if (!chapterText) {
+      return `${this.getReadProgressPercentText(book)} · ${this.getLastReadTimeText(book)}`;
+    }
+    return `${this.getReadProgressPercentText(book)} · ${this.getLastReadTimeText(book)} · ${chapterText}`;
+  }
+
+  getReadChapterText(book: Book): string {
+    return (book.durChapterTitle || '').trim();
   }
 
   pageColor(): string {
