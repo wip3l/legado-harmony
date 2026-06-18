@@ -15,6 +15,18 @@ export class ReaderSettings {
   fontMode: string = 'system';
   systemFontFamily: string = '';
   customFontsRaw: string = '';
+  bodyFontMode: string = 'global';
+  bodyFontFamily: string = '';
+  titleFontMode: string = 'global';
+  titleFontFamily: string = '';
+  titleFontSize: number = 22;
+  regexFontEnabled: boolean = false;
+  regexFontPattern: string = '';
+  regexFontMode: string = 'global';
+  regexFontFamily: string = '';
+  regexFontSize: number = 20;
+  regexShadowColor: string = '';
+  regexFontRulesRaw: string = '';
 }
 
 export class ReaderSettingsStore {
@@ -31,6 +43,18 @@ export class ReaderSettingsStore {
   static readonly KEY_FONT_MODE: string = 'readerFontMode';
   static readonly KEY_SYSTEM_FONT_FAMILY: string = 'readerSystemFontFamily';
   static readonly KEY_CUSTOM_FONTS_RAW: string = 'readerCustomFontsRaw';
+  static readonly KEY_BODY_FONT_MODE: string = 'readerBodyFontMode';
+  static readonly KEY_BODY_FONT_FAMILY: string = 'readerBodyFontFamily';
+  static readonly KEY_TITLE_FONT_MODE: string = 'readerTitleFontMode';
+  static readonly KEY_TITLE_FONT_FAMILY: string = 'readerTitleFontFamily';
+  static readonly KEY_TITLE_FONT_SIZE: string = 'readerTitleFontSize';
+  static readonly KEY_REGEX_FONT_ENABLED: string = 'readerRegexFontEnabled';
+  static readonly KEY_REGEX_FONT_PATTERN: string = 'readerRegexFontPattern';
+  static readonly KEY_REGEX_FONT_MODE: string = 'readerRegexFontMode';
+  static readonly KEY_REGEX_FONT_FAMILY: string = 'readerRegexFontFamily';
+  static readonly KEY_REGEX_FONT_SIZE: string = 'readerRegexFontSize';
+  static readonly KEY_REGEX_SHADOW_COLOR: string = 'readerRegexShadowColor';
+  static readonly KEY_REGEX_FONT_RULES_RAW: string = 'readerRegexFontRulesRaw';
   private static readonly STORE_NAME: string = 'reader_settings';
   private static cachedSettings: ReaderSettings | null = null;
 
@@ -87,6 +111,18 @@ export class ReaderSettingsStore {
     settings.fontMode = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_FONT_MODE, 'system');
     settings.systemFontFamily = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_SYSTEM_FONT_FAMILY, '');
     settings.customFontsRaw = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_CUSTOM_FONTS_RAW, '');
+    settings.bodyFontMode = ReaderSettingsStore.normalizeFontMode(await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_BODY_FONT_MODE, 'global'));
+    settings.bodyFontFamily = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_BODY_FONT_FAMILY, '');
+    settings.titleFontMode = ReaderSettingsStore.normalizeFontMode(await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_TITLE_FONT_MODE, 'global'));
+    settings.titleFontFamily = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_TITLE_FONT_FAMILY, '');
+    settings.titleFontSize = await ReaderSettingsStore.getNumber(store, ReaderSettingsStore.KEY_TITLE_FONT_SIZE, 22, 'fontSize');
+    settings.regexFontEnabled = await ReaderSettingsStore.getBoolean(store, ReaderSettingsStore.KEY_REGEX_FONT_ENABLED, false);
+    settings.regexFontPattern = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_REGEX_FONT_PATTERN, '');
+    settings.regexFontMode = ReaderSettingsStore.normalizeFontMode(await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_REGEX_FONT_MODE, 'global'));
+    settings.regexFontFamily = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_REGEX_FONT_FAMILY, '');
+    settings.regexFontSize = await ReaderSettingsStore.getNumber(store, ReaderSettingsStore.KEY_REGEX_FONT_SIZE, 20, 'fontSize');
+    settings.regexShadowColor = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_REGEX_SHADOW_COLOR, '');
+    settings.regexFontRulesRaw = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_REGEX_FONT_RULES_RAW, '');
     ReaderSettingsStore.mergeStorageFontSettings(settings);
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
     return settings;
@@ -168,6 +204,41 @@ export class ReaderSettingsStore {
     await store.flush();
   }
 
+  static async saveReaderFontStyleSettings(context: Context, settings: ReaderSettings): Promise<void> {
+    const current = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
+    current.fontSize = ReaderSettingsStore.normalizeFontSize(settings.fontSize || current.fontSize);
+    current.bodyFontMode = ReaderSettingsStore.normalizeFontMode(settings.bodyFontMode);
+    current.bodyFontFamily = settings.bodyFontFamily || '';
+    current.titleFontMode = ReaderSettingsStore.normalizeFontMode(settings.titleFontMode);
+    current.titleFontFamily = settings.titleFontFamily || '';
+    current.titleFontSize = ReaderSettingsStore.normalizeFontSize(settings.titleFontSize);
+    current.regexFontEnabled = settings.regexFontEnabled;
+    current.regexFontPattern = settings.regexFontPattern || '';
+    current.regexFontMode = ReaderSettingsStore.normalizeFontMode(settings.regexFontMode);
+    current.regexFontFamily = settings.regexFontFamily || '';
+    current.regexFontSize = ReaderSettingsStore.normalizeFontSize(settings.regexFontSize);
+    current.regexShadowColor = settings.regexShadowColor || '';
+    current.regexFontRulesRaw = settings.regexFontRulesRaw || '';
+    ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(current);
+    ReaderSettingsStore.applyLayoutToStorage(current);
+    ReaderSettingsStore.applyReaderFontStyleToStorage(current);
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    await store.put(ReaderSettingsStore.KEY_FONT_SIZE, current.fontSize);
+    await store.put(ReaderSettingsStore.KEY_BODY_FONT_MODE, current.bodyFontMode);
+    await store.put(ReaderSettingsStore.KEY_BODY_FONT_FAMILY, current.bodyFontFamily);
+    await store.put(ReaderSettingsStore.KEY_TITLE_FONT_MODE, current.titleFontMode);
+    await store.put(ReaderSettingsStore.KEY_TITLE_FONT_FAMILY, current.titleFontFamily);
+    await store.put(ReaderSettingsStore.KEY_TITLE_FONT_SIZE, current.titleFontSize);
+    await store.put(ReaderSettingsStore.KEY_REGEX_FONT_ENABLED, current.regexFontEnabled);
+    await store.put(ReaderSettingsStore.KEY_REGEX_FONT_PATTERN, current.regexFontPattern);
+    await store.put(ReaderSettingsStore.KEY_REGEX_FONT_MODE, current.regexFontMode);
+    await store.put(ReaderSettingsStore.KEY_REGEX_FONT_FAMILY, current.regexFontFamily);
+    await store.put(ReaderSettingsStore.KEY_REGEX_FONT_SIZE, current.regexFontSize);
+    await store.put(ReaderSettingsStore.KEY_REGEX_SHADOW_COLOR, current.regexShadowColor);
+    await store.put(ReaderSettingsStore.KEY_REGEX_FONT_RULES_RAW, current.regexFontRulesRaw);
+    await store.flush();
+  }
+
   static applyToStorage(settings: ReaderSettings): void {
     const normalized = ReaderSettingsStore.clone(settings);
     ReaderSettingsStore.cachedSettings = normalized;
@@ -181,6 +252,22 @@ export class ReaderSettingsStore {
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_FONT_MODE, normalized.fontMode);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_SYSTEM_FONT_FAMILY, normalized.systemFontFamily);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_CUSTOM_FONTS_RAW, normalized.customFontsRaw);
+    ReaderSettingsStore.applyReaderFontStyleToStorage(normalized);
+  }
+
+  private static applyReaderFontStyleToStorage(settings: ReaderSettings): void {
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_BODY_FONT_MODE, settings.bodyFontMode);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_BODY_FONT_FAMILY, settings.bodyFontFamily);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_TITLE_FONT_MODE, settings.titleFontMode);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_TITLE_FONT_FAMILY, settings.titleFontFamily);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_TITLE_FONT_SIZE, settings.titleFontSize);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_REGEX_FONT_ENABLED, settings.regexFontEnabled);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_REGEX_FONT_PATTERN, settings.regexFontPattern);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_REGEX_FONT_MODE, settings.regexFontMode);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_REGEX_FONT_FAMILY, settings.regexFontFamily);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_REGEX_FONT_SIZE, settings.regexFontSize);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_REGEX_SHADOW_COLOR, settings.regexShadowColor);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_REGEX_FONT_RULES_RAW, settings.regexFontRulesRaw);
   }
 
   private static applyLayoutToStorage(settings: ReaderSettings): void {
@@ -294,6 +381,13 @@ export class ReaderSettingsStore {
     return Math.max(1, Math.min(value, 10));
   }
 
+  private static normalizeFontMode(mode: string): string {
+    if (mode === 'system' || mode === 'custom') {
+      return mode;
+    }
+    return 'global';
+  }
+
   private static clone(source: ReaderSettings): ReaderSettings {
     const settings = new ReaderSettings();
     settings.fontSize = ReaderSettingsStore.normalizeFontSize(source.fontSize);
@@ -309,6 +403,18 @@ export class ReaderSettingsStore {
     settings.fontMode = source.fontMode || 'system';
     settings.systemFontFamily = source.systemFontFamily || '';
     settings.customFontsRaw = source.customFontsRaw || '';
+    settings.bodyFontMode = ReaderSettingsStore.normalizeFontMode(source.bodyFontMode);
+    settings.bodyFontFamily = source.bodyFontFamily || '';
+    settings.titleFontMode = ReaderSettingsStore.normalizeFontMode(source.titleFontMode);
+    settings.titleFontFamily = source.titleFontFamily || '';
+    settings.titleFontSize = ReaderSettingsStore.normalizeFontSize(source.titleFontSize || 22);
+    settings.regexFontEnabled = source.regexFontEnabled;
+    settings.regexFontPattern = source.regexFontPattern || '';
+    settings.regexFontMode = ReaderSettingsStore.normalizeFontMode(source.regexFontMode);
+    settings.regexFontFamily = source.regexFontFamily || '';
+    settings.regexFontSize = ReaderSettingsStore.normalizeFontSize(source.regexFontSize || 20);
+    settings.regexShadowColor = source.regexShadowColor || '';
+    settings.regexFontRulesRaw = source.regexFontRulesRaw || '';
     return settings;
   }
 
@@ -339,6 +445,18 @@ export class ReaderSettingsStore {
     settings.fontMode = AppStorage.get<string>(ReaderSettingsStore.KEY_FONT_MODE) || 'system';
     settings.systemFontFamily = AppStorage.get<string>(ReaderSettingsStore.KEY_SYSTEM_FONT_FAMILY) || '';
     settings.customFontsRaw = AppStorage.get<string>(ReaderSettingsStore.KEY_CUSTOM_FONTS_RAW) || '';
+    settings.bodyFontMode = ReaderSettingsStore.normalizeFontMode(AppStorage.get<string>(ReaderSettingsStore.KEY_BODY_FONT_MODE) || 'global');
+    settings.bodyFontFamily = AppStorage.get<string>(ReaderSettingsStore.KEY_BODY_FONT_FAMILY) || '';
+    settings.titleFontMode = ReaderSettingsStore.normalizeFontMode(AppStorage.get<string>(ReaderSettingsStore.KEY_TITLE_FONT_MODE) || 'global');
+    settings.titleFontFamily = AppStorage.get<string>(ReaderSettingsStore.KEY_TITLE_FONT_FAMILY) || '';
+    settings.titleFontSize = ReaderSettingsStore.normalizeFontSize(AppStorage.get<number>(ReaderSettingsStore.KEY_TITLE_FONT_SIZE) ?? 22);
+    settings.regexFontEnabled = AppStorage.get<boolean>(ReaderSettingsStore.KEY_REGEX_FONT_ENABLED) ?? false;
+    settings.regexFontPattern = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_PATTERN) || '';
+    settings.regexFontMode = ReaderSettingsStore.normalizeFontMode(AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_MODE) || 'global');
+    settings.regexFontFamily = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_FAMILY) || '';
+    settings.regexFontSize = ReaderSettingsStore.normalizeFontSize(AppStorage.get<number>(ReaderSettingsStore.KEY_REGEX_FONT_SIZE) ?? 20);
+    settings.regexShadowColor = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_SHADOW_COLOR) || '';
+    settings.regexFontRulesRaw = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_RULES_RAW) || '';
     return settings;
   }
 

@@ -16,6 +16,7 @@
     "pages/OtherSettings",
     "pages/ThemeColorSettings",
     "pages/FontSettings",
+    "pages/ReaderFontSettings",
     "pages/CoverGalleryManager",
     "pages/About",
     "pages/VerifyWeb"

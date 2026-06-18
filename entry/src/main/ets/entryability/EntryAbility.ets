@@ -22,6 +22,18 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('readerPageTurnMode', 1);
     PersistentStorage.persistProp('readerPreloadEnabled', true);
     PersistentStorage.persistProp('readerPreloadChapterCount', 1);
+    PersistentStorage.persistProp('readerBodyFontMode', 'global');
+    PersistentStorage.persistProp('readerBodyFontFamily', '');
+    PersistentStorage.persistProp('readerTitleFontMode', 'global');
+    PersistentStorage.persistProp('readerTitleFontFamily', '');
+    PersistentStorage.persistProp('readerTitleFontSize', 22);
+    PersistentStorage.persistProp('readerRegexFontEnabled', false);
+    PersistentStorage.persistProp('readerRegexFontPattern', '');
+    PersistentStorage.persistProp('readerRegexFontMode', 'global');
+    PersistentStorage.persistProp('readerRegexFontFamily', '');
+    PersistentStorage.persistProp('readerRegexFontSize', 20);
+    PersistentStorage.persistProp('readerRegexShadowColor', '');
+    PersistentStorage.persistProp('readerRegexFontRulesRaw', '');
     if (AppStorage.get<number>('statusBarHeight') === undefined) {
       AppStorage.setOrCreate('statusBarHeight', 32);
     }

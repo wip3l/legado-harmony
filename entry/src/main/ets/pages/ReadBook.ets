@@ -13,7 +13,7 @@ import { OPEN_BOOK_SHORTCUT_ACTION, RecentReadShortcut } from '../utils/RecentRe
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { SystemTtsReader, TtsChunk } from '../utils/SystemTtsReader';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
-import { ReaderFontHelper } from '../utils/ReaderFontHelper';
+import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
@@ -25,6 +25,7 @@ interface ReadTextSlice {
   start: number;
   end: number;
   highlighted: boolean;
+  ruleIndex: number;
   key: string;
 }
 
@@ -33,6 +34,22 @@ interface ReaderPaginationResult {
   pages: string[];
   starts: number[];
   ends: number[];
+}
+
+class ReaderRegexFontRule {
+  id: string = '';
+  name: string = '';
+  pattern: string = '';
+  fontMode: string = 'global';
+  fontFamily: string = '';
+  fontSize: number = 20;
+  highlightColorEnabled: boolean = false;
+  shadowColor: string = '';
+  expanded: boolean = true;
+}
+
+class ReaderRegexFontRulesData {
+  rules: ReaderRegexFontRule[] = [];
 }
 
 class ReaderCustomFontItem {
@@ -143,6 +160,18 @@ struct ReadBookPage {
   @StorageLink('readerSystemFontFamily') @Watch('onReaderActiveFontChanged') readerSystemFontFamily: string = '';
   @StorageLink('readerActiveFontFamily') @Watch('onReaderActiveFontChanged') readerActiveFontFamily: string = '';
   @StorageLink('readerFontRegistered') @Watch('onReaderActiveFontChanged') readerStoredFontRegistered: boolean = false;
+  @StorageLink('readerBodyFontMode') @Watch('onReaderFontStyleChanged') readerBodyFontMode: string = 'global';
+  @StorageLink('readerBodyFontFamily') @Watch('onReaderFontStyleChanged') readerBodyFontFamily: string = '';
+  @StorageLink('readerTitleFontMode') @Watch('onReaderFontStyleChanged') readerTitleFontMode: string = 'global';
+  @StorageLink('readerTitleFontFamily') @Watch('onReaderFontStyleChanged') readerTitleFontFamily: string = '';
+  @StorageLink('readerTitleFontSize') @Watch('onReaderFontStyleChanged') readerTitleFontSize: number = 22;
+  @StorageLink('readerRegexFontEnabled') @Watch('onReaderFontStyleChanged') readerRegexFontEnabled: boolean = false;
+  @StorageLink('readerRegexFontPattern') @Watch('onReaderFontStyleChanged') readerRegexFontPattern: string = '';
+  @StorageLink('readerRegexFontMode') @Watch('onReaderFontStyleChanged') readerRegexFontMode: string = 'global';
+  @StorageLink('readerRegexFontFamily') @Watch('onReaderFontStyleChanged') readerRegexFontFamily: string = '';
+  @StorageLink('readerRegexFontSize') @Watch('onReaderFontStyleChanged') readerRegexFontSize: number = 20;
+  @StorageLink('readerRegexShadowColor') @Watch('onReaderFontStyleChanged') readerRegexShadowColor: string = '';
+  @StorageLink('readerRegexFontRulesRaw') @Watch('onReaderFontStyleChanged') readerRegexFontRulesRaw: string = '';
   @State activeReaderFontFamily: string = '';
   @State readerFontRegistered: boolean = false;
   @State readerFontRenderReady: boolean = false;
@@ -1109,18 +1138,112 @@ struct ReadBookPage {
     return family;
   }
 
-  resolveReaderFontFamily(): string {
-    if (this.readerFontFilePath && !this.readerFontRenderReady) {
+  getBodyReaderFontFamily(): string {
+    return this.resolveStyledReaderFontFamily(this.readerBodyFontMode, this.readerBodyFontFamily);
+  }
+
+  getTitleReaderFontFamily(): string {
+    if (this.readerTitleFontMode === 'global' && !this.readerTitleFontFamily) {
       return this.getSystemReaderFontFamily();
     }
+    return this.resolveStyledReaderFontFamily(this.readerTitleFontMode, this.readerTitleFontFamily);
+  }
+
+  getRegexReaderFontFamily(): string {
+    return this.resolveStyledReaderFontFamily(this.readerRegexFontMode, this.readerRegexFontFamily);
+  }
+
+  resolveStyledReaderFontFamily(mode: string, family: string): string {
+    if (mode === 'system') {
+      return this.getSystemReaderFontFamily();
+    }
+    if (mode === 'custom' && family) {
+      return this.resolveCustomReaderFontFamily(family);
+    }
+    return this.getReaderFontFamily();
+  }
+
+  resolveCustomReaderFontFamily(family: string): string {
+    if (!family) {
+      return '';
+    }
+    const raw = AppStorage.get<string>('readerCustomFontsRaw') || '';
+    if (!raw.trim()) {
+      return family;
+    }
+    try {
+      const parsed = JSON.parse(raw) as ReaderCustomFontData | ReaderCustomFontItem[];
+      const source = Array.isArray(parsed) ? parsed as ReaderCustomFontItem[] : ((parsed as ReaderCustomFontData).fonts || []);
+      for (const item of source) {
+        if (!item || !item.filePath) {
+          continue;
+        }
+        const stableFamily = ReaderFontHelper.normalizeFontFamily(item.filePath);
+        if (item.familyName === family || stableFamily === family) {
+          return stableFamily;
+        }
+      }
+    } catch (e) {
+      console.warn('解析阅读自定义字体失败:', e);
+    }
+    return family;
+  }
+
+  registerCustomReaderFontFamily(family: string): void {
+    if (!family) {
+      return;
+    }
+    const raw = AppStorage.get<string>('readerCustomFontsRaw') || '';
+    if (!raw.trim()) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as ReaderCustomFontData | ReaderCustomFontItem[];
+      const source = Array.isArray(parsed) ? parsed as ReaderCustomFontItem[] : ((parsed as ReaderCustomFontData).fonts || []);
+      for (const item of source) {
+        if (!item || !item.filePath) {
+          continue;
+        }
+        const stableFamily = ReaderFontHelper.normalizeFontFamily(item.filePath);
+        if (item.familyName !== family && stableFamily !== family) {
+          continue;
+        }
+        const fontItem = new ReaderFontItem();
+        fontItem.familyName = stableFamily;
+        fontItem.filePath = item.filePath;
+        fontItem.sourceName = item.sourceName || this.fileNameFromPath(item.filePath);
+        ReaderFontHelper.registerFont(this.getUIContext(), fontItem);
+        return;
+      }
+    } catch (e) {
+      console.warn('解析阅读自定义字体失败:', e);
+    }
+  }
+
+  registerStyledCustomReaderFonts(): void {
+    if (this.readerBodyFontMode === 'custom') {
+      this.registerCustomReaderFontFamily(this.readerBodyFontFamily);
+    }
+    if (this.readerTitleFontMode === 'custom') {
+      this.registerCustomReaderFontFamily(this.readerTitleFontFamily);
+    }
+    if (this.readerRegexFontMode === 'custom') {
+      this.registerCustomReaderFontFamily(this.readerRegexFontFamily);
+    }
+    const rules = this.getRegexRules();
+    for (const rule of rules) {
+      if (rule.fontMode === 'custom') {
+        this.registerCustomReaderFontFamily(rule.fontFamily);
+      }
+    }
+  }
+
+  resolveReaderFontFamily(): string {
     if (this.activeReaderFontFamily) {
       return this.activeReaderFontFamily;
     }
     if (this.readerActiveFontFamily) {
       return this.readerActiveFontFamily;
-    }
-    if (this.readerFontFilePath) {
-      return this.getSystemReaderFontFamily();
     }
     return this.readerFontFamily || this.getSystemReaderFontFamily();
   }
@@ -1249,6 +1372,25 @@ struct ReadBookPage {
     this.readerSystemFontFamily = settings.systemFontFamily || ReaderSystemFontHelper.currentFromStorage(this.getUIContext());
     AppStorage.setOrCreate<string>('readerSystemFontFamily', this.readerSystemFontFamily);
     AppStorage.setOrCreate<string>('readerCustomFontsRaw', settings.customFontsRaw || '');
+    this.readerBodyFontMode = settings.bodyFontMode || 'global';
+    this.readerBodyFontFamily = settings.bodyFontFamily || '';
+    this.readerTitleFontMode = settings.titleFontMode || 'global';
+    this.readerTitleFontFamily = settings.titleFontFamily || '';
+    this.readerTitleFontSize = settings.titleFontSize || 22;
+    this.readerRegexFontEnabled = settings.regexFontEnabled;
+    this.readerRegexFontPattern = settings.regexFontPattern || '';
+    this.readerRegexFontMode = settings.regexFontMode || 'global';
+    this.readerRegexFontFamily = settings.regexFontFamily || '';
+    this.readerRegexFontSize = settings.regexFontSize || 20;
+    this.readerRegexShadowColor = settings.regexShadowColor || '';
+    this.readerRegexFontRulesRaw = settings.regexFontRulesRaw || '';
+    this.registerStyledCustomReaderFonts();
+  }
+
+  onReaderFontStyleChanged(): void {
+    this.registerStyledCustomReaderFonts();
+    this.refreshReaderTextRender();
+    this.paginateContent(this.content);
   }
 
   replaceReaderCustomFontPath(oldPath: string, newPath: string, familyName: string): void {
@@ -3236,21 +3378,9 @@ struct ReadBookPage {
       if (this.hasActiveTtsHighlight(this.currentPageText)) {
         this.readingText(this.currentPageText, 18 + this.getReaderContentBottomReserve())
       } else if (renderVersion % 2 === 0) {
-        Text(this.currentPageText)
-          .fontSize(this.readerFontSize)
-          .fontFamily(this.getReaderFontFamily())
-          .lineHeight(this.readerLineHeight)
-          .fontColor(this.getTextColor())
-          .padding({ left: 18, right: 18, top: 18, bottom: 18 + this.getReaderContentBottomReserve() })
-          .width('100%')
+        this.styledReaderText(this.currentPageText, 18 + this.getReaderContentBottomReserve())
       } else {
-        Text(this.currentPageText)
-          .fontSize(this.readerFontSize)
-          .fontFamily(this.getReaderFontFamily())
-          .lineHeight(this.readerLineHeight)
-          .fontColor(this.getTextColor())
-          .padding({ left: 18, right: 18, top: 18, bottom: 18 + this.getReaderContentBottomReserve() })
-          .width('100%')
+        this.styledReaderText(this.currentPageText, 18 + this.getReaderContentBottomReserve())
       }
     }
     .width('100%')
@@ -3266,21 +3396,9 @@ struct ReadBookPage {
       if (this.hasActiveTtsHighlight(text)) {
         this.readingText(text, 18 + this.getReaderContentBottomReserve())
       } else if (renderVersion % 2 === 0) {
-        Text(text)
-          .fontSize(this.readerFontSize)
-          .fontFamily(this.getReaderFontFamily())
-          .lineHeight(this.readerLineHeight)
-          .fontColor(this.getTextColor())
-          .padding({ left: 18, right: 18, top: 18, bottom: 18 + this.getReaderContentBottomReserve() })
-          .width('100%')
+        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve())
       } else {
-        Text(text)
-          .fontSize(this.readerFontSize)
-          .fontFamily(this.getReaderFontFamily())
-          .lineHeight(this.readerLineHeight)
-          .fontColor(this.getTextColor())
-          .padding({ left: 18, right: 18, top: 18, bottom: 18 + this.getReaderContentBottomReserve() })
-          .width('100%')
+        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve())
       }
     }
     .width('100%')
@@ -3304,20 +3422,291 @@ struct ReadBookPage {
         }, (slice: ReadTextSlice) => slice.key)
       }
       .fontSize(this.readerFontSize)
-      .fontFamily(this.getReaderFontFamily())
+      .fontFamily(this.getBodyReaderFontFamily())
       .lineHeight(this.readerLineHeight)
       .fontColor(this.getTextColor())
       .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
       .width('100%')
     } else {
-      Text(this.getReadingRenderText(text))
+      this.styledReaderText(this.getReadingRenderText(text), bottomPadding)
+    }
+  }
+
+  @Builder
+  styledReaderText(text: string, bottomPadding: number) {
+    if (this.shouldUseTitleStyle(text)) {
+      Text() {
+        Span(this.getChapterTitle())
+          .fontSize(this.readerTitleFontSize)
+          .fontFamily(this.getTitleReaderFontFamily())
+          .fontColor(this.getTextColor())
+        ForEach(this.getRegexTextSlices(text.substring(this.getChapterTitle().length)), (slice: ReadTextSlice) => {
+          Span(slice.text)
+            .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
+            .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
+            .fontColor(slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? this.getRegexHighlightTextColor() : this.getTextColor())
+            .textBackgroundStyle(slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? {
+              color: this.readerRegexHighlightColor(this.getRegexRuleBySlice(slice)),
+              radius: 4
+            } : {})
+        }, (slice: ReadTextSlice) => `title_body_${slice.key}`)
+      }
+      .lineHeight(this.readerLineHeight)
+      .fontColor(this.getTextColor())
+      .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
+      .width('100%')
+    } else if (this.shouldUseRegexStyle(text)) {
+      this.regexReaderText(text, bottomPadding)
+    } else {
+      Text(text)
         .fontSize(this.readerFontSize)
-        .fontFamily(this.getReaderFontFamily())
+        .fontFamily(this.getBodyReaderFontFamily())
         .lineHeight(this.readerLineHeight)
         .fontColor(this.getTextColor())
         .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
         .width('100%')
     }
+  }
+
+  @Builder
+  regexReaderText(text: string, bottomPadding: number) {
+    Text() {
+      ForEach(this.getRegexTextSlices(text), (slice: ReadTextSlice) => {
+        Span(slice.text)
+          .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
+          .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
+          .fontColor(slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? this.getRegexHighlightTextColor() : this.getTextColor())
+          .textBackgroundStyle(slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? {
+            color: this.readerRegexHighlightColor(this.getRegexRuleBySlice(slice)),
+            radius: 4
+          } : {})
+      }, (slice: ReadTextSlice) => slice.key)
+    }
+    .lineHeight(this.readerLineHeight)
+    .fontColor(this.getTextColor())
+    .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
+    .width('100%')
+  }
+
+  shouldUseTitleStyle(text: string): boolean {
+    const title = this.getChapterTitle().trim();
+    return !!title && (text || '').startsWith(title);
+  }
+
+  shouldUseRegexStyle(text: string): boolean {
+    return this.hasRegexMatch(text);
+  }
+
+  hasRegexMatch(text: string): boolean {
+    if (!this.readerRegexFontEnabled) {
+      return false;
+    }
+    const rules = this.getRegexRules();
+    for (const rule of rules) {
+      if (!rule.pattern.trim()) {
+        continue;
+      }
+      try {
+        if (new RegExp(rule.pattern).test(text || '')) {
+          return true;
+        }
+      } catch (e) {
+      }
+    }
+    return false;
+  }
+
+  getRegexRules(): ReaderRegexFontRule[] {
+    const raw = (this.readerRegexFontRulesRaw || '').trim();
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as ReaderRegexFontRulesData | ReaderRegexFontRule[];
+        const source = Array.isArray(parsed) ? parsed as ReaderRegexFontRule[] : ((parsed as ReaderRegexFontRulesData).rules || []);
+        const result: ReaderRegexFontRule[] = [];
+        for (const item of source) {
+          if (!item) {
+            continue;
+          }
+          const rule = new ReaderRegexFontRule();
+          rule.id = item.id || '';
+          rule.name = item.name || '';
+          rule.pattern = item.pattern || '';
+          rule.fontMode = item.fontMode || 'global';
+          rule.fontFamily = item.fontFamily || '';
+          rule.fontSize = Math.max(14, Math.min(Math.round(item.fontSize || 20), 30));
+          rule.highlightColorEnabled = item.highlightColorEnabled === true;
+          rule.shadowColor = item.shadowColor || '';
+          rule.expanded = item.expanded !== false;
+          result.push(rule);
+        }
+        return result;
+      } catch (e) {
+      }
+    }
+    if ((this.readerRegexFontPattern || '').trim()) {
+      const rule = new ReaderRegexFontRule();
+      rule.pattern = this.readerRegexFontPattern;
+      rule.fontMode = this.readerRegexFontMode;
+      rule.fontFamily = this.readerRegexFontFamily;
+      rule.fontSize = this.readerRegexFontSize;
+      rule.highlightColorEnabled = !!this.readerRegexShadowColor;
+      rule.shadowColor = this.readerRegexShadowColor;
+      rule.expanded = true;
+      return [rule];
+    }
+    return [];
+  }
+
+  readerRegexHighlightColor(rule: ReaderRegexFontRule | null): string {
+    return rule ? (rule.highlightColorEnabled ? ((rule.shadowColor || '').trim() || this.accentColor()) : this.accentColor()) :
+      (this.readerRegexShadowColor.trim() || this.accentColor());
+  }
+
+  shouldUseRegexHighlight(rule: ReaderRegexFontRule | null): boolean {
+    return rule ? rule.highlightColorEnabled : !!this.readerRegexShadowColor.trim();
+  }
+
+  getRegexHighlightTextColor(): string {
+    return this.getTtsHighlightTextColor();
+  }
+
+  getRegexTextSlices(text: string): ReadTextSlice[] {
+    const displayText = text || '';
+    const rules = this.getRegexRules();
+    if (!this.readerRegexFontEnabled || rules.length === 0) {
+      return [{
+        text: displayText,
+        start: 0,
+        end: displayText.length,
+        highlighted: false,
+        ruleIndex: -1,
+        key: `plain_regex_${this.buildTextSliceKey(displayText)}`
+      }];
+    }
+    try {
+      const matched: ReadTextSlice[] = [];
+      for (let ruleIndex = 0; ruleIndex < rules.length; ruleIndex++) {
+        const rule = rules[ruleIndex];
+        if (!rule.pattern.trim()) {
+          continue;
+        }
+        let regex: RegExp;
+        try {
+          regex = new RegExp(rule.pattern, 'g');
+        } catch (e) {
+          continue;
+        }
+        let match = regex.exec(displayText);
+        while (match && match.index >= 0) {
+          const start = Math.max(0, match.index);
+          const end = Math.max(start, Math.min(displayText.length, match.index + (match[0] || '').length));
+          if (end <= start) {
+            regex.lastIndex = Math.min(displayText.length, Math.max(regex.lastIndex + 1, start + 1));
+            match = regex.exec(displayText);
+            continue;
+          }
+          if (!this.hasOverlappedRegexSlice(matched, start, end)) {
+            const matchText = displayText.substring(start, end);
+            matched.push({
+              text: matchText,
+              start: start,
+              end: end,
+              highlighted: true,
+              ruleIndex: ruleIndex,
+              key: `regex_hit_${ruleIndex}_${start}_${end}_${this.buildTextSliceKey(matchText)}`
+            });
+          }
+          regex.lastIndex = Math.max(regex.lastIndex, end);
+          match = regex.exec(displayText);
+        }
+      }
+      if (matched.length === 0) {
+        return [{
+          text: displayText,
+          start: 0,
+          end: displayText.length,
+          highlighted: false,
+          ruleIndex: -1,
+          key: `plain_regex_${this.buildTextSliceKey(displayText)}`
+        }];
+      }
+      matched.sort((a: ReadTextSlice, b: ReadTextSlice) => a.start - b.start);
+      const slices: ReadTextSlice[] = [];
+      let cursor = 0;
+      for (const item of matched) {
+        const start = Math.max(cursor, item.start);
+        const end = Math.max(start, item.end);
+        if (start > cursor) {
+          const beforeText = displayText.substring(cursor, start);
+          slices.push({
+            text: beforeText,
+            start: cursor,
+            end: start,
+            highlighted: false,
+            ruleIndex: -1,
+            key: `regex_plain_${cursor}_${start}_${this.buildTextSliceKey(beforeText)}`
+          });
+        }
+        const matchText = displayText.substring(start, end);
+        slices.push({
+          text: matchText,
+          start: start,
+          end: end,
+          highlighted: true,
+          ruleIndex: item.ruleIndex,
+          key: `regex_hit_${item.ruleIndex}_${start}_${end}_${this.buildTextSliceKey(matchText)}`
+        });
+        cursor = end;
+      }
+      if (cursor < displayText.length) {
+        const afterText = displayText.substring(cursor);
+        slices.push({
+          text: afterText,
+          start: cursor,
+          end: displayText.length,
+          highlighted: false,
+          ruleIndex: -1,
+          key: `regex_plain_${cursor}_${displayText.length}_${this.buildTextSliceKey(afterText)}`
+        });
+      }
+      return slices;
+    } catch (e) {
+      return [{
+        text: displayText,
+        start: 0,
+        end: displayText.length,
+        highlighted: false,
+        ruleIndex: -1,
+        key: `plain_regex_error_${this.buildTextSliceKey(displayText)}`
+      }];
+    }
+  }
+
+  hasOverlappedRegexSlice(slices: ReadTextSlice[], start: number, end: number): boolean {
+    for (const slice of slices) {
+      if (start < slice.end && end > slice.start) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  getRegexRuleBySlice(slice: ReadTextSlice): ReaderRegexFontRule | null {
+    const rules = this.getRegexRules();
+    if (!slice.highlighted || slice.ruleIndex < 0 || slice.ruleIndex >= rules.length) {
+      return null;
+    }
+    return rules[slice.ruleIndex];
+  }
+
+  getRegexSliceFontSize(slice: ReadTextSlice): number {
+    const rule = this.getRegexRuleBySlice(slice);
+    return rule ? rule.fontSize : this.readerRegexFontSize;
+  }
+
+  getRegexSliceFontFamily(slice: ReadTextSlice): string {
+    const rule = this.getRegexRuleBySlice(slice);
+    return rule ? this.resolveStyledReaderFontFamily(rule.fontMode, rule.fontFamily) : this.getRegexReaderFontFamily();
   }
 
   getReadingTextSlices(text: string): ReadTextSlice[] {
@@ -3330,6 +3719,7 @@ struct ReadBookPage {
         start: 0,
         end: displayText.length,
         highlighted: false,
+        ruleIndex: -1,
         key: `plain_${this.buildTextSliceKey(displayText)}`
       }];
     }
@@ -3342,6 +3732,7 @@ struct ReadBookPage {
         start: 0,
         end: clampedStart,
         highlighted: false,
+        ruleIndex: -1,
         key: `before_${clampedStart}_${this.buildTextSliceKey(displayText.substring(0, clampedStart))}`
       });
     }
@@ -3351,6 +3742,7 @@ struct ReadBookPage {
       start: clampedStart,
       end: clampedEnd,
       highlighted: true,
+      ruleIndex: -1,
       key: `highlight_${clampedStart}_${clampedEnd}_${this.buildTextSliceKey(highlightedText)}`
     });
     if (clampedEnd < displayText.length) {
@@ -3360,6 +3752,7 @@ struct ReadBookPage {
         start: clampedEnd,
         end: displayText.length,
         highlighted: false,
+        ruleIndex: -1,
         key: `after_${clampedEnd}_${this.buildTextSliceKey(afterText)}`
       });
     }
@@ -3374,6 +3767,7 @@ struct ReadBookPage {
         start: 0,
         end: displayText.length,
         highlighted: false,
+        ruleIndex: -1,
         key: `plain_${this.buildTextSliceKey(displayText)}`
       }];
     }
@@ -3387,6 +3781,7 @@ struct ReadBookPage {
         start: 0,
         end: clampedStart,
         highlighted: false,
+        ruleIndex: -1,
         key: `before_${clampedStart}_${this.buildTextSliceKey(beforeText)}`
       });
     }
@@ -3396,6 +3791,7 @@ struct ReadBookPage {
       start: clampedStart,
       end: clampedEnd,
       highlighted: true,
+      ruleIndex: -1,
       key: `highlight_${clampedStart}_${clampedEnd}_${this.buildTextSliceKey(highlightedText)}`
     });
     if (clampedEnd < displayText.length) {
@@ -3405,6 +3801,7 @@ struct ReadBookPage {
         start: clampedEnd,
         end: displayText.length,
         highlighted: false,
+        ruleIndex: -1,
         key: `after_${clampedEnd}_${this.buildTextSliceKey(afterText)}`
       });
     }
@@ -3555,8 +3952,7 @@ struct ReadBookPage {
       this.pagedContentText = '';
       this.contentPageStarts = [];
       this.contentPageEnds = [];
-      this.currentPageText = '';
-      this.pageRenderVersion++;
+      this.setCurrentPageText(content);
       return;
     }
 

@@ -45,7 +45,7 @@ export class ReaderFontHelper {
   }
 
   static runtimeFontFamily(filePath: string): string {
-    return ReaderFontHelper.ACTIVE_READER_FONT_FAMILY;
+    return ReaderFontHelper.stableFontFamily(filePath);
   }
 
   static registerFont(uiContext: UIContext | null, item: ReaderFontItem): ReaderFontRegisterResult {
