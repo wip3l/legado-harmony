@@ -15,6 +15,7 @@ struct BookshelfSettingsPage {
   @StorageLink('bookshelfShowTags') bookshelfShowTags: boolean = true;
   @StorageLink('bookshelfShowIntro') bookshelfShowIntro: boolean = true;
   @StorageLink('bookshelfShowFullIntro') bookshelfShowFullIntro: boolean = false;
+  @StorageLink('bookshelfShowProgressBar') bookshelfShowProgressBar: boolean = false;
   @StorageLink('bookshelfCoverAlbums') @Watch('onCoverAlbumsChanged') bookshelfCoverAlbums: string = '';
   @StorageLink('bookshelfLightCoverAlbumId') bookshelfLightCoverAlbumId: string = '';
   @StorageLink('bookshelfDarkCoverAlbumId') bookshelfDarkCoverAlbumId: string = '';
@@ -71,6 +72,10 @@ struct BookshelfSettingsPage {
               this.onDisplaySettingChanged();
             })
           }
+          this.switchItem('使用阅读进度条', '开启后在书架卡片底部显示阅读百分比和最后阅读时间', this.bookshelfShowProgressBar, (value: boolean) => {
+            this.bookshelfShowProgressBar = value;
+            this.onDisplaySettingChanged();
+          })
 
           this.sectionTitle('封面设置')
           this.switchItem('忽略书源封面', '开启后书架封面只使用当前应用的封面图集', this.bookshelfIgnoreSourceCover, (value: boolean) => {
@@ -146,6 +151,7 @@ struct BookshelfSettingsPage {
       this.bookshelfShowTags = settings.showTags;
       this.bookshelfShowIntro = settings.showIntro;
       this.bookshelfShowFullIntro = settings.showFullIntro;
+      this.bookshelfShowProgressBar = settings.showProgressBar;
     } catch (e) {
       console.warn('重新加载书架显示设置失败:', e);
     }
@@ -157,6 +163,7 @@ struct BookshelfSettingsPage {
     settings.showTags = this.bookshelfShowTags;
     settings.showIntro = this.bookshelfShowIntro;
     settings.showFullIntro = this.bookshelfShowFullIntro;
+    settings.showProgressBar = this.bookshelfShowProgressBar;
     BookshelfDisplaySettingsStore.applyToStorage(settings);
     BookshelfDisplaySettingsStore.save(getContext(this), settings).catch((e: Error) => {
       console.warn('保存书架显示设置失败:', e);

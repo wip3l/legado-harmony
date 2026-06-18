@@ -5,6 +5,7 @@ export class BookshelfDisplaySettings {
   showTags: boolean = true;
   showIntro: boolean = true;
   showFullIntro: boolean = false;
+  showProgressBar: boolean = false;
 }
 
 export class BookshelfDisplaySettingsStore {
@@ -12,6 +13,7 @@ export class BookshelfDisplaySettingsStore {
   private static readonly KEY_SHOW_TAGS: string = 'bookshelfShowTags';
   private static readonly KEY_SHOW_INTRO: string = 'bookshelfShowIntro';
   private static readonly KEY_SHOW_FULL_INTRO: string = 'bookshelfShowFullIntro';
+  private static readonly KEY_SHOW_PROGRESS_BAR: string = 'bookshelfShowProgressBar';
   private static cachedSettings: BookshelfDisplaySettings | null = null;
 
   static async load(context: Context): Promise<BookshelfDisplaySettings> {
@@ -26,6 +28,8 @@ export class BookshelfDisplaySettingsStore {
       store, BookshelfDisplaySettingsStore.KEY_SHOW_INTRO, true);
     settings.showFullIntro = await BookshelfDisplaySettingsStore.getBoolean(
       store, BookshelfDisplaySettingsStore.KEY_SHOW_FULL_INTRO, false);
+    settings.showProgressBar = await BookshelfDisplaySettingsStore.getBoolean(
+      store, BookshelfDisplaySettingsStore.KEY_SHOW_PROGRESS_BAR, false);
     BookshelfDisplaySettingsStore.cachedSettings = BookshelfDisplaySettingsStore.clone(settings);
     return settings;
   }
@@ -36,6 +40,7 @@ export class BookshelfDisplaySettingsStore {
     await store.put(BookshelfDisplaySettingsStore.KEY_SHOW_TAGS, settings.showTags);
     await store.put(BookshelfDisplaySettingsStore.KEY_SHOW_INTRO, settings.showIntro);
     await store.put(BookshelfDisplaySettingsStore.KEY_SHOW_FULL_INTRO, settings.showFullIntro);
+    await store.put(BookshelfDisplaySettingsStore.KEY_SHOW_PROGRESS_BAR, settings.showProgressBar);
     await store.flush();
   }
 
@@ -44,6 +49,7 @@ export class BookshelfDisplaySettingsStore {
     AppStorage.setOrCreate(BookshelfDisplaySettingsStore.KEY_SHOW_TAGS, settings.showTags);
     AppStorage.setOrCreate(BookshelfDisplaySettingsStore.KEY_SHOW_INTRO, settings.showIntro);
     AppStorage.setOrCreate(BookshelfDisplaySettingsStore.KEY_SHOW_FULL_INTRO, settings.showFullIntro);
+    AppStorage.setOrCreate(BookshelfDisplaySettingsStore.KEY_SHOW_PROGRESS_BAR, settings.showProgressBar);
   }
 
   static fromStorage(): BookshelfDisplaySettings {
@@ -51,6 +57,7 @@ export class BookshelfDisplaySettingsStore {
     settings.showTags = AppStorage.get<boolean>(BookshelfDisplaySettingsStore.KEY_SHOW_TAGS) ?? true;
     settings.showIntro = AppStorage.get<boolean>(BookshelfDisplaySettingsStore.KEY_SHOW_INTRO) ?? true;
     settings.showFullIntro = AppStorage.get<boolean>(BookshelfDisplaySettingsStore.KEY_SHOW_FULL_INTRO) ?? false;
+    settings.showProgressBar = AppStorage.get<boolean>(BookshelfDisplaySettingsStore.KEY_SHOW_PROGRESS_BAR) ?? false;
     return settings;
   }
 
@@ -68,6 +75,7 @@ export class BookshelfDisplaySettingsStore {
     settings.showTags = source.showTags;
     settings.showIntro = source.showIntro;
     settings.showFullIntro = source.showFullIntro;
+    settings.showProgressBar = source.showProgressBar;
     return settings;
   }
 }
