@@ -9,6 +9,7 @@ export class SearchExploreSettings {
   exactSearch: boolean = false;
   exactSearchMatchAuthor: boolean = true;
   showSearchProgress: boolean = true;
+  searchConcurrency: number = 8;
   selectedSourceGroupsRaw: string = '';
   sourceSortRaw: string = '';
 }
@@ -21,6 +22,7 @@ export class SearchExploreSettingsStore {
   static readonly KEY_EXACT_SEARCH: string = 'searchExploreExactSearch';
   static readonly KEY_EXACT_SEARCH_MATCH_AUTHOR: string = 'searchExploreExactSearchMatchAuthor';
   static readonly KEY_SHOW_SEARCH_PROGRESS: string = 'searchExploreShowSearchProgress';
+  static readonly KEY_SEARCH_CONCURRENCY: string = 'searchExploreSearchConcurrency';
   static readonly KEY_SELECTED_SOURCE_GROUPS: string = 'searchExploreSelectedSourceGroups';
   static readonly KEY_SOURCE_SORT: string = 'searchExploreSourceSort';
   private static readonly STORE_NAME: string = 'search_explore_settings';
@@ -46,6 +48,8 @@ export class SearchExploreSettingsStore {
       store, SearchExploreSettingsStore.KEY_EXACT_SEARCH_MATCH_AUTHOR, true);
     settings.showSearchProgress = await SearchExploreSettingsStore.getBoolean(
       store, SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, true);
+    settings.searchConcurrency = await SearchExploreSettingsStore.getNumber(
+      store, SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY, 8);
     settings.selectedSourceGroupsRaw = await SearchExploreSettingsStore.getString(
       store, SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, '');
     settings.sourceSortRaw = await SearchExploreSettingsStore.getString(
@@ -64,6 +68,7 @@ export class SearchExploreSettingsStore {
     await store.put(SearchExploreSettingsStore.KEY_EXACT_SEARCH, settings.exactSearch);
     await store.put(SearchExploreSettingsStore.KEY_EXACT_SEARCH_MATCH_AUTHOR, settings.exactSearchMatchAuthor);
     await store.put(SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, settings.showSearchProgress);
+    await store.put(SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY, settings.searchConcurrency);
     await store.put(SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, settings.selectedSourceGroupsRaw);
     await store.put(SearchExploreSettingsStore.KEY_SOURCE_SORT, settings.sourceSortRaw);
     await store.flush();
@@ -84,8 +89,18 @@ export class SearchExploreSettingsStore {
       SearchExploreSettingsStore.KEY_EXACT_SEARCH_MATCH_AUTHOR,
       settings.exactSearchMatchAuthor);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, settings.showSearchProgress);
+    AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY, settings.searchConcurrency);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, settings.selectedSourceGroupsRaw);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SOURCE_SORT, settings.sourceSortRaw);
+  }
+
+  static getSearchConcurrency(): number {
+    const cached = SearchExploreSettingsStore.cachedSettings?.searchConcurrency;
+    if (typeof cached === 'number' && cached > 0) {
+      return cached;
+    }
+    const value = AppStorage.get<number>(SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY);
+    return typeof value === 'number' && value > 0 ? value : 8;
   }
 
   private static async getBoolean(
@@ -106,6 +121,7 @@ export class SearchExploreSettingsStore {
     settings.exactSearch = source.exactSearch;
     settings.exactSearchMatchAuthor = source.exactSearchMatchAuthor;
     settings.showSearchProgress = source.showSearchProgress;
+    settings.searchConcurrency = source.searchConcurrency;
     settings.selectedSourceGroupsRaw = source.selectedSourceGroupsRaw;
     settings.sourceSortRaw = source.sourceSortRaw;
     return settings;
@@ -118,5 +134,14 @@ export class SearchExploreSettingsStore {
   ): Promise<string> {
     const value = await store.get(key, fallback);
     return typeof value === 'string' ? value : fallback;
+  }
+
+  private static async getNumber(
+    store: preferences.Preferences,
+    key: string,
+    fallback: number
+  ): Promise<number> {
+    const value = await store.get(key, fallback);
+    return typeof value === 'number' && !isNaN(value) && value > 0 ? value : fallback;
   }
 }

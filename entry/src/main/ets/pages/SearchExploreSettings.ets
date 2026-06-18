@@ -14,6 +14,7 @@ struct SearchExploreSettingsPage {
   @StorageLink('searchExploreExactSearch') searchExploreExactSearch: boolean = false;
   @StorageLink('searchExploreExactSearchMatchAuthor') searchExploreExactSearchMatchAuthor: boolean = true;
   @StorageLink('searchExploreShowSearchProgress') searchExploreShowSearchProgress: boolean = true;
+  @StorageLink('searchExploreSearchConcurrency') searchExploreSearchConcurrency: number = 8;
   @StorageLink('searchExploreSelectedSourceGroups') searchExploreSelectedSourceGroups: string = '';
   @StorageLink('searchExploreSourceSort') searchExploreSourceSort: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
@@ -84,6 +85,11 @@ struct SearchExploreSettingsPage {
               this.searchExploreShowSearchProgress = value;
               this.onSettingChanged();
             })
+          this.numberSettingItem('搜索并发数', '控制书籍检索、书源校验和换源同时并发请求的数量',
+            this.searchExploreSearchConcurrency, 1, 32, (value: number) => {
+              this.searchExploreSearchConcurrency = value;
+              this.onSettingChanged();
+            })
           this.sourceGroupSettings()
 
           this.sectionTitle('发现设置')
@@ -111,6 +117,7 @@ struct SearchExploreSettingsPage {
       this.searchExploreExactSearch = settings.exactSearch;
       this.searchExploreExactSearchMatchAuthor = settings.exactSearchMatchAuthor;
       this.searchExploreShowSearchProgress = settings.showSearchProgress;
+      this.searchExploreSearchConcurrency = settings.searchConcurrency;
       this.searchExploreSelectedSourceGroups = settings.selectedSourceGroupsRaw;
       this.searchExploreSourceSort = settings.sourceSortRaw;
     } catch (e) {
@@ -149,6 +156,7 @@ struct SearchExploreSettingsPage {
     settings.exactSearch = this.searchExploreExactSearch;
     settings.exactSearchMatchAuthor = this.searchExploreExactSearchMatchAuthor;
     settings.showSearchProgress = this.searchExploreShowSearchProgress;
+    settings.searchConcurrency = this.searchExploreSearchConcurrency;
     settings.selectedSourceGroupsRaw = this.searchExploreSelectedSourceGroups;
     settings.sourceSortRaw = this.searchExploreSourceSort;
     SearchExploreSettingsStore.applyToStorage(settings);
@@ -307,6 +315,58 @@ struct SearchExploreSettingsPage {
         .onChange((checked: boolean) => {
           onChange(checked);
         })
+    }
+    .width('100%')
+    .constraintSize({ minHeight: 64 })
+    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+    .backgroundColor(this.cardColor())
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  numberSettingItem(title: string, desc: string, value: number, minValue: number, maxValue: number, onChange: (value: number) => void) {
+    Row() {
+      Column() {
+        Text(title)
+          .fontSize(16)
+          .fontColor(this.primaryTextColor())
+        Text(desc)
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+          .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Row() {
+        Text('−')
+          .fontSize(18)
+          .fontColor(this.primaryTextColor())
+          .width(30)
+          .height(30)
+          .textAlign(TextAlign.Center)
+          .onClick(() => {
+            onChange(Math.max(minValue, value - 1));
+          })
+
+        Text(`${value}`)
+          .fontSize(15)
+          .fontColor(this.primaryTextColor())
+          .width(42)
+          .textAlign(TextAlign.Center)
+
+        Text('+')
+          .fontSize(18)
+          .fontColor(this.primaryTextColor())
+          .width(30)
+          .height(30)
+          .textAlign(TextAlign.Center)
+          .onClick(() => {
+            onChange(Math.min(maxValue, value + 1));
+          })
+      }
+      .height(30)
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
     .constraintSize({ minHeight: 64 })

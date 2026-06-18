@@ -18,6 +18,7 @@ import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
+import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 
 interface ReadTextSlice {
   text: string;
@@ -49,12 +50,6 @@ interface PageTurnPreview {
   pageIndex: number;
 }
 
-interface ScrollParagraph {
-  key: string;
-  text: string;
-  isTitle: boolean;
-}
-
 @Entry
 @Component
 struct ReadBookPage {
@@ -78,9 +73,6 @@ struct ReadBookPage {
   @State currentPageIndex: number = 0;
   @State currentPageText: string = '';
   @State pageRenderVersion: number = 0;
-  @State scrollContentText: string = '';
-  @State scrollParagraphs: ScrollParagraph[] = [];
-  @State scrollRenderVersion: number = 0;
   @State pageViewWidth: number = 0;
   @State pageViewHeight: number = 0;
   @State statusBarSafeHeight: number = 0;
@@ -89,9 +81,6 @@ struct ReadBookPage {
   @State ttsHighlightStart: number = -1;
   @State ttsHighlightEnd: number = -1;
   private pendingRestorePageIndex: number = -1;
-  private pendingRestoreScrollOffset: number = -1;
-  private currentScrollOffset: number = 0;
-  private contentScroller: Scroller = new Scroller();
   private tocScroller: Scroller = new Scroller();
   private ttsReader: SystemTtsReader = new SystemTtsReader();
   private ttsAutoContinue: boolean = false;
@@ -113,6 +102,7 @@ struct ReadBookPage {
   @State pageTransitionX: number = 0;
   @State pageTransitionOpacity: number = 1;
   @State pageSlideOffsetX: number = 0;
+  @State pageSlideOffsetY: number = 0;
   @State pageSlideDirection: number = 0;
   @State pageTurnAnimating: boolean = false;
   @State pageTurnIncomingText: string = '';
@@ -123,9 +113,8 @@ struct ReadBookPage {
   private bookLoadSerial: number = 0;
   private contentLoadSerial: number = 0;
   private isPageTurning: boolean = false;
-  private isAutoLoadingScrollChapter: boolean = false;
-  private suppressScrollReachStart: boolean = false;
-  private suppressScrollReachEnd: boolean = false;
+  private changeSourceSessionId: number = 0;
+  private activeChangeSourceCoordinator: SearchCoordinator | null = null;
   private lastRecentReadCardReloadAt: number = 0;
   private lastRecentReadCardChapterIndex: number = -1;
   private readerTouchStartX: number = 0;
@@ -298,11 +287,7 @@ struct ReadBookPage {
       const savedChapterIndex = engine.curIdx;
       this.currentChapterIndex = this.clampChapterIndex(savedChapterIndex);
       const savedPosition = this.currentChapterIndex === savedChapterIndex ? Math.max(0, engine.curPos) : 0;
-      if (this.readerPageTurnMode === 0) {
-        this.pendingRestoreScrollOffset = savedPosition;
-      } else {
-        this.pendingRestorePageIndex = savedPosition;
-      }
+      this.pendingRestorePageIndex = savedPosition;
       this.readerThemeIndex = Math.max(0, Math.min(this.readerThemeIndex, this.themeBackgrounds.length - 1));
 
       if (this.chapters.length > 0) {
@@ -356,17 +341,13 @@ struct ReadBookPage {
     this.pagedContentText = '';
     this.currentPageIndex = 0;
     this.currentPageText = '';
-    this.scrollContentText = '';
-    this.scrollParagraphs = [];
-    this.scrollRenderVersion = 0;
     this.pageViewWidth = 0;
     this.pageViewHeight = 0;
-    this.currentScrollOffset = 0;
     this.pendingRestorePageIndex = -1;
-    this.pendingRestoreScrollOffset = -1;
     this.pageTransitionX = 0;
     this.pageTransitionOpacity = 1;
     this.pageSlideOffsetX = 0;
+    this.pageSlideOffsetY = 0;
     this.pageSlideDirection = 0;
     this.pageTurnAnimating = false;
     this.pageTurnIncomingText = '';
@@ -440,8 +421,6 @@ struct ReadBookPage {
         this.chapters = [...engine.chapters];
         this.pendingRestorePageIndex = 0;
         this.currentPageIndex = 0;
-        this.currentScrollOffset = 0;
-        this.pendingRestoreScrollOffset = 0;
         this.paginateContent(body);
         this.preloadReaderContent();
         await this.saveReadingProgress();
@@ -466,11 +445,11 @@ struct ReadBookPage {
   }
 
   shouldRenderPrimaryReaderContent(): boolean {
-    return !this.isLoading || (this.readerPageTurnMode !== 0 && !!this.content);
+    return !this.isLoading || !!this.content;
   }
 
   isPagedReaderAwaitingPagination(): boolean {
-    return this.readerPageTurnMode !== 0 && !!this.content && this.contentPages.length === 0;
+    return !!this.content && this.contentPages.length === 0;
   }
 
   shouldShowReaderLoadingOverlay(): boolean {
@@ -510,8 +489,6 @@ struct ReadBookPage {
       Column() {
         if (!this.shouldRenderPrimaryReaderContent()) {
           this.readerLoadingPanel()
-        } else if (this.readerPageTurnMode === 0) {
-          this.readerScrollModeContent(this.scrollRenderVersion)
         } else {
           Column() {
             Stack() {
@@ -546,22 +523,23 @@ struct ReadBookPage {
           this.hideReaderPanels();
           return;
         }
-        if (this.readerPageTurnMode === 0) {
-          this.showMenu = true;
-        }
       })
 
       if (this.shouldShowReaderLoadingOverlay()) {
         this.readerLoadingPanel()
       }
 
-      if (this.readerPageTurnMode !== 0 && !this.showMenu && !this.showToc && !this.showSettings &&
+      if (!this.showMenu && !this.showToc && !this.showSettings &&
         !this.shouldBlockReaderInteraction()) {
         this.readerTapLayer()
       }
 
       if (this.showMenu && !this.showToc && !this.showSettings) {
         this.menuDismissLayer()
+      }
+
+      if (this.showSettings) {
+        this.settingsDismissLayer()
       }
 
       if (this.showMenu) {
@@ -788,15 +766,12 @@ struct ReadBookPage {
                   .padding({ left: 16, right: 16, top: 12, bottom: 12 })
                   .backgroundColor(index === this.currentChapterIndex ? this.tocSelectedBackgroundColor() : '#00000000')
                     .onClick(async () => {
-                      this.currentChapterIndex = index;
+                      const targetChapterIndex = index;
                       this.currentPageIndex = 0;
                       this.pendingRestorePageIndex = 0;
-                      this.currentScrollOffset = 0;
-                      this.pendingRestoreScrollOffset = 0;
-                      this.prepareScrollChapterReload(index);
                       this.showToc = false;
                       this.showMenu = false;
-                      await this.loadContent(false, index);
+                      await this.loadContent(false, targetChapterIndex);
                       await this.saveReadingProgress();
                     })
                 }
@@ -828,17 +803,6 @@ struct ReadBookPage {
               .fontSize(18)
               .fontWeight(FontWeight.Bold)
               .layoutWeight(1)
-            Button('完成')
-              .height(34)
-              .fontSize(13)
-              .borderRadius(17)
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.showSettings = false;
-                this.saveReadConfig();
-                this.hideReaderPanels();
-              })
           }
           .width('100%')
 
@@ -852,8 +816,7 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
-                this.readerFontSize = Math.max(16, this.readerFontSize - 1);
-                this.readerLineHeight = Math.max(24, this.readerLineHeight - 1);
+                this.applyReaderFontSize(this.readerFontSize - 1, true);
               })
             Text(`${this.readerFontSize}`)
               .fontSize(15)
@@ -865,8 +828,7 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
-                this.readerFontSize = Math.min(30, this.readerFontSize + 1);
-                this.readerLineHeight = Math.min(52, this.readerLineHeight + 1);
+                this.applyReaderFontSize(this.readerFontSize + 1, true);
               })
           }
           .width('100%')
@@ -881,7 +843,7 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
-                this.readerLineHeight = Math.max(24, this.readerLineHeight - 2);
+                this.applyReaderLineHeight(this.readerLineHeight - 2);
               })
             Text(`${this.readerLineHeight}`)
               .fontSize(15)
@@ -893,7 +855,34 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
-                this.readerLineHeight = Math.min(52, this.readerLineHeight + 2);
+                this.applyReaderLineHeight(this.readerLineHeight + 2);
+              })
+          }
+          .width('100%')
+
+          Row() {
+            Text('段落间距')
+              .fontSize(15)
+              .layoutWeight(1)
+            Button('-')
+              .width(44)
+              .height(36)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
+              .onClick(() => {
+                this.applyReaderParagraphSpacing(this.readerParagraphSpacing - 2);
+              })
+            Text(`${this.readerParagraphSpacing}`)
+              .fontSize(15)
+              .width(48)
+              .textAlign(TextAlign.Center)
+            Button('+')
+              .width(44)
+              .height(36)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
+              .onClick(() => {
+                this.applyReaderParagraphSpacing(this.readerParagraphSpacing + 2);
               })
           }
           .width('100%')
@@ -927,7 +916,7 @@ struct ReadBookPage {
                   color: this.readerThemeIndex === index ? this.accentColor() : '#22000000'
                 })
                 .onClick(() => {
-                  this.readerThemeIndex = index;
+                  this.applyReaderThemeIndex(index);
                 })
             })
           }
@@ -982,7 +971,7 @@ struct ReadBookPage {
 
   getProgressText(): string {
     if (this.chapters.length === 0) return '';
-    if (this.readerPageTurnMode === 0 || this.contentPages.length === 0) {
+    if (this.contentPages.length === 0) {
       return `${this.currentChapterIndex + 1}/${this.chapters.length}`;
     }
     return `${this.currentChapterIndex + 1}/${this.chapters.length} · ${this.currentPageIndex + 1}/${this.contentPages.length}`;
@@ -998,7 +987,7 @@ struct ReadBookPage {
   }
 
   getPageInfoText(): string {
-    if (this.readerPageTurnMode === 0 || this.contentPages.length === 0) {
+    if (this.contentPages.length === 0) {
       return '1/1';
     }
     const index = Math.max(0, Math.min(this.currentPageIndex, this.contentPages.length - 1));
@@ -1007,7 +996,7 @@ struct ReadBookPage {
 
   getPageText(pageIndex: number): string {
     if (this.contentPages.length === 0) {
-      if (this.readerPageTurnMode !== 0 && this.content && !this.hasPagedReaderArea()) {
+      if (this.content && !this.hasPagedReaderArea()) {
         return '';
       }
       return this.content;
@@ -1249,6 +1238,10 @@ struct ReadBookPage {
   }
 
   applyLoadedReaderSettings(settings: ReaderSettings): void {
+    this.readerFontSize = settings.fontSize;
+    this.readerLineHeight = settings.lineHeight;
+    this.readerParagraphSpacing = settings.paragraphSpacing;
+    this.readerThemeIndex = settings.themeIndex;
     this.readerFontFamily = settings.fontFamily || '';
     this.readerFontFilePath = settings.fontFilePath || '';
     AppStorage.setOrCreate<string>('readerFontSourceName', settings.fontSourceName || '系统默认');
@@ -1405,12 +1398,8 @@ struct ReadBookPage {
   }
 
   refreshReaderTextRender(): void {
-    if (this.readerPageTurnMode === 0) {
-      this.scrollRenderVersion++;
-    } else {
-      this.pageRenderVersion++;
-      this.pageTurnIncomingRenderVersion++;
-    }
+    this.pageRenderVersion++;
+    this.pageTurnIncomingRenderVersion++;
   }
 
   onReaderFontChanged(): void {
@@ -1454,14 +1443,17 @@ struct ReadBookPage {
 
   onReaderVolumeTurnPageChanged(): void {
     this.updateVolumeKeySubscription();
+    this.saveReadConfig();
   }
 
   onReaderPageTurnAnimationChanged(): void {
     this.resetSlidePageEffect();
+    this.saveReadConfig();
   }
 
   onReaderPreloadChanged(): void {
     this.preloadReaderContentLater();
+    this.saveReadConfig();
   }
 
   updateVolumeKeySubscription(): void {
@@ -1516,13 +1508,6 @@ struct ReadBookPage {
     if (!this.readerVolumeTurnPage || this.showMenu || this.showToc || this.showSettings || this.isLoading || this.chapters.length === 0) {
       return;
     }
-    if (this.readerPageTurnMode === 0) {
-      this.contentScroller.scrollPage({ next: direction > 0, animation: true });
-      setTimeout(() => {
-        this.saveReadingProgress();
-      }, 260);
-      return;
-    }
     if (direction > 0) {
       this.turnNext();
     } else {
@@ -1548,19 +1533,7 @@ struct ReadBookPage {
     if (this.isLoading || this.isPagedReaderAwaitingPagination()) {
       return false;
     }
-    return this.readerPageTurnMode === 0 || (this.pageViewWidth > 0 && this.pageViewHeight > 0 && this.contentPages.length > 0);
-  }
-
-  restorePendingScrollOffset(): void {
-    if (this.pendingRestoreScrollOffset < 0) {
-      return;
-    }
-    const yOffset = Math.max(0, this.pendingRestoreScrollOffset);
-    this.currentScrollOffset = yOffset;
-    this.pendingRestoreScrollOffset = -1;
-    setTimeout(() => {
-      this.contentScroller.scrollTo({ xOffset: 0, yOffset: yOffset });
-    }, 0);
+    return this.pageViewWidth > 0 && this.pageViewHeight > 0 && this.contentPages.length > 0;
   }
 
   @Builder
@@ -1696,45 +1669,76 @@ struct ReadBookPage {
       promptAction.showToast({ message: '当前书籍信息不完整' });
       return;
     }
+    this.cancelActiveChangeSourceSearch();
+    const sessionId = ++this.changeSourceSessionId;
     this.showChangeSourceDialog = true;
     this.showMenu = false;
     this.showToc = false;
     this.showSettings = false;
     this.changeSourceResults = [];
-    this.searchChangeSource();
+    this.searchChangeSource(sessionId);
   }
 
   closeChangeSourceDialog(): void {
+    this.changeSourceSessionId++;
+    this.cancelActiveChangeSourceSearch();
     this.showChangeSourceDialog = false;
     this.changeSourceResults = [];
     this.changeSourceStatus = '';
+    this.isChangingSource = false;
   }
 
-  async searchChangeSource(): Promise<void> {
+  async searchChangeSource(sessionId: number): Promise<void> {
     if (!this.book) {
       return;
     }
     this.isChangingSource = true;
     this.changeSourceStatus = '正在搜索可用书源...';
+    const coordinator = new SearchCoordinator(SearchExploreSettingsStore.getSearchConcurrency());
+    this.activeChangeSourceCoordinator = coordinator;
     try {
       const currentBookUrl = this.book.bookUrl;
       const currentOrigin = this.book.origin;
-      const coordinator = new SearchCoordinator(10);
       const results = await coordinator.search(this.book.name, (progress: SearchProgress) => {
+        if (!this.isChangeSourceSessionActive(sessionId)) {
+          return;
+        }
         this.changeSourceResults = this.filterChangeSourceResults(progress.results, currentBookUrl, currentOrigin);
         this.changeSourceStatus = progress.status;
         if (progress.finished) {
           this.isChangingSource = false;
         }
       }, { exactMatch: true });
+      if (!this.isChangeSourceSessionActive(sessionId)) {
+        return;
+      }
       this.changeSourceResults = this.filterChangeSourceResults(results, currentBookUrl, currentOrigin);
       this.changeSourceStatus = this.changeSourceResults.length > 0 ?
         `搜索完成，找到 ${this.changeSourceResults.length} 个可切换书源` : '搜索完成，未找到可切换书源';
     } catch (e) {
+      if (!this.isChangeSourceSessionActive(sessionId)) {
+        return;
+      }
       console.error('搜索换源失败:', e);
       this.changeSourceStatus = '搜索换源失败';
     } finally {
-      this.isChangingSource = false;
+      if (this.activeChangeSourceCoordinator === coordinator) {
+        this.activeChangeSourceCoordinator = null;
+      }
+      if (this.isChangeSourceSessionActive(sessionId)) {
+        this.isChangingSource = false;
+      }
+    }
+  }
+
+  isChangeSourceSessionActive(sessionId: number): boolean {
+    return this.showChangeSourceDialog && sessionId === this.changeSourceSessionId;
+  }
+
+  cancelActiveChangeSourceSearch(): void {
+    if (this.activeChangeSourceCoordinator) {
+      this.activeChangeSourceCoordinator.cancel();
+      this.activeChangeSourceCoordinator = null;
     }
   }
 
@@ -1755,14 +1759,14 @@ struct ReadBookPage {
     if (!this.book || this.isChangingSource) {
       return;
     }
+    const sessionId = this.changeSourceSessionId;
     this.isChangingSource = true;
     this.changeSourceStatus = '正在切换书源...';
     await this.saveReadingProgress();
     const oldBook = this.book;
     const oldBookUrl = oldBook.bookUrl;
     const chapterIndex = this.clampChapterIndex(this.currentChapterIndex);
-    const pageIndex = this.readerPageTurnMode === 0 ? Math.max(0, Math.round(this.currentScrollOffset)) :
-      Math.max(0, this.currentPageIndex);
+    const pageIndex = Math.max(0, this.currentPageIndex);
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
@@ -1771,12 +1775,21 @@ struct ReadBookPage {
         promptAction.showToast({ message: '书源不存在或已删除' });
         return;
       }
+      if (!this.isChangeSourceSessionActive(sessionId)) {
+        return;
+      }
 
       const nextBook = this.buildBookFromSearchResult(searchBook, oldBook, chapterIndex, pageIndex);
       const service = new WebBookService();
       const fullBook = await service.getBookInfo(source, nextBook);
+      if (!this.isChangeSourceSessionActive(sessionId)) {
+        return;
+      }
       this.preserveSwitchBookState(fullBook, nextBook, oldBook, chapterIndex, pageIndex);
       const chapters = await service.getChapterList(source, fullBook);
+      if (!this.isChangeSourceSessionActive(sessionId)) {
+        return;
+      }
       fullBook.totalChapterNum = chapters.length;
       if (chapters.length > 0) {
         const safeIndex = Math.max(0, Math.min(chapterIndex, chapters.length - 1));
@@ -1808,10 +1821,15 @@ struct ReadBookPage {
       promptAction.showToast({ message: `已切换至 ${fullBook.originName || searchBook.originName}` });
       await this.loadBook();
     } catch (e) {
+      if (!this.isChangeSourceSessionActive(sessionId)) {
+        return;
+      }
       console.error('切换书源失败:', e);
       promptAction.showToast({ message: '切换书源失败' });
     } finally {
-      this.isChangingSource = false;
+      if (this.isChangeSourceSessionActive(sessionId)) {
+        this.isChangingSource = false;
+      }
     }
   }
 
@@ -1871,11 +1889,9 @@ struct ReadBookPage {
     }
     const engine = ReadBookEngine.get();
     const chapterIndex = this.clampChapterIndex(this.currentChapterIndex);
-    const pageIndex = this.readerPageTurnMode === 0 ? Math.max(0, Math.round(this.currentScrollOffset)) : Math.max(0, Math.min(this.currentPageIndex, Math.max(0, this.contentPages.length - 1)));
+    const pageIndex = Math.max(0, Math.min(this.currentPageIndex, Math.max(0, this.contentPages.length - 1)));
     this.currentChapterIndex = chapterIndex;
-    if (this.readerPageTurnMode !== 0) {
-      this.currentPageIndex = pageIndex;
-    }
+    this.currentPageIndex = pageIndex;
     this.book.durChapterIndex = chapterIndex;
     this.book.durChapterPos = pageIndex;
     const now = Date.now();
@@ -1966,7 +1982,7 @@ struct ReadBookPage {
 
   @Builder
   readerTapLayer() {
-    if (this.readerPageTurnMode === 2) {
+    if (this.readerPageTurnMode === 0 || this.readerPageTurnMode === 2) {
       Column() {
         Blank()
           .width('100%')
@@ -2027,7 +2043,7 @@ struct ReadBookPage {
         this.handleReaderTouch(event);
       })
       .parallelGesture(
-        PanGesture({ direction: PanDirection.Horizontal, distance: 1 })
+        PanGesture({ direction: this.readerPageTurnMode === 0 ? PanDirection.Vertical : PanDirection.Horizontal, distance: 1 })
           .onActionStart((event: GestureEvent) => {
             this.handleReaderPanStart(event);
           })
@@ -2076,7 +2092,7 @@ struct ReadBookPage {
   }
 
   canHandleReaderPageTurnPan(): boolean {
-    return !this.showMenu && !this.showToc && !this.showSettings && this.readerPageTurnMode !== 0 &&
+    return !this.showMenu && !this.showToc && !this.showSettings &&
       this.chapters.length > 0 && !this.isPageTurning;
   }
 
@@ -2103,7 +2119,7 @@ struct ReadBookPage {
       this.readerTouchMoved = true;
       this.suppressReaderTapClick = true;
     }
-    this.updateSlidePageEffect(offsetX);
+    this.updateSlidePageEffect(this.getReaderPageTurnGestureOffset(offsetX, offsetY));
   }
 
   handleReaderPanEnd(event: GestureEvent): void {
@@ -2113,10 +2129,10 @@ struct ReadBookPage {
     this.readerPanActive = false;
     const offsetX = event.offsetX;
     const offsetY = event.offsetY;
-    if (Math.abs(offsetX) >= 48 && Math.abs(offsetX) > Math.abs(offsetY) * 1.2) {
+    if (this.isReaderPageTurnCommitGesture(offsetX, offsetY)) {
       this.readerTouchMoved = true;
       this.suppressReaderTapClick = true;
-      this.commitReaderHorizontalMove(offsetX);
+      this.commitReaderMove(offsetX, offsetY);
       return;
     }
     if (this.readerTouchMoved || this.isReaderTouchMoved(offsetX, offsetY)) {
@@ -2132,7 +2148,7 @@ struct ReadBookPage {
       return;
     }
     this.readerPanActive = false;
-    if (Math.abs(this.pageSlideOffsetX) > 0.5) {
+    if (Math.abs(this.getPageSlideAxisOffset()) > 0.5) {
       this.suppressReaderTapClick = true;
       this.rollbackSlidePageEffect();
       return;
@@ -2141,7 +2157,7 @@ struct ReadBookPage {
   }
 
   handleReaderTouch(event: TouchEvent): void {
-    if (this.showMenu || this.showToc || this.showSettings || this.readerPageTurnMode === 0 || this.chapters.length === 0) {
+    if (this.showMenu || this.showToc || this.showSettings || this.chapters.length === 0) {
       return;
     }
     const point = event.changedTouches && event.changedTouches.length > 0 ? event.changedTouches[0] :
@@ -2174,7 +2190,7 @@ struct ReadBookPage {
         this.readerTouchMoved = true;
         this.suppressReaderTapClick = true;
       }
-      this.updateSlidePageEffect(offsetX);
+      this.updateSlidePageEffect(this.getReaderPageTurnGestureOffset(offsetX, offsetY));
       return;
     }
     if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
@@ -2188,10 +2204,10 @@ struct ReadBookPage {
   finishReaderHorizontalTouch(): void {
     const offsetX = this.readerTouchLastX - this.readerTouchStartX;
     const offsetY = this.readerTouchLastY - this.readerTouchStartY;
-    if (Math.abs(offsetX) >= 48 && Math.abs(offsetX) > Math.abs(offsetY) * 1.2) {
+    if (this.isReaderPageTurnCommitGesture(offsetX, offsetY)) {
       this.readerTouchMoved = true;
       this.suppressReaderTapClick = true;
-      this.commitReaderHorizontalMove(offsetX);
+      this.commitReaderMove(offsetX, offsetY);
       return;
     }
     if (this.readerTouchMoved || this.isReaderTouchMoved(offsetX, offsetY)) {
@@ -2212,6 +2228,42 @@ struct ReadBookPage {
     }
     this.suppressReaderTapClick = false;
     return true;
+  }
+
+  getReaderPageTurnGestureOffset(offsetX: number, offsetY: number): number {
+    return this.readerPageTurnMode === 0 ? offsetY : offsetX;
+  }
+
+  isReaderPageTurnCommitGesture(offsetX: number, offsetY: number): boolean {
+    if (this.readerPageTurnMode === 0) {
+      return Math.abs(offsetY) >= 48 && Math.abs(offsetY) > Math.abs(offsetX) * 1.2;
+    }
+    return Math.abs(offsetX) >= 48 && Math.abs(offsetX) > Math.abs(offsetY) * 1.2;
+  }
+
+  commitReaderMove(offsetX: number, offsetY: number): void {
+    if (this.readerPageTurnMode === 0) {
+      this.commitReaderVerticalMove(offsetY);
+      return;
+    }
+    this.commitReaderHorizontalMove(offsetX);
+  }
+
+  commitReaderVerticalMove(offsetY: number): void {
+    if (this.readerPageTurnMode !== 0 || this.showToc || this.showSettings ||
+      this.chapters.length === 0) {
+      return;
+    }
+    if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
+      this.stopTtsReading();
+    }
+    if (offsetY < -48) {
+      this.runPageTurnAnimation(1, 'gesture');
+    } else if (offsetY > 48) {
+      this.runPageTurnAnimation(-1, 'gesture');
+    } else {
+      this.resetSlidePageEffect();
+    }
   }
 
   commitReaderHorizontalMove(offsetX: number): void {
@@ -2333,11 +2385,69 @@ struct ReadBookPage {
       console.error('保存翻页方式失败:', e);
     });
     this.currentPageIndex = 0;
-    this.currentScrollOffset = 0;
     this.pendingRestorePageIndex = 0;
-    this.pendingRestoreScrollOffset = 0;
     this.paginateContent(this.content);
     this.saveReadingProgress();
+    this.saveReadConfig();
+  }
+
+  saveReaderLayoutSettings(): void {
+    ReaderSettingsStore.saveLayoutSettings(
+      getContext(this),
+      this.readerFontSize,
+      this.readerLineHeight,
+      this.readerParagraphSpacing,
+      this.readerThemeIndex
+    ).catch((e: Error) => {
+      console.warn('保存阅读排版设置失败:', e);
+    });
+  }
+
+  applyReaderFontSize(fontSize: number, syncLineHeight: boolean = false): void {
+    const nextFontSize = Math.max(14, Math.min(Math.round(fontSize), 30));
+    const offset = nextFontSize - this.readerFontSize;
+    if (nextFontSize === this.readerFontSize && (!syncLineHeight || offset === 0)) {
+      return;
+    }
+    this.readerFontSize = nextFontSize;
+    if (syncLineHeight && offset !== 0) {
+      this.readerLineHeight = Math.max(24, Math.min(Math.round(this.readerLineHeight + offset), 52));
+    }
+    this.onReadLayoutChanged();
+    this.saveReaderLayoutSettings();
+    this.saveReadConfig();
+  }
+
+  applyReaderLineHeight(lineHeight: number): void {
+    const nextLineHeight = Math.max(24, Math.min(Math.round(lineHeight), 52));
+    if (nextLineHeight === this.readerLineHeight) {
+      return;
+    }
+    this.readerLineHeight = nextLineHeight;
+    this.onReadLayoutChanged();
+    this.saveReaderLayoutSettings();
+    this.saveReadConfig();
+  }
+
+  applyReaderParagraphSpacing(paragraphSpacing: number): void {
+    const nextParagraphSpacing = Math.max(0, Math.min(Math.round(paragraphSpacing), 32));
+    if (nextParagraphSpacing === this.readerParagraphSpacing) {
+      return;
+    }
+    this.readerParagraphSpacing = nextParagraphSpacing;
+    this.onReadLayoutChanged();
+    this.saveReaderLayoutSettings();
+    this.saveReadConfig();
+  }
+
+  applyReaderThemeIndex(index: number): void {
+    const nextThemeIndex = Math.max(0, Math.min(Math.round(index), this.themeBackgrounds.length - 1));
+    if (nextThemeIndex === this.readerThemeIndex) {
+      return;
+    }
+    this.readerThemeIndex = nextThemeIndex;
+    this.saveReaderLayoutSettings();
+    this.saveReadConfig();
   }
 
   setReaderPreloadEnabled(enabled: boolean): void {
@@ -2348,6 +2458,7 @@ struct ReadBookPage {
     if (enabled) {
       this.preloadReaderContentLater();
     }
+    this.saveReadConfig();
   }
 
   setReaderPreloadChapterCount(count: number): void {
@@ -2357,6 +2468,7 @@ struct ReadBookPage {
       console.error('保存预缓存章节数失败:', e);
     });
     this.preloadReaderContentLater();
+    this.saveReadConfig();
   }
 
   async toggleTtsReading(): Promise<void> {
@@ -2408,7 +2520,7 @@ struct ReadBookPage {
         }
       });
       if (showToast) {
-        promptAction.showToast({ message: this.readerPageTurnMode === 0 ? '开始连续朗读' : '开始连续朗读' });
+        promptAction.showToast({ message: '开始连续朗读' });
       }
     } catch (error) {
       if (token !== this.ttsReadToken) {
@@ -2457,17 +2569,6 @@ struct ReadBookPage {
     if (this.chapters.length === 0) {
       return false;
     }
-    if (this.readerPageTurnMode === 0) {
-      if (this.currentChapterIndex >= this.chapters.length - 1) {
-        return false;
-      }
-      await this.loadNextChapter();
-      setTimeout(() => {
-        this.contentScroller.scrollTo({ xOffset: 0, yOffset: 0 });
-      }, 0);
-      return true;
-    }
-
     if (this.currentPageIndex < this.contentPages.length - 1) {
       await this.runTtsPageTurnAnimation(1);
       return true;
@@ -2711,14 +2812,10 @@ struct ReadBookPage {
   }
 
   getTtsReadingText(): string {
-    if (this.readerPageTurnMode !== 0) {
-      const start = this.getCurrentPageStartOffset();
-      this.ttsTextStartOffset = start;
-      const source = this.pagedContentText || this.getPagedSourceText();
-      return source.substring(start);
-    }
-    this.ttsTextStartOffset = 0;
-    return this.getPagedSourceText();
+    const start = this.getCurrentPageStartOffset();
+    this.ttsTextStartOffset = start;
+    const source = this.pagedContentText || this.getPagedSourceText();
+    return source.substring(start);
   }
 
   normalizeReaderText(text: string): string {
@@ -2965,13 +3062,6 @@ struct ReadBookPage {
   }
 
   followTtsChunk(chunk: TtsChunk): void {
-    if (this.readerPageTurnMode === 0) {
-      this.ttsDisplayText = this.getPagedSourceText();
-      this.ttsHighlightStart = chunk.start;
-      this.ttsHighlightEnd = chunk.end;
-      return;
-    }
-
     const absoluteStart = this.ttsTextStartOffset + chunk.start;
     const absoluteEnd = this.ttsTextStartOffset + chunk.end;
     const currentPageEnd = this.getPageEndOffset(this.currentPageIndex);
@@ -3047,10 +3137,10 @@ struct ReadBookPage {
   }
 
   async runTtsTapPageTurn(direction: number): Promise<void> {
-    const width = this.getPageTurnWidth();
+    const distance = this.getPageTurnDistance();
     this.prepareSlidePageTurn(direction, 0);
     animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
-      this.pageSlideOffsetX = direction > 0 ? -width : width;
+      this.setPageSlideAxisOffset(direction > 0 ? -distance : distance);
       this.pageTransitionOpacity = 1;
     });
     await this.delay(230);
@@ -3059,10 +3149,10 @@ struct ReadBookPage {
   }
 
   async runTtsSlidePageTurn(direction: number): Promise<void> {
-    const width = this.getPageTurnWidth();
-    this.prepareSlidePageTurn(direction, this.pageSlideOffsetX);
+    const distance = this.getPageTurnDistance();
+    this.prepareSlidePageTurn(direction, this.getPageSlideAxisOffset());
     animateTo({ duration: 240, curve: Curve.EaseOut }, () => {
-      this.pageSlideOffsetX = direction > 0 ? -width : width;
+      this.setPageSlideAxisOffset(direction > 0 ? -distance : distance);
       this.pageTransitionOpacity = 1;
     });
     await this.delay(250);
@@ -3124,7 +3214,7 @@ struct ReadBookPage {
     .width('100%')
     .height('100%')
     .backgroundColor(this.getBackgroundColor())
-    .translate({ x: this.pageTransitionX + this.pageSlideOffsetX })
+    .translate({ x: this.pageTransitionX + this.pageSlideOffsetX, y: this.pageSlideOffsetY })
     .opacity(this.pageTransitionOpacity)
   }
 
@@ -3136,7 +3226,7 @@ struct ReadBookPage {
     .width('100%')
     .height('100%')
     .backgroundColor(this.getBackgroundColor())
-    .translate({ x: this.getIncomingSlideX() })
+    .translate({ x: this.getIncomingSlideX(), y: this.getIncomingSlideY() })
     .opacity(this.getVisiblePageTurnIncomingOpacity())
   }
 
@@ -3201,151 +3291,6 @@ struct ReadBookPage {
   }
 
   @Builder
-  readerScrollModeContent(renderVersion: number) {
-    Column() {
-      if (renderVersion % 2 === 0) {
-        this.readerScrollContainerEven(renderVersion)
-      } else {
-        this.readerScrollContainerOdd(renderVersion)
-      }
-
-      this.readerBottomInfoBar()
-    }
-    .width('100%')
-    .height('100%')
-  }
-
-  @Builder
-  readerScrollContainerEven(renderVersion: number) {
-    Scroll(this.contentScroller) {
-      Column() {
-        this.readerScrollContentLayer(renderVersion)
-      }
-      .width('100%')
-    }
-    .width('100%')
-    .layoutWeight(1)
-    .scrollBar(BarState.Off)
-    .onScroll((xOffset: number, yOffset: number) => {
-      this.currentScrollOffset = Math.max(0, yOffset);
-    })
-    .onScrollStop(() => {
-      this.saveReadingProgress();
-    })
-    .onReachEnd(() => {
-      this.loadNextChapterOnScrollEnd();
-    })
-    .onReachStart(() => {
-      this.loadPrevChapterOnScrollStart();
-    })
-  }
-
-  @Builder
-  readerScrollContainerOdd(renderVersion: number) {
-    Scroll(this.contentScroller) {
-      Column() {
-        this.readerScrollContentLayer(renderVersion)
-      }
-      .width('100%')
-    }
-    .width('100%')
-    .layoutWeight(1)
-    .scrollBar(BarState.Off)
-    .onScroll((xOffset: number, yOffset: number) => {
-      this.currentScrollOffset = Math.max(0, yOffset);
-    })
-    .onScrollStop(() => {
-      this.saveReadingProgress();
-    })
-    .onReachEnd(() => {
-      this.loadNextChapterOnScrollEnd();
-    })
-    .onReachStart(() => {
-      this.loadPrevChapterOnScrollStart();
-    })
-  }
-
-  refreshScrollReaderContent(text: string, chapterIndex: number = this.currentChapterIndex): void {
-    this.scrollContentText = text;
-    this.scrollRenderVersion++;
-    this.scrollParagraphs = this.buildScrollParagraphs(text, this.scrollRenderVersion, chapterIndex);
-    this.contentScroller = new Scroller();
-  }
-
-  prepareScrollChapterReload(chapterIndex: number = this.currentChapterIndex): void {
-    if (this.readerPageTurnMode !== 0) {
-      return;
-    }
-    this.refreshScrollReaderContent('', chapterIndex);
-  }
-
-  buildScrollParagraphs(text: string, renderVersion: number, chapterIndex: number = this.currentChapterIndex): ScrollParagraph[] {
-    const safeChapterIndex = this.clampChapterIndex(chapterIndex);
-    const title = this.getChapterTitle(safeChapterIndex).trim();
-    const chapter = this.chapters[safeChapterIndex];
-    const chapterIdentity = `${safeChapterIndex}_${this.buildTextSliceKey(chapter?.url || '')}`;
-    const displayText = this.getReadingRenderText(text || '');
-    const bodySource = title ? this.stripDuplicatedChapterTitle(displayText, title) : displayText;
-    const normalizedBody = this.normalizeChapterBody(bodySource);
-    const result: ScrollParagraph[] = [];
-    const keyPrefix = `${chapterIdentity}_${renderVersion}_${this.buildTextSliceKey(displayText)}`;
-    if (title) {
-      result.push({
-        key: `${keyPrefix}_title_${this.buildTextSliceKey(title)}`,
-        text: title,
-        isTitle: true
-      });
-    }
-    const lines = normalizedBody ? normalizedBody.split('\n') : [];
-    for (let i = 0; i < lines.length; i++) {
-      const rawLine = lines[i] || '';
-      if (!rawLine.trim()) {
-        continue;
-      }
-      const line = this.indentReaderLine(rawLine);
-      result.push({
-        key: `${keyPrefix}_body_${i}_${this.buildTextSliceKey(line)}`,
-        text: line,
-        isTitle: false
-      });
-    }
-    if (result.length === 0 && displayText) {
-      result.push({
-        key: `${keyPrefix}_empty_${this.buildTextSliceKey(displayText)}`,
-        text: displayText,
-        isTitle: false
-      });
-    }
-    return result;
-  }
-
-  @Builder
-  readerScrollContentLayer(renderVersion: number) {
-    Column() {
-      ForEach(this.scrollParagraphs, (paragraph: ScrollParagraph) => {
-        Text(paragraph.text)
-          .fontSize(paragraph.isTitle ? Math.max(this.readerFontSize + 2, 18) : this.readerFontSize)
-          .fontFamily(this.getReaderFontFamily())
-          .lineHeight(paragraph.isTitle ? Math.ceil(this.readerLineHeight * 1.1) : this.readerLineHeight)
-          .fontColor(this.getTextColor())
-          .fontWeight(paragraph.isTitle ? FontWeight.Medium : FontWeight.Normal)
-          .padding({
-            left: 18,
-            right: 18,
-            top: paragraph.isTitle ? 18 : Math.max(0, Math.floor(this.readerParagraphSpacing / 2)),
-            bottom: paragraph.isTitle ? this.readerParagraphSpacing : Math.max(0, Math.ceil(this.readerParagraphSpacing / 2))
-          })
-          .width('100%')
-      }, (paragraph: ScrollParagraph) => paragraph.key)
-
-      Blank()
-        .height(24 + this.readerParagraphSpacing + this.getReaderContentBottomReserve())
-        .width('100%')
-    }
-    .width('100%')
-  }
-
-  @Builder
   readingText(text: string, bottomPadding: number) {
     if (this.hasActiveTtsHighlight(text)) {
       Text() {
@@ -3398,6 +3343,51 @@ struct ReadBookPage {
         end: clampedStart,
         highlighted: false,
         key: `before_${clampedStart}_${this.buildTextSliceKey(displayText.substring(0, clampedStart))}`
+      });
+    }
+    const highlightedText = displayText.substring(clampedStart, clampedEnd);
+    slices.push({
+      text: highlightedText,
+      start: clampedStart,
+      end: clampedEnd,
+      highlighted: true,
+      key: `highlight_${clampedStart}_${clampedEnd}_${this.buildTextSliceKey(highlightedText)}`
+    });
+    if (clampedEnd < displayText.length) {
+      const afterText = displayText.substring(clampedEnd);
+      slices.push({
+        text: afterText,
+        start: clampedEnd,
+        end: displayText.length,
+        highlighted: false,
+        key: `after_${clampedEnd}_${this.buildTextSliceKey(afterText)}`
+      });
+    }
+    return slices;
+  }
+
+  getReadingTextSlicesInRange(text: string, start: number, end: number): ReadTextSlice[] {
+    const displayText = text || '';
+    if (!this.isTtsSpeaking || start < 0 || end <= start) {
+      return [{
+        text: displayText,
+        start: 0,
+        end: displayText.length,
+        highlighted: false,
+        key: `plain_${this.buildTextSliceKey(displayText)}`
+      }];
+    }
+    const clampedStart = Math.max(0, Math.min(start, displayText.length));
+    const clampedEnd = Math.max(clampedStart, Math.min(end, displayText.length));
+    const slices: ReadTextSlice[] = [];
+    if (clampedStart > 0) {
+      const beforeText = displayText.substring(0, clampedStart);
+      slices.push({
+        text: beforeText,
+        start: 0,
+        end: clampedStart,
+        highlighted: false,
+        key: `before_${clampedStart}_${this.buildTextSliceKey(beforeText)}`
       });
     }
     const highlightedText = displayText.substring(clampedStart, clampedEnd);
@@ -3479,6 +3469,24 @@ struct ReadBookPage {
       )
   }
 
+  @Builder
+  settingsDismissLayer() {
+    Column() {
+      Blank()
+        .width('100%')
+        .layoutWeight(1)
+        .onClick(() => {
+          this.showSettings = false;
+        })
+      Blank()
+        .width('100%')
+        .height(430)
+    }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(Color.Transparent)
+  }
+
   hideReaderPanels() {
     this.showMenu = false;
     this.showSettings = false;
@@ -3538,23 +3546,7 @@ struct ReadBookPage {
       this.pagedContentText = '';
       this.contentPageStarts = [];
       this.contentPageEnds = [];
-      this.refreshScrollReaderContent('', chapterIndex);
       this.setCurrentPageText('');
-      return;
-    }
-
-    if (this.readerPageTurnMode === 0) {
-      const safeChapterIndex = this.clampChapterIndex(chapterIndex);
-      const scrollText = this.buildPagedSourceText(safeChapterIndex, content);
-      const pages: string[] = content ? [content] : [];
-      this.contentPages = pages;
-      this.pagedContentText = content || '';
-      this.contentPageStarts = content ? [0] : [];
-      this.contentPageEnds = content ? [content.length] : [];
-      this.refreshScrollReaderContent(scrollText, safeChapterIndex);
-      this.currentPageIndex = 0;
-      this.restorePendingScrollOffset();
-      this.setCurrentPageText(pages[0] || '');
       return;
     }
 
@@ -3568,7 +3560,8 @@ struct ReadBookPage {
       return;
     }
 
-    const result = this.paginateReaderSourceText(this.buildPagedSourceText(this.currentChapterIndex, content));
+    const safeChapterIndex = this.clampChapterIndex(chapterIndex);
+    const result = this.paginateReaderSourceText(this.buildPagedSourceText(safeChapterIndex, content));
     const pages: string[] = result.pages.length > 0 ? result.pages : [content];
     this.pagedContentText = result.source;
     this.contentPages = pages;
@@ -3615,65 +3608,8 @@ struct ReadBookPage {
     }, 0);
   }
 
-  async loadNextChapterOnScrollEnd(): Promise<void> {
-    if (this.readerPageTurnMode !== 0 || this.isLoading || this.isAutoLoadingScrollChapter || this.suppressScrollReachEnd) {
-      return;
-    }
-    if (this.currentChapterIndex >= this.chapters.length - 1) {
-      return;
-    }
-    this.isAutoLoadingScrollChapter = true;
-    try {
-      await this.saveReadingProgress();
-      this.suppressScrollReachStart = true;
-      this.suppressScrollReachEnd = true;
-      await this.loadNextChapter();
-      setTimeout(() => {
-        this.contentScroller.scrollTo({ xOffset: 0, yOffset: 0 });
-      }, 0);
-    } finally {
-      setTimeout(() => {
-        this.isAutoLoadingScrollChapter = false;
-        this.suppressScrollReachStart = false;
-        this.suppressScrollReachEnd = false;
-      }, 350);
-    }
-  }
-
-  async loadPrevChapterOnScrollStart(): Promise<void> {
-    if (this.readerPageTurnMode !== 0 || this.isLoading || this.isAutoLoadingScrollChapter || this.suppressScrollReachStart) {
-      return;
-    }
-    if (this.currentChapterIndex <= 0) {
-      return;
-    }
-    this.isAutoLoadingScrollChapter = true;
-    try {
-      await this.saveReadingProgress();
-      this.suppressScrollReachEnd = true;
-      await this.loadPrevChapter();
-      setTimeout(() => {
-        this.contentScroller.scrollTo({ xOffset: 0, yOffset: Number.MAX_SAFE_INTEGER });
-      }, 0);
-    } finally {
-      setTimeout(() => {
-        this.isAutoLoadingScrollChapter = false;
-        this.suppressScrollReachEnd = false;
-      }, 350);
-    }
-  }
-
-  suppressScrollBoundaryAutoLoad(duration: number = 500): void {
-    this.suppressScrollReachStart = true;
-    this.suppressScrollReachEnd = true;
-    setTimeout(() => {
-      this.suppressScrollReachStart = false;
-      this.suppressScrollReachEnd = false;
-    }, duration);
-  }
-
   canTurnPage(direction: number): boolean {
-    if (this.readerPageTurnMode === 0 || this.chapters.length === 0) {
+    if (this.chapters.length === 0) {
       return false;
     }
     if (direction > 0) {
@@ -3741,7 +3677,7 @@ struct ReadBookPage {
     this.setPageTurnIncomingState(this.currentPageIndex, '', false);
     this.clearPageTurnPreviewState();
     animateTo({ duration: 120, curve: Curve.EaseOut }, () => {
-      this.pageSlideOffsetX = subtleOffset;
+      this.setPageSlideAxisOffset(subtleOffset);
     });
     await this.delay(130);
     await this.applyPageTurn(direction);
@@ -3749,10 +3685,10 @@ struct ReadBookPage {
   }
 
   async runTapPageTurn(direction: number): Promise<void> {
-    const width = this.getPageTurnWidth();
+    const distance = this.getPageTurnDistance();
     this.prepareSlidePageTurn(direction, 0);
     animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
-      this.pageSlideOffsetX = direction > 0 ? -width : width;
+      this.setPageSlideAxisOffset(direction > 0 ? -distance : distance);
       this.pageTransitionOpacity = 1;
     });
     await this.delay(230);
@@ -3761,13 +3697,13 @@ struct ReadBookPage {
   }
 
   async runSlidePageTurn(direction: number): Promise<void> {
-    const width = this.getPageTurnWidth();
-    this.prepareSlidePageTurn(direction, this.pageSlideOffsetX);
-    const targetOffset = direction > 0 ? -width : width;
-    const remaining = Math.abs(targetOffset - this.pageSlideOffsetX);
-    const duration = Math.max(90, Math.min(240, Math.round(240 * remaining / width)));
+    const distance = this.getPageTurnDistance();
+    this.prepareSlidePageTurn(direction, this.getPageSlideAxisOffset());
+    const targetOffset = direction > 0 ? -distance : distance;
+    const remaining = Math.abs(targetOffset - this.getPageSlideAxisOffset());
+    const duration = Math.max(90, Math.min(240, Math.round(240 * remaining / distance)));
     animateTo({ duration: duration, curve: Curve.EaseOut }, () => {
-      this.pageSlideOffsetX = targetOffset;
+      this.setPageSlideAxisOffset(targetOffset);
       this.pageTransitionOpacity = 1;
     });
     await this.delay(duration + 10);
@@ -3781,11 +3717,11 @@ struct ReadBookPage {
     this.pageTurnIncomingOpacity = 1;
   }
 
-  prepareSlidePageTurn(direction: number, offsetX: number): void {
-    const width = this.getPageTurnWidth();
-    const clampedOffset = Math.max(-width, Math.min(width, offsetX));
+  prepareSlidePageTurn(direction: number, offset: number): void {
+    const distance = this.getPageTurnDistance();
+    const clampedOffset = Math.max(-distance, Math.min(distance, offset));
     this.pageSlideDirection = direction;
-    this.pageSlideOffsetX = clampedOffset;
+    this.setPageSlideAxisOffset(clampedOffset);
     this.pageTransitionOpacity = 1;
     this.pageTurnIncomingOpacity = 1;
     this.prepareIncomingPageTurn(direction);
@@ -3795,6 +3731,7 @@ struct ReadBookPage {
     this.pageTransitionX = 0;
     this.pageTransitionOpacity = 1;
     this.pageSlideOffsetX = 0;
+    this.pageSlideOffsetY = 0;
     this.pageSlideDirection = 0;
     this.pageTurnIncomingX = 0;
     this.pageTurnIncomingOpacity = 1;
@@ -3948,16 +3885,16 @@ struct ReadBookPage {
       });
   }
 
-  updateSlidePageEffect(offsetX: number): void {
+  updateSlidePageEffect(offset: number): void {
     if (this.isPageTurning) {
       return;
     }
     if (!this.readerPageTurnAnimation) {
-      this.updateLegacySlidePageEffect(offsetX);
+      this.updateLegacySlidePageEffect(offset);
       return;
     }
-    const width = this.getPageTurnWidth();
-    const clamped = Math.max(-width, Math.min(width, offsetX));
+    const distance = this.getPageTurnDistance();
+    const clamped = Math.max(-distance, Math.min(distance, offset));
     if (Math.abs(clamped) < 1) {
       this.resetSlidePageState();
       return;
@@ -3968,15 +3905,15 @@ struct ReadBookPage {
       return;
     }
     this.pageSlideDirection = direction;
-    this.pageSlideOffsetX = clamped;
+    this.setPageSlideAxisOffset(clamped);
     this.pageTransitionOpacity = 1;
     this.pageTurnIncomingOpacity = 1;
     this.updatePageTurnIncomingForDirection(direction);
   }
 
-  updateLegacySlidePageEffect(offsetX: number): void {
-    const width = this.getPageTurnWidth();
-    const clamped = Math.max(-width, Math.min(width, offsetX));
+  updateLegacySlidePageEffect(offset: number): void {
+    const distance = this.getPageTurnDistance();
+    const clamped = Math.max(-distance, Math.min(distance, offset));
     if (Math.abs(clamped) < 1) {
       this.resetSlidePageState();
       return;
@@ -3988,7 +3925,7 @@ struct ReadBookPage {
     }
     const subtleOffset = Math.min(10, Math.max(2, Math.abs(clamped) * 0.08));
     this.pageSlideDirection = 0;
-    this.pageSlideOffsetX = direction > 0 ? -subtleOffset : subtleOffset;
+    this.setPageSlideAxisOffset(direction > 0 ? -subtleOffset : subtleOffset);
     this.pageTransitionOpacity = 1;
     this.pageTurnIncomingOpacity = 1;
     this.setPageTurnIncomingState(this.currentPageIndex, '', false);
@@ -3996,16 +3933,16 @@ struct ReadBookPage {
   }
 
   rollbackSlidePageEffect(): void {
-    const offset = Math.abs(this.pageSlideOffsetX);
+    const offset = Math.abs(this.getPageSlideAxisOffset());
     if (offset < 0.5) {
       this.resetSlidePageState();
       return;
     }
-    const width = this.getPageTurnWidth();
-    const duration = Math.max(80, Math.min(180, Math.round(180 * offset / width)));
+    const distance = this.getPageTurnDistance();
+    const duration = Math.max(80, Math.min(180, Math.round(180 * offset / distance)));
     const serial = ++this.slideResetSerial;
     animateTo({ duration: duration, curve: Curve.EaseOut }, () => {
-      this.pageSlideOffsetX = 0;
+      this.setPageSlideAxisOffset(0);
       this.pageTransitionOpacity = 1;
       this.pageTurnIncomingOpacity = 1;
     });
@@ -4041,8 +3978,34 @@ struct ReadBookPage {
     return Math.max(1, this.pageViewWidth > 0 ? this.pageViewWidth : 360);
   }
 
+  getPageTurnHeight(): number {
+    return Math.max(1, this.pageViewHeight > 0 ? this.pageViewHeight : 640);
+  }
+
+  isVerticalPageTurnAnimation(): boolean {
+    return this.readerPageTurnMode === 0;
+  }
+
+  getPageTurnDistance(): number {
+    return this.isVerticalPageTurnAnimation() ? this.getPageTurnHeight() : this.getPageTurnWidth();
+  }
+
+  getPageSlideAxisOffset(): number {
+    return this.isVerticalPageTurnAnimation() ? this.pageSlideOffsetY : this.pageSlideOffsetX;
+  }
+
+  setPageSlideAxisOffset(offset: number): void {
+    if (this.isVerticalPageTurnAnimation()) {
+      this.pageSlideOffsetX = 0;
+      this.pageSlideOffsetY = offset;
+      return;
+    }
+    this.pageSlideOffsetX = offset;
+    this.pageSlideOffsetY = 0;
+  }
+
   shouldRenderSlidingPageTurn(): boolean {
-    return this.readerPageTurnAnimation && this.readerPageTurnMode !== 0 && this.pageSlideDirection !== 0 &&
+    return this.readerPageTurnAnimation && this.pageSlideDirection !== 0 &&
       this.canTurnPage(this.pageSlideDirection);
   }
 
@@ -4051,14 +4014,26 @@ struct ReadBookPage {
   }
 
   getIncomingSlideX(): number {
-    if (this.pageSlideDirection === 0) {
+    if (this.pageSlideDirection === 0 || this.isVerticalPageTurnAnimation()) {
       return 0;
     }
     return this.getSlideIncomingX(this.pageSlideDirection, this.pageSlideOffsetX);
   }
 
+  getSlideIncomingY(direction: number, offsetY: number, height: number = this.getPageTurnHeight()): number {
+    return direction > 0 ? height + offsetY : offsetY - height;
+  }
+
+  getIncomingSlideY(): number {
+    if (this.pageSlideDirection === 0 || !this.isVerticalPageTurnAnimation()) {
+      return 0;
+    }
+    return this.getSlideIncomingY(this.pageSlideDirection, this.pageSlideOffsetY);
+  }
+
   resetSlidePageState(): void {
     this.pageSlideOffsetX = 0;
+    this.pageSlideOffsetY = 0;
     this.pageSlideDirection = 0;
     this.pageTransitionOpacity = 1;
     this.pageTurnIncomingX = 0;
@@ -4095,16 +4070,10 @@ struct ReadBookPage {
 
   async loadNextChapter() {
     if (this.currentChapterIndex < this.chapters.length - 1) {
-      if (this.readerPageTurnMode === 0 && !this.isAutoLoadingScrollChapter) {
-        this.suppressScrollBoundaryAutoLoad();
-      }
       const targetChapterIndex = this.currentChapterIndex + 1;
       this.currentChapterIndex = targetChapterIndex;
       this.currentPageIndex = 0;
       this.pendingRestorePageIndex = 0;
-      this.currentScrollOffset = 0;
-      this.pendingRestoreScrollOffset = 0;
-      this.prepareScrollChapterReload(targetChapterIndex);
       await this.loadContent(true, targetChapterIndex);
       await this.saveReadingProgress();
     }
@@ -4112,16 +4081,10 @@ struct ReadBookPage {
 
   async loadPrevChapter() {
     if (this.currentChapterIndex > 0) {
-      if (this.readerPageTurnMode === 0 && !this.isAutoLoadingScrollChapter) {
-        this.suppressScrollBoundaryAutoLoad();
-      }
       const targetChapterIndex = this.currentChapterIndex - 1;
       this.currentChapterIndex = targetChapterIndex;
       this.currentPageIndex = 0;
       this.pendingRestorePageIndex = 0;
-      this.currentScrollOffset = 0;
-      this.pendingRestoreScrollOffset = 0;
-      this.prepareScrollChapterReload(targetChapterIndex);
       await this.loadContent(true, targetChapterIndex);
       await this.saveReadingProgress();
     }

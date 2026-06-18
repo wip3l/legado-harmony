@@ -2,6 +2,10 @@ import { Context } from '@kit.AbilityKit';
 import preferences from '@ohos.data.preferences';
 
 export class ReaderSettings {
+  fontSize: number = 20;
+  lineHeight: number = 32;
+  paragraphSpacing: number = 10;
+  themeIndex: number = 0;
   pageTurnMode: number = 1;
   preloadEnabled: boolean = true;
   preloadChapterCount: number = 1;
@@ -14,6 +18,10 @@ export class ReaderSettings {
 }
 
 export class ReaderSettingsStore {
+  static readonly KEY_FONT_SIZE: string = 'readerFontSize';
+  static readonly KEY_LINE_HEIGHT: string = 'readerLineHeight';
+  static readonly KEY_PARAGRAPH_SPACING: string = 'readerParagraphSpacing';
+  static readonly KEY_THEME_INDEX: string = 'readerThemeIndex';
   static readonly KEY_PAGE_TURN_MODE: string = 'readerPageTurnMode';
   static readonly KEY_PRELOAD_ENABLED: string = 'readerPreloadEnabled';
   static readonly KEY_PRELOAD_CHAPTER_COUNT: string = 'readerPreloadChapterCount';
@@ -32,6 +40,30 @@ export class ReaderSettingsStore {
     }
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
     const settings = new ReaderSettings();
+    settings.fontSize = await ReaderSettingsStore.getNumber(
+      store,
+      ReaderSettingsStore.KEY_FONT_SIZE,
+      20,
+      'fontSize'
+    );
+    settings.lineHeight = await ReaderSettingsStore.getNumber(
+      store,
+      ReaderSettingsStore.KEY_LINE_HEIGHT,
+      32,
+      'lineHeight'
+    );
+    settings.paragraphSpacing = await ReaderSettingsStore.getNumber(
+      store,
+      ReaderSettingsStore.KEY_PARAGRAPH_SPACING,
+      10,
+      'paragraphSpacing'
+    );
+    settings.themeIndex = await ReaderSettingsStore.getNumber(
+      store,
+      ReaderSettingsStore.KEY_THEME_INDEX,
+      0,
+      'themeIndex'
+    );
     settings.pageTurnMode = await ReaderSettingsStore.getNumber(
       store,
       ReaderSettingsStore.KEY_PAGE_TURN_MODE,
@@ -58,6 +90,28 @@ export class ReaderSettingsStore {
     ReaderSettingsStore.mergeStorageFontSettings(settings);
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
     return settings;
+  }
+
+  static async saveLayoutSettings(
+    context: Context,
+    fontSize: number,
+    lineHeight: number,
+    paragraphSpacing: number,
+    themeIndex: number
+  ): Promise<void> {
+    const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
+    settings.fontSize = ReaderSettingsStore.normalizeFontSize(fontSize);
+    settings.lineHeight = ReaderSettingsStore.normalizeLineHeight(lineHeight);
+    settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(paragraphSpacing);
+    settings.themeIndex = ReaderSettingsStore.normalizeThemeIndex(themeIndex);
+    ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
+    ReaderSettingsStore.applyLayoutToStorage(settings);
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    await store.put(ReaderSettingsStore.KEY_FONT_SIZE, settings.fontSize);
+    await store.put(ReaderSettingsStore.KEY_LINE_HEIGHT, settings.lineHeight);
+    await store.put(ReaderSettingsStore.KEY_PARAGRAPH_SPACING, settings.paragraphSpacing);
+    await store.put(ReaderSettingsStore.KEY_THEME_INDEX, settings.themeIndex);
+    await store.flush();
   }
 
   static async savePageTurnMode(context: Context, mode: number): Promise<void> {
@@ -117,6 +171,7 @@ export class ReaderSettingsStore {
   static applyToStorage(settings: ReaderSettings): void {
     const normalized = ReaderSettingsStore.clone(settings);
     ReaderSettingsStore.cachedSettings = normalized;
+    ReaderSettingsStore.applyLayoutToStorage(normalized);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PAGE_TURN_MODE, normalized.pageTurnMode);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_ENABLED, normalized.preloadEnabled);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_CHAPTER_COUNT, normalized.preloadChapterCount);
@@ -126,6 +181,13 @@ export class ReaderSettingsStore {
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_FONT_MODE, normalized.fontMode);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_SYSTEM_FONT_FAMILY, normalized.systemFontFamily);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_CUSTOM_FONTS_RAW, normalized.customFontsRaw);
+  }
+
+  private static applyLayoutToStorage(settings: ReaderSettings): void {
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_FONT_SIZE, settings.fontSize);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_LINE_HEIGHT, settings.lineHeight);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_PARAGRAPH_SPACING, settings.paragraphSpacing);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_THEME_INDEX, settings.themeIndex);
   }
 
   private static async getNumber(
@@ -181,6 +243,18 @@ export class ReaderSettingsStore {
   }
 
   private static normalizeNumber(value: number, type: string, fallback: number): number {
+    if (type === 'fontSize') {
+      return ReaderSettingsStore.normalizeFontSize(value);
+    }
+    if (type === 'lineHeight') {
+      return ReaderSettingsStore.normalizeLineHeight(value);
+    }
+    if (type === 'paragraphSpacing') {
+      return ReaderSettingsStore.normalizeParagraphSpacing(value);
+    }
+    if (type === 'themeIndex') {
+      return ReaderSettingsStore.normalizeThemeIndex(value);
+    }
     if (type === 'pageTurnMode') {
       return ReaderSettingsStore.normalizePageTurnMode(value);
     }
@@ -188,6 +262,26 @@ export class ReaderSettingsStore {
       return ReaderSettingsStore.normalizePreloadChapterCount(value);
     }
     return fallback;
+  }
+
+  private static normalizeFontSize(fontSize: number): number {
+    const value = Math.round(fontSize);
+    return Math.max(14, Math.min(value, 30));
+  }
+
+  private static normalizeLineHeight(lineHeight: number): number {
+    const value = Math.round(lineHeight);
+    return Math.max(24, Math.min(value, 52));
+  }
+
+  private static normalizeParagraphSpacing(paragraphSpacing: number): number {
+    const value = Math.round(paragraphSpacing);
+    return Math.max(0, Math.min(value, 32));
+  }
+
+  private static normalizeThemeIndex(themeIndex: number): number {
+    const value = Math.round(themeIndex);
+    return value >= 0 && value <= 3 ? value : 0;
   }
 
   private static normalizePageTurnMode(mode: number): number {
@@ -202,6 +296,10 @@ export class ReaderSettingsStore {
 
   private static clone(source: ReaderSettings): ReaderSettings {
     const settings = new ReaderSettings();
+    settings.fontSize = ReaderSettingsStore.normalizeFontSize(source.fontSize);
+    settings.lineHeight = ReaderSettingsStore.normalizeLineHeight(source.lineHeight);
+    settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(source.paragraphSpacing);
+    settings.themeIndex = ReaderSettingsStore.normalizeThemeIndex(source.themeIndex);
     settings.pageTurnMode = ReaderSettingsStore.normalizePageTurnMode(source.pageTurnMode);
     settings.preloadEnabled = source.preloadEnabled;
     settings.preloadChapterCount = ReaderSettingsStore.normalizePreloadChapterCount(source.preloadChapterCount);
@@ -216,6 +314,18 @@ export class ReaderSettingsStore {
 
   private static fromStorage(): ReaderSettings {
     const settings = new ReaderSettings();
+    settings.fontSize = ReaderSettingsStore.normalizeFontSize(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_FONT_SIZE) ?? 20
+    );
+    settings.lineHeight = ReaderSettingsStore.normalizeLineHeight(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_LINE_HEIGHT) ?? 32
+    );
+    settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_PARAGRAPH_SPACING) ?? 10
+    );
+    settings.themeIndex = ReaderSettingsStore.normalizeThemeIndex(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_THEME_INDEX) ?? 0
+    );
     settings.pageTurnMode = ReaderSettingsStore.normalizePageTurnMode(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PAGE_TURN_MODE) ?? 1
     );

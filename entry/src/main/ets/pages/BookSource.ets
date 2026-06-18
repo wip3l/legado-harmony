@@ -4,6 +4,7 @@ import { AppDatabase } from '../model/data/AppDatabase';
 import { HttpClient } from '../core/http/HttpClient';
 import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
 import { syncSystemBars } from '../utils/SystemBars';
+import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
@@ -1170,7 +1171,7 @@ struct BookSourcePage {
     this.checkStatus = `准备校验 ${enabledSources.length} 个启用书源`;
 
     try {
-      const coordinator = new SearchCoordinator(8);
+      const coordinator = new SearchCoordinator(SearchExploreSettingsStore.getSearchConcurrency());
       const results = await coordinator.search(BOOK_SOURCE_CHECK_KEYWORD, (progress: SearchProgress) => {
         this.checkDone = progress.done;
         this.checkTotal = progress.total;

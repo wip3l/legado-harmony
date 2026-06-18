@@ -116,7 +116,7 @@ struct SettingsPage {
               }
               .margin({ right: 18 })
               .onClick(() => {
-                this.readerThemeIndex = index;
+                this.setReaderThemeIndex(index);
               })
             })
           }
@@ -376,6 +376,10 @@ struct SettingsPage {
   }
 
   applyLoadedReaderSettings(settings: ReaderSettings): void {
+    this.readerFontSize = settings.fontSize;
+    this.readerLineHeight = settings.lineHeight;
+    this.readerParagraphSpacing = settings.paragraphSpacing;
+    this.readerThemeIndex = settings.themeIndex;
     this.readerFontFamily = settings.fontFamily || '';
     this.readerFontFilePath = settings.fontFilePath || '';
     this.readerFontSourceName = settings.fontSourceName || '系统默认';
@@ -660,6 +664,38 @@ struct SettingsPage {
     return '滚动阅读';
   }
 
+  saveReaderLayoutSettings(): void {
+    ReaderSettingsStore.saveLayoutSettings(
+      getContext(this),
+      this.readerFontSize,
+      this.readerLineHeight,
+      this.readerParagraphSpacing,
+      this.readerThemeIndex
+    ).catch((e: Error) => {
+      console.warn('保存阅读排版设置失败:', e);
+    });
+  }
+
+  setReaderFontSize(fontSize: number): void {
+    this.readerFontSize = Math.max(14, Math.min(Math.round(fontSize), 30));
+    this.saveReaderLayoutSettings();
+  }
+
+  setReaderLineHeight(lineHeight: number): void {
+    this.readerLineHeight = Math.max(24, Math.min(Math.round(lineHeight), 52));
+    this.saveReaderLayoutSettings();
+  }
+
+  setReaderParagraphSpacing(paragraphSpacing: number): void {
+    this.readerParagraphSpacing = Math.max(0, Math.min(Math.round(paragraphSpacing), 32));
+    this.saveReaderLayoutSettings();
+  }
+
+  setReaderThemeIndex(index: number): void {
+    this.readerThemeIndex = Math.max(0, Math.min(Math.round(index), this.themes.length - 1));
+    this.saveReaderLayoutSettings();
+  }
+
   setReaderPageTurnMode(mode: number): void {
     this.readerPageTurnMode = mode;
     ReaderSettingsStore.savePageTurnMode(getContext(this), mode).catch((e: Error) => {
@@ -920,7 +956,7 @@ struct SettingsPage {
         .margin({ top: 8 })
         .selectedColor(this.accentColor())
         .onChange((sliderValue: number) => {
-          this.readerFontSize = Math.round(sliderValue);
+          this.setReaderFontSize(sliderValue);
         })
     }
     .width('100%')
@@ -947,7 +983,7 @@ struct SettingsPage {
         .margin({ top: 8 })
         .selectedColor(this.accentColor())
         .onChange((sliderValue: number) => {
-          this.readerLineHeight = Math.round(sliderValue);
+          this.setReaderLineHeight(sliderValue);
         })
     }
     .width('100%')
@@ -974,7 +1010,7 @@ struct SettingsPage {
         .margin({ top: 8 })
         .selectedColor(this.accentColor())
         .onChange((sliderValue: number) => {
-          this.readerParagraphSpacing = Math.round(sliderValue);
+          this.setReaderParagraphSpacing(sliderValue);
         })
     }
     .width('100%')

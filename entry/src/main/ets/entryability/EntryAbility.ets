@@ -59,6 +59,7 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('searchExploreExactSearch', false);
     PersistentStorage.persistProp('searchExploreExactSearchMatchAuthor', true);
     PersistentStorage.persistProp('searchExploreShowSearchProgress', true);
+    PersistentStorage.persistProp('searchExploreSearchConcurrency', 8);
     PersistentStorage.persistProp('searchExploreSelectedSourceGroups', '');
     PersistentStorage.persistProp('searchExploreSourceSort', '');
     PersistentStorage.persistProp('appLightAccentColor', '#007DFF');

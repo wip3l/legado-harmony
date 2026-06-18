@@ -2246,6 +2246,7 @@ struct SearchPage {
   @StorageLink('searchExploreExactSearch') exactSearch: boolean = false;
   @StorageLink('searchExploreExactSearchMatchAuthor') exactSearchMatchAuthor: boolean = true;
   @StorageLink('searchExploreShowSearchProgress') showSearchProgress: boolean = true;
+  @StorageLink('searchExploreSearchConcurrency') searchConcurrency: number = 8;
   @StorageLink('searchExploreSelectedSourceGroups') selectedSourceGroupsRaw: string = '';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
@@ -2462,7 +2463,7 @@ struct SearchPage {
         }
       };
 
-      this.coordinator = new SearchCoordinator(10);
+      this.coordinator = new SearchCoordinator(SearchExploreSettingsStore.getSearchConcurrency());
       const allBooks = await this.coordinator.search(keyword, callback, {
         exactMatch: this.exactSearch,
         exactMatchAuthor: this.exactSearchMatchAuthor,
@@ -2715,6 +2716,7 @@ struct SearchPage {
     settings.exactSearch = this.exactSearch;
     settings.exactSearchMatchAuthor = this.exactSearchMatchAuthor;
     settings.showSearchProgress = this.showSearchProgress;
+    settings.searchConcurrency = this.searchConcurrency;
     settings.selectedSourceGroupsRaw = this.selectedSourceGroupsRaw;
     settings.sourceSortRaw = AppStorage.get<string>('searchExploreSourceSort') || '';
     SearchExploreSettingsStore.applyToStorage(settings);
@@ -2747,6 +2749,11 @@ struct SearchPage {
 
         this.switchSettingRow('显示搜索进度', this.showSearchProgress, (checked: boolean) => {
           this.showSearchProgress = checked;
+          this.saveSearchExploreSettings();
+        })
+
+        this.numberSettingRow('搜索并发数', this.searchConcurrency, 1, 32, (value: number) => {
+          this.searchConcurrency = value;
           this.saveSearchExploreSettings();
         })
 
@@ -2869,6 +2876,47 @@ struct SearchPage {
       Toggle({ type: ToggleType.Switch, isOn: checked })
         .selectedColor(this.buttonColor())
         .onChange(onChange)
+    }
+    .width('100%')
+    .height(42)
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  numberSettingRow(title: string, value: number, minValue: number, maxValue: number, onChange: (value: number) => void) {
+    Row() {
+      Text(title)
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
+
+      Row() {
+        Text('−')
+          .fontSize(18)
+          .fontColor(this.primaryTextColor())
+          .width(30)
+          .height(30)
+          .textAlign(TextAlign.Center)
+          .onClick(() => {
+            onChange(Math.max(minValue, value - 1));
+          })
+        Text(`${value}`)
+          .fontSize(15)
+          .fontColor(this.primaryTextColor())
+          .width(42)
+          .textAlign(TextAlign.Center)
+        Text('+')
+          .fontSize(18)
+          .fontColor(this.primaryTextColor())
+          .width(30)
+          .height(30)
+          .textAlign(TextAlign.Center)
+          .onClick(() => {
+            onChange(Math.min(maxValue, value + 1));
+          })
+      }
+      .height(30)
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
     .height(42)

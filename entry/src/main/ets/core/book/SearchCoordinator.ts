@@ -23,7 +23,7 @@ export interface SearchProgress {
 
 export type SearchCallback = (progress: SearchProgress) => void;
 
-const MAX_SEARCH_CONCURRENCY = 12;
+const MAX_SEARCH_CONCURRENCY = 32;
 
 export interface SearchOptions {
   exactMatch?: boolean;
@@ -108,9 +108,11 @@ export class SearchCoordinator {
 
   private async searchOne(source: BookSource, keyword: string): Promise<SearchBook[]> {
     try {
+      if (this.cancelled) return [];
       if (BookSourceDataUrlSupport.sourceUsesGySearch(source)) {
         return await BookSourceDataUrlSupport.search(this.http, source, keyword);
       }
+      if (this.cancelled) return [];
       if (!source.searchUrl || !source.searchRule?.bookList || !source.searchRule?.name || !source.searchRule?.bookUrl) {
         console.warn('[SC] skip source without search rules:', source.bookSourceName);
         return [];
@@ -130,6 +132,7 @@ export class SearchCoordinator {
       console.log('[SC] search source:', source.bookSourceName, 'url:', urlTemplate);
       const resp = EncodedSourceUrl.canHandle(urlTemplate) ?
         await this.fetchEncodedDataUrl(urlTemplate, source) : await au.fetch(urlTemplate);
+      if (this.cancelled) return [];
 
       console.log('[SC] response:', source.bookSourceName, resp.statusCode, 'len:', resp.body?.length || 0);
       if (VerificationSupport.shouldRequestBrowserVerification(source, resp.body, resp.statusCode, source.searchUrl)) {
@@ -152,11 +155,13 @@ export class SearchCoordinator {
       rule.setJsVar('page', '1');
       const searchRule = source.searchRule;
       const items = rule.getElements(searchRule.bookList || '');
+      if (this.cancelled) return [];
       console.log('[SC] parsed list:', source.bookSourceName, 'rule:', searchRule.bookList, 'count:', items.length);
 
       const books: SearchBook[] = [];
       const sourceBackendHost = BookSourceDataUrlSupport.sourceBackendHost(source);
       for (const item of items) {
+        if (this.cancelled) return [];
         const ir = new AnalyzeRule(item, baseUrl);
         this.seedSourceVariables(ir.getContext(), source);
         if (sourceBackendHost) {
