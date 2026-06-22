@@ -50,8 +50,8 @@ export class WebBookService {
     this.seedSourceVariables(ctx, source);
     book.name = ir.getString(infoRule.name) || book.name;
     book.author = ir.getString(infoRule.author) || book.author;
-    book.coverUrl = BookSourceDataUrlSupport.normalizeCoverUrl(source, ir.getString(infoRule.coverUrl), baseUrl) ||
-      book.coverUrl;
+    const infoCoverUrl = BookSourceDataUrlSupport.normalizeCoverUrl(source, ir.getString(infoRule.coverUrl), baseUrl);
+    book.coverUrl = book.coverUrl || infoCoverUrl;
     book.intro = BookFieldSanitizer.prefer(ir.getString(infoRule.intro), book.intro);
     book.kind = BookFieldSanitizer.prefer(ir.getString(infoRule.kind), book.kind);
     book.latestChapterTitle = BookFieldSanitizer.prefer(ir.getString(infoRule.lastChapter), book.latestChapterTitle);

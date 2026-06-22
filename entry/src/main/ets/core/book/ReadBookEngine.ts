@@ -1,6 +1,7 @@
 import { Book, BookChapter, BookSource } from '../../model/data/Book';
 import { appDb } from '../../model/data/AppDatabase';
 import { WebBookService } from './WebBookService';
+import { CoverUrlNormalizer } from '../../utils/CoverUrlNormalizer';
 
 export class ReadBookEngine {
   private static inst: ReadBookEngine | null = null;
@@ -64,8 +65,10 @@ export class ReadBookEngine {
       const oldBook = this.book;
       const oldTocUrl = oldBook.tocUrl;
       const oldLatestChapter = oldBook.latestChapterTitle;
+      const oldCoverUrl = oldBook.coverUrl;
       const infoBook = await this.webBook.getBookInfo(this.source, this.book);
       this.book = infoBook;
+      this.book.coverUrl = CoverUrlNormalizer.prefer(oldCoverUrl, this.book.coverUrl);
       this.preserveReadingState(this.book, oldBook);
       console.log('[RE] getBookInfo done, tocUrl:', this.book.tocUrl);
       if (!this.book.tocUrl && oldTocUrl) {

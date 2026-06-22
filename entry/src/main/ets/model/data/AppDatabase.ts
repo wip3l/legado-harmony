@@ -14,7 +14,7 @@ export class AppDatabase {
   private initialized: boolean = false;
   private initPromise: Promise<void> | null = null;
   private readonly DATABASE_NAME = 'legado.db';
-  private readonly SCHEMA_VERSION = 3;
+  private readonly SCHEMA_VERSION = 4;
 
   private constructor() {}
 
@@ -218,7 +218,31 @@ export class AppDatabase {
       { table: 'books', column: 'tocUrl', definition: "tocUrl TEXT DEFAULT ''" },
       { table: 'books', column: 'origin', definition: "origin TEXT DEFAULT 'local'" },
       { table: 'books', column: 'originName', definition: "originName TEXT DEFAULT ''" },
+      { table: 'books', column: 'kind', definition: "kind TEXT DEFAULT ''" },
+      { table: 'books', column: 'customTag', definition: "customTag TEXT DEFAULT ''" },
+      { table: 'books', column: 'coverUrl', definition: "coverUrl TEXT DEFAULT ''" },
+      { table: 'books', column: 'customCoverUrl', definition: "customCoverUrl TEXT DEFAULT ''" },
+      { table: 'books', column: 'intro', definition: "intro TEXT DEFAULT ''" },
+      { table: 'books', column: 'customIntro', definition: "customIntro TEXT DEFAULT ''" },
+      { table: 'books', column: 'charset', definition: "charset TEXT DEFAULT ''" },
+      { table: 'books', column: 'type', definition: 'type INTEGER DEFAULT 0' },
+      { table: 'books', column: 'groupId', definition: 'groupId INTEGER DEFAULT 0' },
+      { table: 'books', column: 'latestChapterTitle', definition: "latestChapterTitle TEXT DEFAULT ''" },
+      { table: 'books', column: 'latestChapterTime', definition: 'latestChapterTime INTEGER DEFAULT 0' },
+      { table: 'books', column: 'lastCheckTime', definition: 'lastCheckTime INTEGER DEFAULT 0' },
+      { table: 'books', column: 'lastCheckCount', definition: 'lastCheckCount INTEGER DEFAULT 0' },
+      { table: 'books', column: 'totalChapterNum', definition: 'totalChapterNum INTEGER DEFAULT 0' },
+      { table: 'books', column: 'durChapterTitle', definition: "durChapterTitle TEXT DEFAULT ''" },
+      { table: 'books', column: 'durChapterIndex', definition: 'durChapterIndex INTEGER DEFAULT 0' },
+      { table: 'books', column: 'durChapterPos', definition: 'durChapterPos INTEGER DEFAULT 0' },
+      { table: 'books', column: 'durChapterTime', definition: 'durChapterTime INTEGER DEFAULT 0' },
+      { table: 'books', column: 'wordCount', definition: "wordCount TEXT DEFAULT ''" },
+      { table: 'books', column: 'canUpdate', definition: 'canUpdate INTEGER DEFAULT 1' },
+      { table: 'books', column: 'bookOrder', definition: 'bookOrder INTEGER DEFAULT 0' },
+      { table: 'books', column: 'originOrder', definition: 'originOrder INTEGER DEFAULT 0' },
       { table: 'books', column: 'variable', definition: 'variable TEXT' },
+      { table: 'books', column: 'readConfig', definition: 'readConfig TEXT' },
+      { table: 'books', column: 'syncTime', definition: 'syncTime INTEGER DEFAULT 0' },
       { table: 'book_sources', column: 'searchUrl', definition: "searchUrl TEXT DEFAULT ''" },
       { table: 'book_sources', column: 'exploreUrl', definition: "exploreUrl TEXT DEFAULT ''" },
       { table: 'book_sources', column: 'jsLib', definition: "jsLib TEXT DEFAULT ''" },
@@ -392,36 +416,36 @@ export class AppDatabase {
 
   private resultSetToBook(resultSet: relationalStore.ResultSet): Book {
     const book = new Book();
-    book.bookUrl = resultSet.getString(resultSet.getColumnIndex('bookUrl'));
-    book.tocUrl = resultSet.getString(resultSet.getColumnIndex('tocUrl'));
-    book.origin = resultSet.getString(resultSet.getColumnIndex('origin'));
-    book.originName = resultSet.getString(resultSet.getColumnIndex('originName'));
-    book.name = resultSet.getString(resultSet.getColumnIndex('name'));
-    book.author = resultSet.getString(resultSet.getColumnIndex('author'));
-    book.kind = resultSet.getString(resultSet.getColumnIndex('kind'));
-    book.customTag = resultSet.getString(resultSet.getColumnIndex('customTag'));
-    book.coverUrl = resultSet.getString(resultSet.getColumnIndex('coverUrl'));
-    book.customCoverUrl = resultSet.getString(resultSet.getColumnIndex('customCoverUrl'));
-    book.intro = resultSet.getString(resultSet.getColumnIndex('intro'));
-    book.customIntro = resultSet.getString(resultSet.getColumnIndex('customIntro'));
-    book.charset = resultSet.getString(resultSet.getColumnIndex('charset'));
-    book.type = resultSet.getLong(resultSet.getColumnIndex('type'));
-    book.group = resultSet.getLong(resultSet.getColumnIndex('groupId'));
-    book.latestChapterTitle = resultSet.getString(resultSet.getColumnIndex('latestChapterTitle'));
-    book.latestChapterTime = resultSet.getLong(resultSet.getColumnIndex('latestChapterTime'));
-    book.lastCheckTime = resultSet.getLong(resultSet.getColumnIndex('lastCheckTime'));
-    book.lastCheckCount = resultSet.getLong(resultSet.getColumnIndex('lastCheckCount'));
-    book.totalChapterNum = resultSet.getLong(resultSet.getColumnIndex('totalChapterNum'));
-    book.durChapterTitle = resultSet.getString(resultSet.getColumnIndex('durChapterTitle'));
-    book.durChapterIndex = resultSet.getLong(resultSet.getColumnIndex('durChapterIndex'));
-    book.durChapterPos = resultSet.getLong(resultSet.getColumnIndex('durChapterPos'));
-    book.durChapterTime = resultSet.getLong(resultSet.getColumnIndex('durChapterTime'));
-    book.wordCount = resultSet.getString(resultSet.getColumnIndex('wordCount'));
-    book.canUpdate = resultSet.getLong(resultSet.getColumnIndex('canUpdate')) === 1;
-    book.order = resultSet.getLong(resultSet.getColumnIndex('bookOrder'));
-    book.originOrder = resultSet.getLong(resultSet.getColumnIndex('originOrder'));
-    book.variable = resultSet.getString(resultSet.getColumnIndex('variable'));
-    const readConfigStr = resultSet.getString(resultSet.getColumnIndex('readConfig'));
+    book.bookUrl = this.getStringColumn(resultSet, 'bookUrl');
+    book.tocUrl = this.getStringColumn(resultSet, 'tocUrl');
+    book.origin = this.getStringColumn(resultSet, 'origin', 'local');
+    book.originName = this.getStringColumn(resultSet, 'originName');
+    book.name = this.getStringColumn(resultSet, 'name');
+    book.author = this.getStringColumn(resultSet, 'author');
+    book.kind = this.getStringColumn(resultSet, 'kind');
+    book.customTag = this.getStringColumn(resultSet, 'customTag');
+    book.coverUrl = this.getStringColumn(resultSet, 'coverUrl');
+    book.customCoverUrl = this.getStringColumn(resultSet, 'customCoverUrl');
+    book.intro = this.getStringColumn(resultSet, 'intro');
+    book.customIntro = this.getStringColumn(resultSet, 'customIntro');
+    book.charset = this.getStringColumn(resultSet, 'charset');
+    book.type = this.getLongColumn(resultSet, 'type');
+    book.group = this.getLongColumn(resultSet, 'groupId');
+    book.latestChapterTitle = this.getStringColumn(resultSet, 'latestChapterTitle');
+    book.latestChapterTime = this.getLongColumn(resultSet, 'latestChapterTime');
+    book.lastCheckTime = this.getLongColumn(resultSet, 'lastCheckTime');
+    book.lastCheckCount = this.getLongColumn(resultSet, 'lastCheckCount');
+    book.totalChapterNum = this.getLongColumn(resultSet, 'totalChapterNum');
+    book.durChapterTitle = this.getStringColumn(resultSet, 'durChapterTitle');
+    book.durChapterIndex = this.getLongColumn(resultSet, 'durChapterIndex');
+    book.durChapterPos = this.getLongColumn(resultSet, 'durChapterPos');
+    book.durChapterTime = this.getLongColumn(resultSet, 'durChapterTime');
+    book.wordCount = this.getStringColumn(resultSet, 'wordCount');
+    book.canUpdate = this.getLongColumn(resultSet, 'canUpdate', 1) === 1;
+    book.order = this.getLongColumn(resultSet, 'bookOrder');
+    book.originOrder = this.getLongColumn(resultSet, 'originOrder');
+    book.variable = this.getStringColumn(resultSet, 'variable');
+    const readConfigStr = this.getStringColumn(resultSet, 'readConfig');
     if (readConfigStr) {
       try {
         book.readConfig = JSON.parse(readConfigStr);
@@ -429,8 +453,24 @@ export class AppDatabase {
         book.readConfig = null;
       }
     }
-    book.syncTime = resultSet.getLong(resultSet.getColumnIndex('syncTime'));
+    book.syncTime = this.getLongColumn(resultSet, 'syncTime');
     return book;
+  }
+
+  private getStringColumn(resultSet: relationalStore.ResultSet, column: string, fallback: string = ''): string {
+    const index = resultSet.getColumnIndex(column);
+    if (index < 0) {
+      return fallback;
+    }
+    return resultSet.getString(index) || fallback;
+  }
+
+  private getLongColumn(resultSet: relationalStore.ResultSet, column: string, fallback: number = 0): number {
+    const index = resultSet.getColumnIndex(column);
+    if (index < 0) {
+      return fallback;
+    }
+    return resultSet.getLong(index);
   }
 
   async insertBookSource(source: BookSource): Promise<void> {

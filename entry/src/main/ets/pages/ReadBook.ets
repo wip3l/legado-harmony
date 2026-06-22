@@ -317,6 +317,7 @@ struct ReadBookPage {
       if (loadSerial !== this.bookLoadSerial) {
         return;
       }
+      this.book = engine.book || this.book;
       this.chapters = engine.chapters;
       const savedChapterIndex = engine.curIdx;
       this.currentChapterIndex = this.clampChapterIndex(savedChapterIndex);
@@ -347,6 +348,7 @@ struct ReadBookPage {
     try {
       const engine = ReadBookEngine.get();
       await engine.refreshToc();
+      this.book = engine.book || this.book;
       this.chapters = engine.chapters;
       if (this.chapters.length > 0) {
         this.loadStatus = '';
@@ -2031,6 +2033,7 @@ struct ReadBookPage {
   preserveSwitchBookState(target: Book, source: Book, oldBook: Book, chapterIndex: number, pageIndex: number): void {
     target.origin = source.origin;
     target.originName = source.originName;
+    target.coverUrl = CoverUrlNormalizer.prefer(source.coverUrl, target.coverUrl);
     target.group = oldBook.group;
     target.order = oldBook.order;
     target.originOrder = oldBook.originOrder;
