@@ -65,6 +65,7 @@ class ReaderCustomFontData {
 interface PageTurnPreview {
   text: string;
   pageIndex: number;
+  chapterIndex: number;
 }
 
 @Entry
@@ -90,6 +91,7 @@ struct ReadBookPage {
   @State currentPageIndex: number = 0;
   @State currentPageText: string = '';
   @State pageRenderVersion: number = 0;
+  @State chapterJumpRenderGeneration: number = 0;
   @State pageViewWidth: number = 0;
   @State pageViewHeight: number = 0;
   @State statusBarSafeHeight: number = 0;
@@ -114,6 +116,8 @@ struct ReadBookPage {
   private contentPageStarts: number[] = [];
   private contentPageEnds: number[] = [];
   private pagedContentText: string = '';
+  private readerPaginationCache: Map<string, ReaderPaginationResult> = new Map();
+  private adjacentPaginationPreloadSerial: number = 0;
   private pageTurnPreviewKey: string = '';
   private pageTurnPreviewLoadingKey: string = '';
   @State pageTransitionX: number = 0;
@@ -126,6 +130,7 @@ struct ReadBookPage {
   @State pageTurnIncomingX: number = 0;
   @State pageTurnIncomingOpacity: number = 1;
   @State pageTurnIncomingPageIndex: number = 0;
+  @State pageTurnIncomingChapterIndex: number = 0;
   @State pageTurnIncomingRenderVersion: number = 0;
   private bookLoadSerial: number = 0;
   private contentLoadSerial: number = 0;
@@ -368,8 +373,11 @@ struct ReadBookPage {
     this.contentPageStarts = [];
     this.contentPageEnds = [];
     this.pagedContentText = '';
+    this.readerPaginationCache.clear();
+    this.adjacentPaginationPreloadSerial++;
     this.currentPageIndex = 0;
     this.currentPageText = '';
+    this.chapterJumpRenderGeneration = 0;
     this.pageViewWidth = 0;
     this.pageViewHeight = 0;
     this.pendingRestorePageIndex = -1;
@@ -383,6 +391,7 @@ struct ReadBookPage {
     this.pageTurnIncomingX = 0;
     this.pageTurnIncomingOpacity = 1;
     this.pageTurnIncomingPageIndex = 0;
+    this.pageTurnIncomingChapterIndex = 0;
     this.pageTurnIncomingRenderVersion = 0;
     this.isPageTurning = false;
     this.clearPageTurnPreviewState();
@@ -521,10 +530,18 @@ struct ReadBookPage {
         } else {
           Column() {
             Stack() {
-              if (this.readerPageTurnAnimation) {
-                this.readerSlidingPageTurnSurface()
+              if (this.chapterJumpRenderGeneration % 2 === 0) {
+                if (this.readerPageTurnAnimation) {
+                  this.readerSlidingPageTurnSurface(this.currentPageText, this.pageRenderVersion)
+                } else {
+                  this.readerCurrentPageSurface(this.pageRenderVersion, this.currentPageText)
+                }
               } else {
-                this.readerCurrentPageSurface(this.pageRenderVersion)
+                if (this.readerPageTurnAnimation) {
+                  this.readerSlidingPageTurnSurfaceAlternate(this.currentPageText, this.pageRenderVersion)
+                } else {
+                  this.readerCurrentPageSurfaceAlternate(this.pageRenderVersion, this.currentPageText)
+                }
               }
             }
             .width('100%')
@@ -680,8 +697,8 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(async () => {
-                await this.loadPrevChapter();
                 this.hideReaderPanels();
+                await this.jumpToAdjacentChapterFirstPage(-1);
               })
 
             Button('目录')
@@ -700,8 +717,8 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(async () => {
-                await this.loadNextChapter();
                 this.hideReaderPanels();
+                await this.jumpToAdjacentChapterFirstPage(1);
               })
           }
           .width('100%')
@@ -1043,7 +1060,11 @@ struct ReadBookPage {
   }
 
   setCurrentPageText(text: string): void {
-    this.currentPageText = text || '';
+    const nextText = text || '';
+    if (this.currentPageText !== nextText) {
+      this.chapterJumpRenderGeneration++;
+    }
+    this.currentPageText = nextText;
     this.pageRenderVersion++;
   }
 
@@ -1075,6 +1096,7 @@ struct ReadBookPage {
     this.pageViewWidth = width;
     this.pageViewHeight = height;
     this.paginateContent(this.content);
+    this.preloadNextChapterPaginationLater();
   }
 
   hasPagedReaderArea(): boolean {
@@ -1391,6 +1413,7 @@ struct ReadBookPage {
     this.registerStyledCustomReaderFonts();
     this.refreshReaderTextRender();
     this.paginateContent(this.content);
+    this.preloadNextChapterPaginationLater();
   }
 
   replaceReaderCustomFontPath(oldPath: string, newPath: string, familyName: string): void {
@@ -1536,6 +1559,7 @@ struct ReadBookPage {
 
   onReadLayoutChanged(): void {
     this.paginateContent(this.content);
+    this.preloadNextChapterPaginationLater();
     this.saveReadingProgress();
   }
 
@@ -3322,7 +3346,7 @@ struct ReadBookPage {
       this.syncCurrentPageText();
       await this.saveReadingProgress();
     } else {
-      await this.loadPrevChapter();
+      await this.loadPrevChapter(true);
     }
   }
 
@@ -3333,13 +3357,13 @@ struct ReadBookPage {
   }
 
   @Builder
-  readerSlidingPageTurnSurface() {
+  readerSlidingPageTurnSurface(currentText: string, currentRenderVersion: number) {
     Stack() {
       if (this.shouldRenderSlidingPageTurn()) {
         this.readerIncomingPageSurface(this.pageTurnIncomingRenderVersion, this.getVisiblePageTurnIncomingText())
-        this.readerCurrentPageSurface(this.pageRenderVersion)
+        this.readerCurrentPageSurface(currentRenderVersion, currentText)
       } else {
-        this.readerCurrentPageSurface(this.pageRenderVersion)
+        this.readerCurrentPageSurface(currentRenderVersion, currentText)
       }
     }
     .width('100%')
@@ -3349,12 +3373,42 @@ struct ReadBookPage {
   }
 
   @Builder
-  readerCurrentPageSurface(renderVersion: number) {
-    Column() {
-      this.readerCurrentPageLayer(renderVersion)
+  readerSlidingPageTurnSurfaceAlternate(currentText: string, currentRenderVersion: number) {
+    Stack() {
+      if (this.shouldRenderSlidingPageTurn()) {
+        this.readerIncomingPageSurface(this.pageTurnIncomingRenderVersion, this.getVisiblePageTurnIncomingText())
+        this.readerCurrentPageSurfaceAlternate(currentRenderVersion, currentText)
+      } else {
+        this.readerCurrentPageSurfaceAlternate(currentRenderVersion, currentText)
+      }
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(this.getBackgroundColor())
+    .clip(true)
+  }
+
+  @Builder
+  readerCurrentPageSurface(renderVersion: number, text: string) {
+    Column() {
+      this.readerCurrentPageLayer(renderVersion, text)
+    }
+    .width('100%')
+    .height('100%')
+    .id(`reader_current_${this.currentChapterIndex}_${this.currentPageIndex}_${renderVersion}`)
+    .backgroundColor(this.getBackgroundColor())
+    .translate({ x: this.pageTransitionX + this.pageSlideOffsetX, y: this.pageSlideOffsetY })
+    .opacity(this.pageTransitionOpacity)
+  }
+
+  @Builder
+  readerCurrentPageSurfaceAlternate(renderVersion: number, text: string) {
+    Column() {
+      this.readerCurrentPageLayer(renderVersion, text)
+    }
+    .width('100%')
+    .height('100%')
+    .id(`reader_current_alt_${this.currentChapterIndex}_${this.currentPageIndex}_${renderVersion}`)
     .backgroundColor(this.getBackgroundColor())
     .translate({ x: this.pageTransitionX + this.pageSlideOffsetX, y: this.pageSlideOffsetY })
     .opacity(this.pageTransitionOpacity)
@@ -3367,20 +3421,21 @@ struct ReadBookPage {
     }
     .width('100%')
     .height('100%')
+    .id(`reader_incoming_${this.pageTurnIncomingChapterIndex}_${this.pageTurnIncomingPageIndex}_${renderVersion}`)
     .backgroundColor(this.getBackgroundColor())
     .translate({ x: this.getIncomingSlideX(), y: this.getIncomingSlideY() })
     .opacity(this.getVisiblePageTurnIncomingOpacity())
   }
 
   @Builder
-  readerCurrentPageLayer(renderVersion: number) {
+  readerCurrentPageLayer(renderVersion: number, text: string) {
     Column() {
-      if (this.hasActiveTtsHighlight(this.currentPageText)) {
-        this.readingText(this.currentPageText, 18 + this.getReaderContentBottomReserve())
+      if (this.hasActiveTtsHighlight(text)) {
+        this.readingText(text, 18 + this.getReaderContentBottomReserve())
       } else if (renderVersion % 2 === 0) {
-        this.styledReaderText(this.currentPageText, 18 + this.getReaderContentBottomReserve())
+        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve())
       } else {
-        this.styledReaderText(this.currentPageText, 18 + this.getReaderContentBottomReserve())
+        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve())
       }
     }
     .width('100%')
@@ -3396,9 +3451,9 @@ struct ReadBookPage {
       if (this.hasActiveTtsHighlight(text)) {
         this.readingText(text, 18 + this.getReaderContentBottomReserve())
       } else if (renderVersion % 2 === 0) {
-        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve())
+        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve(), this.pageTurnIncomingChapterIndex)
       } else {
-        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve())
+        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve(), this.pageTurnIncomingChapterIndex)
       }
     }
     .width('100%')
@@ -3433,14 +3488,14 @@ struct ReadBookPage {
   }
 
   @Builder
-  styledReaderText(text: string, bottomPadding: number) {
-    if (this.shouldUseTitleStyle(text)) {
+  styledReaderText(text: string, bottomPadding: number, chapterIndex: number = this.currentChapterIndex) {
+    if (this.shouldUseTitleStyle(text, chapterIndex)) {
       Text() {
-        Span(this.getChapterTitle())
+        Span(this.getChapterTitle(chapterIndex))
           .fontSize(this.readerTitleFontSize)
           .fontFamily(this.getTitleReaderFontFamily())
           .fontColor(this.getTextColor())
-        ForEach(this.getRegexTextSlices(text.substring(this.getChapterTitle().length)), (slice: ReadTextSlice) => {
+        ForEach(this.getRegexTextSlices(text.substring(this.getChapterTitle(chapterIndex).length)), (slice: ReadTextSlice) => {
           Span(slice.text)
             .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
             .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
@@ -3488,8 +3543,8 @@ struct ReadBookPage {
     .width('100%')
   }
 
-  shouldUseTitleStyle(text: string): boolean {
-    const title = this.getChapterTitle().trim();
+  shouldUseTitleStyle(text: string, chapterIndex: number = this.currentChapterIndex): boolean {
+    const title = this.getChapterTitle(chapterIndex).trim();
     return !!title && (text || '').startsWith(title);
   }
 
@@ -3936,6 +3991,64 @@ struct ReadBookPage {
     };
   }
 
+  buildReaderPaginationCacheKey(chapterIndex: number, source: string): string {
+    return `${chapterIndex}_${this.pageViewWidth}_${this.pageViewHeight}_${this.readerFontSize}_` +
+      `${this.readerLineHeight}_${this.getReaderFontFamily()}_${source.length}_${this.hashText(source)}`;
+  }
+
+  getCachedReaderPagination(chapterIndex: number, source: string): ReaderPaginationResult | null {
+    const key = this.buildReaderPaginationCacheKey(chapterIndex, source);
+    return this.readerPaginationCache.get(key) || null;
+  }
+
+  getOrCreateReaderPagination(chapterIndex: number, source: string): ReaderPaginationResult {
+    const key = this.buildReaderPaginationCacheKey(chapterIndex, source);
+    const cached = this.readerPaginationCache.get(key);
+    if (cached) {
+      return cached;
+    }
+    const result = this.paginateReaderSourceText(source);
+    this.readerPaginationCache.set(key, result);
+    while (this.readerPaginationCache.size > 6) {
+      const oldestKey = this.readerPaginationCache.keys().next().value as string | undefined;
+      if (!oldestKey) {
+        break;
+      }
+      this.readerPaginationCache.delete(oldestKey);
+    }
+    return result;
+  }
+
+  preloadNextChapterPaginationLater(delayMs: number = 800): void {
+    if (!this.readerPreloadEnabled || !this.hasPagedReaderArea() ||
+      this.currentChapterIndex >= this.chapters.length - 1) {
+      return;
+    }
+    const sourceChapterIndex = this.currentChapterIndex;
+    const targetChapterIndex = sourceChapterIndex + 1;
+    const serial = ++this.adjacentPaginationPreloadSerial;
+    setTimeout(() => {
+      if (serial !== this.adjacentPaginationPreloadSerial ||
+        this.currentChapterIndex !== sourceChapterIndex) {
+        return;
+      }
+      ReadBookEngine.get().peekContent(targetChapterIndex)
+        .then((body: string) => {
+          if (!body || serial !== this.adjacentPaginationPreloadSerial ||
+            this.currentChapterIndex !== sourceChapterIndex) {
+            return;
+          }
+          const source = this.buildPagedSourceText(targetChapterIndex, body);
+          if (!this.getCachedReaderPagination(targetChapterIndex, source)) {
+            this.getOrCreateReaderPagination(targetChapterIndex, source);
+          }
+        })
+        .catch((err: Error) => {
+          console.error('预排版下一章失败:', err);
+        });
+    }, Math.max(0, delayMs));
+  }
+
   paginateContent(sourceContent?: string, chapterIndex: number = this.currentChapterIndex) {
     const content = sourceContent !== undefined ? sourceContent : this.content;
     if (!content) {
@@ -3957,7 +4070,8 @@ struct ReadBookPage {
     }
 
     const safeChapterIndex = this.clampChapterIndex(chapterIndex);
-    const result = this.paginateReaderSourceText(this.buildPagedSourceText(safeChapterIndex, content));
+    const pagedSource = this.buildPagedSourceText(safeChapterIndex, content);
+    const result = this.getOrCreateReaderPagination(safeChapterIndex, pagedSource);
     const pages: string[] = result.pages.length > 0 ? result.pages : [content];
     this.pagedContentText = result.source;
     this.contentPages = pages;
@@ -3992,6 +4106,7 @@ struct ReadBookPage {
     }
     const engine = ReadBookEngine.get();
     engine.preloadAround(this.currentChapterIndex, this.normalizePreloadChapterCount(this.readerPreloadChapterCount), 0);
+    this.preloadNextChapterPaginationLater();
   }
 
   normalizePreloadChapterCount(count: number): number {
@@ -4022,6 +4137,7 @@ struct ReadBookPage {
         this.syncCurrentPageText();
         if (this.contentPages.length - this.currentPageIndex <= 3) {
           this.preloadReaderContentLater();
+          this.preloadNextChapterPaginationLater(0);
         }
         this.saveReadingProgress();
       } else {
@@ -4038,7 +4154,7 @@ struct ReadBookPage {
       }
       this.saveReadingProgress();
     } else {
-      await this.loadPrevChapter();
+      await this.loadPrevChapter(true);
     }
   }
 
@@ -4048,6 +4164,11 @@ struct ReadBookPage {
     }
     if (!this.canTurnPage(direction)) {
       this.resetSlidePageEffect();
+      if (direction > 0 && this.chapters.length > 0 &&
+        this.currentChapterIndex >= this.chapters.length - 1 &&
+        this.currentPageIndex >= this.contentPages.length - 1) {
+        promptAction.showToast({ message: '本书已阅读完成' });
+      }
       return;
     }
 
@@ -4136,14 +4257,17 @@ struct ReadBookPage {
     this.isPageTurning = false;
   }
 
-  setPageTurnIncomingState(pageIndex: number, text: string, animating: boolean = true): void {
+  setPageTurnIncomingState(pageIndex: number, text: string, animating: boolean = true,
+    chapterIndex: number = this.currentChapterIndex): void {
     const safeText = text || '';
     const nextAnimating = animating && !!safeText;
-    if (this.pageTurnIncomingPageIndex !== pageIndex || this.pageTurnIncomingText !== safeText ||
+    if (this.pageTurnIncomingPageIndex !== pageIndex || this.pageTurnIncomingChapterIndex !== chapterIndex ||
+      this.pageTurnIncomingText !== safeText ||
       this.pageTurnAnimating !== nextAnimating) {
       this.pageTurnIncomingRenderVersion++;
     }
     this.pageTurnIncomingPageIndex = pageIndex;
+    this.pageTurnIncomingChapterIndex = chapterIndex;
     this.pageTurnIncomingText = safeText;
     this.pageTurnAnimating = nextAnimating;
   }
@@ -4206,6 +4330,10 @@ struct ReadBookPage {
     }
 
     const key = this.buildPageTurnPreviewKey(direction, targetChapterIndex);
+    if (this.pageTurnPreviewKey === key && this.pageTurnIncomingText &&
+      this.pageTurnIncomingChapterIndex === targetChapterIndex) {
+      return;
+    }
     if (this.pageTurnPreviewKey !== key) {
       this.pageTurnPreviewKey = key;
     }
@@ -4216,7 +4344,7 @@ struct ReadBookPage {
       return;
     }
 
-    this.setPageTurnIncomingState(0, this.getPageTurnLoadingText(targetChapterIndex));
+    this.setPageTurnIncomingState(0, this.getPageTurnLoadingText(targetChapterIndex), true, targetChapterIndex);
     this.loadAdjacentPageTurnPreview(direction, targetChapterIndex, key);
   }
 
@@ -4228,21 +4356,22 @@ struct ReadBookPage {
   buildCachedAdjacentPageTurnPreview(direction: number, chapterIndex: number): PageTurnPreview {
     const body = ReadBookEngine.get().getCachedContent(chapterIndex);
     if (!body) {
-      return { text: '', pageIndex: 0 };
+      return { text: '', pageIndex: 0, chapterIndex: chapterIndex };
     }
     return this.buildAdjacentPageTurnPreview(direction, chapterIndex, body);
   }
 
   buildAdjacentPageTurnPreview(direction: number, chapterIndex: number, body: string): PageTurnPreview {
     const source = this.buildPagedSourceText(chapterIndex, body);
-    const result = this.paginateReaderSourceText(source);
+    const result = this.getOrCreateReaderPagination(chapterIndex, source);
     if (result.pages.length === 0) {
-      return { text: '', pageIndex: 0 };
+      return { text: '', pageIndex: 0, chapterIndex: chapterIndex };
     }
     const pageIndex = direction > 0 ? 0 : result.pages.length - 1;
     return {
       text: result.pages[pageIndex],
-      pageIndex: pageIndex
+      pageIndex: pageIndex,
+      chapterIndex: chapterIndex
     };
   }
 
@@ -4252,7 +4381,7 @@ struct ReadBookPage {
   }
 
   applyPageTurnPreview(preview: PageTurnPreview): void {
-    this.setPageTurnIncomingState(preview.pageIndex, preview.text);
+    this.setPageTurnIncomingState(preview.pageIndex, preview.text, true, preview.chapterIndex);
     this.pageTurnIncomingOpacity = 1;
   }
 
@@ -4464,25 +4593,70 @@ struct ReadBookPage {
     return text;
   }
 
-  async loadNextChapter() {
-    if (this.currentChapterIndex < this.chapters.length - 1) {
-      const targetChapterIndex = this.currentChapterIndex + 1;
-      this.currentChapterIndex = targetChapterIndex;
+  async jumpToAdjacentChapterFirstPage(direction: number): Promise<void> {
+    const targetChapterIndex = this.currentChapterIndex + (direction > 0 ? 1 : -1);
+    if (targetChapterIndex < 0) {
+      promptAction.showToast({ message: '已经是第一章' });
+      return;
+    }
+    if (targetChapterIndex >= this.chapters.length) {
+      promptAction.showToast({ message: '本书已阅读完成' });
+      return;
+    }
+
+    this.stopTtsReading();
+    this.finishPageTurnAnimation();
+    this.isLoading = true;
+    this.loadStatus = '正在切换章节...';
+    await this.delay(0);
+    try {
       this.currentPageIndex = 0;
       this.pendingRestorePageIndex = 0;
       await this.loadContent(true, targetChapterIndex);
-      await this.saveReadingProgress();
+      if (this.currentChapterIndex !== targetChapterIndex) {
+        return;
+      }
+
+      this.currentPageIndex = 0;
+      this.pendingRestorePageIndex = -1;
+      const targetPageText = this.contentPages[0] || this.content || '';
+      this.setCurrentPageText(targetPageText);
+      this.finishPageTurnAnimation();
+      this.refreshReaderTextRender();
+      await this.delay(16);
+    } finally {
+      this.isLoading = false;
+      this.loadStatus = '';
     }
+    this.saveReadingProgress();
   }
 
-  async loadPrevChapter() {
-    if (this.currentChapterIndex > 0) {
-      const targetChapterIndex = this.currentChapterIndex - 1;
-      this.currentChapterIndex = targetChapterIndex;
-      this.currentPageIndex = 0;
-      this.pendingRestorePageIndex = 0;
-      await this.loadContent(true, targetChapterIndex);
-      await this.saveReadingProgress();
+  async loadNextChapter(showLoading: boolean = false, showBoundaryToast: boolean = false): Promise<void> {
+    if (this.currentChapterIndex >= this.chapters.length - 1) {
+      if (showBoundaryToast) {
+        promptAction.showToast({ message: '本书已阅读完成' });
+      }
+      return;
     }
+    const targetChapterIndex = this.currentChapterIndex + 1;
+    this.currentPageIndex = 0;
+    this.pendingRestorePageIndex = 0;
+    await this.loadContent(!showLoading, targetChapterIndex);
+    this.saveReadingProgress();
+  }
+
+  async loadPrevChapter(toLastPage: boolean = false, showLoading: boolean = false,
+    showBoundaryToast: boolean = false): Promise<void> {
+    if (this.currentChapterIndex <= 0) {
+      if (showBoundaryToast) {
+        promptAction.showToast({ message: '已经是第一章' });
+      }
+      return;
+    }
+    const targetChapterIndex = this.currentChapterIndex - 1;
+    this.currentPageIndex = 0;
+    this.pendingRestorePageIndex = toLastPage ? Number.MAX_SAFE_INTEGER : 0;
+    await this.loadContent(!showLoading, targetChapterIndex);
+    this.saveReadingProgress();
   }
 }
