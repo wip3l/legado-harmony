@@ -8,6 +8,11 @@ export class JsRuntime {
   setVar(k: string, v: string): void { this.vars[k] = v; }
   getVar(k: string): string { return this.vars[k] || ''; }
 
+  evaluate(expression: string, result: string = ''): string {
+    this.vars['result'] = result;
+    return this.evalExpr(expression.replace(/^\s*(?:return\s+)?/, '').replace(/;\s*$/, ''));
+  }
+
   evalTemplate(tpl: string): string {
     if (!tpl.includes('{{')) return tpl;
     return tpl.replace(/\{\{([\s\S]*?)\}\}/g, (_: string, expr: string) => this.evalExpr(expr.trim()));
@@ -15,6 +20,12 @@ export class JsRuntime {
 
   private evalExpr(expr: string): string {
     try {
+      const statements = this.splitStatements(expr);
+      if (statements.length > 1) {
+        let last = '';
+        for (const statement of statements) last = this.evalExpr(statement);
+        return last;
+      }
       expr = this.replaceDateExpressions(expr);
       expr = expr.replace(/Date\.now\(\)/g, String(Date.now()));
 
@@ -22,13 +33,22 @@ export class JsRuntime {
       expr = this.replaceFunctionCalls(expr, 'Math.floor', (v: string) => String(Math.floor(this.evalNumber(v))));
       expr = this.replaceFunctionCalls(expr, 'Math.ceil', (v: string) => String(Math.ceil(this.evalNumber(v))));
 
-      expr = this.replaceFunctionCalls(expr, 'java.base64Encode', (v: string) => this.base64(this.evalStr(v)));
-      expr = this.replaceFunctionCalls(expr, 'java.base64Decode', (v: string) => this.base64Decode(this.evalStr(v)));
-      expr = this.replaceFunctionCalls(expr, 'java.hexDecodeToString', (v: string) => this.hexDecodeToString(this.evalStr(v)));
-      expr = this.replaceFunctionCalls(expr, 'java.md5Encode', (v: string) => this.md5(this.evalStr(v)));
-      expr = this.replaceFunctionCalls(expr, 'java.getCookie', (v: string) => CookieStore.getCookie(this.evalStr(v)));
-      expr = this.replaceFunctionCalls(expr, 'cookie.getCookie', (v: string) => CookieStore.getCookie(this.evalStr(v)));
-      expr = this.replaceFunctionCalls(expr, 'java.timeFormat', (v: string) => this.timeFormat(this.evalNumber(this.evalStr(v))));
+      expr = this.replaceFunctionCalls(expr, 'java.base64Encode', (v: string) => this.base64(this.evalStr(this.splitArgs(v)[0] || v)));
+      expr = this.replaceFunctionCalls(expr, 'java.base64EncodeToString', (v: string) => this.base64(this.evalStr(this.splitArgs(v)[0] || v)));
+      expr = this.replaceFunctionCalls(expr, 'java.base64Decode', (v: string) => this.base64Decode(this.evalStr(this.splitArgs(v)[0] || v)));
+      expr = this.replaceFunctionCalls(expr, 'java.hexDecodeToString', (v: string) => this.hexDecodeToString(this.evalStr(this.splitArgs(v)[0] || v)));
+      expr = this.replaceFunctionCalls(expr, 'java.hexEncodeToString', (v: string) => this.hexEncodeToString(this.evalStr(this.splitArgs(v)[0] || v)));
+      expr = this.replaceFunctionCalls(expr, 'java.md5Encode16', (v: string) => this.md5(this.evalStr(v)).substring(8, 24));
+      expr = this.replaceFunctionCalls(expr, 'java.md5Encode', (v: string) => this.digest('MD5', this.evalStr(v)));
+      expr = this.replaceFunctionCalls(expr, 'java.sha1Encode', (v: string) => this.digest('SHA1', this.evalStr(v)));
+      expr = this.replaceFunctionCalls(expr, 'java.sha256Encode', (v: string) => this.digest('SHA256', this.evalStr(v)));
+      expr = this.replaceFunctionCalls(expr, 'java.urlEncode', (v: string) => encodeURIComponent(this.evalStr(this.splitArgs(v)[0] || v)));
+      expr = this.replaceFunctionCalls(expr, 'java.urlDecode', (v: string) => this.urlDecode(this.evalStr(this.splitArgs(v)[0] || v)));
+      expr = this.replaceFunctionCalls(expr, 'java.getCookie', (v: string) => this.cookieValue(v));
+      expr = this.replaceFunctionCalls(expr, 'java.put', (v: string) => this.putVar(v));
+      expr = this.replaceFunctionCalls(expr, 'java.get', (v: string) => this.getVarCall(v));
+      expr = this.replaceFunctionCalls(expr, 'cookie.getCookie', (v: string) => this.cookieValue(v));
+      expr = this.replaceFunctionCalls(expr, 'java.timeFormat', (v: string) => this.timeFormatCall(v));
       expr = this.replaceFunctionCalls(expr, 'java.getString', (_v: string) => '');
       expr = this.replaceFunctionCalls(expr, 'java.getElement', (_v: string) => '');
       expr = this.replaceFunctionCalls(expr, 'java.t2s', (v: string) => this.evalStr(v));
@@ -36,13 +56,18 @@ export class JsRuntime {
       expr = this.replaceFunctionCalls(expr, 'encodeURIComponent', (v: string) => encodeURIComponent(this.evalStr(v)));
       expr = this.replaceFunctionCalls(expr, 'encodeURI', (v: string) => encodeURI(this.evalStr(v)));
       expr = this.replaceFunctionCalls(expr, 'java.encodeURI', (v: string) => encodeURIComponent(this.evalStr(this.splitArgs(v)[0] || v)));
+      expr = this.replaceFunctionCalls(expr, 'java.aesBase64DecodeToString', (v: string) => this.evalAes(v, false));
+      expr = this.replaceFunctionCalls(expr, 'java.aesEncodeToBase64String', (v: string) => this.evalAes(v, true));
+      expr = this.replaceFunctionCalls(expr, 'java.desBase64DecodeToString', (v: string) => this.evalDes(v, false));
+      expr = this.replaceFunctionCalls(expr, 'java.desEncodeToBase64String', (v: string) => this.evalDes(v, true));
 
       expr = this.replaceNoArgCalls(expr);
       this.applyCookieSideEffects(expr);
 
       for (const k in this.vars) {
         const value = this.vars[k];
-        const replacement = value.match(/^-?\d+(\.\d+)?$/) ? value : `"${value}"`;
+        const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const replacement = value.match(/^-?\d+(\.\d+)?$/) ? value : `"${escaped}"`;
         expr = expr.replace(new RegExp('\\b' + k + '\\b', 'g'), replacement);
       }
 
@@ -125,9 +150,10 @@ export class JsRuntime {
     const removeRe = /\bcookie\.removeCookie\(\s*([^)]+)\)/g;
     let removeMatch: RegExpExecArray | null;
     while ((removeMatch = removeRe.exec(expr)) !== null) {
-      const url = this.evalStr(removeMatch[1]);
-      CookieStore.setCookies(url, 'removed=; Max-Age=0; Path=/');
-      CookieStore.saveAsync();
+      const args = this.splitArgs(removeMatch[1]);
+      const url = this.evalStr(args[0] || '');
+      const name = args.length > 1 ? this.evalStr(args[1]) : '';
+      CookieStore.removeCookie(url, name || undefined);
     }
   }
 
@@ -279,9 +305,51 @@ export class JsRuntime {
     } catch (_) { return input; }
   }
 
-  private md5(input: string): string {
+  private splitStatements(expr: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let quote = '';
+    let start = 0;
+    for (let i = 0; i < expr.length; i++) {
+      const ch = expr.charAt(i);
+      if (quote) {
+        if (ch === quote && expr.charAt(i - 1) !== '\\') quote = '';
+        continue;
+      }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '(' || ch === '[' || ch === '{') depth++;
+      if (ch === ')' || ch === ']' || ch === '}') depth--;
+      if (ch === ';' && depth === 0) {
+        const part = expr.substring(start, i).trim();
+        if (part) parts.push(part);
+        start = i + 1;
+      }
+    }
+    const last = expr.substring(start).trim();
+    if (last) parts.push(last);
+    return parts;
+  }
+
+  private hexEncodeToString(input: string): string {
     try {
-      const md = cryptoFramework.createMd('MD5');
+      const bytes = new util.TextEncoder().encodeInto(input);
+      let value = '';
+      for (let i = 0; i < bytes.length; i++) value += bytes[i].toString(16).padStart(2, '0');
+      return value;
+    } catch (_) { return input; }
+  }
+
+  private urlDecode(input: string): string {
+    try { return decodeURIComponent(input.replace(/\+/g, '%20')); } catch (_) { return input; }
+  }
+
+  private md5(input: string): string {
+    return this.digest('MD5', input);
+  }
+
+  private digest(algorithm: string, input: string): string {
+    try {
+      const md = cryptoFramework.createMd(algorithm);
       const e = new util.TextEncoder();
       md.updateSync({ data: e.encodeInto(input) });
       const r = md.digestSync();
@@ -302,6 +370,43 @@ export class JsRuntime {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   }
 
+  private timeFormatCall(rawArgs: string): string {
+    const args = this.splitArgs(rawArgs);
+    const timestamp = this.evalNumber(this.evalStr(args[0] || ''));
+    if (args.length < 2) return this.timeFormat(timestamp);
+    const millis = timestamp < 100000000000 ? timestamp * 1000 : timestamp;
+    const date = new Date(millis);
+    const pad = (value: number): string => value < 10 ? `0${value}` : String(value);
+    return this.evalStr(args[1])
+      .replace(/yyyy/g, String(date.getFullYear()))
+      .replace(/MM/g, pad(date.getMonth() + 1))
+      .replace(/dd/g, pad(date.getDate()))
+      .replace(/HH/g, pad(date.getHours()))
+      .replace(/mm/g, pad(date.getMinutes()))
+      .replace(/ss/g, pad(date.getSeconds()));
+  }
+
+  private cookieValue(rawArgs: string): string {
+    const args = this.splitArgs(rawArgs);
+    const url = this.evalStr(args[0] || '');
+    const name = args.length > 1 ? this.evalStr(args[1]) : '';
+    return name ? CookieStore.getCookieValue(url, name) : CookieStore.getCookie(url);
+  }
+
+  private putVar(rawArgs: string): string {
+    const args = this.splitArgs(rawArgs);
+    const key = this.evalStr(args[0] || '');
+    const value = this.evalStr(args[1] || '');
+    if (key) this.setVar(key, value);
+    return value;
+  }
+
+  private getVarCall(rawArgs: string): string {
+    const args = this.splitArgs(rawArgs);
+    const key = this.evalStr(args[0] || '');
+    return this.getVar(key);
+  }
+
   private androidId(): string {
     return 'legado_harmony_' + this.md5('legado-harmony').substring(0, 16);
   }
@@ -312,48 +417,58 @@ export class JsRuntime {
     return `${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}`;
   }
 
-  aesBase64DecodeToString(data: string, key: string, iv: string): string {
+  aesBase64DecodeToString(data: string, key: string, iv: string, transformation: string = 'AES/CBC/PKCS5Padding'): string {
+    return this.symmetricBase64(data, key, transformation, iv, false);
+  }
+
+  private evalAes(rawArgs: string, encrypt: boolean): string {
+    const args = this.splitArgs(rawArgs);
+    return this.symmetricBase64(
+      this.evalStr(args[0] || ''), this.evalStr(args[1] || ''),
+      this.evalStr(args[2] || 'AES/CBC/PKCS5Padding'), this.evalStr(args[3] || ''), encrypt
+    );
+  }
+
+  private evalDes(rawArgs: string, encrypt: boolean): string {
+    const args = this.splitArgs(rawArgs);
+    return this.symmetricBase64(
+      this.evalStr(args[0] || ''), this.evalStr(args[1] || ''),
+      this.evalStr(args[2] || 'DES/CBC/PKCS5Padding'), this.evalStr(args[3] || ''), encrypt
+    );
+  }
+
+  private symmetricBase64(data: string, key: string, transformation: string, iv: string, encrypt: boolean): string {
     try {
       const textEncoder = new util.TextEncoder();
       const textDecoder = util.TextDecoder.create('utf-8');
       const base64 = new util.Base64Helper();
-
-      // Base64 解码
-      const dataBytes = base64.decodeSync(data);
-
-      // Key: UTF-8 编码后填/截为 16 字节
-      const keyRaw = textEncoder.encodeInto(key);
-      const key16 = new Uint8Array(16);
-      for (let i = 0; i < 16; i++) {
-        key16[i] = i < keyRaw.length ? keyRaw[i] : 0;
-      }
-
-      // IV: UTF-8 编码后填/截为 16 字节
-      const ivRaw = textEncoder.encodeInto(iv);
-      const iv16 = new Uint8Array(16);
-      for (let i = 0; i < 16; i++) {
-        iv16[i] = i < ivRaw.length ? ivRaw[i] : 0;
-      }
-
-      // 创建对称密钥
-      const keyGen = cryptoFramework.createSymKeyGenerator('AES128');
-      const symKey = keyGen.convertKeySync({ data: key16 });
-
-      // 创建 IV 参数
-      const ivParams: cryptoFramework.IvParamsSpec = {
+      const upper = transformation.toUpperCase();
+      const isDes = upper.startsWith('DES');
+      const mode = upper.includes('/ECB/') ? 'ECB' : 'CBC';
+      const padding = upper.includes('NOPADDING') ? 'NoPadding' : upper.includes('PKCS7') ? 'PKCS7' : 'PKCS5';
+      const rawKey = textEncoder.encodeInto(key);
+      const keyLength = isDes ? 8 : (rawKey.length >= 32 ? 32 : rawKey.length >= 24 ? 24 : 16);
+      const keyAlgorithm = isDes ? 'DES' : `AES${keyLength * 8}`;
+      const keyGen = cryptoFramework.createSymKeyGenerator(keyAlgorithm);
+      const symKey = keyGen.convertKeySync({ data: this.fixedBytes(rawKey, keyLength) });
+      const cipher = cryptoFramework.createCipher(`${keyAlgorithm}|${mode}|${padding}`);
+      const params: cryptoFramework.IvParamsSpec | null = mode === 'ECB' ? null : {
         algName: 'IvParamsSpec',
-        iv: { data: iv16 }
+        iv: { data: this.fixedBytes(textEncoder.encodeInto(iv), isDes ? 8 : 16) }
       };
-
-      // AES-CBC 解密
-      const cipher = cryptoFramework.createCipher('AES128|CBC|PKCS5');
-      cipher.initSync(cryptoFramework.CryptoMode.DECRYPT_MODE, symKey, ivParams);
-      const outBlob = cipher.doFinalSync({ data: dataBytes });
-
-      return textDecoder.decodeWithStream(outBlob.data, { stream: false });
+      cipher.initSync(encrypt ? cryptoFramework.CryptoMode.ENCRYPT_MODE : cryptoFramework.CryptoMode.DECRYPT_MODE, symKey, params);
+      const input = encrypt ? textEncoder.encodeInto(data) : base64.decodeSync(data);
+      const outBlob = cipher.doFinalSync({ data: input });
+      return encrypt ? base64.encodeToStringSync(outBlob.data) : textDecoder.decodeWithStream(outBlob.data, { stream: false });
     } catch (e) {
-      console.error('[JsRuntime] AES解密失败:', JSON.stringify(e));
+      console.error('[JsRuntime] 对称加解密失败:', JSON.stringify(e));
       return '';
     }
+  }
+
+  private fixedBytes(bytes: Uint8Array, length: number): Uint8Array {
+    const result = new Uint8Array(length);
+    for (let i = 0; i < length; i++) result[i] = i < bytes.length ? bytes[i] : 0;
+    return result;
   }
 }

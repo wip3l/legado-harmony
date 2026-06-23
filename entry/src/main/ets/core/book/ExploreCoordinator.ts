@@ -325,7 +325,7 @@ export class ExploreCoordinator {
     ctx.put('bookSourceGroup', source.bookSourceGroup || '');
     ctx.put('source.bookSourceComment', source.bookSourceComment || '');
     ctx.put('bookSourceComment', source.bookSourceComment || '');
-    ctx.put('source.variable', source.variableComment || '');
+    if (!ctx.has('source.variable')) ctx.put('source.variable', source.variableComment || '');
   }
 
   private async fetchEncodedDataUrl(url: string, source: BookSource): Promise<{ url: string, statusCode: number, headers: Record<string, string>, body: string, success: boolean, error?: string }> {

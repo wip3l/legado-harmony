@@ -4,11 +4,13 @@ import { AnalyzeUrl } from '../rule/AnalyzeUrl';
 import { AnalyzeRule } from '../rule/AnalyzeRule';
 import { RuleContext } from '../rule/RuleContext';
 import { util } from '@kit.ArkTS';
+import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { VerificationSupport } from '../http/VerificationSupport';
 import { EncodedSourceUrl } from './EncodedSourceUrl';
 import { BookSourceDataUrlSupport } from './BookSourceDataUrlSupport';
 import { BookUrlResolver } from './BookUrlResolver';
 import { BookFieldSanitizer } from '../../utils/BookFieldSanitizer';
+import { AjaxRuleCompat } from '../rule/AjaxRuleCompat';
 
 export class WebBookService {
   private http: HttpClient;
@@ -279,7 +281,8 @@ export class WebBookService {
     const rule = new AnalyzeRule(resp.body, baseUrl, ctx);
     const contentRule = source.contentRule;
 
-    let content = rule.getString(contentRule.content);
+    let content = await this.tryGetDirectAjaxRuleContent(source, resp.body, baseUrl, ctx, contentRule.content);
+    if (!content) content = rule.getString(contentRule.content);
     if (!content || this.isBadExtractedContent(content)) {
       const fallbackContent = this.tryExtractReadableContentFromHtml(resp.body);
       if (fallbackContent) content = fallbackContent;
@@ -301,6 +304,21 @@ export class WebBookService {
 
     book.variable = ctx.toJson();
     return content;
+  }
+
+  private async tryGetDirectAjaxRuleContent(source: BookSource, body: string, baseUrl: string,
+    ctx: RuleContext, contentRule: string): Promise<string> {
+    const plan = AjaxRuleCompat.directResultPlan(contentRule);
+    if (!plan) return '';
+
+    const urlAnalyze = new AnalyzeRule(body, baseUrl, ctx);
+    const requestUrl = urlAnalyze.getString(plan.urlRule, true);
+    if (!requestUrl || !/^https?:\/\//.test(requestUrl)) return '';
+
+    const response = await new AnalyzeUrl(source, this.http).fetch(requestUrl);
+    if (!response.success || !response.body) return '';
+
+    return AjaxRuleCompat.applyReplaceChain(response.body, plan.jsCode);
   }
 
   private async fetchEncodedDataUrl(url: string, source: BookSource): Promise<{ url: string, statusCode: number, headers: Record<string, string>, body: string, success: boolean, error?: string }> {
@@ -719,7 +737,7 @@ export class WebBookService {
     ctx.put('bookSourceGroup', source.bookSourceGroup || '');
     ctx.put('source.bookSourceComment', source.bookSourceComment || '');
     ctx.put('bookSourceComment', source.bookSourceComment || '');
-    ctx.put('source.variable', source.variableComment || '');
+    if (!ctx.has('source.variable')) ctx.put('source.variable', source.variableComment || '');
   }
 
   private extractQueryParam(url: string, key: string): string {
@@ -848,6 +866,8 @@ export class WebBookService {
   }
 
   private async tryGetSpecialContent(source: BookSource, chapter: BookChapter): Promise<string> {
+    const signedContent = await this.tryGetJsLibSignedContent(source, chapter);
+    if (signedContent) return signedContent;
     if (!chapter.url.startsWith('data:;base64,') || !source.contentRule.content.includes('item_id')) {
       return '';
     }
@@ -877,6 +897,97 @@ export class WebBookService {
       console.warn('[WS] 特殊正文获取失败:', e);
       return '';
     }
+  }
+
+  private async tryGetJsLibSignedContent(source: BookSource, chapter: BookChapter): Promise<string> {
+    const script = source.jsLib || '';
+    if (!chapter.url.includes('chapter_ids=') || !chapter.url.includes('nid=') ||
+      !script.includes('requestKey') || !script.includes('digestHex')) return '';
+    try {
+      const nid = this.extractQueryParam(chapter.url, 'nid');
+      const chapterIds = this.extractQueryParam(chapter.url, 'chapter_ids');
+      if (!nid || !chapterIds) return '';
+      const version = this.extractJsLiteral(script, 'ver') || 'android_02050803';
+      const salt = this.extractJsLiteral(script, 'f');
+      if (!salt) return '';
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const digest = this.digestHex(`chapter_ids=${chapterIds}&nid=${nid}${timestamp}${version}${salt}`, 'SHA256');
+      const range = script.match(/digestHex\([\s\S]*?\)\.substring\(\s*(\d+)\s*,\s*(\d+)\s*\)/);
+      const start = range ? parseInt(range[1]) : 10;
+      const end = range ? parseInt(range[2]) : 42;
+      const requestKey = digest.substring(start, end);
+      if (!requestKey) return '';
+
+      const token = this.extractLoginToken(source.loginHeader || '');
+      const headers: Record<string, string> = {
+        'User-Agent': this.extractHeaderLiteral(script, 'User-Agent') ||
+          'chang pei yue du/2.5.8.3 (Android 13; HarmonyOS; Mobile)',
+        'randStr': timestamp,
+        'version': version,
+        'requestKey': requestKey,
+        'client': this.extractHeaderLiteral(script, 'client') || 'android',
+        'imei': this.extractHeaderLiteral(script, 'imei') || '455321005bc9cd38',
+        'referer': this.extractHeaderLiteral(script, 'referer') || source.bookSourceUrl,
+        'token': token
+      };
+      const response = await this.http.execute({ url: chapter.url, method: 'GET', headers: headers });
+      if (!response.success || !response.body) return '';
+      const root = JSON.parse(response.body) as Object;
+      return this.deepStringValue(root, 'content');
+    } catch (e) {
+      console.warn('[WS] JS 签名正文请求失败:', e);
+      return '';
+    }
+  }
+
+  private extractJsLiteral(script: string, name: string): string {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = script.match(new RegExp(`\\b${escaped}\\s*=\\s*(["'])([\\s\\S]*?)\\1`));
+    return match ? match[2] : '';
+  }
+
+  private extractHeaderLiteral(script: string, name: string): string {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = script.match(new RegExp(`["']?${escaped}["']?\\s*:\\s*(["'])([\\s\\S]*?)\\1`, 'i'));
+    return match ? match[2] : '';
+  }
+
+  private extractLoginToken(loginHeader: string): string {
+    const value = (loginHeader || '').trim().replace(/^&/, '');
+    if (!value) return '';
+    try {
+      const data = JSON.parse(value) as Record<string, Object>;
+      return String(data['token'] || '');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  private digestHex(input: string, algorithm: string): string {
+    const digest = cryptoFramework.createMd(algorithm);
+    digest.updateSync({ data: new util.TextEncoder().encodeInto(input) });
+    const result = digest.digestSync().data;
+    let hex = '';
+    for (let i = 0; i < result.length; i++) hex += result[i].toString(16).padStart(2, '0');
+    return hex;
+  }
+
+  private deepStringValue(value: Object, key: string): string {
+    if (!value || typeof value !== 'object') return '';
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = this.deepStringValue(item as Object, key);
+        if (found) return found;
+      }
+      return '';
+    }
+    const record = value as Record<string, Object>;
+    if (record[key] !== undefined && record[key] !== null) return String(record[key]);
+    for (const name in record) {
+      const found = this.deepStringValue(record[name], key);
+      if (found) return found;
+    }
+    return '';
   }
 
   private base64Encode(input: string): string {
