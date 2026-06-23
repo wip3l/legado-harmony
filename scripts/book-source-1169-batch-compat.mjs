@@ -10,8 +10,9 @@ const typescriptPaths = [
   'C:/Program Files/Huawei/DevEco Studio/plugins/codelinter/node_modules/typescript/lib/typescript.js'
 ];
 
-const sourceUrl = 'https://www.yckceo.com/yuedu/shuyuans/json/id/1169.json';
+const sourceUrl = process.env.BOOK_SOURCE_URL || 'https://www.yckceo.com/yuedu/shuyuans/json/id/1169.json';
 const sourceMirrorUrl =
+  process.env.BOOK_SOURCE_MIRROR_URL ||
   'https://gcore.jsdelivr.net/gh/mumuceo/file01/202606/11780_e23645a35b55ac384f4fe66187b6148c.json';
 const keyword = process.env.BOOK_SOURCE_KEYWORD || '斗破苍穹';
 const onlineTarget = Number(process.env.BOOK_SOURCE_ONLINE_TARGET || '10');
@@ -32,6 +33,7 @@ if (!ts) throw new Error('DevEco Studio TypeScript runtime not found');
 
 async function loadModules() {
   const files = [
+    'entry/src/main/ets/core/book/EncodedSourceUrl.ts',
     'entry/src/main/ets/core/rule/JsRuntime.ts',
     'entry/src/main/ets/core/rule/JsonPathEvaluator.ts',
     'entry/src/main/ets/core/rule/AjaxRuleCompat.ts',
@@ -47,7 +49,7 @@ async function loadModules() {
     "}",
     "const util = {",
     "  TextEncoder: CompatTextEncoder,",
-    "  TextDecoder: { create: () => new globalThis.TextDecoder() },",
+    "  TextDecoder: { create: label => ({ decodeWithStream: data => new globalThis.TextDecoder(label || 'utf-8').decode(data) }) },",
     "  Base64Helper: class {",
     "    encodeToStringSync(v) { return Buffer.from(v).toString('base64'); }",
     "    decodeSync(v) { return new Uint8Array(Buffer.from(v, 'base64')); }",
@@ -75,16 +77,11 @@ async function loadModules() {
     "  pickVerificationUrl: () => '',",
     "  requestVerification: () => {}",
     "};",
-    "const EncodedSourceUrl = {",
-    "  asMap: value => value || {},",
-    "  encode: (value, type) => 'data:application/json;type=' + encodeURIComponent(type || '') + ';base64,' + Buffer.from(JSON.stringify(value || {})).toString('base64'),",
-    "  encodeRaw: (value, type, host) => 'data:;type=' + encodeURIComponent(type || '') + ';host=' + encodeURIComponent(host || '') + ';base64,' + Buffer.from(String(value || '')).toString('base64')",
-    "};"
   ].join('\n');
   const combined = [
     stubs,
     ...sources.map(stripImportsAndExports),
-    'export { AjaxRuleCompat, AnalyzeRule, AnalyzeUrl, JsonPathEvaluator, JsRuntime, RuleContext };'
+    'export { AjaxRuleCompat, AnalyzeRule, AnalyzeUrl, EncodedSourceUrl, JsonPathEvaluator, JsRuntime, RuleContext };'
   ].join('\n');
   const output = ts.transpileModule(combined, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 }
@@ -148,10 +145,11 @@ function charsetFromContentType(contentType) {
 }
 
 async function loadSourceList() {
+  const normalize = value => Array.isArray(value) ? value : [value];
   try {
-    return JSON.parse(await fetchText(sourceUrl));
+    return normalize(JSON.parse(await fetchText(sourceUrl)));
   } catch (_) {
-    return JSON.parse(await fetchText(sourceMirrorUrl));
+    return normalize(JSON.parse(await fetchText(sourceMirrorUrl)));
   }
 }
 
@@ -527,7 +525,7 @@ function yesNo(value) {
 }
 
 function runCapabilitySmoke(modules) {
-  const { AjaxRuleCompat, AnalyzeRule, RuleContext } = modules;
+  const { AjaxRuleCompat, AnalyzeRule, EncodedSourceUrl, RuleContext } = modules;
   const checks = [];
   const ctx = new RuleContext();
   ctx.put('source.bookSourceUrl', 'https://example.com');
@@ -584,6 +582,46 @@ function runCapabilitySmoke(modules) {
   checks.push({
     name: 'legacy css html',
     pass: htmlRule.analyzeFirst('#WuXian@html').includes('正文内容测试文本')
+  });
+  const shushanDetail = Buffer.from(JSON.stringify({
+    source: '番茄小说',
+    url: Buffer.from('https://example.com/detail?book_id=1234567890123456789').toString('base64'),
+    name: '书山样例'
+  })).toString('base64');
+  const shushanCatalog = Buffer.from(JSON.stringify({
+    source: '番茄小说',
+    url: 'https://example.com/detail?book_id=1234567890123456789',
+    name: '书山样例',
+    tab: 'novel'
+  })).toString('base64');
+  const shushanContent = Buffer.from(
+    'chapter?cid=100&source=番茄小说&device=android&book_id=1234567890123456789&item_id=100'
+  ).toString('base64');
+  const detailUrl = `data:detailsUrl;base64,${shushanDetail},{"type":"shushan"}`;
+  const catalogUrl = `data:catalogUrl;base64,${shushanCatalog},{"type":"shushan"}`;
+  const contentUrl = `data:contentUrl;base64,${shushanContent},{"type":"qingci"}`;
+  const detailPayload = EncodedSourceUrl.decode(detailUrl);
+  const catalogPayload = EncodedSourceUrl.decode(catalogUrl);
+  const contentPayload = EncodedSourceUrl.decode(contentUrl);
+  checks.push({
+    name: 'shushan detailsUrl decode',
+    pass: detailPayload?.type === 'shushanDetail' &&
+      detailPayload.data?.source === '番茄小说' &&
+      detailPayload.data?.name === '书山样例' &&
+      EncodedSourceUrl.canHandle(detailUrl)
+  });
+  checks.push({
+    name: 'shushan catalogUrl decode',
+    pass: catalogPayload?.type === 'shushanCatalog' &&
+      catalogPayload.data?.tab === 'novel' &&
+      EncodedSourceUrl.canHandle(catalogUrl)
+  });
+  checks.push({
+    name: 'shushan contentUrl decode',
+    pass: contentPayload?.type === 'shushanContent' &&
+      contentPayload.data?.cid === '100' &&
+      contentPayload.data?.item_id === '100' &&
+      EncodedSourceUrl.canHandle(contentUrl)
   });
   return checks;
 }

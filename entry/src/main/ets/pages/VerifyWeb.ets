@@ -4,6 +4,7 @@ import { CookieStore } from '../core/http/CookieStore';
 import { EncodedSourceUrl } from '../core/book/EncodedSourceUrl';
 import { VerificationSupport } from '../core/http/VerificationSupport';
 import { AppDatabase } from '../model/data/AppDatabase';
+import { BookSource } from '../model/data/Book';
 import { syncSystemBars } from '../utils/SystemBars';
 
 @Entry
@@ -171,6 +172,15 @@ struct VerifyWebPage {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
       const source = await db.getBookSource(bookSourceUrl);
+      if (source && this.isShushanSource(source)) {
+        router.replaceUrl({
+          url: 'pages/BookSourceEdit',
+          params: {
+            bookSourceUrl: bookSourceUrl
+          }
+        });
+        return;
+      }
       const loginUrl = source ? VerificationSupport.resolveBookSourceLoginUrl(source) : '';
       if (source && loginUrl) {
         this.url = loginUrl;
@@ -189,6 +199,12 @@ struct VerifyWebPage {
         bookSourceUrl: bookSourceUrl
       }
     });
+  }
+
+  isShushanSource(source: BookSource): boolean {
+    const raw = `${source.bookSourceUrl || ''}\n${source.searchUrl || ''}\n${source.exploreUrl || ''}\n` +
+      `${source.loginUrl || ''}\n${source.jsLib || ''}\n${source.header || ''}`;
+    return raw.includes('vossc.com') || raw.includes('SHUSAN_READ_2025');
   }
 
   syncBookSourceLoginCookies(): void {

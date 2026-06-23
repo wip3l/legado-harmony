@@ -8,6 +8,8 @@ import { CoverUrlNormalizer } from '../../utils/CoverUrlNormalizer';
 import { util } from '@kit.ArkTS';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 
+const SHUSHAN_REQUEST_TIMEOUT_MS = 25000;
+
 class DataUrlMeta {
   host: string = '';
   bookId: string = '';
@@ -106,7 +108,11 @@ export class BookSourceDataUrlSupport {
       const path = `/search?login=search&key=${encodeURIComponent(query.keyword)}&page=${page}` +
         (selectedSource ? `&source=${encodeURIComponent(selectedSource)}` : '');
       const root = await BookSourceDataUrlSupport.requestShushanJson(http, host, path);
-      return root ? BookSourceDataUrlSupport.parseShushanBookList(root, source, host) : [];
+      const books = root ? BookSourceDataUrlSupport.parseShushanBookList(root, source, host) : [];
+      if (books.length > 0 || !selectedSource || query.source) return books;
+      const fallbackRoot = await BookSourceDataUrlSupport.requestShushanJson(http, host,
+        `/search?login=search&key=${encodeURIComponent(query.keyword)}&page=${page}`);
+      return fallbackRoot ? BookSourceDataUrlSupport.parseShushanBookList(fallbackRoot, source, host) : [];
     }
     const host = BookSourceDataUrlSupport.firstHostFromSource(source);
     const url = EncodedSourceUrl.buildSearchUrl(keyword, page);
@@ -415,9 +421,10 @@ export class BookSourceDataUrlSupport {
       return '';
     }
     const root = await BookSourceDataUrlSupport.requestShushanJson(http, host,
-      `${path}${path.includes('?') ? '&' : '?'}key=${encodeURIComponent(secretKey)}&l=11`);
+      `${path}${path.includes('?') ? '&' : '?'}key=${encodeURIComponent(secretKey)}&version=11`);
     if (!root) return '';
-    const content = EncodedSourceUrl.str(root['content']) || EncodedSourceUrl.str(EncodedSourceUrl.asMap(root['data'])['content']);
+    const content = EncodedSourceUrl.str(root['content']) || EncodedSourceUrl.str(EncodedSourceUrl.asMap(root['data'])['content']) ||
+      EncodedSourceUrl.str(root['data']);
     if (BookSourceDataUrlSupport.needsLogin(root, content) || BookSourceDataUrlSupport.needsLogin(root, JSON.stringify(root))) {
       const loginText = `${content}\n${JSON.stringify(root)}`;
       if (BookSourceDataUrlSupport.isShushanFanqieSource(sourceName) &&
@@ -656,7 +663,9 @@ export class BookSourceDataUrlSupport {
       const resp = await http.execute({
         url: url,
         method: 'GET',
-        headers: BookSourceDataUrlSupport.shushanHeaders()
+        headers: BookSourceDataUrlSupport.shushanHeaders(),
+        connectTimeout: SHUSHAN_REQUEST_TIMEOUT_MS,
+        readTimeout: SHUSHAN_REQUEST_TIMEOUT_MS
       });
       const root = BookSourceDataUrlSupport.parseShushanResponse(resp);
       if (root && BookSourceDataUrlSupport.isShushanAccessDenied(root)) {
@@ -679,7 +688,9 @@ export class BookSourceDataUrlSupport {
           ...BookSourceDataUrlSupport.shushanHeaders(),
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        connectTimeout: SHUSHAN_REQUEST_TIMEOUT_MS,
+        readTimeout: SHUSHAN_REQUEST_TIMEOUT_MS
       });
       const root = BookSourceDataUrlSupport.parseShushanResponse(resp);
       if (root && BookSourceDataUrlSupport.isShushanAccessDenied(root)) {

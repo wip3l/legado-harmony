@@ -11,6 +11,7 @@ import { util } from '@kit.ArkTS';
 
 const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const BOOK_SOURCE_IMPORT_TIMEOUT_MS = 20000;
+const BOOK_SOURCE_IMPORT_URL_RETRY_COUNT = 3;
 const BOOK_SOURCE_CHECK_KEYWORD = '斗破苍穹';
 
 @Entry
@@ -1323,17 +1324,29 @@ struct BookSourcePage {
   }
 
   async fetchImportUrlBody(url: string): Promise<string> {
-    const response = await new HttpClient(BOOK_SOURCE_IMPORT_TIMEOUT_MS).execute({
-      url,
-      method: 'GET',
-      headers: {},
-      connectTimeout: BOOK_SOURCE_IMPORT_TIMEOUT_MS,
-      readTimeout: BOOK_SOURCE_IMPORT_TIMEOUT_MS
-    });
-    if (!response.success) {
-      throw new Error(response.error || `HTTP ${response.statusCode}`);
+    let lastError = '';
+    for (let attempt = 1; attempt <= BOOK_SOURCE_IMPORT_URL_RETRY_COUNT; attempt++) {
+      const response = await new HttpClient(BOOK_SOURCE_IMPORT_TIMEOUT_MS).execute({
+        url,
+        method: 'GET',
+        headers: {},
+        connectTimeout: BOOK_SOURCE_IMPORT_TIMEOUT_MS,
+        readTimeout: BOOK_SOURCE_IMPORT_TIMEOUT_MS
+      });
+      if (response.success && this.looksLikeBookSourceJson(response.body)) {
+        return response.body.replace(/^\uFEFF/, '');
+      }
+      lastError = response.success ? '响应内容不是有效书源JSON' : (response.error || `HTTP ${response.statusCode}`);
+      if (attempt < BOOK_SOURCE_IMPORT_URL_RETRY_COUNT) {
+        await new Promise<void>((resolve) => setTimeout(resolve, attempt * 500));
+      }
     }
-    return response.body;
+    throw new Error(lastError || '获取书源失败');
+  }
+
+  looksLikeBookSourceJson(body: string): boolean {
+    const text = (body || '').replace(/^\uFEFF/, '').replace(/^\s+/, '');
+    return text.startsWith('[') || text.startsWith('{');
   }
 
   async importSourcesFromJson(json: string) {
