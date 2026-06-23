@@ -23,7 +23,7 @@ struct SettingsPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageLink('readerFontSize') readerFontSize: number = 20;
-  @StorageLink('readerLineHeight') readerLineHeight: number = 32;
+  @StorageLink('readerLineHeight') readerLineHeight: number = 12;
   @StorageLink('readerParagraphSpacing') readerParagraphSpacing: number = 10;
   @StorageLink('readerThemeIndex') readerThemeIndex: number = 0;
   @StorageLink('readerFontFamily') readerFontFamily: string = '';
@@ -470,14 +470,18 @@ struct SettingsPage {
       .fontSize(this.readerFontSize)
       .fontFamily(this.getPreviewFontFamily())
       .fontColor(this.previewTextColor())
-      .lineHeight(this.readerLineHeight)
+      .lineHeight(this.getPreviewReaderLineHeight())
       .padding({ bottom: this.readerParagraphSpacing })
 
     Text('他停在灯下，听见远处传来的脚步声，像是某个被遗忘的约定终于抵达。')
       .fontSize(this.readerFontSize)
       .fontFamily(this.getPreviewFontFamily())
       .fontColor(this.previewTextColor())
-      .lineHeight(this.readerLineHeight)
+      .lineHeight(this.getPreviewReaderLineHeight())
+  }
+
+  getPreviewReaderLineHeight(): number {
+    return this.readerFontSize + Math.max(0, this.readerLineHeight);
   }
 
   saveFontSettings(): void {
@@ -682,7 +686,7 @@ struct SettingsPage {
   }
 
   setReaderLineHeight(lineHeight: number): void {
-    this.readerLineHeight = Math.max(24, Math.min(Math.round(lineHeight), 52));
+    this.readerLineHeight = Math.max(0, Math.min(Math.round(lineHeight), 52));
     this.saveReaderLayoutSettings();
   }
 
@@ -939,24 +943,31 @@ struct SettingsPage {
 
   @Builder
   fontSizeSlider() {
-    Column() {
-      Row() {
-        Text('字号')
-          .fontSize(16)
-          .fontColor(this.primaryTextColor())
-          .layoutWeight(1)
-        Text(`${this.readerFontSize}sp`)
-          .fontSize(14)
-          .fontColor(this.subTextColor())
-      }
-      .width('100%')
-
-      Slider({ value: this.readerFontSize, min: 14, max: 30, step: 1 })
-        .width('100%')
-        .margin({ top: 8 })
-        .selectedColor(this.accentColor())
-        .onChange((sliderValue: number) => {
-          this.setReaderFontSize(sliderValue);
+    Row() {
+      Text('字号')
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
+      Button('-')
+        .width(44)
+        .height(36)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .onClick(() => {
+          this.setReaderFontSize(this.readerFontSize - 1);
+        })
+      Text(`${this.readerFontSize}`)
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .width(48)
+        .textAlign(TextAlign.Center)
+      Button('+')
+        .width(44)
+        .height(36)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .onClick(() => {
+          this.setReaderFontSize(this.readerFontSize + 1);
         })
     }
     .width('100%')
@@ -966,24 +977,31 @@ struct SettingsPage {
 
   @Builder
   lineHeightSlider() {
-    Column() {
-      Row() {
-        Text('行距')
-          .fontSize(16)
-          .fontColor(this.primaryTextColor())
-          .layoutWeight(1)
-        Text(`${this.readerLineHeight}px`)
-          .fontSize(14)
-          .fontColor(this.subTextColor())
-      }
-      .width('100%')
-
-      Slider({ value: this.readerLineHeight, min: 24, max: 52, step: 1 })
-        .width('100%')
-        .margin({ top: 8 })
-        .selectedColor(this.accentColor())
-        .onChange((sliderValue: number) => {
-          this.setReaderLineHeight(sliderValue);
+    Row() {
+      Text('行距')
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
+      Button('-')
+        .width(44)
+        .height(36)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .onClick(() => {
+          this.setReaderLineHeight(this.readerLineHeight - 2);
+        })
+      Text(`${this.readerLineHeight}`)
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .width(48)
+        .textAlign(TextAlign.Center)
+      Button('+')
+        .width(44)
+        .height(36)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .onClick(() => {
+          this.setReaderLineHeight(this.readerLineHeight + 2);
         })
     }
     .width('100%')
@@ -993,24 +1011,31 @@ struct SettingsPage {
 
   @Builder
   paragraphSpacingSlider() {
-    Column() {
-      Row() {
-        Text('段落间距')
-          .fontSize(16)
-          .fontColor(this.primaryTextColor())
-          .layoutWeight(1)
-        Text(`${this.readerParagraphSpacing}px`)
-          .fontSize(14)
-          .fontColor(this.subTextColor())
-      }
-      .width('100%')
-
-      Slider({ value: this.readerParagraphSpacing, min: 0, max: 32, step: 1 })
-        .width('100%')
-        .margin({ top: 8 })
-        .selectedColor(this.accentColor())
-        .onChange((sliderValue: number) => {
-          this.setReaderParagraphSpacing(sliderValue);
+    Row() {
+      Text('段落间距')
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
+      Button('-')
+        .width(44)
+        .height(36)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .onClick(() => {
+          this.setReaderParagraphSpacing(this.readerParagraphSpacing - 2);
+        })
+      Text(`${this.readerParagraphSpacing}`)
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .width(48)
+        .textAlign(TextAlign.Center)
+      Button('+')
+        .width(44)
+        .height(36)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .onClick(() => {
+          this.setReaderParagraphSpacing(this.readerParagraphSpacing + 2);
         })
     }
     .width('100%')

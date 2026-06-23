@@ -3,7 +3,7 @@ import preferences from '@ohos.data.preferences';
 
 export class ReaderSettings {
   fontSize: number = 20;
-  lineHeight: number = 32;
+  lineHeight: number = 12;
   paragraphSpacing: number = 10;
   themeIndex: number = 0;
   pageTurnMode: number = 1;
@@ -32,6 +32,7 @@ export class ReaderSettings {
 export class ReaderSettingsStore {
   static readonly KEY_FONT_SIZE: string = 'readerFontSize';
   static readonly KEY_LINE_HEIGHT: string = 'readerLineHeight';
+  static readonly KEY_LINE_HEIGHT_MODE: string = 'readerLineHeightMode';
   static readonly KEY_PARAGRAPH_SPACING: string = 'readerParagraphSpacing';
   static readonly KEY_THEME_INDEX: string = 'readerThemeIndex';
   static readonly KEY_PAGE_TURN_MODE: string = 'readerPageTurnMode';
@@ -74,7 +75,9 @@ export class ReaderSettingsStore {
       store,
       ReaderSettingsStore.KEY_LINE_HEIGHT,
       32,
-      'lineHeight'
+      'legacyLineHeight',
+      settings.fontSize,
+      await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_LINE_HEIGHT_MODE, '')
     );
     settings.paragraphSpacing = await ReaderSettingsStore.getNumber(
       store,
@@ -145,6 +148,7 @@ export class ReaderSettingsStore {
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
     await store.put(ReaderSettingsStore.KEY_FONT_SIZE, settings.fontSize);
     await store.put(ReaderSettingsStore.KEY_LINE_HEIGHT, settings.lineHeight);
+    await store.put(ReaderSettingsStore.KEY_LINE_HEIGHT_MODE, 'spacing');
     await store.put(ReaderSettingsStore.KEY_PARAGRAPH_SPACING, settings.paragraphSpacing);
     await store.put(ReaderSettingsStore.KEY_THEME_INDEX, settings.themeIndex);
     await store.flush();
@@ -273,6 +277,7 @@ export class ReaderSettingsStore {
   private static applyLayoutToStorage(settings: ReaderSettings): void {
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_FONT_SIZE, settings.fontSize);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_LINE_HEIGHT, settings.lineHeight);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_LINE_HEIGHT_MODE, 'spacing');
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PARAGRAPH_SPACING, settings.paragraphSpacing);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_THEME_INDEX, settings.themeIndex);
   }
@@ -281,16 +286,18 @@ export class ReaderSettingsStore {
     store: preferences.Preferences,
     key: string,
     fallback: number,
-    type: string
+    type: string,
+    fontSize: number = 20,
+    lineHeightMode: string = ''
   ): Promise<number> {
     const value = await store.get(key, fallback);
     if (typeof value === 'number') {
-      return ReaderSettingsStore.normalizeNumber(value, type, fallback);
+      return ReaderSettingsStore.normalizeNumber(value, type, fallback, fontSize, lineHeightMode);
     }
     if (typeof value === 'string') {
       const parsed = Number(value);
       if (!Number.isNaN(parsed)) {
-        return ReaderSettingsStore.normalizeNumber(parsed, type, fallback);
+        return ReaderSettingsStore.normalizeNumber(parsed, type, fallback, fontSize, lineHeightMode);
       }
     }
     return fallback;
@@ -329,12 +336,23 @@ export class ReaderSettingsStore {
     return fallback;
   }
 
-  private static normalizeNumber(value: number, type: string, fallback: number): number {
+  private static normalizeNumber(
+    value: number,
+    type: string,
+    fallback: number,
+    fontSize: number = 20,
+    lineHeightMode: string = ''
+  ): number {
     if (type === 'fontSize') {
       return ReaderSettingsStore.normalizeFontSize(value);
     }
     if (type === 'lineHeight') {
       return ReaderSettingsStore.normalizeLineHeight(value);
+    }
+    if (type === 'legacyLineHeight') {
+      return lineHeightMode === 'spacing' ?
+        ReaderSettingsStore.normalizeLineHeight(value) :
+        ReaderSettingsStore.normalizeLegacyLineHeight(value, fontSize);
     }
     if (type === 'paragraphSpacing') {
       return ReaderSettingsStore.normalizeParagraphSpacing(value);
@@ -358,7 +376,15 @@ export class ReaderSettingsStore {
 
   private static normalizeLineHeight(lineHeight: number): number {
     const value = Math.round(lineHeight);
-    return Math.max(24, Math.min(value, 52));
+    return Math.max(0, Math.min(value, 52));
+  }
+
+  private static normalizeLegacyLineHeight(lineHeight: number, fontSize: number): number {
+    const value = Math.round(lineHeight);
+    if (value >= 24) {
+      return ReaderSettingsStore.normalizeLineHeight(value - ReaderSettingsStore.normalizeFontSize(fontSize));
+    }
+    return ReaderSettingsStore.normalizeLineHeight(value);
   }
 
   private static normalizeParagraphSpacing(paragraphSpacing: number): number {
@@ -423,9 +449,10 @@ export class ReaderSettingsStore {
     settings.fontSize = ReaderSettingsStore.normalizeFontSize(
       AppStorage.get<number>(ReaderSettingsStore.KEY_FONT_SIZE) ?? 20
     );
-    settings.lineHeight = ReaderSettingsStore.normalizeLineHeight(
-      AppStorage.get<number>(ReaderSettingsStore.KEY_LINE_HEIGHT) ?? 32
-    );
+    const storageLineHeight = AppStorage.get<number>(ReaderSettingsStore.KEY_LINE_HEIGHT) ?? 32;
+    settings.lineHeight = AppStorage.get<string>(ReaderSettingsStore.KEY_LINE_HEIGHT_MODE) === 'spacing' ?
+      ReaderSettingsStore.normalizeLineHeight(storageLineHeight) :
+      ReaderSettingsStore.normalizeLegacyLineHeight(storageLineHeight, settings.fontSize);
     settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PARAGRAPH_SPACING) ?? 10
     );

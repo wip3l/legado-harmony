@@ -29,6 +29,15 @@ interface ReadTextSlice {
   key: string;
 }
 
+interface ReaderTextParagraph {
+  text: string;
+  start: number;
+  end: number;
+  index: number;
+  isLast: boolean;
+  key: string;
+}
+
 interface ReaderPaginationResult {
   source: string;
   pages: string[];
@@ -150,7 +159,7 @@ struct ReadBookPage {
   private readerPanActive: boolean = false;
   private slideResetSerial: number = 0;
   @StorageLink('readerFontSize') @Watch('onReadLayoutChanged') readerFontSize: number = 20;
-  @StorageLink('readerLineHeight') @Watch('onReadLayoutChanged') readerLineHeight: number = 32;
+  @StorageLink('readerLineHeight') @Watch('onReadLayoutChanged') readerLineHeight: number = 12;
   @StorageLink('readerParagraphSpacing') @Watch('onReadLayoutChanged') readerParagraphSpacing: number = 10;
   @StorageLink('readerThemeIndex') @Watch('onReaderThemeChanged') readerThemeIndex: number = 0;
   @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
@@ -864,7 +873,7 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
-                this.applyReaderFontSize(this.readerFontSize - 1, true);
+                this.applyReaderFontSize(this.readerFontSize - 1);
               })
             Text(`${this.readerFontSize}`)
               .fontSize(15)
@@ -876,7 +885,7 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
-                this.applyReaderFontSize(this.readerFontSize + 1, true);
+                this.applyReaderFontSize(this.readerFontSize + 1);
               })
           }
           .width('100%')
@@ -1556,7 +1565,11 @@ struct ReadBookPage {
   }
 
   getReaderContentBottomReserve(): number {
-    return Math.ceil(Math.max(12, this.readerLineHeight * 0.75));
+    return Math.ceil(Math.max(12, this.getEffectiveReaderLineHeight() * 0.75));
+  }
+
+  getEffectiveReaderLineHeight(): number {
+    return this.readerFontSize + Math.max(0, this.readerLineHeight);
   }
 
   onReadLayoutChanged(): void {
@@ -2572,23 +2585,19 @@ struct ReadBookPage {
     });
   }
 
-  applyReaderFontSize(fontSize: number, syncLineHeight: boolean = false): void {
+  applyReaderFontSize(fontSize: number): void {
     const nextFontSize = Math.max(14, Math.min(Math.round(fontSize), 30));
-    const offset = nextFontSize - this.readerFontSize;
-    if (nextFontSize === this.readerFontSize && (!syncLineHeight || offset === 0)) {
+    if (nextFontSize === this.readerFontSize) {
       return;
     }
     this.readerFontSize = nextFontSize;
-    if (syncLineHeight && offset !== 0) {
-      this.readerLineHeight = Math.max(24, Math.min(Math.round(this.readerLineHeight + offset), 52));
-    }
     this.onReadLayoutChanged();
     this.saveReaderLayoutSettings();
     this.saveReadConfig();
   }
 
   applyReaderLineHeight(lineHeight: number): void {
-    const nextLineHeight = Math.max(24, Math.min(Math.round(lineHeight), 52));
+    const nextLineHeight = Math.max(0, Math.min(Math.round(lineHeight), 52));
     if (nextLineHeight === this.readerLineHeight) {
       return;
     }
@@ -3108,10 +3117,13 @@ struct ReadBookPage {
     if (!layoutText) {
       return -1;
     }
+    if (this.readerParagraphSpacing > 0 && /\n/.test(layoutText)) {
+      return -1;
+    }
 
     try {
       const fontSizePx = this.toMeasurePx(this.readerFontSize);
-      const lineHeightPx = this.toMeasurePx(Math.max(this.readerLineHeight, this.readerFontSize));
+      const lineHeightPx = this.toMeasurePx(this.getEffectiveReaderLineHeight());
       const textStyle: graphicsText.TextStyle = {
         fontSize: fontSizePx,
         fontFamilies: [this.getReaderFontFamily()],
@@ -3168,20 +3180,93 @@ struct ReadBookPage {
 
   getReaderLayoutWindowSize(availableWidth: number, availableHeight: number): number {
     const charsPerLine = Math.max(8, Math.floor(availableWidth / Math.max(1, this.readerFontSize * 0.95)));
-    const visibleLines = Math.max(1, Math.ceil(availableHeight / Math.max(1, this.readerLineHeight)));
+    const visibleLines = Math.max(1, Math.ceil(availableHeight / this.getEffectiveReaderLineHeight()));
     return Math.min(12000, Math.max(800, charsPerLine * (visibleLines + 6) * 2));
+  }
+
+  getReaderTextParagraphs(text: string): ReaderTextParagraph[] {
+    const source = (text || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n');
+    const paragraphs: ReaderTextParagraph[] = [];
+    const separatorRegex = /\n+/g;
+    let start = 0;
+    let index = 0;
+    let match = separatorRegex.exec(source);
+    while (match) {
+      if (match.index > start) {
+        const paragraphText = source.substring(start, match.index);
+        paragraphs.push({
+          text: paragraphText,
+          start: start,
+          end: match.index,
+          index: index,
+          isLast: false,
+          key: `paragraph_${index}_${start}_${match.index}_${this.buildTextSliceKey(paragraphText)}`
+        });
+        index++;
+      }
+      start = match.index + match[0].length;
+      match = separatorRegex.exec(source);
+    }
+    if (start < source.length) {
+      const paragraphText = source.substring(start);
+      paragraphs.push({
+        text: paragraphText,
+        start: start,
+        end: source.length,
+        index: index,
+        isLast: false,
+        key: `paragraph_${index}_${start}_${source.length}_${this.buildTextSliceKey(paragraphText)}`
+      });
+    }
+    if (paragraphs.length === 0) {
+      paragraphs.push({
+        text: source,
+        start: 0,
+        end: source.length,
+        index: 0,
+        isLast: true,
+        key: `paragraph_empty_${this.buildTextSliceKey(source)}`
+      });
+      return paragraphs;
+    }
+    const lastIndex = paragraphs.length - 1;
+    for (let i = 0; i < paragraphs.length; i++) {
+      paragraphs[i].isLast = i === lastIndex;
+      paragraphs[i].index = i;
+    }
+    return paragraphs;
   }
 
   measureReaderTextHeight(text: string, availableWidth: number): number {
     if (!text) {
       return 0;
     }
-      const options: MeasureOptions = {
+    const paragraphs = this.getReaderTextParagraphs(text);
+    if (paragraphs.length > 1) {
+      let totalHeight = 0;
+      for (const paragraph of paragraphs) {
+        totalHeight += this.measureReaderSingleParagraphHeight(paragraph.text, availableWidth);
+        if (!paragraph.isLast) {
+          totalHeight += this.toMeasurePx(this.readerParagraphSpacing);
+        }
+      }
+      return totalHeight;
+    }
+    return this.measureReaderSingleParagraphHeight(text, availableWidth);
+  }
+
+  measureReaderSingleParagraphHeight(text: string, availableWidth: number): number {
+    if (!text) {
+      return 0;
+    }
+    const options: MeasureOptions = {
         textContent: text,
         constraintWidth: Math.max(1, availableWidth),
         fontSize: this.readerFontSize,
         fontFamily: this.getReaderFontFamily(),
-        lineHeight: this.readerLineHeight,
+        lineHeight: this.getEffectiveReaderLineHeight(),
       fontWeight: FontWeight.Normal,
       textAlign: TextAlign.Start,
       wordBreak: WordBreak.BREAK_ALL
@@ -3197,7 +3282,7 @@ struct ReadBookPage {
     }
     const charsPerLine = Math.max(8, Math.floor(availableWidth / Math.max(1, this.readerFontSize * 1.08)));
     const lines = Math.max(1, Math.ceil(text.length / charsPerLine));
-    return this.toMeasurePx(lines * Math.max(1, this.readerLineHeight));
+    return this.toMeasurePx(lines * this.getEffectiveReaderLineHeight());
   }
 
   toMeasurePx(value: number): number {
@@ -3468,37 +3553,59 @@ struct ReadBookPage {
 
   @Builder
   readingText(text: string, bottomPadding: number) {
-    if (this.hasActiveTtsHighlight(text)) {
-      Text() {
-        ForEach(this.getReadingTextSlices(text), (slice: ReadTextSlice) => {
-          Span(slice.text)
-            .fontColor(slice.highlighted ? this.getTtsHighlightTextColor() : this.getTextColor())
-            .textBackgroundStyle(slice.highlighted ? {
-              color: this.getTtsHighlightColor(),
-              radius: 4
-            } : {})
-        }, (slice: ReadTextSlice) => slice.key)
-      }
-      .fontSize(this.readerFontSize)
-      .fontFamily(this.getBodyReaderFontFamily())
-      .lineHeight(this.readerLineHeight)
-      .fontColor(this.getTextColor())
-      .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
-      .width('100%')
-    } else {
-      this.styledReaderText(this.getReadingRenderText(text), bottomPadding)
+    Column() {
+      ForEach(this.getReaderTextParagraphs(this.getReadingRenderText(text)), (paragraph: ReaderTextParagraph) => {
+        if (this.hasActiveTtsHighlight(text)) {
+          Text() {
+            ForEach(this.getReadingTextSlicesInRange(
+              paragraph.text,
+              this.ttsHighlightStart - paragraph.start,
+              this.ttsHighlightEnd - paragraph.start
+            ), (slice: ReadTextSlice) => {
+              Span(slice.text)
+                .fontColor(slice.highlighted ? this.getTtsHighlightTextColor() : this.getTextColor())
+                .textBackgroundStyle(slice.highlighted ? {
+                  color: this.getTtsHighlightColor(),
+                  radius: 4
+                } : {})
+            }, (slice: ReadTextSlice) => `${paragraph.key}_${slice.key}`)
+          }
+          .fontSize(this.readerFontSize)
+          .fontFamily(this.getBodyReaderFontFamily())
+          .lineHeight(this.getEffectiveReaderLineHeight())
+          .fontColor(this.getTextColor())
+          .width('100%')
+        } else {
+          this.styledReaderParagraph(paragraph, this.currentChapterIndex)
+        }
+        this.readerParagraphGap(paragraph)
+      }, (paragraph: ReaderTextParagraph) => paragraph.key)
     }
+    .width('100%')
+    .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
   }
 
   @Builder
   styledReaderText(text: string, bottomPadding: number, chapterIndex: number = this.currentChapterIndex) {
-    if (this.shouldUseTitleStyle(text, chapterIndex)) {
+    Column() {
+      ForEach(this.getReaderTextParagraphs(text), (paragraph: ReaderTextParagraph) => {
+        this.styledReaderParagraph(paragraph, chapterIndex)
+        this.readerParagraphGap(paragraph)
+      }, (paragraph: ReaderTextParagraph) => paragraph.key)
+    }
+    .width('100%')
+    .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
+  }
+
+  @Builder
+  styledReaderParagraph(paragraph: ReaderTextParagraph, chapterIndex: number = this.currentChapterIndex) {
+    if (this.shouldUseTitleStyle(paragraph.text, chapterIndex)) {
       Text() {
         Span(this.getChapterTitle(chapterIndex))
           .fontSize(this.readerTitleFontSize)
           .fontFamily(this.getTitleReaderFontFamily())
           .fontColor(this.getTextColor())
-        ForEach(this.getRegexTextSlices(text.substring(this.getChapterTitle(chapterIndex).length)), (slice: ReadTextSlice) => {
+        ForEach(this.getRegexTextSlices(paragraph.text.substring(this.getChapterTitle(chapterIndex).length)), (slice: ReadTextSlice) => {
           Span(slice.text)
             .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
             .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
@@ -3509,27 +3616,34 @@ struct ReadBookPage {
             } : {})
         }, (slice: ReadTextSlice) => `title_body_${slice.key}`)
       }
-      .lineHeight(this.readerLineHeight)
+      .lineHeight(this.getEffectiveReaderLineHeight())
       .fontColor(this.getTextColor())
-      .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
       .width('100%')
-    } else if (this.shouldUseRegexStyle(text)) {
-      this.regexReaderText(text, bottomPadding)
+    } else if (this.shouldUseRegexStyle(paragraph.text)) {
+      this.regexReaderText(paragraph)
     } else {
-      Text(text)
+      Text(paragraph.text)
         .fontSize(this.readerFontSize)
         .fontFamily(this.getBodyReaderFontFamily())
-        .lineHeight(this.readerLineHeight)
+        .lineHeight(this.getEffectiveReaderLineHeight())
         .fontColor(this.getTextColor())
-        .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
         .width('100%')
     }
   }
 
   @Builder
-  regexReaderText(text: string, bottomPadding: number) {
+  readerParagraphGap(paragraph: ReaderTextParagraph) {
+    if (!paragraph.isLast && this.readerParagraphSpacing > 0) {
+      Blank()
+        .height(this.readerParagraphSpacing)
+        .width('100%')
+    }
+  }
+
+  @Builder
+  regexReaderText(paragraph: ReaderTextParagraph) {
     Text() {
-      ForEach(this.getRegexTextSlices(text), (slice: ReadTextSlice) => {
+      ForEach(this.getRegexTextSlices(paragraph.text), (slice: ReadTextSlice) => {
         Span(slice.text)
           .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
           .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
@@ -3540,9 +3654,8 @@ struct ReadBookPage {
           } : {})
       }, (slice: ReadTextSlice) => slice.key)
     }
-    .lineHeight(this.readerLineHeight)
+    .lineHeight(this.getEffectiveReaderLineHeight())
     .fontColor(this.getTextColor())
-    .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
     .width('100%')
   }
 
@@ -3968,7 +4081,8 @@ struct ReadBookPage {
     }
 
     const horizontalPadding = 36;
-    const verticalPadding = 36 + this.getReaderContentBottomReserve() + Math.ceil(Math.max(1, this.readerLineHeight) * 0.35);
+    const verticalPadding = 36 + this.getReaderContentBottomReserve() +
+      Math.ceil(this.getEffectiveReaderLineHeight() * 0.35);
     const availableWidth = Math.max(1, this.pageViewWidth - horizontalPadding);
     const availableHeight = Math.max(1, this.pageViewHeight - verticalPadding);
     const measuredAvailableHeight = this.toMeasurePx(availableHeight);

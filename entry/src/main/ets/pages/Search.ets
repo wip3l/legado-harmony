@@ -551,19 +551,20 @@ struct SearchPage {
   }
 
   saveSearchExploreSettings(): void {
-    const settings = new SearchExploreSettings();
-    settings.showResultCover = this.searchExploreShowResultCover;
-    settings.useBookshelfCoverGallery = this.searchExploreUseBookshelfCoverGallery;
-    settings.showResultTags = this.searchExploreShowResultTags;
-    settings.promptAddToShelfOnBack = this.searchExplorePromptAddToShelfOnBack;
-    settings.exactSearch = this.exactSearch;
-    settings.exactSearchMatchAuthor = this.exactSearchMatchAuthor;
-    settings.showSearchProgress = this.showSearchProgress;
-    settings.searchConcurrency = this.searchConcurrency;
-    settings.selectedSourceGroupsRaw = this.selectedSourceGroupsRaw;
-    settings.sourceSortRaw = AppStorage.get<string>('searchExploreSourceSort') || '';
-    SearchExploreSettingsStore.applyToStorage(settings);
-    SearchExploreSettingsStore.save(getContext(this), settings).catch((e: Error) => {
+    SearchExploreSettingsStore.load(getContext(this)).then((settings: SearchExploreSettings) => {
+      settings.showResultCover = this.searchExploreShowResultCover;
+      settings.useBookshelfCoverGallery = this.searchExploreUseBookshelfCoverGallery;
+      settings.showResultTags = this.searchExploreShowResultTags;
+      settings.promptAddToShelfOnBack = this.searchExplorePromptAddToShelfOnBack;
+      settings.exactSearch = this.exactSearch;
+      settings.exactSearchMatchAuthor = this.exactSearchMatchAuthor;
+      settings.showSearchProgress = this.showSearchProgress;
+      settings.searchConcurrency = this.searchConcurrency;
+      settings.selectedSourceGroupsRaw = this.selectedSourceGroupsRaw;
+      settings.sourceSortRaw = AppStorage.get<string>('searchExploreSourceSort') || '';
+      SearchExploreSettingsStore.applyToStorage(settings);
+      return SearchExploreSettingsStore.save(getContext(this), settings);
+    }).catch((e: Error) => {
       console.warn('保存搜索设置失败:', e);
     });
   }

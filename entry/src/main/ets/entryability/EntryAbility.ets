@@ -82,6 +82,7 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('appLightButtonColor', '#007DFF');
     PersistentStorage.persistProp('appDarkButtonColor', '#3F8CFF');
     PersistentStorage.persistProp('explorePlatform', '番茄');
+    PersistentStorage.persistProp('exploreSourceUrl', '');
     CoverGalleryStore.load(this.context).then((snapshot) => {
       CoverGalleryStore.applyToStorage(snapshot);
       return CoverGalleryStore.save(this.context, snapshot);

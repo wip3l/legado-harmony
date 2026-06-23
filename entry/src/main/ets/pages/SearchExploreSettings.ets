@@ -148,19 +148,20 @@ struct SearchExploreSettingsPage {
   }
 
   onSettingChanged(): void {
-    const settings = new SearchExploreSettings();
-    settings.showResultCover = this.searchExploreShowResultCover;
-    settings.useBookshelfCoverGallery = this.searchExploreUseBookshelfCoverGallery;
-    settings.showResultTags = this.searchExploreShowResultTags;
-    settings.promptAddToShelfOnBack = this.searchExplorePromptAddToShelfOnBack;
-    settings.exactSearch = this.searchExploreExactSearch;
-    settings.exactSearchMatchAuthor = this.searchExploreExactSearchMatchAuthor;
-    settings.showSearchProgress = this.searchExploreShowSearchProgress;
-    settings.searchConcurrency = this.searchExploreSearchConcurrency;
-    settings.selectedSourceGroupsRaw = this.searchExploreSelectedSourceGroups;
-    settings.sourceSortRaw = this.searchExploreSourceSort;
-    SearchExploreSettingsStore.applyToStorage(settings);
-    SearchExploreSettingsStore.save(getContext(this), settings).catch((e: Error) => {
+    SearchExploreSettingsStore.load(getContext(this)).then((settings: SearchExploreSettings) => {
+      settings.showResultCover = this.searchExploreShowResultCover;
+      settings.useBookshelfCoverGallery = this.searchExploreUseBookshelfCoverGallery;
+      settings.showResultTags = this.searchExploreShowResultTags;
+      settings.promptAddToShelfOnBack = this.searchExplorePromptAddToShelfOnBack;
+      settings.exactSearch = this.searchExploreExactSearch;
+      settings.exactSearchMatchAuthor = this.searchExploreExactSearchMatchAuthor;
+      settings.showSearchProgress = this.searchExploreShowSearchProgress;
+      settings.searchConcurrency = this.searchExploreSearchConcurrency;
+      settings.selectedSourceGroupsRaw = this.searchExploreSelectedSourceGroups;
+      settings.sourceSortRaw = this.searchExploreSourceSort;
+      SearchExploreSettingsStore.applyToStorage(settings);
+      return SearchExploreSettingsStore.save(getContext(this), settings);
+    }).catch((e: Error) => {
       console.warn('保存搜索/发现配置失败:', e);
     });
   }

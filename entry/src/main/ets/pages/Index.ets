@@ -1805,6 +1805,7 @@ struct ExplorePage {
   @State verificationUrl: string = '';
   @State verificationTitle: string = '';
   @StorageLink('explorePlatform') selectedPlatform: string = '番茄';
+  @StorageLink('exploreSourceUrl') selectedSourceUrl: string = '';
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
@@ -1818,6 +1819,7 @@ struct ExplorePage {
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   private coordinator: ExploreCoordinator = new ExploreCoordinator();
   private hasLoaded: boolean = false;
+  private hasRestoredExploreSelection: boolean = false;
   private shelfStatusVersion: number = 0;
   private exploreLoadVersion: number = 0;
 
@@ -1850,16 +1852,26 @@ struct ExplorePage {
     this.verificationUrl = '';
     this.verificationTitle = '';
     try {
+      if (!this.hasRestoredExploreSelection) {
+        this.hasRestoredExploreSelection = true;
+        await this.restoreExploreSelectionFromSettings();
+        if (!this.isCurrentExploreLoad(loadVersion)) return;
+      }
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
       if (!this.isCurrentExploreLoad(loadVersion)) return;
       const previousSourceName = this.selectedSourceName;
+      const previousSourceUrl = this.selectedSourceUrl;
       const sourceOptions = await this.coordinator.getExploreSources();
       if (!this.isCurrentExploreLoad(loadVersion)) return;
       this.sourceOptions = this.sortExploreSourceOptions(sourceOptions);
       this.sourceNames = this.sourceOptions.map((option: ExploreSourceOption) => option.sourceName);
-      this.selectedSourceName = previousSourceName && this.sourceNames.includes(previousSourceName) ?
-        previousSourceName : (this.sourceNames.length > 0 ? this.sourceNames[0] : '');
+      const restoredOption = this.sourceOptions.find((option: ExploreSourceOption) =>
+        option.sourceUrl === previousSourceUrl) ||
+        this.sourceOptions.find((option: ExploreSourceOption) => option.sourceName === previousSourceName) ||
+        (this.sourceOptions.length > 0 ? this.sourceOptions[0] : null);
+      this.selectedSourceName = restoredOption ? restoredOption.sourceName : '';
+      this.selectedSourceUrl = restoredOption ? restoredOption.sourceUrl : '';
       this.platformNames = this.getSelectedSourcePlatforms();
       if (platformOverride && this.platformNames.includes(platformOverride)) {
         this.selectedPlatform = platformOverride;
@@ -1934,9 +1946,9 @@ struct ExplorePage {
             .backgroundColor('#00000000')
             .width('100%')
             .onSelect((index: number) => {
-              const name = this.sourceNames[index] || '';
-              if (name) {
-                this.switchExploreSource(name);
+              const option = this.sourceOptions[index];
+              if (option) {
+                this.switchExploreSource(option);
               }
             })
         }
@@ -2157,19 +2169,23 @@ struct ExplorePage {
     this.books = [];
     this.status = `正在切换到 ${platform}...`;
     AppStorage.setOrCreate('explorePlatform', platform);
+    this.saveExploreSelection();
     this.loadEntries(platform);
   }
 
-  switchExploreSource(sourceName: string): void {
-    if (this.selectedSourceName === sourceName) {
+  switchExploreSource(option: ExploreSourceOption): void {
+    if (this.selectedSourceUrl === option.sourceUrl) {
       return;
     }
-    this.selectedSourceName = sourceName;
+    this.selectedSourceName = option.sourceName;
+    this.selectedSourceUrl = option.sourceUrl;
     this.platformNames = this.getSelectedSourcePlatforms();
     this.normalizeSelectedPlatform();
     this.selectedIndex = 0;
     this.books = [];
-    this.status = `正在切换到 ${sourceName}...`;
+    this.status = `正在切换到 ${option.sourceName}...`;
+    AppStorage.setOrCreate('exploreSourceUrl', option.sourceUrl);
+    this.saveExploreSelection();
     this.loadEntries();
   }
 
@@ -2196,7 +2212,39 @@ struct ExplorePage {
     if (!this.platformNames.includes(this.selectedPlatform)) {
       this.selectedPlatform = this.platformNames.length > 0 ? this.platformNames[0] : '番茄';
       AppStorage.setOrCreate('explorePlatform', this.selectedPlatform);
+      this.saveExploreSelection();
     }
+  }
+
+  async restoreExploreSelectionFromSettings(): Promise<void> {
+    try {
+      const settings = await SearchExploreSettingsStore.load(getContext(this));
+      const storedSourceUrl = settings.exploreSourceUrl || AppStorage.get<string>('exploreSourceUrl') || '';
+      const storedPlatform = settings.explorePlatform || AppStorage.get<string>('explorePlatform') || '';
+      if (storedSourceUrl) {
+        this.selectedSourceUrl = storedSourceUrl;
+        settings.exploreSourceUrl = storedSourceUrl;
+      }
+      if (storedPlatform) {
+        this.selectedPlatform = storedPlatform;
+        settings.explorePlatform = storedPlatform;
+      }
+      SearchExploreSettingsStore.applyToStorage(settings);
+    } catch (e) {
+      console.warn('恢复发现页选择失败:', e);
+    }
+  }
+
+  saveExploreSelection(): void {
+    AppStorage.setOrCreate('exploreSourceUrl', this.selectedSourceUrl);
+    AppStorage.setOrCreate('explorePlatform', this.selectedPlatform);
+    SearchExploreSettingsStore.saveExploreSelection(
+      getContext(this),
+      this.selectedSourceUrl,
+      this.selectedPlatform
+    ).catch((e: Error) => {
+      console.warn('保存发现页选择失败:', e);
+    });
   }
 
   async syncExploreShelfStatus(books: SearchBook[]): Promise<void> {
@@ -2315,7 +2363,8 @@ struct ExplorePage {
   }
 
   selectedExploreSourceIndex(): number {
-    const index = this.sourceNames.indexOf(this.selectedSourceName);
+    const index = this.sourceOptions.findIndex((option: ExploreSourceOption) =>
+      option.sourceUrl === this.selectedSourceUrl);
     return index >= 0 ? index : 0;
   }
 
@@ -2341,7 +2390,7 @@ struct ExplorePage {
 
   getSelectedSourceOption(): ExploreSourceOption | null {
     for (const option of this.sourceOptions) {
-      if (option.sourceName === this.selectedSourceName) return option;
+      if (option.sourceUrl === this.selectedSourceUrl) return option;
     }
     return null;
   }
@@ -2366,8 +2415,8 @@ struct ExplorePage {
   }
 
   getActiveEntries(): ExploreEntry[] {
-    if (!this.selectedSourceName) return this.entries;
-    return this.entries.filter(entry => entry.sourceName === this.selectedSourceName);
+    if (!this.selectedSourceUrl) return this.entries;
+    return this.entries.filter(entry => entry.sourceUrl === this.selectedSourceUrl);
   }
 
   resultListBottomInset(): number {
@@ -2915,19 +2964,20 @@ struct SearchPage {
   }
 
   saveSearchExploreSettings(): void {
-    const settings = new SearchExploreSettings();
-    settings.showResultCover = this.searchExploreShowResultCover;
-    settings.useBookshelfCoverGallery = this.searchExploreUseBookshelfCoverGallery;
-    settings.showResultTags = this.searchExploreShowResultTags;
-    settings.promptAddToShelfOnBack = this.searchExplorePromptAddToShelfOnBack;
-    settings.exactSearch = this.exactSearch;
-    settings.exactSearchMatchAuthor = this.exactSearchMatchAuthor;
-    settings.showSearchProgress = this.showSearchProgress;
-    settings.searchConcurrency = this.searchConcurrency;
-    settings.selectedSourceGroupsRaw = this.selectedSourceGroupsRaw;
-    settings.sourceSortRaw = AppStorage.get<string>('searchExploreSourceSort') || '';
-    SearchExploreSettingsStore.applyToStorage(settings);
-    SearchExploreSettingsStore.save(getContext(this), settings).catch((e: Error) => {
+    SearchExploreSettingsStore.load(getContext(this)).then((settings: SearchExploreSettings) => {
+      settings.showResultCover = this.searchExploreShowResultCover;
+      settings.useBookshelfCoverGallery = this.searchExploreUseBookshelfCoverGallery;
+      settings.showResultTags = this.searchExploreShowResultTags;
+      settings.promptAddToShelfOnBack = this.searchExplorePromptAddToShelfOnBack;
+      settings.exactSearch = this.exactSearch;
+      settings.exactSearchMatchAuthor = this.exactSearchMatchAuthor;
+      settings.showSearchProgress = this.showSearchProgress;
+      settings.searchConcurrency = this.searchConcurrency;
+      settings.selectedSourceGroupsRaw = this.selectedSourceGroupsRaw;
+      settings.sourceSortRaw = AppStorage.get<string>('searchExploreSourceSort') || '';
+      SearchExploreSettingsStore.applyToStorage(settings);
+      return SearchExploreSettingsStore.save(getContext(this), settings);
+    }).catch((e: Error) => {
       console.warn('保存搜索设置失败:', e);
     });
   }

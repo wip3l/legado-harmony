@@ -12,6 +12,8 @@ export class SearchExploreSettings {
   searchConcurrency: number = 8;
   selectedSourceGroupsRaw: string = '';
   sourceSortRaw: string = '';
+  exploreSourceUrl: string = '';
+  explorePlatform: string = '番茄';
 }
 
 export class SearchExploreSettingsStore {
@@ -25,6 +27,8 @@ export class SearchExploreSettingsStore {
   static readonly KEY_SEARCH_CONCURRENCY: string = 'searchExploreSearchConcurrency';
   static readonly KEY_SELECTED_SOURCE_GROUPS: string = 'searchExploreSelectedSourceGroups';
   static readonly KEY_SOURCE_SORT: string = 'searchExploreSourceSort';
+  static readonly KEY_EXPLORE_SOURCE_URL: string = 'exploreSourceUrl';
+  static readonly KEY_EXPLORE_PLATFORM: string = 'explorePlatform';
   private static readonly STORE_NAME: string = 'search_explore_settings';
   private static cachedSettings: SearchExploreSettings | null = null;
 
@@ -54,6 +58,10 @@ export class SearchExploreSettingsStore {
       store, SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, '');
     settings.sourceSortRaw = await SearchExploreSettingsStore.getString(
       store, SearchExploreSettingsStore.KEY_SOURCE_SORT, '');
+    settings.exploreSourceUrl = await SearchExploreSettingsStore.getString(
+      store, SearchExploreSettingsStore.KEY_EXPLORE_SOURCE_URL, '');
+    settings.explorePlatform = await SearchExploreSettingsStore.getString(
+      store, SearchExploreSettingsStore.KEY_EXPLORE_PLATFORM, '番茄');
     SearchExploreSettingsStore.cachedSettings = SearchExploreSettingsStore.clone(settings);
     return settings;
   }
@@ -71,6 +79,25 @@ export class SearchExploreSettingsStore {
     await store.put(SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY, settings.searchConcurrency);
     await store.put(SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, settings.selectedSourceGroupsRaw);
     await store.put(SearchExploreSettingsStore.KEY_SOURCE_SORT, settings.sourceSortRaw);
+    await store.put(SearchExploreSettingsStore.KEY_EXPLORE_SOURCE_URL, settings.exploreSourceUrl);
+    await store.put(SearchExploreSettingsStore.KEY_EXPLORE_PLATFORM, settings.explorePlatform);
+    await store.flush();
+  }
+
+  static async saveExploreSelection(
+    context: Context,
+    exploreSourceUrl: string,
+    explorePlatform: string
+  ): Promise<void> {
+    if (SearchExploreSettingsStore.cachedSettings) {
+      SearchExploreSettingsStore.cachedSettings.exploreSourceUrl = exploreSourceUrl;
+      SearchExploreSettingsStore.cachedSettings.explorePlatform = explorePlatform;
+    }
+    AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_EXPLORE_SOURCE_URL, exploreSourceUrl);
+    AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_EXPLORE_PLATFORM, explorePlatform);
+    const store = await preferences.getPreferences(context, SearchExploreSettingsStore.STORE_NAME);
+    await store.put(SearchExploreSettingsStore.KEY_EXPLORE_SOURCE_URL, exploreSourceUrl);
+    await store.put(SearchExploreSettingsStore.KEY_EXPLORE_PLATFORM, explorePlatform);
     await store.flush();
   }
 
@@ -92,6 +119,8 @@ export class SearchExploreSettingsStore {
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY, settings.searchConcurrency);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, settings.selectedSourceGroupsRaw);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SOURCE_SORT, settings.sourceSortRaw);
+    AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_EXPLORE_SOURCE_URL, settings.exploreSourceUrl);
+    AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_EXPLORE_PLATFORM, settings.explorePlatform);
   }
 
   static getSearchConcurrency(): number {
@@ -124,6 +153,8 @@ export class SearchExploreSettingsStore {
     settings.searchConcurrency = source.searchConcurrency;
     settings.selectedSourceGroupsRaw = source.selectedSourceGroupsRaw;
     settings.sourceSortRaw = source.sourceSortRaw;
+    settings.exploreSourceUrl = source.exploreSourceUrl;
+    settings.explorePlatform = source.explorePlatform || '番茄';
     return settings;
   }
 
