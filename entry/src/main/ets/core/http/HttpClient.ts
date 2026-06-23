@@ -10,6 +10,7 @@ export interface HttpRequest {
   charset?: string;
   connectTimeout?: number;
   readTimeout?: number;
+  contentType?: string;
 }
 
 export interface HttpResponse {
@@ -52,7 +53,7 @@ export class HttpClient {
         extraData: req.body,
         connectTimeout: req.connectTimeout || this.timeout,
         readTimeout: req.readTimeout || this.timeout,
-        expectDataType: http.HttpDataType.STRING
+        expectDataType: http.HttpDataType.ARRAY_BUFFER
       });
 
       const responseHeaders = (resp.header || {}) as Record<string, string>;
@@ -66,7 +67,7 @@ export class HttpClient {
         url: req.url,
         statusCode: resp.responseCode,
         headers: responseHeaders,
-        body: this.decodeBody(resp.result, req.charset),
+        body: this.decodeBody(resp.result, req.charset || this.responseCharset(responseHeaders)),
         success: resp.responseCode >= 200 && resp.responseCode < 300
       };
     } catch (e) {
@@ -101,15 +102,28 @@ export class HttpClient {
     return '';
   }
 
+  private responseCharset(headers: Record<string, string>): string {
+    const contentType = this.findHeader(headers, 'content-type');
+    const match = contentType.match(/charset\s*=\s*["']?([^;\s"']+)/i);
+    return match ? match[1].trim().toLowerCase() : 'utf-8';
+  }
+
   private decodeBody(result: string | Object, charset?: string): string {
     if (typeof result === 'string') return result as string;
     if (result instanceof ArrayBuffer) {
       try {
-        return util.TextDecoder.create(charset || 'utf-8').decodeWithStream(new Uint8Array(result as ArrayBuffer), { stream: false });
+        return util.TextDecoder.create(this.normalizeCharset(charset || 'utf-8'))
+          .decodeWithStream(new Uint8Array(result as ArrayBuffer), { stream: false });
       } catch (_) {
         return String(result || '');
       }
     }
     return String(result || '');
+  }
+
+  private normalizeCharset(charset: string): string {
+    const value = charset.toLowerCase().replace(/["']/g, '').trim();
+    if (value === 'gb2312' || value === 'gbk') return 'gb18030';
+    return value || 'utf-8';
   }
 }

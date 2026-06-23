@@ -36,6 +36,31 @@ export class CookieStore {
     this.saveAsync();
   }
 
+  static getCookieValue(url: string, name: string): string {
+    if (!name) return this.getCookie(url);
+    for (const item of this.getCookie(url).split(';')) {
+      const index = item.indexOf('=');
+      if (index > 0 && item.substring(0, index).trim() === name) return item.substring(index + 1).trim();
+    }
+    return '';
+  }
+
+  static removeCookie(url: string, name?: string): void {
+    if (!url) return;
+    const current = this.getCookie(url);
+    const names = name ? [name] : current.split(';').map(item => item.trim().split('=')[0]).filter(item => item.length > 0);
+    for (const cookieName of names) {
+      this.setCookies(url, `${cookieName}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/`);
+    }
+    this.saveAsync();
+  }
+
+  static clearAll(): void {
+    try {
+      webview.WebCookieManager.clearAllCookiesSync();
+    } catch (_) {}
+  }
+
   static saveAsync(): void {
     try {
       webview.WebCookieManager.saveCookieAsync();

@@ -406,7 +406,7 @@ export class SearchCoordinator {
     ctx.put('bookSourceGroup', source.bookSourceGroup || '');
     ctx.put('source.bookSourceComment', source.bookSourceComment || '');
     ctx.put('bookSourceComment', source.bookSourceComment || '');
-    ctx.put('source.variable', source.variableComment || '');
+    if (!ctx.has('source.variable')) ctx.put('source.variable', source.variableComment || '');
   }
 
   private async tryBuildScriptedFormSearchUrl(source: BookSource, keyword: string): Promise<string> {

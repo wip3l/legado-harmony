@@ -1,6 +1,7 @@
 import { BookSource } from '../../model/data/Book';
 import { HttpClient, HttpRequest, HttpResponse } from '../http/HttpClient';
 import { VerificationSupport } from '../http/VerificationSupport';
+import { util } from '@kit.ArkTS';
 
 export interface UrlConfig {
   url: string;
@@ -9,6 +10,10 @@ export interface UrlConfig {
   charset: string;
   headers: Record<string, string>;
   sourceHeaders: Record<string, string>;
+  retry: number;
+  type: string;
+  useWebView: boolean;
+  webJs: string;
 }
 
 export class AnalyzeUrl {
@@ -19,20 +24,20 @@ export class AnalyzeUrl {
   constructor(source: BookSource | null, client: HttpClient) {
     this.source = source;
     this.client = client;
-    this.config = { url: '', method: 'GET', body: '', charset: '', headers: {}, sourceHeaders: {} };
+    this.config = this.emptyConfig('');
   }
 
   parse(urlTemplate: string): UrlConfig {
-    this.config = { url: urlTemplate, method: 'GET', body: '', charset: '', headers: {}, sourceHeaders: {} };
+    this.config = this.emptyConfig(urlTemplate);
     if (!urlTemplate) return this.config;
 
     let url = urlTemplate.trim();
     url = this.stripLeadingJs(url);
 
     // 1. 解析 URL 选项 JSON: url,{"method":"POST","body":"...","headers":{...}}
-    const optIndex = url.indexOf(',{');
+    const optIndex = this.findOptionIndex(url);
     if (optIndex > 0) {
-      const optStr = url.substring(optIndex + 1);
+      const optStr = url.substring(optIndex + 1).trim();
       url = url.substring(0, optIndex);
       this.parseOption(optStr);
     }
@@ -63,7 +68,10 @@ export class AnalyzeUrl {
     this.config.sourceHeaders = this.loadSourceHeaders();
 
     // 5. 解决相对 URL
-    this.config.url = this.resolveUrl(url.trim());
+    this.config.url = this.encodeUrl(this.resolveUrl(url.trim()));
+    if (this.config.method === 'POST' && this.config.body && !this.looksLikeStructuredBody(this.config.body)) {
+      this.config.body = this.encodeParams(this.config.body, false);
+    }
 
     return this.config;
   }
@@ -72,9 +80,18 @@ export class AnalyzeUrl {
     try {
       const opt = JSON.parse(optStr.replace(/'/g, '"')) as Record<string, Object>;
       if (opt['method']) this.config.method = String(opt['method']).toUpperCase();
-      if (opt['body']) this.config.body = String(opt['body']);
+      if (opt['body'] !== undefined && opt['body'] !== null) {
+        this.config.body = typeof opt['body'] === 'string' ? String(opt['body']) : JSON.stringify(opt['body']);
+      }
       if (opt['charset']) this.config.charset = String(opt['charset']);
-      if (opt['headers']) this.config.headers = opt['headers'] as Record<string, string>;
+      if (opt['headers']) {
+        if (typeof opt['headers'] === 'string') this.config.headers = this.parseHeaderObject(String(opt['headers']));
+        else this.config.headers = opt['headers'] as Record<string, string>;
+      }
+      if (opt['retry'] !== undefined) this.config.retry = Math.max(0, parseInt(String(opt['retry'])) || 0);
+      if (opt['type']) this.config.type = String(opt['type']);
+      if (opt['webView'] !== undefined) this.config.useWebView = String(opt['webView']).toLowerCase() !== 'false';
+      if (opt['webJs']) this.config.webJs = String(opt['webJs']);
     } catch (e) {
       // 正则保底提取
       const m = optStr.match(/"method"\s*:\s*"(\w+)"/);
@@ -102,12 +119,27 @@ export class AnalyzeUrl {
   }
 
   private parseHeaders(hdr: string): void {
+    const parsed = this.parseHeaderObject(hdr);
+    for (const key in parsed) this.config.headers[key] = parsed[key];
+  }
+
+  private parseHeaderObject(hdr: string): Record<string, string> {
+    const result: Record<string, string> = {};
+    const text = (hdr || '').trim();
+    if (text.startsWith('{')) {
+      try {
+        const source = JSON.parse(text.replace(/'/g, '"')) as Record<string, Object>;
+        for (const key in source) result[key] = String(source[key]);
+        return result;
+      } catch (_) {}
+    }
     for (const line of hdr.split(/[\n\r]+/)) {
       const idx = line.indexOf(':');
       if (idx > 0) {
-        this.config.headers[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+        result[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
       }
     }
+    return result;
   }
 
   private loadSourceHeaders(): Record<string, string> {
@@ -139,6 +171,83 @@ export class AnalyzeUrl {
     return b + '/' + url;
   }
 
+  private encodeUrl(url: string): string {
+    const queryIndex = url.indexOf('?');
+    if (queryIndex < 0 || url.startsWith('data:')) return url;
+    return url.substring(0, queryIndex) + '?' + this.encodeParams(url.substring(queryIndex + 1), true);
+  }
+
+  private encodeParams(params: string, isQuery: boolean): string {
+    const charset = (this.config.charset || '').toLowerCase();
+    return params.split('&').map(field => {
+      const index = field.indexOf('=');
+      const key = index < 0 ? field : field.substring(0, index);
+      const value = index < 0 ? '' : field.substring(index + 1);
+      const encodedKey = this.encodeComponent(key, charset, isQuery);
+      return index < 0 ? encodedKey : encodedKey + '=' + this.encodeComponent(value, charset, isQuery);
+    }).join('&');
+  }
+
+  private encodeComponent(value: string, charset: string, isQuery: boolean): string {
+    if (!value) return value;
+    if (!charset && this.looksEncoded(value)) return value;
+    if (charset === 'escape') return this.escapeComponent(value);
+    if (charset && charset !== 'utf-8' && charset !== 'utf8') {
+      return this.percentEncode(value, charset, !isQuery);
+    }
+    try {
+      const encoded = encodeURIComponent(charset ? value : this.safeDecode(value));
+      return isQuery ? encoded : encoded.replace(/%20/g, '+');
+    } catch (_) {
+      return value;
+    }
+  }
+
+  private percentEncode(value: string, charset: string, form: boolean): string {
+    try {
+      const normalized = charset === 'gbk' || charset === 'gb2312' ? 'gb18030' : charset;
+      const bytes = new util.TextEncoder(normalized).encodeInto(value);
+      let result = '';
+      for (let i = 0; i < bytes.length; i++) {
+        const byte = bytes[i];
+        const ch = String.fromCharCode(byte);
+        if (/[A-Za-z0-9_.~-]/.test(ch) || (form && ch === '*')) result += ch;
+        else if (form && ch === ' ') result += '+';
+        else result += '%' + byte.toString(16).toUpperCase().padStart(2, '0');
+      }
+      return result;
+    } catch (_) {
+      return value;
+    }
+  }
+
+  private safeDecode(value: string): string {
+    if (!this.looksEncoded(value)) return value;
+    try { return decodeURIComponent(value.replace(/\+/g, '%20')); } catch (_) { return value; }
+  }
+
+  private looksEncoded(value: string): boolean {
+    return /%[0-9A-Fa-f]{2}/.test(value) || (!/[\u0080-\uFFFF\s]/.test(value) && value.includes('+'));
+  }
+
+  private escapeComponent(value: string): string {
+    let result = '';
+    for (let i = 0; i < value.length; i++) {
+      const code = value.charCodeAt(i);
+      const ch = value.charAt(i);
+      if (/[A-Za-z0-9@*_+\-./]/.test(ch)) result += ch;
+      else if (code < 256) result += '%' + code.toString(16).toUpperCase().padStart(2, '0');
+      else result += '%u' + code.toString(16).toUpperCase().padStart(4, '0');
+    }
+    return result;
+  }
+
+  private looksLikeStructuredBody(body: string): boolean {
+    const value = body.trim();
+    return (value.startsWith('{') && value.endsWith('}')) || (value.startsWith('[') && value.endsWith(']')) ||
+      value.startsWith('<?xml') || value.startsWith('<');
+  }
+
   private cleanBaseUrl(url: string): string {
     const i = url.indexOf('##');
     return i >= 0 ? url.substring(0, i) : url;
@@ -150,8 +259,9 @@ export class AnalyzeUrl {
       const cookie = VerificationSupport.sourceCookieHeader(this.source, this.config.url);
       if (cookie) merged['Cookie'] = cookie;
     }
-    if (this.config.method === 'POST' && this.config.body && !merged['Content-Type']) {
-      merged['Content-Type'] = 'application/x-www-form-urlencoded';
+    if (this.config.method === 'POST' && this.config.body && !this.findHeader(merged, 'content-type')) {
+      merged['Content-Type'] = this.looksLikeStructuredBody(this.config.body) && this.config.body.trim().startsWith('{') ?
+        'application/json; charset=utf-8' : 'application/x-www-form-urlencoded';
     }
     return {
       url: this.config.url,
@@ -168,17 +278,45 @@ export class AnalyzeUrl {
     if (!req.url) {
       return { url: urlTemplate, statusCode: 0, headers: {}, body: '', success: false, error: 'empty url' };
     }
-    const resp = await this.fetchFollowingRedirects(req);
+    if (req.url.startsWith('data:')) return this.decodeDataUrl(req.url);
+    const resp = await this.fetchWithRetry(req);
     if (this.isUsableResponse(resp)) return resp;
 
     const fallbackUrls = this.buildFallbackUrls(req.url);
     for (const url of fallbackUrls) {
-      const fallbackResp = await this.fetchFollowingRedirects({ ...req, url: url });
+      const fallbackResp = await this.fetchWithRetry({ ...req, url: url });
       if (this.isUsableResponse(fallbackResp)) {
         return fallbackResp;
       }
     }
     return resp;
+  }
+
+  private async fetchWithRetry(req: HttpRequest): Promise<HttpResponse> {
+    let response = await this.fetchFollowingRedirects(req);
+    for (let i = 0; i < this.config.retry && !this.isUsableResponse(response); i++) {
+      response = await this.fetchFollowingRedirects(req);
+    }
+    return response;
+  }
+
+  private decodeDataUrl(url: string): HttpResponse {
+    try {
+      const comma = url.indexOf(',');
+      if (comma < 0) throw new Error('invalid data url');
+      const meta = url.substring(5, comma);
+      const payload = url.substring(comma + 1);
+      let body = '';
+      if (/;base64(?:;|$)/i.test(meta)) {
+        const bytes = new util.Base64Helper().decodeSync(payload);
+        body = util.TextDecoder.create('utf-8').decodeWithStream(bytes, { stream: false });
+      } else {
+        body = decodeURIComponent(payload);
+      }
+      return { url: url, statusCode: 200, headers: { 'Content-Type': meta }, body: body, success: true };
+    } catch (e) {
+      return { url: url, statusCode: 0, headers: {}, body: '', success: false, error: String(e) };
+    }
   }
 
   private async fetchFollowingRedirects(req: HttpRequest): Promise<HttpResponse> {
@@ -190,7 +328,9 @@ export class AnalyzeUrl {
       if (!location) return lastResp;
       const nextUrl = this.resolveRedirectUrl(location, currentReq.url);
       if (!nextUrl || nextUrl === currentReq.url) return lastResp;
-      currentReq = { ...currentReq, url: nextUrl };
+      const switchToGet = (lastResp.statusCode === 301 || lastResp.statusCode === 302 || lastResp.statusCode === 303) &&
+        currentReq.method.toUpperCase() !== 'GET' && currentReq.method.toUpperCase() !== 'HEAD';
+      currentReq = switchToGet ? { ...currentReq, url: nextUrl, method: 'GET', body: '' } : { ...currentReq, url: nextUrl };
       lastResp = await this.client.execute(currentReq);
     }
     return lastResp;
@@ -220,6 +360,30 @@ export class AnalyzeUrl {
 
   getConfig(): UrlConfig {
     return this.config;
+  }
+
+  private emptyConfig(url: string): UrlConfig {
+    return {
+      url: url, method: 'GET', body: '', charset: '', headers: {}, sourceHeaders: {},
+      retry: 0, type: '', useWebView: false, webJs: ''
+    };
+  }
+
+  private findOptionIndex(value: string): number {
+    let quote = '';
+    let brace = 0;
+    for (let i = 0; i < value.length - 1; i++) {
+      const ch = value.charAt(i);
+      if (quote) {
+        if (ch === quote && value.charAt(i - 1) !== '\\') quote = '';
+        continue;
+      }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '{') brace++;
+      if (ch === '}') brace--;
+      if (ch === ',' && brace === 0 && /^\s*\{/.test(value.substring(i + 1))) return i;
+    }
+    return -1;
   }
 
   private buildFallbackUrls(url: string): string[] {
