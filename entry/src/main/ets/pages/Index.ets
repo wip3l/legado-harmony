@@ -1569,6 +1569,7 @@ struct BookshelfPage {
     this.isShelfRefreshing = true;
     promptAction.showToast({ message: '正在刷新书架...' });
     let attempted = 0;
+    let skippedFinished = 0;
     let updated = 0;
     let failed = 0;
     let taskFailed = false;
@@ -1579,6 +1580,10 @@ struct BookshelfPage {
       const shelfBooks = [...this.books];
       for (const shelfBook of shelfBooks) {
         if (!shelfBook.bookUrl || shelfBook.origin === 'local' || !shelfBook.canUpdate) {
+          continue;
+        }
+        if (this.isFinishedBook(shelfBook)) {
+          skippedFinished++;
           continue;
         }
         attempted++;
@@ -1608,7 +1613,10 @@ struct BookshelfPage {
       }
       if (attempted > 0) {
         await this.loadBooks();
-        const message = failed > 0 ? `书架刷新完成：${updated}本有更新，${failed}本失败` : `书架刷新完成：${updated}本有更新`;
+        const skippedText = skippedFinished > 0 ? `，跳过${skippedFinished}本完结` : '';
+        const message = failed > 0 ?
+          `书架刷新完成：${updated}本有更新，${failed}本失败${skippedText}` :
+          `书架刷新完成：${updated}本有更新${skippedText}`;
         promptAction.showToast({ message });
         AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       }
@@ -1621,9 +1629,21 @@ struct BookshelfPage {
       this.isShelfRefreshing = false;
       this.shelfRefreshPrompt = '下拉刷新书架';
       if (!taskFailed && attempted === 0) {
-        promptAction.showToast({ message: '没有可刷新的网络书籍' });
+        const message = skippedFinished > 0 ? `没有可刷新的连载书籍，已跳过${skippedFinished}本完结` : '没有可刷新的网络书籍';
+        promptAction.showToast({ message });
       }
     }
+  }
+
+  isFinishedBook(book: Book): boolean {
+    const text = `${book.kind || ''},${book.customTag || ''}`.replace(/\s+/g, '');
+    if (!text) {
+      return false;
+    }
+    if (/(连载中|連載中|连载|連載|未完结|未完結|更新中|ongoing|serializing)/i.test(text)) {
+      return false;
+    }
+    return /(已完结|已完結|完结|完結|完本|全本|完$|completed|complete|finished)/i.test(text);
   }
 
   updateShelfRefreshPrompt(state: RefreshStatus): void {
