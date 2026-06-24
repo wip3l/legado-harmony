@@ -120,11 +120,17 @@ export struct SearchBookResultList {
           .justifyContent(FlexAlign.Center)
         }
       }
+
+      ListItem() {
+        Column()
+          .height(this.bottomPadding)
+      }
     }
     .width('100%')
     .layoutWeight(1)
-    .padding({ left: 16, right: 16, bottom: this.bottomPadding })
+    .padding({ left: 16, right: 16 })
     .backgroundColor(this.pageColor)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   sourceLine(book: SearchBook): string {
