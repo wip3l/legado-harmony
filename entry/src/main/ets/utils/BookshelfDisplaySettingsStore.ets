@@ -7,6 +7,8 @@ export class BookshelfDisplaySettings {
   showIntro: boolean = true;
   showFullIntro: boolean = false;
   showProgressBar: boolean = false;
+  showLastReadTime: boolean = true;
+  showLastReadChapter: boolean = false;
   layoutMode: string = 'compact';
 }
 
@@ -17,6 +19,8 @@ export class BookshelfDisplaySettingsStore {
   private static readonly KEY_SHOW_INTRO: string = 'bookshelfShowIntro';
   private static readonly KEY_SHOW_FULL_INTRO: string = 'bookshelfShowFullIntro';
   private static readonly KEY_SHOW_PROGRESS_BAR: string = 'bookshelfShowProgressBar';
+  private static readonly KEY_SHOW_LAST_READ_TIME: string = 'bookshelfShowLastReadTime';
+  private static readonly KEY_SHOW_LAST_READ_CHAPTER: string = 'bookshelfShowLastReadChapter';
   private static readonly KEY_LAYOUT_MODE: string = 'bookshelfLayoutMode';
   private static cachedSettings: BookshelfDisplaySettings | null = null;
 
@@ -36,6 +40,10 @@ export class BookshelfDisplaySettingsStore {
       store, BookshelfDisplaySettingsStore.KEY_SHOW_FULL_INTRO, false);
     settings.showProgressBar = await BookshelfDisplaySettingsStore.getBoolean(
       store, BookshelfDisplaySettingsStore.KEY_SHOW_PROGRESS_BAR, false);
+    settings.showLastReadTime = await BookshelfDisplaySettingsStore.getBoolean(
+      store, BookshelfDisplaySettingsStore.KEY_SHOW_LAST_READ_TIME, true);
+    settings.showLastReadChapter = await BookshelfDisplaySettingsStore.getBoolean(
+      store, BookshelfDisplaySettingsStore.KEY_SHOW_LAST_READ_CHAPTER, false);
     settings.layoutMode = BookshelfDisplaySettingsStore.normalizeLayoutMode(await BookshelfDisplaySettingsStore.getString(
       store, BookshelfDisplaySettingsStore.KEY_LAYOUT_MODE, 'compact'));
     BookshelfDisplaySettingsStore.cachedSettings = BookshelfDisplaySettingsStore.clone(settings);
@@ -50,6 +58,8 @@ export class BookshelfDisplaySettingsStore {
     await store.put(BookshelfDisplaySettingsStore.KEY_SHOW_INTRO, settings.showIntro);
     await store.put(BookshelfDisplaySettingsStore.KEY_SHOW_FULL_INTRO, settings.showFullIntro);
     await store.put(BookshelfDisplaySettingsStore.KEY_SHOW_PROGRESS_BAR, settings.showProgressBar);
+    await store.put(BookshelfDisplaySettingsStore.KEY_SHOW_LAST_READ_TIME, settings.showLastReadTime);
+    await store.put(BookshelfDisplaySettingsStore.KEY_SHOW_LAST_READ_CHAPTER, settings.showLastReadChapter);
     await store.put(BookshelfDisplaySettingsStore.KEY_LAYOUT_MODE,
       BookshelfDisplaySettingsStore.normalizeLayoutMode(settings.layoutMode));
     await store.flush();
@@ -62,6 +72,8 @@ export class BookshelfDisplaySettingsStore {
     AppStorage.setOrCreate(BookshelfDisplaySettingsStore.KEY_SHOW_INTRO, settings.showIntro);
     AppStorage.setOrCreate(BookshelfDisplaySettingsStore.KEY_SHOW_FULL_INTRO, settings.showFullIntro);
     AppStorage.setOrCreate(BookshelfDisplaySettingsStore.KEY_SHOW_PROGRESS_BAR, settings.showProgressBar);
+    AppStorage.setOrCreate(BookshelfDisplaySettingsStore.KEY_SHOW_LAST_READ_TIME, settings.showLastReadTime);
+    AppStorage.setOrCreate(BookshelfDisplaySettingsStore.KEY_SHOW_LAST_READ_CHAPTER, settings.showLastReadChapter);
     AppStorage.setOrCreate(BookshelfDisplaySettingsStore.KEY_LAYOUT_MODE,
       BookshelfDisplaySettingsStore.normalizeLayoutMode(settings.layoutMode));
   }
@@ -73,6 +85,8 @@ export class BookshelfDisplaySettingsStore {
     settings.showIntro = AppStorage.get<boolean>(BookshelfDisplaySettingsStore.KEY_SHOW_INTRO) ?? true;
     settings.showFullIntro = AppStorage.get<boolean>(BookshelfDisplaySettingsStore.KEY_SHOW_FULL_INTRO) ?? false;
     settings.showProgressBar = AppStorage.get<boolean>(BookshelfDisplaySettingsStore.KEY_SHOW_PROGRESS_BAR) ?? false;
+    settings.showLastReadTime = AppStorage.get<boolean>(BookshelfDisplaySettingsStore.KEY_SHOW_LAST_READ_TIME) ?? true;
+    settings.showLastReadChapter = AppStorage.get<boolean>(BookshelfDisplaySettingsStore.KEY_SHOW_LAST_READ_CHAPTER) ?? false;
     settings.layoutMode = BookshelfDisplaySettingsStore.normalizeLayoutMode(
       AppStorage.get<string>(BookshelfDisplaySettingsStore.KEY_LAYOUT_MODE) ?? 'compact');
     return settings;
@@ -107,6 +121,8 @@ export class BookshelfDisplaySettingsStore {
     settings.showIntro = source.showIntro;
     settings.showFullIntro = source.showFullIntro;
     settings.showProgressBar = source.showProgressBar;
+    settings.showLastReadTime = source.showLastReadTime;
+    settings.showLastReadChapter = source.showLastReadChapter;
     settings.layoutMode = BookshelfDisplaySettingsStore.normalizeLayoutMode(source.layoutMode);
     return settings;
   }

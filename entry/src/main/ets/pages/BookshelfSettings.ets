@@ -17,6 +17,8 @@ struct BookshelfSettingsPage {
   @StorageLink('bookshelfShowIntro') bookshelfShowIntro: boolean = true;
   @StorageLink('bookshelfShowFullIntro') bookshelfShowFullIntro: boolean = false;
   @StorageLink('bookshelfShowProgressBar') bookshelfShowProgressBar: boolean = false;
+  @StorageLink('bookshelfShowLastReadTime') bookshelfShowLastReadTime: boolean = true;
+  @StorageLink('bookshelfShowLastReadChapter') bookshelfShowLastReadChapter: boolean = false;
   @StorageLink('bookshelfLayoutMode') bookshelfLayoutMode: string = 'compact';
   @StorageLink('bookshelfCoverAlbums') @Watch('onCoverAlbumsChanged') bookshelfCoverAlbums: string = '';
   @StorageLink('bookshelfLightCoverAlbumId') bookshelfLightCoverAlbumId: string = '';
@@ -78,10 +80,20 @@ struct BookshelfSettingsPage {
               this.onDisplaySettingChanged();
             })
           }
-          this.switchItem('使用阅读进度条', '开启后在书架卡片底部显示阅读百分比和最后阅读时间', this.bookshelfShowProgressBar, (value: boolean) => {
+          this.switchItem('使用阅读进度条', '开启后在书架卡片底部显示阅读百分比和阅读信息', this.bookshelfShowProgressBar, (value: boolean) => {
             this.bookshelfShowProgressBar = value;
             this.onDisplaySettingChanged();
           })
+          if (this.bookshelfShowProgressBar) {
+            this.switchItem('显示最后阅读时间', '开启后阅读进度条旁显示最近一次阅读时间', this.bookshelfShowLastReadTime, (value: boolean) => {
+              this.bookshelfShowLastReadTime = value;
+              this.onDisplaySettingChanged();
+            })
+            this.switchItem('显示最后阅读章节', '开启后阅读进度条旁显示最近一次阅读章节', this.bookshelfShowLastReadChapter, (value: boolean) => {
+              this.bookshelfShowLastReadChapter = value;
+              this.onDisplaySettingChanged();
+            })
+          }
           this.selectItem('书架布局', '切换书架卡片的信息排布密度',
             this.bookshelfLayoutOptions(), this.bookshelfLayoutSelectedIndex(), (index: number) => {
               this.bookshelfLayoutMode = index === 1 ? 'loose' : 'compact';
@@ -164,6 +176,8 @@ struct BookshelfSettingsPage {
       this.bookshelfShowIntro = settings.showIntro;
       this.bookshelfShowFullIntro = settings.showFullIntro;
       this.bookshelfShowProgressBar = settings.showProgressBar;
+      this.bookshelfShowLastReadTime = settings.showLastReadTime;
+      this.bookshelfShowLastReadChapter = settings.showLastReadChapter;
       this.bookshelfLayoutMode = settings.layoutMode;
     } catch (e) {
       console.warn('重新加载书架显示设置失败:', e);
@@ -178,6 +192,8 @@ struct BookshelfSettingsPage {
     settings.showIntro = this.bookshelfShowIntro;
     settings.showFullIntro = this.bookshelfShowFullIntro;
     settings.showProgressBar = this.bookshelfShowProgressBar;
+    settings.showLastReadTime = this.bookshelfShowLastReadTime;
+    settings.showLastReadChapter = this.bookshelfShowLastReadChapter;
     settings.layoutMode = this.bookshelfLayoutMode;
     BookshelfDisplaySettingsStore.applyToStorage(settings);
     BookshelfDisplaySettingsStore.save(getContext(this), settings).catch((e: Error) => {

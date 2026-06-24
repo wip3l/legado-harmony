@@ -837,6 +837,9 @@ struct ReadBookPage {
             }
             .layoutWeight(1)
             .width('100%')
+            .scrollBar(BarState.On)
+            .scrollBarWidth(16)
+            .scrollBarColor(this.appDarkMode || this.readerThemeIndex === 3 ? '#668A8F98' : '#667A6F63')
           }
           .width('82%')
           .height('100%')

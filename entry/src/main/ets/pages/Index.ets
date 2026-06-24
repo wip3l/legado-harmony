@@ -425,6 +425,8 @@ struct BookshelfPage {
   @State cacheStatus: string = '';
   @State isCaching: boolean = false;
   @State isCacheTocLoading: boolean = false;
+  @State isShelfRefreshing: boolean = false;
+  @State shelfRefreshPrompt: string = '下拉刷新书架';
   @State editingTags: string[] = [];
   @State tagInput: string = '';
   @State shelfCoverMap: Map<string, string> = new Map();
@@ -436,6 +438,8 @@ struct BookshelfPage {
   @StorageLink('bookshelfShowIntro') bookshelfShowIntro: boolean = true;
   @StorageLink('bookshelfShowFullIntro') bookshelfShowFullIntro: boolean = false;
   @StorageLink('bookshelfShowProgressBar') bookshelfShowProgressBar: boolean = false;
+  @StorageLink('bookshelfShowLastReadTime') bookshelfShowLastReadTime: boolean = true;
+  @StorageLink('bookshelfShowLastReadChapter') bookshelfShowLastReadChapter: boolean = false;
   @StorageLink('bookshelfLayoutMode') bookshelfLayoutMode: string = 'compact';
   @StorageLink('bookshelfCoverAlbums') @Watch('onShelfCoverSettingsChanged') bookshelfCoverAlbums: string = '';
   @StorageLink('bookshelfLightCoverAlbumId') @Watch('onShelfCoverSettingsChanged') bookshelfLightCoverAlbumId: string = '';
@@ -452,6 +456,7 @@ struct BookshelfPage {
   private cacheTocLoadToken: number = 0;
   private cacheTocLoadBookUrl: string = '';
   private cacheTocLoadPromise: Promise<boolean> | null = null;
+  private shelfRefreshRunning: boolean = false;
 
   aboutToAppear() {
     this.reloadDisplaySettings();
@@ -466,6 +471,8 @@ struct BookshelfPage {
       this.bookshelfShowIntro = settings.showIntro;
       this.bookshelfShowFullIntro = settings.showFullIntro;
       this.bookshelfShowProgressBar = settings.showProgressBar;
+      this.bookshelfShowLastReadTime = settings.showLastReadTime;
+      this.bookshelfShowLastReadChapter = settings.showLastReadChapter;
       this.bookshelfLayoutMode = settings.layoutMode;
     } catch (e) {
       console.warn('恢复书架显示设置失败:', e);
@@ -662,47 +669,58 @@ struct BookshelfPage {
           .height('100%')
           .justifyContent(FlexAlign.Center)
         } else {
-          List({ space: 8 }) {
-            ForEach(this.books, (book: Book) => {
-              ListItem() {
-                Column() {
-                  if (this.isCompactLayout()) {
-                    this.compactBookContent(book)
-                  } else {
-                    this.looseBookContent(book)
+          Refresh({ refreshing: $$this.isShelfRefreshing, builder: this.shelfRefreshBuilder }) {
+            List({ space: 8 }) {
+              ForEach(this.books, (book: Book) => {
+                ListItem() {
+                  Column() {
+                    if (this.isCompactLayout()) {
+                      this.compactBookContent(book)
+                    } else {
+                      this.looseBookContent(book)
+                    }
                   }
+                  .width('100%')
+                  .alignItems(HorizontalAlign.Start)
+                  .backgroundColor(this.glassCardColor())
+                  .borderRadius(8)
+                  .border({ width: 1, color: this.glassBorderColor() })
+                  .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
+                  .gesture(
+                    LongPressGesture({ repeat: false })
+                      .onAction(() => {
+                        this.showBookActions(book);
+                      })
+                  )
+                  .onClick(() => {
+                    router.pushUrl({
+                      url: 'pages/ReadBook',
+                      params: { bookUrl: book.bookUrl }
+                    });
+                  })
                 }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-                .backgroundColor(this.glassCardColor())
-                .borderRadius(8)
-                .border({ width: 1, color: this.glassBorderColor() })
-                .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
-                .gesture(
-                  LongPressGesture({ repeat: false })
-                    .onAction(() => {
-                      this.showBookActions(book);
-                    })
-                )
-                .onClick(() => {
-                  router.pushUrl({
-                    url: 'pages/ReadBook',
-                    params: { bookUrl: book.bookUrl }
-                  });
-                })
-              }
-            })
+              })
 
-            ListItem() {
-              Column()
-                .height(this.bookshelfListBottomInset())
+              ListItem() {
+                Column()
+                  .height(this.bookshelfListBottomInset())
+              }
             }
+            .width('100%')
+            .height('100%')
+            .padding({ left: 16, right: 16 })
+            .backgroundColor(this.pageColor())
+            .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
           }
-          .width('100%')
           .layoutWeight(1)
-          .padding({ left: 16, right: 16 })
           .backgroundColor(this.pageColor())
-          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+          .refreshOffset(64)
+          .onStateChange((state: RefreshStatus) => {
+            this.updateShelfRefreshPrompt(state);
+          })
+          .onRefreshing(() => {
+            this.refreshBookshelfToc();
+          })
         }
       }
       .width('100%')
@@ -1537,6 +1555,93 @@ struct BookshelfPage {
     }
   }
 
+  async refreshBookshelfToc(): Promise<void> {
+    if (this.shelfRefreshRunning) {
+      this.shelfRefreshPrompt = '书架刷新中';
+      this.isShelfRefreshing = true;
+      return;
+    }
+    if (this.books.length === 0) {
+      this.isShelfRefreshing = false;
+      return;
+    }
+    this.shelfRefreshRunning = true;
+    this.isShelfRefreshing = true;
+    promptAction.showToast({ message: '正在刷新书架...' });
+    let attempted = 0;
+    let updated = 0;
+    let failed = 0;
+    let taskFailed = false;
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const engine = ReadBookEngine.get();
+      const shelfBooks = [...this.books];
+      for (const shelfBook of shelfBooks) {
+        if (!shelfBook.bookUrl || shelfBook.origin === 'local' || !shelfBook.canUpdate) {
+          continue;
+        }
+        attempted++;
+        const beforeCount = shelfBook.totalChapterNum;
+        const beforeLatest = shelfBook.latestChapterTitle;
+        try {
+          const freshBook = await db.getBook(shelfBook.bookUrl) || shelfBook;
+          await engine.openBook(freshBook);
+          await engine.refreshToc();
+          const refreshedBook = await db.getBook(shelfBook.bookUrl);
+          if (refreshedBook) {
+            refreshedBook.lastCheckTime = Date.now();
+            refreshedBook.lastCheckCount = engine.chapters.length;
+            if (engine.chapters.length > 0) {
+              refreshedBook.totalChapterNum = engine.chapters.length;
+              refreshedBook.latestChapterTitle = engine.chapters[engine.chapters.length - 1].title;
+            }
+            await db.updateBook(refreshedBook);
+            if (refreshedBook.totalChapterNum > beforeCount || refreshedBook.latestChapterTitle !== beforeLatest) {
+              updated++;
+            }
+          }
+        } catch (e) {
+          failed++;
+          console.error('刷新书架目录失败:', shelfBook.name, e);
+        }
+      }
+      if (attempted > 0) {
+        await this.loadBooks();
+        const message = failed > 0 ? `书架刷新完成：${updated}本有更新，${failed}本失败` : `书架刷新完成：${updated}本有更新`;
+        promptAction.showToast({ message });
+        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      }
+    } catch (e) {
+      taskFailed = true;
+      console.error('刷新书架失败:', e);
+      promptAction.showToast({ message: '书架刷新失败' });
+    } finally {
+      this.shelfRefreshRunning = false;
+      this.isShelfRefreshing = false;
+      this.shelfRefreshPrompt = '下拉刷新书架';
+      if (!taskFailed && attempted === 0) {
+        promptAction.showToast({ message: '没有可刷新的网络书籍' });
+      }
+    }
+  }
+
+  updateShelfRefreshPrompt(state: RefreshStatus): void {
+    if (this.shelfRefreshRunning) {
+      this.shelfRefreshPrompt = '书架刷新中';
+      return;
+    }
+    if (state === RefreshStatus.OverDrag) {
+      this.shelfRefreshPrompt = '松手刷新书架';
+    } else if (state === RefreshStatus.Refresh) {
+      this.shelfRefreshPrompt = '正在刷新书架...';
+    } else if (state === RefreshStatus.Done) {
+      this.shelfRefreshPrompt = '刷新完成';
+    } else {
+      this.shelfRefreshPrompt = '下拉刷新书架';
+    }
+  }
+
   async updateShelfBook(book: Book): Promise<void> {
     try {
       const db = AppDatabase.getInstance();
@@ -1552,6 +1657,25 @@ struct BookshelfPage {
 
   cachedChapterTextColor(): string {
     return this.appDarkMode ? '#DDEFE5' : '#244B35';
+  }
+
+  @Builder
+  shelfRefreshBuilder() {
+    Row({ space: 8 }) {
+      if (this.isShelfRefreshing) {
+        LoadingProgress()
+          .width(18)
+          .height(18)
+          .color(this.accentColor())
+      }
+      Text(this.shelfRefreshPrompt)
+        .fontSize(13)
+        .fontColor(this.secondaryTextColor())
+    }
+    .height(48)
+    .width('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(VerticalAlign.Center)
   }
 
   @Builder
@@ -1722,11 +1846,17 @@ struct BookshelfPage {
   }
 
   getReadProgressInfoText(book: Book): string {
-    const chapterText = this.getReadChapterText(book);
-    if (!chapterText) {
-      return `${this.getReadProgressPercentText(book)} · ${this.getLastReadTimeText(book)}`;
+    const parts: string[] = [this.getReadProgressPercentText(book)];
+    if (this.bookshelfShowLastReadTime) {
+      parts.push(this.getLastReadTimeText(book));
     }
-    return `${this.getReadProgressPercentText(book)} · ${this.getLastReadTimeText(book)} · ${chapterText}`;
+    if (this.bookshelfShowLastReadChapter) {
+      const chapterText = this.getReadChapterText(book);
+      if (chapterText) {
+        parts.push(chapterText);
+      }
+    }
+    return parts.join(' · ');
   }
 
   getReadChapterText(book: Book): string {
