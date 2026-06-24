@@ -1797,6 +1797,7 @@ struct ExplorePage {
   @State sourceNames: string[] = [];
   @State selectedSourceName: string = '';
   @State selectedIndex: number = 0;
+  @State showExploreSourcePicker: boolean = false;
   @State books: SearchBook[] = [];
   @State shelfBookKeys: string[] = [];
   @State addingShelfBookKeys: string[] = [];
@@ -1817,6 +1818,7 @@ struct ExplorePage {
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
+  @StorageLink('readerActiveFontFamily') readerActiveFontFamily: string = '';
   private coordinator: ExploreCoordinator = new ExploreCoordinator();
   private hasLoaded: boolean = false;
   private hasRestoredExploreSelection: boolean = false;
@@ -1936,21 +1938,19 @@ struct ExplorePage {
     Column() {
       Row() {
         Row() {
-          Select(this.exploreSourceSelectOptions())
-            .selected(this.selectedExploreSourceIndex())
-            .value(this.selectedSourceName || '发现')
-            .font({ size: 16 })
+          Text(this.selectedSourceName || '发现')
+            .fontSize(16)
+            .fontFamily(this.readerActiveFontFamily)
             .fontColor(this.primaryTextColor())
-            .selectedOptionFontColor(this.accentColor())
-            .selectedOptionBgColor(this.exploreSelectedBackgroundColor())
-            .backgroundColor('#00000000')
-            .width('100%')
-            .onSelect((index: number) => {
-              const option = this.sourceOptions[index];
-              if (option) {
-                this.switchExploreSource(option);
-              }
-            })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+
+          Text(this.showExploreSourcePicker ? '⌃' : '⌄')
+            .fontSize(18)
+            .fontFamily(this.readerActiveFontFamily)
+            .fontColor(this.secondaryTextColor())
+            .margin({ left: 6 })
         }
           .layoutWeight(1)
           .height(40)
@@ -1958,8 +1958,25 @@ struct ExplorePage {
           .backgroundColor(this.glassCardColor())
           .border({ width: 1, color: this.glassBorderColor() })
           .shadow({ radius: 8, color: this.glassShadowColor(), offsetX: 0, offsetY: 3 })
-          .padding({ left: 8, right: 8 })
+          .padding({ left: 16, right: 14 })
           .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            if (this.sourceOptions.length > 0) {
+              this.showExploreSourcePicker = !this.showExploreSourcePicker;
+            }
+          })
+          .bindPopup(this.showExploreSourcePicker, {
+            builder: this.exploreSourcePopup,
+            placement: Placement.Bottom,
+            popupColor: this.cardColor(),
+            enableArrow: false,
+            autoCancel: true,
+            onStateChange: (event) => {
+              if (!event.isVisible) {
+                this.showExploreSourcePicker = false;
+              }
+            }
+          })
 
         Button('刷新')
           .height(36)
@@ -2144,6 +2161,56 @@ struct ExplorePage {
         promptAddToShelfOnBack: this.searchExplorePromptAddToShelfOnBack ? 'true' : 'false'
       }
     });
+  }
+
+  @Builder
+  exploreSourcePopup() {
+    Column() {
+      Scroll() {
+        Column() {
+          ForEach(this.sourceOptions, (option: ExploreSourceOption) => {
+            Row() {
+              Text(option.sourceName || '未命名书源')
+                .fontSize(16)
+                .fontFamily(this.readerActiveFontFamily)
+                .fontColor(option.sourceUrl === this.selectedSourceUrl ? this.accentColor() : this.primaryTextColor())
+                .fontWeight(option.sourceUrl === this.selectedSourceUrl ? FontWeight.Medium : FontWeight.Regular)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+
+              if (option.sourceUrl === this.selectedSourceUrl) {
+                Text('✓')
+                  .fontSize(15)
+                  .fontFamily(this.readerActiveFontFamily)
+                  .fontColor(this.accentColor())
+                  .margin({ left: 10 })
+              }
+            }
+            .width('100%')
+            .height(44)
+            .padding({ left: 14, right: 14 })
+            .borderRadius(12)
+            .backgroundColor(option.sourceUrl === this.selectedSourceUrl ? this.exploreSelectedBackgroundColor() : '#00000000')
+            .alignItems(VerticalAlign.Center)
+            .onClick(() => {
+              this.showExploreSourcePicker = false;
+              this.switchExploreSource(option);
+            })
+          })
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .constraintSize({ maxHeight: 320 })
+      .scrollBar(BarState.Auto)
+    }
+    .width(260)
+    .padding(8)
+    .borderRadius(16)
+    .backgroundColor(this.cardColor())
+    .border({ width: 1, color: this.glassBorderColor() })
+    .shadow({ radius: 14, color: this.glassShadowColor(), offsetX: 0, offsetY: 6 })
   }
 
   async addSearchBookToShelf(searchBook: SearchBook): Promise<void> {

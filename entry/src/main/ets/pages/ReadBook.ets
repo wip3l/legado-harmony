@@ -95,6 +95,7 @@ struct ReadBookPage {
   @State showChangeSourceDialog: boolean = false;
   @State changeSourceResults: SearchBook[] = [];
   @State isChangingSource: boolean = false;
+  @State isSwitchingSource: boolean = false;
   @State changeSourceStatus: string = '';
   @State contentPages: string[] = [];
   @State currentPageIndex: number = 0;
@@ -900,7 +901,7 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
-                this.applyReaderLineHeight(this.readerLineHeight - 2);
+                this.applyReaderLineHeight(this.readerLineHeight - 1);
               })
             Text(`${this.readerLineHeight}`)
               .fontSize(15)
@@ -912,7 +913,7 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
-                this.applyReaderLineHeight(this.readerLineHeight + 2);
+                this.applyReaderLineHeight(this.readerLineHeight + 1);
               })
           }
           .width('100%')
@@ -927,7 +928,7 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
-                this.applyReaderParagraphSpacing(this.readerParagraphSpacing - 2);
+                this.applyReaderParagraphSpacing(this.readerParagraphSpacing - 1);
               })
             Text(`${this.readerParagraphSpacing}`)
               .fontSize(15)
@@ -939,7 +940,7 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
-                this.applyReaderParagraphSpacing(this.readerParagraphSpacing + 2);
+                this.applyReaderParagraphSpacing(this.readerParagraphSpacing + 1);
               })
           }
           .width('100%')
@@ -958,7 +959,7 @@ struct ReadBookPage {
 
           this.readerSwitchSettingItem('音量键翻页', '阅读页获得焦点时使用音量上/下键翻页', this.readerVolumeTurnPage,
             (checked: boolean) => {
-              this.readerVolumeTurnPage = checked;
+              this.setReaderVolumeTurnPage(checked);
             })
 
           Row({ space: 10 }) {
@@ -981,7 +982,7 @@ struct ReadBookPage {
 
           this.readerSwitchSettingItem('正文扩展至状态栏', '开启后正文阅读区域会延伸到顶部状态栏安全区', this.readerExtendToStatusBar,
             (checked: boolean) => {
-              this.readerExtendToStatusBar = checked;
+              this.setReaderExtendToStatusBar(checked);
             })
 
           this.readerPreloadSettingItem()
@@ -1398,6 +1399,12 @@ struct ReadBookPage {
     this.readerLineHeight = settings.lineHeight;
     this.readerParagraphSpacing = settings.paragraphSpacing;
     this.readerThemeIndex = settings.themeIndex;
+    this.readerPageTurnMode = settings.pageTurnMode;
+    this.readerVolumeTurnPage = settings.volumeTurnPage;
+    this.readerKeepScreenOn = settings.keepScreenOn;
+    this.readerExtendToStatusBar = settings.extendToStatusBar;
+    this.readerPreloadEnabled = settings.preloadEnabled;
+    this.readerPreloadChapterCount = settings.preloadChapterCount;
     this.readerFontFamily = settings.fontFamily || '';
     this.readerFontFilePath = settings.fontFilePath || '';
     AppStorage.setOrCreate<string>('readerFontSourceName', settings.fontSourceName || '系统默认');
@@ -1799,6 +1806,7 @@ struct ReadBookPage {
                     .borderRadius(16)
                     .backgroundColor(this.buttonColor())
                     .fontColor('#FFFFFF')
+                    .enabled(!this.isSwitchingSource)
                     .onClick(() => {
                       this.switchToSearchBook(book);
                     })
@@ -1857,6 +1865,7 @@ struct ReadBookPage {
     this.showToc = false;
     this.showSettings = false;
     this.changeSourceResults = [];
+    this.isSwitchingSource = false;
     this.searchChangeSource(sessionId);
   }
 
@@ -1867,6 +1876,7 @@ struct ReadBookPage {
     this.changeSourceResults = [];
     this.changeSourceStatus = '';
     this.isChangingSource = false;
+    this.isSwitchingSource = false;
   }
 
   async searchChangeSource(sessionId: number): Promise<void> {
@@ -1937,11 +1947,13 @@ struct ReadBookPage {
   }
 
   async switchToSearchBook(searchBook: SearchBook): Promise<void> {
-    if (!this.book || this.isChangingSource) {
+    if (!this.book || this.isSwitchingSource) {
       return;
     }
-    const sessionId = this.changeSourceSessionId;
-    this.isChangingSource = true;
+    this.cancelActiveChangeSourceSearch();
+    this.isChangingSource = false;
+    const sessionId = ++this.changeSourceSessionId;
+    this.isSwitchingSource = true;
     this.changeSourceStatus = '正在切换书源...';
     await this.saveReadingProgress();
     const oldBook = this.book;
@@ -2008,8 +2020,8 @@ struct ReadBookPage {
       console.error('切换书源失败:', e);
       promptAction.showToast({ message: '切换书源失败' });
     } finally {
-      if (this.isChangeSourceSessionActive(sessionId)) {
-        this.isChangingSource = false;
+      if (sessionId === this.changeSourceSessionId) {
+        this.isSwitchingSource = false;
       }
     }
   }
@@ -2486,10 +2498,10 @@ struct ReadBookPage {
       Column() {
         Text(title)
           .fontSize(15)
-          .fontColor('#333333')
+          .fontColor(this.getTextColor())
         Text(description)
           .fontSize(12)
-          .fontColor('#777777')
+          .fontColor(this.getSubTextColor())
           .margin({ top: 4 })
       }
       .layoutWeight(1)
@@ -2513,10 +2525,10 @@ struct ReadBookPage {
         Column() {
           Text('预缓存设置')
             .fontSize(15)
-            .fontColor('#333333')
+            .fontColor(this.getTextColor())
           Text(this.readerPreloadEnabled ? '阅读过程中提前缓存后续章节' : '已关闭自动预缓存')
             .fontSize(12)
-            .fontColor('#777777')
+            .fontColor(this.getSubTextColor())
             .margin({ top: 4 })
         }
         .layoutWeight(1)
@@ -2535,11 +2547,11 @@ struct ReadBookPage {
         Row() {
           Text('下一章节数')
             .fontSize(13)
-            .fontColor('#333333')
+            .fontColor(this.getTextColor())
             .layoutWeight(1)
           Text(`${this.readerPreloadChapterCount}章`)
             .fontSize(13)
-            .fontColor('#777777')
+            .fontColor(this.getSubTextColor())
         }
         .width('100%')
         .margin({ top: 10 })
@@ -2625,6 +2637,33 @@ struct ReadBookPage {
     }
     this.readerThemeIndex = nextThemeIndex;
     this.saveReaderLayoutSettings();
+    this.saveReadConfig();
+  }
+
+  saveReaderInteractionSettings(): void {
+    ReaderSettingsStore.saveReadingInteractionSettings(
+      getContext(this),
+      this.readerVolumeTurnPage,
+      this.readerKeepScreenOn,
+      this.readerExtendToStatusBar
+    ).catch((e: Error) => {
+      console.error('保存阅读交互设置失败:', e);
+    });
+  }
+
+  setReaderVolumeTurnPage(enabled: boolean): void {
+    this.readerVolumeTurnPage = enabled;
+    this.updateVolumeKeySubscription();
+    this.saveReaderInteractionSettings();
+    this.saveReadConfig();
+  }
+
+  setReaderExtendToStatusBar(enabled: boolean): void {
+    this.readerExtendToStatusBar = enabled;
+    this.enterReaderImmersive();
+    this.paginateContent(this.content);
+    this.saveReaderInteractionSettings();
+    this.saveReadingProgress();
     this.saveReadConfig();
   }
 

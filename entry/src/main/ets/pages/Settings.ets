@@ -2,6 +2,7 @@ import { router, promptAction } from '@kit.ArkUI';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
+import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import fs from '@ohos.file.fs';
@@ -52,7 +53,7 @@ struct SettingsPage {
   @State previewFontRenderVersion: number = 0;
 
   aboutToAppear() {
-    this.applyThemeMode(this.appThemeMode);
+    this.loadThemeMode();
     this.loadReaderSettings();
     this.reloadCustomFonts();
     this.syncBars();
@@ -79,6 +80,16 @@ struct SettingsPage {
       this.registerSelectedReaderFont(settings);
     } catch (e) {
       console.warn('读取阅读设置失败:', e);
+    }
+  }
+
+  async loadThemeMode(): Promise<void> {
+    try {
+      const mode = await AppThemeModeStore.load(getContext(this));
+      this.applyThemeMode(mode, false);
+    } catch (e) {
+      console.warn('读取主题模式失败:', e);
+      this.applyThemeMode(this.appThemeMode, false);
     }
   }
 
@@ -130,13 +141,13 @@ struct SettingsPage {
             this.readerPageTurnAnimation = value;
           })
           this.switchItem('音量键翻页', '阅读页获得焦点时使用音量上/下键切换上一页/下一页', this.readerVolumeTurnPage, (value: boolean) => {
-            this.readerVolumeTurnPage = value;
+            this.setReaderVolumeTurnPage(value);
           })
           this.switchItem('阅读时保持屏幕常亮', '进入阅读页后尽量避免自动息屏', this.readerKeepScreenOn, (value: boolean) => {
-            this.readerKeepScreenOn = value;
+            this.setReaderKeepScreenOn(value);
           })
           this.switchItem('正文扩展至状态栏', '开启后正文阅读区域会延伸到顶部状态栏安全区', this.readerExtendToStatusBar, (value: boolean) => {
-            this.readerExtendToStatusBar = value;
+            this.setReaderExtendToStatusBar(value);
           })
           this.preloadSettingPanel()
 
@@ -178,12 +189,19 @@ struct SettingsPage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
-  applyThemeMode(mode: string) {
-    this.appThemeMode = mode;
-    if (mode === 'dark') {
+  applyThemeMode(mode: string, persist: boolean = true) {
+    const normalizedMode = AppThemeModeStore.normalizeMode(mode);
+    this.appThemeMode = normalizedMode;
+    AppStorage.setOrCreate('appThemeMode', normalizedMode);
+    if (persist) {
+      AppThemeModeStore.save(getContext(this), normalizedMode).catch((e: Error) => {
+        console.warn('保存主题模式失败:', e);
+      });
+    }
+    if (normalizedMode === 'dark') {
       this.appDarkMode = true;
       getContext(this).getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
-    } else if (mode === 'light') {
+    } else if (normalizedMode === 'light') {
       this.appDarkMode = false;
       getContext(this).getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
     } else {
@@ -380,6 +398,12 @@ struct SettingsPage {
     this.readerLineHeight = settings.lineHeight;
     this.readerParagraphSpacing = settings.paragraphSpacing;
     this.readerThemeIndex = settings.themeIndex;
+    this.readerPageTurnMode = settings.pageTurnMode;
+    this.readerVolumeTurnPage = settings.volumeTurnPage;
+    this.readerKeepScreenOn = settings.keepScreenOn;
+    this.readerExtendToStatusBar = settings.extendToStatusBar;
+    this.readerPreloadEnabled = settings.preloadEnabled;
+    this.readerPreloadChapterCount = settings.preloadChapterCount;
     this.readerFontFamily = settings.fontFamily || '';
     this.readerFontFilePath = settings.fontFilePath || '';
     this.readerFontSourceName = settings.fontSourceName || '系统默认';
@@ -707,6 +731,32 @@ struct SettingsPage {
     });
   }
 
+  saveReaderInteractionSettings(): void {
+    ReaderSettingsStore.saveReadingInteractionSettings(
+      getContext(this),
+      this.readerVolumeTurnPage,
+      this.readerKeepScreenOn,
+      this.readerExtendToStatusBar
+    ).catch((e: Error) => {
+      console.error('保存阅读交互设置失败:', e);
+    });
+  }
+
+  setReaderVolumeTurnPage(enabled: boolean): void {
+    this.readerVolumeTurnPage = enabled;
+    this.saveReaderInteractionSettings();
+  }
+
+  setReaderKeepScreenOn(enabled: boolean): void {
+    this.readerKeepScreenOn = enabled;
+    this.saveReaderInteractionSettings();
+  }
+
+  setReaderExtendToStatusBar(enabled: boolean): void {
+    this.readerExtendToStatusBar = enabled;
+    this.saveReaderInteractionSettings();
+  }
+
   setReaderPreloadEnabled(enabled: boolean): void {
     this.readerPreloadEnabled = enabled;
     ReaderSettingsStore.savePreloadEnabled(getContext(this), enabled).catch((e: Error) => {
@@ -988,7 +1038,7 @@ struct SettingsPage {
         .backgroundColor(this.buttonColor())
         .fontColor('#FFFFFF')
         .onClick(() => {
-          this.setReaderLineHeight(this.readerLineHeight - 2);
+          this.setReaderLineHeight(this.readerLineHeight - 1);
         })
       Text(`${this.readerLineHeight}`)
         .fontSize(15)
@@ -1001,7 +1051,7 @@ struct SettingsPage {
         .backgroundColor(this.buttonColor())
         .fontColor('#FFFFFF')
         .onClick(() => {
-          this.setReaderLineHeight(this.readerLineHeight + 2);
+          this.setReaderLineHeight(this.readerLineHeight + 1);
         })
     }
     .width('100%')
@@ -1022,7 +1072,7 @@ struct SettingsPage {
         .backgroundColor(this.buttonColor())
         .fontColor('#FFFFFF')
         .onClick(() => {
-          this.setReaderParagraphSpacing(this.readerParagraphSpacing - 2);
+          this.setReaderParagraphSpacing(this.readerParagraphSpacing - 1);
         })
       Text(`${this.readerParagraphSpacing}`)
         .fontSize(15)
@@ -1035,7 +1085,7 @@ struct SettingsPage {
         .backgroundColor(this.buttonColor())
         .fontColor('#FFFFFF')
         .onClick(() => {
-          this.setReaderParagraphSpacing(this.readerParagraphSpacing + 2);
+          this.setReaderParagraphSpacing(this.readerParagraphSpacing + 1);
         })
     }
     .width('100%')

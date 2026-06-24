@@ -7,6 +7,9 @@ export class ReaderSettings {
   paragraphSpacing: number = 10;
   themeIndex: number = 0;
   pageTurnMode: number = 1;
+  volumeTurnPage: boolean = false;
+  keepScreenOn: boolean = true;
+  extendToStatusBar: boolean = false;
   preloadEnabled: boolean = true;
   preloadChapterCount: number = 1;
   fontFamily: string = '';
@@ -36,6 +39,9 @@ export class ReaderSettingsStore {
   static readonly KEY_PARAGRAPH_SPACING: string = 'readerParagraphSpacing';
   static readonly KEY_THEME_INDEX: string = 'readerThemeIndex';
   static readonly KEY_PAGE_TURN_MODE: string = 'readerPageTurnMode';
+  static readonly KEY_VOLUME_TURN_PAGE: string = 'readerVolumeTurnPage';
+  static readonly KEY_KEEP_SCREEN_ON: string = 'readerKeepScreenOn';
+  static readonly KEY_EXTEND_TO_STATUS_BAR: string = 'readerExtendToStatusBar';
   static readonly KEY_PRELOAD_ENABLED: string = 'readerPreloadEnabled';
   static readonly KEY_PRELOAD_CHAPTER_COUNT: string = 'readerPreloadChapterCount';
   static readonly KEY_FONT_FAMILY: string = 'readerFontFamily';
@@ -96,6 +102,21 @@ export class ReaderSettingsStore {
       ReaderSettingsStore.KEY_PAGE_TURN_MODE,
       1,
       'pageTurnMode'
+    );
+    settings.volumeTurnPage = await ReaderSettingsStore.getBoolean(
+      store,
+      ReaderSettingsStore.KEY_VOLUME_TURN_PAGE,
+      AppStorage.get<boolean>(ReaderSettingsStore.KEY_VOLUME_TURN_PAGE) ?? false
+    );
+    settings.keepScreenOn = await ReaderSettingsStore.getBoolean(
+      store,
+      ReaderSettingsStore.KEY_KEEP_SCREEN_ON,
+      AppStorage.get<boolean>(ReaderSettingsStore.KEY_KEEP_SCREEN_ON) ?? true
+    );
+    settings.extendToStatusBar = await ReaderSettingsStore.getBoolean(
+      store,
+      ReaderSettingsStore.KEY_EXTEND_TO_STATUS_BAR,
+      AppStorage.get<boolean>(ReaderSettingsStore.KEY_EXTEND_TO_STATUS_BAR) ?? false
     );
     settings.preloadEnabled = await ReaderSettingsStore.getBoolean(
       store,
@@ -160,6 +181,25 @@ export class ReaderSettingsStore {
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
     await store.put(ReaderSettingsStore.KEY_PAGE_TURN_MODE, settings.pageTurnMode);
+    await store.flush();
+  }
+
+  static async saveReadingInteractionSettings(
+    context: Context,
+    volumeTurnPage: boolean,
+    keepScreenOn: boolean,
+    extendToStatusBar: boolean
+  ): Promise<void> {
+    const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
+    settings.volumeTurnPage = volumeTurnPage;
+    settings.keepScreenOn = keepScreenOn;
+    settings.extendToStatusBar = extendToStatusBar;
+    ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
+    ReaderSettingsStore.applyInteractionToStorage(settings);
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    await store.put(ReaderSettingsStore.KEY_VOLUME_TURN_PAGE, settings.volumeTurnPage);
+    await store.put(ReaderSettingsStore.KEY_KEEP_SCREEN_ON, settings.keepScreenOn);
+    await store.put(ReaderSettingsStore.KEY_EXTEND_TO_STATUS_BAR, settings.extendToStatusBar);
     await store.flush();
   }
 
@@ -248,6 +288,7 @@ export class ReaderSettingsStore {
     ReaderSettingsStore.cachedSettings = normalized;
     ReaderSettingsStore.applyLayoutToStorage(normalized);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PAGE_TURN_MODE, normalized.pageTurnMode);
+    ReaderSettingsStore.applyInteractionToStorage(normalized);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_ENABLED, normalized.preloadEnabled);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_CHAPTER_COUNT, normalized.preloadChapterCount);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_FONT_FAMILY, normalized.fontFamily);
@@ -272,6 +313,12 @@ export class ReaderSettingsStore {
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_REGEX_FONT_SIZE, settings.regexFontSize);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_REGEX_SHADOW_COLOR, settings.regexShadowColor);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_REGEX_FONT_RULES_RAW, settings.regexFontRulesRaw);
+  }
+
+  private static applyInteractionToStorage(settings: ReaderSettings): void {
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_VOLUME_TURN_PAGE, settings.volumeTurnPage);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_KEEP_SCREEN_ON, settings.keepScreenOn);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_EXTEND_TO_STATUS_BAR, settings.extendToStatusBar);
   }
 
   private static applyLayoutToStorage(settings: ReaderSettings): void {
@@ -421,6 +468,9 @@ export class ReaderSettingsStore {
     settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(source.paragraphSpacing);
     settings.themeIndex = ReaderSettingsStore.normalizeThemeIndex(source.themeIndex);
     settings.pageTurnMode = ReaderSettingsStore.normalizePageTurnMode(source.pageTurnMode);
+    settings.volumeTurnPage = source.volumeTurnPage;
+    settings.keepScreenOn = source.keepScreenOn;
+    settings.extendToStatusBar = source.extendToStatusBar;
     settings.preloadEnabled = source.preloadEnabled;
     settings.preloadChapterCount = ReaderSettingsStore.normalizePreloadChapterCount(source.preloadChapterCount);
     settings.fontFamily = source.fontFamily || '';
@@ -462,6 +512,9 @@ export class ReaderSettingsStore {
     settings.pageTurnMode = ReaderSettingsStore.normalizePageTurnMode(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PAGE_TURN_MODE) ?? 1
     );
+    settings.volumeTurnPage = AppStorage.get<boolean>(ReaderSettingsStore.KEY_VOLUME_TURN_PAGE) ?? false;
+    settings.keepScreenOn = AppStorage.get<boolean>(ReaderSettingsStore.KEY_KEEP_SCREEN_ON) ?? true;
+    settings.extendToStatusBar = AppStorage.get<boolean>(ReaderSettingsStore.KEY_EXTEND_TO_STATUS_BAR) ?? false;
     settings.preloadEnabled = AppStorage.get<boolean>(ReaderSettingsStore.KEY_PRELOAD_ENABLED) ?? true;
     settings.preloadChapterCount = ReaderSettingsStore.normalizePreloadChapterCount(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PRELOAD_CHAPTER_COUNT) ?? 1

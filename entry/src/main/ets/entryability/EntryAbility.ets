@@ -7,15 +7,25 @@ import { BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettings
 import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
+import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 
 export default class EntryAbility extends UIAbility {
+  private appliedColorMode: number = -1;
+
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onCreate');
     AppStorage.setOrCreate('startupT0', Date.now());
     hilog.info(0x0000, 'testTag', 'StartupTrace onCreate %{public}d', Date.now());
-    this.syncSystemColorMode(this.context.config);
+    PersistentStorage.persistProp('appThemeMode', 'system');
+    AppThemeModeStore.load(this.context).then((mode: string) => {
+      AppThemeModeStore.applyToStorage(mode);
+      this.applyThemeColorMode(mode, this.context.config);
+    }).catch((e: Error) => {
+      hilog.warn(0x0000, 'testTag', 'Sync app theme mode failed: %{public}s', JSON.stringify(e));
+      this.syncSystemColorMode(this.context.config);
+    });
     AppStorage.setOrCreate('readerSystemFontFamily', ReaderSystemFontHelper.FALLBACK_SYSTEM_FONT_FAMILY);
     AppStorage.setOrCreate('readerActiveFontFamily', '');
     AppStorage.setOrCreate('readerFontRegistered', false);
@@ -46,6 +56,7 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('ttsStyle', '');
     PersistentStorage.persistProp('ttsLanguage', 'zh-CN');
     PersistentStorage.persistProp('ttsSpeed', 1);
+    PersistentStorage.persistProp('ttsInstalledVoiceKeys', '');
     PersistentStorage.persistProp('ttsOfflineSdkModeMigrated', false);
     if (!AppStorage.get<boolean>('ttsOfflineSdkModeMigrated')) {
       if (AppStorage.get<number>('ttsOnline') === 0) {
@@ -54,6 +65,9 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate('ttsOfflineSdkModeMigrated', true);
     }
     PersistentStorage.persistProp('readerPageTurnAnimation', true);
+    PersistentStorage.persistProp('readerVolumeTurnPage', false);
+    PersistentStorage.persistProp('readerKeepScreenOn', true);
+    PersistentStorage.persistProp('readerExtendToStatusBar', false);
     PersistentStorage.persistProp('bookshelfShowTags', true);
     PersistentStorage.persistProp('bookshelfShowSource', true);
     PersistentStorage.persistProp('bookshelfShowIntro', true);
@@ -160,9 +174,32 @@ export default class EntryAbility extends UIAbility {
 
   private syncSystemColorMode(config: Configuration): void {
     const mode = AppStorage.get<string>('appThemeMode') || 'system';
-    if (mode === 'system') {
-      AppStorage.setOrCreate('appDarkMode', config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
+    this.applyThemeColorMode(mode, config);
+  }
+
+  private applyThemeColorMode(mode: string, config: Configuration): void {
+    const normalizedMode = AppThemeModeStore.normalizeMode(mode);
+    AppStorage.setOrCreate('appThemeMode', normalizedMode);
+    if (normalizedMode === 'dark') {
+      AppStorage.setOrCreate('appDarkMode', true);
+      this.setApplicationColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
+      return;
     }
+    if (normalizedMode === 'light') {
+      AppStorage.setOrCreate('appDarkMode', false);
+      this.setApplicationColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
+      return;
+    }
+    this.setApplicationColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+    AppStorage.setOrCreate('appDarkMode', config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
+  }
+
+  private setApplicationColorMode(colorMode: number): void {
+    if (this.appliedColorMode === colorMode) {
+      return;
+    }
+    this.appliedColorMode = colorMode;
+    this.context.getApplicationContext().setColorMode(colorMode);
   }
 
   private handleLaunchWant(want: Want): void {

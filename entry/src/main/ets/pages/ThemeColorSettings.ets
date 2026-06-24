@@ -1,6 +1,7 @@
 import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { AppThemeSettings, AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
+import { ColorCodePicker } from '../components/ColorCodePicker';
 
 @Entry
 @Component
@@ -13,12 +14,6 @@ struct ThemeColorSettingsPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State selectedMode: string = 'light';
-
-  private palette: string[] = [
-    '#007DFF', '#3F8CFF', '#4E9BFF', '#00A870',
-    '#2E7D68', '#FF7A1A', '#E53935', '#D81B60',
-    '#7A5AF8', '#8E24AA', '#00ACC1', '#607D8B'
-  ];
 
   aboutToAppear(): void {
     this.reloadSettings();
@@ -196,53 +191,17 @@ struct ThemeColorSettingsPage {
 
   @Builder
   colorPanel(title: string, value: string, onChange: (color: string) => void) {
-    Column() {
-      Row() {
-        Text(title)
-          .fontSize(16)
-          .fontColor(this.primaryTextColor())
-          .layoutWeight(1)
-        Text(value)
-          .fontSize(13)
-          .fontColor(this.subTextColor())
+    ColorCodePicker({
+      value: value,
+      placeholder: '#007DFF',
+      appDarkMode: this.appDarkMode,
+      accentColor: this.currentAccentColor(),
+      optionTitle: title,
+      onColorChange: (color: string) => {
+        onChange(color);
       }
-      .width('100%')
-      .margin({ bottom: 12 })
-
-      Flex({ wrap: FlexWrap.Wrap }) {
-        ForEach(this.palette, (color: string) => {
-          Text('')
-            .width(34)
-            .height(34)
-            .borderRadius(17)
-            .backgroundColor(color)
-            .border({ width: value === color ? 3 : 1, color: value === color ? this.primaryTextColor() : '#22000000' })
-            .margin({ right: 10, bottom: 10 })
-            .onClick(() => {
-              onChange(color);
-            })
-        })
-      }
-      .width('100%')
-
-      TextInput({ text: value, placeholder: '#007DFF' })
-        .height(42)
-        .fontSize(14)
-        .fontColor(this.primaryTextColor())
-        .placeholderColor(this.subTextColor())
-        .backgroundColor(this.inputColor())
-        .borderRadius(8)
-        .margin({ top: 12 })
-        .onChange((text: string) => {
-          if (/^#?[0-9a-fA-F]{6}$/.test(text.trim())) {
-            onChange(text);
-          }
-        })
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 16 })
-    .backgroundColor(this.cardColor())
-    .margin({ top: 1 })
+    })
+      .margin({ top: 1 })
   }
 
   @Builder

@@ -2,6 +2,7 @@ import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
+import { ColorCodePicker } from '../components/ColorCodePicker';
 
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -61,12 +62,6 @@ struct ReaderFontSettingsPage {
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State regexRules: ReaderRegexFontRule[] = [];
   @State regexHighlightRefreshKey: number = 0;
-
-  private highlightPalette: string[] = [
-    '#007DFF', '#4E9BFF', '#00A870', '#2E7D68',
-    '#FF7A1A', '#E53935', '#D81B60', '#7A5AF8',
-    '#8E24AA', '#00ACC1', '#607D8B', '#FFE58A'
-  ];
 
   aboutToAppear(): void {
     this.loadSettings();
@@ -888,10 +883,13 @@ struct ReaderFontSettingsPage {
     return (rule.highlightColorEnabled ? rule.shadowColor : '') + key;
   }
 
-  regexHighlightSummaryByIndex(index: number, refreshKey: number): string {
+  regexHighlightColorMode(index: number, refreshKey: number): string {
     const suffix = refreshKey >= 0 ? '' : '';
     const rule = this.regexRuleAt(index);
-    return (rule.highlightColorEnabled ? (rule.shadowColor || this.accentColor()) : '关闭时不显示高亮色') + suffix;
+    if (!rule.highlightColorEnabled) {
+      return `off${suffix}`;
+    }
+    return rule.shadowColor.trim() ? `custom${suffix}` : `accent${suffix}`;
   }
 
   shouldPreviewHighlight(color: string): boolean {
@@ -957,78 +955,26 @@ struct ReaderFontSettingsPage {
 
   @Builder
   regexHighlightColorPicker(index: number, refreshKey: number) {
-    Column({ space: 8 }) {
-      Text(`${refreshKey}`)
-        .fontSize(1)
-        .fontColor(Color.Transparent)
-        .height(0)
-      Row() {
-        Text('自定义高亮颜色')
-          .fontSize(15)
-          .fontColor(this.primaryTextColor())
-          .layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.regexRuleAt(index).highlightColorEnabled })
-          .selectedColor(this.accentColor())
-          .onChange((checked: boolean) => {
-            this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-              target.highlightColorEnabled = checked;
-            });
-          })
+    ColorCodePicker({
+      value: this.regexRuleAt(index).shadowColor,
+      placeholder: this.accentColor(),
+      appDarkMode: this.appDarkMode,
+      accentColor: this.accentColor(),
+      colorMode: this.regexHighlightColorMode(index, refreshKey),
+      onColorModeChange: (mode: string) => {
+        this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+          target.highlightColorEnabled = mode !== 'off';
+          if (mode === 'accent') {
+            target.shadowColor = '';
+          }
+        });
+      },
+      onColorChange: (value: string) => {
+        this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+          target.shadowColor = this.normalizeColorInput(value, target.shadowColor);
+        });
       }
-      .width('100%')
-
-      Text(this.regexHighlightSummaryByIndex(index, refreshKey))
-        .fontSize(13)
-        .fontColor(this.subTextColor())
-        .width('100%')
-
-      if (this.regexRuleAt(index).highlightColorEnabled) {
-        Flex({ wrap: FlexWrap.Wrap }) {
-          ForEach(this.highlightPalette, (color: string) => {
-            Button('')
-              .width(30)
-              .height(30)
-              .borderRadius(15)
-              .backgroundColor(color)
-              .padding(0)
-              .border({
-                width: this.effectiveHighlightColor(this.regexRuleAt(index).shadowColor) === color ? 3 : 1,
-                color: this.effectiveHighlightColor(this.regexRuleAt(index).shadowColor) === color ? this.primaryTextColor() : '#22000000'
-              })
-              .margin({ right: 8, bottom: 8 })
-              .onClick(() => {
-                this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-                  target.shadowColor = color;
-                });
-              })
-          })
-        }
-        .width('100%')
-
-        TextInput({ text: this.regexRuleAt(index).shadowColor, placeholder: this.accentColor() })
-          .height(40)
-          .fontSize(14)
-          .fontColor(this.primaryTextColor())
-          .placeholderColor(this.subTextColor())
-          .backgroundColor(this.inputColor())
-          .borderRadius(8)
-          .onChange((value: string) => {
-            const trimmed = value.trim();
-            if (trimmed === '') {
-              this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-                target.shadowColor = '';
-              });
-              return;
-            }
-            if (/^#?[0-9a-fA-F]{6}$/.test(trimmed)) {
-              this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-                target.shadowColor = this.normalizeColorInput(trimmed, target.shadowColor);
-              });
-            }
-          })
-      }
-    }
-    .width('100%')
+    })
   }
   @Builder
   compactFontModeItem(title: string, mode: string, family: string, onChange: (mode: string, family: string) => void) {
