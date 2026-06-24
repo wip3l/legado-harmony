@@ -101,7 +101,9 @@ struct SearchBookDetailPage {
 
         Scroll() {
           Column() {
-            Row() {
+            Row({ space: 16 }) {
+              this.coverView(this.name, this.displayCoverUrl(), 96, 128)
+
               Column() {
                 Text(this.name || '未知书名')
                   .fontSize(22)
@@ -124,9 +126,10 @@ struct SearchBookDetailPage {
               .alignItems(HorizontalAlign.Start)
             }
             .width('100%')
-            .padding(16)
+            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
             .backgroundColor(this.cardColor())
             .borderRadius(8)
+            .alignItems(VerticalAlign.Center)
 
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(this.getTags(), (tag: string, index: number) => {
@@ -176,29 +179,23 @@ struct SearchBookDetailPage {
               .margin({ top: 12 })
             }
 
-            Row({ space: 14 }) {
-              this.coverView(this.name, this.displayCoverUrl(), 88, 118)
+            Column() {
+              Text('简介')
+                .fontSize(18)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.primaryTextColor())
+                .width('100%')
+                .textAlign(TextAlign.Center)
 
-              Column() {
-                Text('简介')
-                  .fontSize(15)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.primaryTextColor())
-                  .width('100%')
-                Text(this.intro || '暂无简介')
-                  .fontSize(14)
-                  .fontColor(this.secondaryTextColor())
-                  .lineHeight(22)
-                  .width('100%')
-                  .maxLines(8)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .margin({ top: 8 })
-              }
-              .layoutWeight(1)
-              .alignItems(HorizontalAlign.Start)
+              Text(this.intro || '暂无简介')
+                .fontSize(20)
+                .fontColor(this.secondaryTextColor())
+                .lineHeight(32)
+                .width('100%')
+                .margin({ top: 16 })
             }
             .width('100%')
-            .padding(16)
+            .padding({ left: 20, right: 20, top: 18, bottom: 22 })
             .backgroundColor(this.cardColor())
             .borderRadius(8)
             .margin({ top: 12 })

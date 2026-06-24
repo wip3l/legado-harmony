@@ -63,11 +63,15 @@ export class HttpClient {
         CookieStore.saveAsync();
       }
 
+      const charset = req.charset || this.responseCharset(responseHeaders);
+      const body = this.decodeBody(resp.result, charset);
+      const finalBody = req.charset ? body : this.decodeBodyWithMetaCharset(resp.result, body, charset);
+
       return {
         url: req.url,
         statusCode: resp.responseCode,
         headers: responseHeaders,
-        body: this.decodeBody(resp.result, req.charset || this.responseCharset(responseHeaders)),
+        body: finalBody,
         success: resp.responseCode >= 200 && resp.responseCode < 300
       };
     } catch (e) {
@@ -119,6 +123,23 @@ export class HttpClient {
       }
     }
     return String(result || '');
+  }
+
+  private decodeBodyWithMetaCharset(result: string | Object, decoded: string, charset: string): string {
+    if (!(result instanceof ArrayBuffer)) return decoded;
+    const metaCharset = this.findMetaCharset(decoded);
+    if (!metaCharset || this.normalizeCharset(metaCharset) === this.normalizeCharset(charset || 'utf-8')) {
+      return decoded;
+    }
+    return this.decodeBody(result, metaCharset);
+  }
+
+  private findMetaCharset(html: string): string {
+    const head = (html || '').substring(0, 4096);
+    const direct = head.match(/<meta[^>]+charset\s*=\s*["']?\s*([A-Za-z0-9_-]+)/i);
+    if (direct) return direct[1].trim().toLowerCase();
+    const contentType = head.match(/<meta[^>]+http-equiv\s*=\s*["']?content-type["']?[^>]+content\s*=\s*["'][^"']*charset\s*=\s*([^;"'\s>]+)/i);
+    return contentType ? contentType[1].trim().toLowerCase() : '';
   }
 
   private normalizeCharset(charset: string): string {

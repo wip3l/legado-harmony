@@ -1,65 +1,65 @@
 [
-  {
-    "bookSourceComment": "爱去小说网是 TXT 打包下载站，不是标准章节连载站。当前规则适配 legado-harmony：支持搜索、发现、详情、下载页作为目录、在线阅读页正文第一页抽取。目标站在线阅读会把整本 TXT 分页，当前软件暂未实现正文分页追页，因此长篇可能只能读取第一页；下载页会保留 TXT 下载/在线阅读入口。",
-    "bookSourceGroup": "TXT下载",
-    "bookSourceName": "爱去小说网",
-    "bookSourceType": 0,
-    "bookSourceUrl": "https://www.aqxsw66.com",
-    "bookUrlPattern": "https?://www\\.aqxsw66\\.com/txt-xx/.*/txt-\\d+\\.htm",
-    "customOrder": 10,
-    "enabled": true,
-    "enabledCookieJar": true,
-    "enabledExplore": true,
-    "exploreUrl": "最新::/txt-xx/new/index_{{page}}.htm,{\"charset\":\"gb2312\"}\n强推::/txt-xx/best/index_{{page}}.htm,{\"charset\":\"gb2312\"}\n排行::/da/phb.htm,{\"charset\":\"gb2312\"}\n耽美::/txt-xx/15/list15_{{page}}.htm,{\"charset\":\"gb2312\"}\n言情::/txt-xx/19/list19_{{page}}.htm,{\"charset\":\"gb2312\"}\n女生::/txt-xx/nsxs/list109_{{page}}.htm,{\"charset\":\"gb2312\"}\n男生::/txt-xx/nsbook/list123_{{page}}.htm,{\"charset\":\"gb2312\"}\n都市言情::/txt-xx/nsxs/dsyq/list110_{{page}}.htm,{\"charset\":\"gb2312\"}\n古代言情::/txt-xx/nsxs/gdyq/list111_{{page}}.htm,{\"charset\":\"gb2312\"}\n穿越重生::/txt-xx/nsxs/cycs/list112_{{page}}.htm,{\"charset\":\"gb2312\"}\n玄幻仙侠::/txt-xx/nsxs/xhxx/list113_{{page}}.htm,{\"charset\":\"gb2312\"}\n青春同人::/txt-xx/nsxs/qctr/list114_{{page}}.htm,{\"charset\":\"gb2312\"}\n网游科幻::/txt-xx/nsxs/wykh/list115_{{page}}.htm,{\"charset\":\"gb2312\"}",
-    "header": "{\n  \"Accept\": \"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\",\n  \"Accept-Language\": \"zh-CN,zh;q=0.9\",\n  \"User-Agent\": \"Mozilla/5.0 (Linux; Android 12; HarmonyOS; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36\"\n}",
-    "lastUpdateTime": 1782230400000,
-    "respondTime": 0,
-    "ruleBookInfo": {
-      "author": "a[href*=searchzuozhe]@text##^作者名称：|^作者：|\\(查看作者其他作品.*|[\\s　]+$",
-      "coverUrl": "",
-      "init": "",
-      "intro": "meta[name=description]@content||body@text##^[\\s\\S]*?小说简介：|请保存或截图以下网址[\\s\\S]*$",
-      "kind": ".crumb a:last@text||a[href*=list]:last@text",
-      "lastChapter": "a[href*=softdownfree]@text",
-      "name": "title##txt下载[\\s\\S]*$|网盘资源下载[\\s\\S]*$|^-|^《|》$",
-      "tocUrl": "a[href*=softdownfree]@href",
-      "updateTime": "td:contains(更新时间)@text##^.*?更新时间：",
-      "wordCount": "td:contains(小说大小)@text##^.*?小说大小："
-    },
-    "ruleContent": {
-      "content": ".content-box@text||body@text",
-      "replaceRegex": "推荐一个小说下载必备网址：[^\\n]+\\n*|下载本书[\\s\\S]*$|当前页码：第\\d+页 / 共\\d+页[\\s\\S]*$|可使用下面一键跳转[\\s\\S]*$",
-      "title": "title##\\.txt下载[\\s\\S]*$"
-    },
-    "ruleExplore": {
-      "author": "a[href*=searchzuozhe]@text##^作者：|^作者名称：",
-      "bookList": "li[class^=showlist]:has(a[href*=txt-]),.search-card",
-      "bookUrl": "a[href*=txt-]@href||a.searchtitle@href",
-      "coverUrl": "",
-      "intro": ".search-card-content@text||text",
-      "kind": "a[href*=list]@text||.search-card-category@text",
-      "lastChapter": "span.globalDate@text||.search-card-date@text",
-      "name": "a[href*=txt-]@title##^《|》$||a.searchtitle@text##^《|》$",
-      "wordCount": ""
-    },
-    "ruleSearch": {
-      "author": ".search-card-author@text##^作者：",
-      "bookList": ".search-card",
-      "bookUrl": "a.searchtitle@href||a[href*=txt-]@href",
-      "coverUrl": "",
-      "intro": ".search-card-content@text",
-      "kind": ".search-card-category@text",
-      "lastChapter": ".search-card-date@text",
-      "name": "a.searchtitle@title##^《|》$||a.searchtitle@text##^《|》$",
-      "wordCount": ""
-    },
-    "ruleToc": {
-      "chapterList": "a[href$='.txt']:first||a[href$='.txt']",
-      "chapterName": "text##^在线阅读\\(|\\)$|^第一下载地址.*$|^第二下载地址.*$|^第三下载地址.*$|^第四下载地址.*$|^下载本书$##TXT正文",
-      "chapterUrl": "href",
-      "updateTime": ""
-    },
-    "searchUrl": "/search.asp?word={{key}},{\"charset\":\"gb2312\"}",
-    "weight": 50
-  }
+{
+  "bookSourceComment": "爱去小说网是 TXT 打包下载站，不是标准章节连载站。当前规则适配 legado-harmony：支持搜索、发现、详情、下载页作为目录，并优先解析 HTTPS TXT 下载地址。若站点下载服务临时失效，正文可能需要重试或在详情页手动打开下载入口。",
+  "bookSourceGroup": "TXT下载",
+  "bookSourceName": "爱去小说网",
+  "bookSourceType": 0,
+  "bookSourceUrl": "https://www.aqxsw66.com",
+  "bookUrlPattern": "https?://www\\.aqxsw66\\.com/txt-xx/.*/txt-\\d+\\.htm",
+  "customOrder": 10,
+  "enabled": true,
+  "enabledCookieJar": true,
+  "enabledExplore": true,
+  "exploreUrl": "最新::/txt-xx/new/index_{{page}}.htm,{\"charset\":\"gb2312\"}\n强推::/txt-xx/best/index_{{page}}.htm,{\"charset\":\"gb2312\"}\n排行::/da/phb.htm,{\"charset\":\"gb2312\"}\n耽美小说 · 全部耽美::/txt-xx/15/list15_{{page}}.htm,{\"charset\":\"gb2312\"}\n耽美小说 · 现代耽美::/txt-xx/dmxs/xddm/list117_{{page}}.htm,{\"charset\":\"gb2312\"}\n耽美小说 · 古代架空::/txt-xx/dmxs/gdjk/list118_{{page}}.htm,{\"charset\":\"gb2312\"}\n耽美小说 · 穿越重生::/txt-xx/dmxs/cycs/list119_{{page}}.htm,{\"charset\":\"gb2312\"}\n耽美小说 · 玄幻科幻::/txt-xx/dmxs/xhkh/list120_{{page}}.htm,{\"charset\":\"gb2312\"}\n耽美小说 · BL同人::/txt-xx/dmxs/bltr/list121_{{page}}.htm,{\"charset\":\"gb2312\"}\n耽美小说 · GL百合::/txt-xx/dmxs/glbh/list122_{{page}}.htm,{\"charset\":\"gb2312\"}\n女生小说 · 都市言情::/txt-xx/nsxs/dsyq/list110_{{page}}.htm,{\"charset\":\"gb2312\"}\n女生小说 · 古代言情::/txt-xx/nsxs/gdyq/list111_{{page}}.htm,{\"charset\":\"gb2312\"}\n女生小说 · 穿越重生::/txt-xx/nsxs/cycs/list112_{{page}}.htm,{\"charset\":\"gb2312\"}\n女生小说 · 玄幻仙侠::/txt-xx/nsxs/xhxx/list113_{{page}}.htm,{\"charset\":\"gb2312\"}\n女生小说 · 青春同人::/txt-xx/nsxs/qctr/list114_{{page}}.htm,{\"charset\":\"gb2312\"}\n女生小说 · 网游科幻::/txt-xx/nsxs/wykh/list115_{{page}}.htm,{\"charset\":\"gb2312\"}\n男生小说 · 玄幻奇幻::/txt-xx/nsbook/xhqh/list124_{{page}}.htm,{\"charset\":\"gb2312\"}\n男生小说 · 武侠仙侠::/txt-xx/nsbook/wxxx/list125_{{page}}.htm,{\"charset\":\"gb2312\"}\n男生小说 · 都市重生::/txt-xx/nsbook/dscs/list126_{{page}}.htm,{\"charset\":\"gb2312\"}\n男生小说 · 历史军事::/txt-xx/nsbook/lsjs/list127_{{page}}.htm,{\"charset\":\"gb2312\"}\n男生小说 · 恐怖推理::/txt-xx/nsbook/kbtl/list128_{{page}}.htm,{\"charset\":\"gb2312\"}\n男生小说 · 科幻网游::/txt-xx/nsbook/khwy/list129_{{page}}.htm,{\"charset\":\"gb2312\"}\n男生小说 · 二次元::/txt-xx/nsbook/ecy/list130_{{page}}.htm,{\"charset\":\"gb2312\"}\n其他类型 · 军事小说::/txt-xx/25/list25_{{page}}.htm,{\"charset\":\"gb2312\"}\n其他类型 · 名人传记::/txt-xx/22/list22_{{page}}.htm,{\"charset\":\"gb2312\"}\n其他类型 · 中外名著::/txt-xx/28/list28_{{page}}.htm,{\"charset\":\"gb2312\"}\n其他类型 · 当代文学::/txt-xx/27/list27_{{page}}.htm,{\"charset\":\"gb2312\"}\n其他类型 · 其他小说::/txt-xx/30/list30_{{page}}.htm,{\"charset\":\"gb2312\"}\n其他类型 · 推理悬疑::/txt-xx/16/list16_{{page}}.htm,{\"charset\":\"gb2312\"}\n其他类型 · 浪漫爱情::/txt-xx/19/list19_{{page}}.htm,{\"charset\":\"gb2312\"}",
+  "header": "{\n  \"Accept\": \"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\",\n  \"Accept-Language\": \"zh-CN,zh;q=0.9\",\n  \"User-Agent\": \"Mozilla/5.0 (Linux; Android 12; HarmonyOS; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36\"\n}",
+  "lastUpdateTime": 1782230400000,
+  "respondTime": 0,
+  "ruleBookInfo": {
+    "author": "a[href*=searchzuozhe]@text##^作者名称：|^作者：|\\(查看作者其他作品.*|[\\s　]+$",
+    "coverUrl": "",
+    "init": "",
+    "intro": "meta[name=description]@content||.readcontent@text||body@text##^[\\s\\S]*?小说简介：|请保存或截图以下网址[\\s\\S]*$",
+    "kind": ".crumb a:last@text||a[href*=list]:last@text",
+    "lastChapter": "a[href*=softdownfree]@text",
+    "name": "title##txt下载[\\s\\S]*$|网盘资源下载[\\s\\S]*$|^-|^《|》$",
+    "tocUrl": "a[href*=softdownfree]@href",
+    "updateTime": "td:contains(更新时间)@text##^.*?更新时间：",
+    "wordCount": "td:contains(小说大小)@text##^.*?小说大小："
+  },
+  "ruleContent": {
+    "content": ".content-box@text||body@text||text",
+    "replaceRegex": "^[\\s\\S]*?推荐一个小说下载必备网址：[^\\n]+\\n*|下载本书[\\s\\S]*$|当前页码：第\\d+页 / 共\\d+页[\\s\\S]*$|可使用下面一键跳转[\\s\\S]*$",
+    "title": "title##\\.txt下载[\\s\\S]*$"
+  },
+  "ruleExplore": {
+    "author": "a[href*=searchzuozhe]@text##^作者：|^作者名称：",
+    "bookList": ".book-item,li[class^=showlist]:has(a[href*=txt-]),.search-card",
+    "bookUrl": "a[href*=txt-]@href||a.searchtitle@href",
+    "coverUrl": "",
+    "intro": ".search-card-content@text||text",
+    "kind": "a[href*=list]@text||.search-card-category@text",
+    "lastChapter": "span.globalDate@text||.search-card-date@text",
+    "name": ".book-title a@title##^《|》$||a[href*=txt-]@title##^《|》$||a.searchtitle@text##^《|》$",
+    "wordCount": ""
+  },
+  "ruleSearch": {
+    "author": ".search-card-author@text##^作者：",
+    "bookList": ".search-card",
+    "bookUrl": "a.searchtitle@href||a[href*=txt-]@href",
+    "coverUrl": "",
+    "intro": ".search-card-content@text",
+    "kind": ".search-card-category@text",
+    "lastChapter": ".search-card-date@text",
+    "name": "a.searchtitle@title##^《|》$||a.searchtitle@text##^《|》$",
+    "wordCount": ""
+  },
+  "ruleToc": {
+    "chapterList": "a[href^='https://mg.downbook12.com'][href$='.txt']:first||a[href^='https://'][href$='.txt']:first||a[href$='.txt']:first",
+    "chapterName": "text##^[\\s\\S]*$##TXT全文",
+    "chapterUrl": "href",
+    "updateTime": ""
+  },
+  "searchUrl": "/search.asp?word={{searchKeyRaw}},{\"charset\":\"gb2312\"}",
+  "weight": 50
+}
 ]
