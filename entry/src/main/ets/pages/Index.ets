@@ -3189,7 +3189,7 @@ struct SearchPage {
       settings.exactSearch = this.exactSearch;
       settings.exactSearchMatchAuthor = this.exactSearchMatchAuthor;
       settings.showSearchProgress = this.showSearchProgress;
-      settings.searchConcurrency = this.searchConcurrency;
+      settings.searchConcurrency = SearchExploreSettingsStore.normalizeSearchConcurrency(this.searchConcurrency);
       settings.selectedSourceGroupsRaw = this.selectedSourceGroupsRaw;
       settings.sourceSortRaw = AppStorage.get<string>('searchExploreSourceSort') || '';
       SearchExploreSettingsStore.applyToStorage(settings);
@@ -3227,7 +3227,7 @@ struct SearchPage {
         })
 
         this.numberSettingRow('搜索并发数', this.searchConcurrency, 1, 32, (value: number) => {
-          this.searchConcurrency = value;
+          this.searchConcurrency = SearchExploreSettingsStore.normalizeSearchConcurrency(value);
           this.saveSearchExploreSettings();
         })
 
@@ -3372,9 +3372,9 @@ struct SearchPage {
           .height(30)
           .textAlign(TextAlign.Center)
           .onClick(() => {
-            onChange(Math.max(minValue, value - 1));
+            onChange(Math.max(minValue, this.searchConcurrency - 1));
           })
-        Text(`${value}`)
+        Text(`${this.searchConcurrency}`)
           .fontSize(15)
           .fontColor(this.primaryTextColor())
           .width(42)
@@ -3386,7 +3386,7 @@ struct SearchPage {
           .height(30)
           .textAlign(TextAlign.Center)
           .onClick(() => {
-            onChange(Math.min(maxValue, value + 1));
+            onChange(Math.min(maxValue, this.searchConcurrency + 1));
           })
       }
       .height(30)

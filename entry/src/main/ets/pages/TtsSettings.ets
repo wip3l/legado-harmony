@@ -1,6 +1,7 @@
 import { router, promptAction } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { SystemTtsReader, TtsVoiceOption } from '../utils/SystemTtsReader';
+import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
 
 @Entry
 @Component
@@ -30,9 +31,7 @@ struct TtsSettingsPage {
 
   aboutToAppear(): void {
     this.syncBars();
-    this.normalizeDefaultOnlineVoice();
-    this.selectedVoiceKey = this.currentVoiceKey();
-    this.loadVoices();
+    this.loadSettingsAndVoices();
   }
 
   onPageShow(): void {
@@ -85,7 +84,7 @@ struct TtsSettingsPage {
               .margin({ top: 10 })
               .selectedColor(this.accentColor())
               .onChange((value: number) => {
-                this.ttsSpeed = Math.round(value * 10) / 10;
+                this.applySpeed(value);
               })
 
             Row({ space: 8 }) {
@@ -163,9 +162,51 @@ struct TtsSettingsPage {
   }
 
   normalizeDefaultOnlineVoice(): void {
-    if (this.ttsOnline === 0) {
+    if (this.ttsOnline === 0 && this.ttsPerson === 0 && !this.ttsStyle &&
+      this.sameLanguage(this.ttsLanguage || 'zh-CN', 'zh-CN')) {
       this.ttsOnline = 1;
+      this.saveSettings();
     }
+  }
+
+  async loadSettingsAndVoices(): Promise<void> {
+    try {
+      const settings = await TtsSettingsStore.load(getContext(this));
+      this.applySettings(settings);
+    } catch (e) {
+      console.warn('加载朗读设置失败:', e);
+    }
+    this.normalizeDefaultOnlineVoice();
+    this.selectedVoiceKey = this.currentVoiceKey();
+    this.loadVoices();
+  }
+
+  applySettings(settings: TtsSettings): void {
+    this.ttsPerson = settings.person;
+    this.ttsOnline = settings.online;
+    this.ttsStyle = settings.style;
+    this.ttsLanguage = settings.language;
+    this.ttsSpeed = settings.speed;
+    this.ttsInstalledVoiceKeys = settings.installedVoiceKeys;
+  }
+
+  currentSettings(): TtsSettings {
+    const settings = new TtsSettings();
+    settings.person = this.ttsPerson;
+    settings.online = this.ttsOnline;
+    settings.style = this.ttsStyle;
+    settings.language = this.ttsLanguage;
+    settings.speed = this.ttsSpeed;
+    settings.installedVoiceKeys = this.ttsInstalledVoiceKeys;
+    return settings;
+  }
+
+  saveSettings(): void {
+    const settings = this.currentSettings();
+    TtsSettingsStore.applyToStorage(settings);
+    TtsSettingsStore.save(getContext(this), settings).catch((e: Error) => {
+      console.warn('保存朗读设置失败:', e);
+    });
   }
 
   static defaultVoice(): TtsVoiceOption {
@@ -199,6 +240,7 @@ struct TtsSettingsPage {
       this.ttsOnline = 1;
       this.ttsStyle = '';
       this.ttsLanguage = 'zh-CN';
+      this.saveSettings();
       this.selectedVoiceKey = this.currentVoiceKey();
     } finally {
       this.isLoadingVoices = false;
@@ -282,6 +324,7 @@ struct TtsSettingsPage {
     this.ttsStyle = voice.style;
     this.ttsLanguage = voice.language;
     this.selectedVoiceKey = this.voiceKey(voice);
+    this.saveSettings();
   }
 
   async downloadAndSelectVoice(voice: TtsVoiceOption): Promise<void> {
@@ -338,6 +381,7 @@ struct TtsSettingsPage {
     }
     this.ttsInstalledVoiceKeys = this.ttsInstalledVoiceKeys ?
       `${this.ttsInstalledVoiceKeys}\n${key}` : key;
+    this.saveSettings();
   }
 
   isLocallyInstalledVoice(voice: TtsVoiceOption): boolean {
@@ -599,8 +643,13 @@ struct TtsSettingsPage {
       .borderRadius(16)
       .backgroundColor(Math.abs(this.ttsSpeed - value) < 0.01 ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
       .onClick(() => {
-        this.ttsSpeed = value;
+        this.applySpeed(value);
       })
+  }
+
+  applySpeed(value: number): void {
+    this.ttsSpeed = Math.max(0.5, Math.min(2, Math.round(value * 10) / 10));
+    this.saveSettings();
   }
 
   voiceTrailingText(voice: TtsVoiceOption): string {

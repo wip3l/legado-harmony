@@ -10,6 +10,7 @@ import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
+import { TtsSettingsStore } from '../utils/TtsSettingsStore';
 
 export default class EntryAbility extends UIAbility {
   private appliedColorMode: number = -1;
@@ -59,7 +60,10 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('ttsInstalledVoiceKeys', '');
     PersistentStorage.persistProp('ttsOfflineSdkModeMigrated', false);
     if (!AppStorage.get<boolean>('ttsOfflineSdkModeMigrated')) {
-      if (AppStorage.get<number>('ttsOnline') === 0) {
+      if (AppStorage.get<number>('ttsOnline') === 0 &&
+        (AppStorage.get<number>('ttsPerson') ?? 0) === 0 &&
+        !(AppStorage.get<string>('ttsStyle') || '') &&
+        ((AppStorage.get<string>('ttsLanguage') || 'zh-CN') === 'zh-CN')) {
         AppStorage.setOrCreate('ttsOnline', 1);
       }
       AppStorage.setOrCreate('ttsOfflineSdkModeMigrated', true);
@@ -114,6 +118,11 @@ export default class EntryAbility extends UIAbility {
       SearchExploreSettingsStore.applyToStorage(settings);
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Sync search explore settings failed: %{public}s', JSON.stringify(e));
+    });
+    TtsSettingsStore.load(this.context).then((settings) => {
+      TtsSettingsStore.applyToStorage(settings);
+    }).catch((e: Error) => {
+      hilog.warn(0x0000, 'testTag', 'Sync tts settings failed: %{public}s', JSON.stringify(e));
     });
     ReaderSettingsStore.load(this.context).then((settings) => {
       ReaderSettingsStore.applyToStorage(settings);

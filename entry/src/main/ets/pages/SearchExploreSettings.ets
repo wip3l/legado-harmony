@@ -87,7 +87,7 @@ struct SearchExploreSettingsPage {
             })
           this.numberSettingItem('搜索并发数', '控制书籍检索、书源校验和换源同时并发请求的数量',
             this.searchExploreSearchConcurrency, 1, 32, (value: number) => {
-              this.searchExploreSearchConcurrency = value;
+              this.searchExploreSearchConcurrency = SearchExploreSettingsStore.normalizeSearchConcurrency(value);
               this.onSettingChanged();
             })
           this.sourceGroupSettings()
@@ -156,7 +156,7 @@ struct SearchExploreSettingsPage {
       settings.exactSearch = this.searchExploreExactSearch;
       settings.exactSearchMatchAuthor = this.searchExploreExactSearchMatchAuthor;
       settings.showSearchProgress = this.searchExploreShowSearchProgress;
-      settings.searchConcurrency = this.searchExploreSearchConcurrency;
+      settings.searchConcurrency = SearchExploreSettingsStore.normalizeSearchConcurrency(this.searchExploreSearchConcurrency);
       settings.selectedSourceGroupsRaw = this.searchExploreSelectedSourceGroups;
       settings.sourceSortRaw = this.searchExploreSourceSort;
       SearchExploreSettingsStore.applyToStorage(settings);
@@ -347,10 +347,10 @@ struct SearchExploreSettingsPage {
           .height(30)
           .textAlign(TextAlign.Center)
           .onClick(() => {
-            onChange(Math.max(minValue, value - 1));
+            onChange(Math.max(minValue, this.searchExploreSearchConcurrency - 1));
           })
 
-        Text(`${value}`)
+        Text(`${this.searchExploreSearchConcurrency}`)
           .fontSize(15)
           .fontColor(this.primaryTextColor())
           .width(42)
@@ -363,7 +363,7 @@ struct SearchExploreSettingsPage {
           .height(30)
           .textAlign(TextAlign.Center)
           .onClick(() => {
-            onChange(Math.min(maxValue, value + 1));
+            onChange(Math.min(maxValue, this.searchExploreSearchConcurrency + 1));
           })
       }
       .height(30)

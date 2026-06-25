@@ -30,6 +30,9 @@ export class SearchExploreSettingsStore {
   static readonly KEY_EXPLORE_SOURCE_URL: string = 'exploreSourceUrl';
   static readonly KEY_EXPLORE_PLATFORM: string = 'explorePlatform';
   private static readonly STORE_NAME: string = 'search_explore_settings';
+  private static readonly DEFAULT_SEARCH_CONCURRENCY: number = 8;
+  private static readonly MIN_SEARCH_CONCURRENCY: number = 1;
+  private static readonly MAX_SEARCH_CONCURRENCY: number = 32;
   private static cachedSettings: SearchExploreSettings | null = null;
 
   static async load(context: Context): Promise<SearchExploreSettings> {
@@ -52,8 +55,13 @@ export class SearchExploreSettingsStore {
       store, SearchExploreSettingsStore.KEY_EXACT_SEARCH_MATCH_AUTHOR, true);
     settings.showSearchProgress = await SearchExploreSettingsStore.getBoolean(
       store, SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, true);
+    const storageConcurrency = AppStorage.get<number>(SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY);
     settings.searchConcurrency = await SearchExploreSettingsStore.getNumber(
-      store, SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY, 8);
+      store,
+      SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY,
+      typeof storageConcurrency === 'number' ?
+        SearchExploreSettingsStore.normalizeSearchConcurrency(storageConcurrency) :
+        SearchExploreSettingsStore.DEFAULT_SEARCH_CONCURRENCY);
     settings.selectedSourceGroupsRaw = await SearchExploreSettingsStore.getString(
       store, SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, '');
     settings.sourceSortRaw = await SearchExploreSettingsStore.getString(
@@ -76,7 +84,8 @@ export class SearchExploreSettingsStore {
     await store.put(SearchExploreSettingsStore.KEY_EXACT_SEARCH, settings.exactSearch);
     await store.put(SearchExploreSettingsStore.KEY_EXACT_SEARCH_MATCH_AUTHOR, settings.exactSearchMatchAuthor);
     await store.put(SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, settings.showSearchProgress);
-    await store.put(SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY, settings.searchConcurrency);
+    await store.put(SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY,
+      SearchExploreSettingsStore.normalizeSearchConcurrency(settings.searchConcurrency));
     await store.put(SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, settings.selectedSourceGroupsRaw);
     await store.put(SearchExploreSettingsStore.KEY_SOURCE_SORT, settings.sourceSortRaw);
     await store.put(SearchExploreSettingsStore.KEY_EXPLORE_SOURCE_URL, settings.exploreSourceUrl);
@@ -116,7 +125,8 @@ export class SearchExploreSettingsStore {
       SearchExploreSettingsStore.KEY_EXACT_SEARCH_MATCH_AUTHOR,
       settings.exactSearchMatchAuthor);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SHOW_SEARCH_PROGRESS, settings.showSearchProgress);
-    AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY, settings.searchConcurrency);
+    AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY,
+      SearchExploreSettingsStore.normalizeSearchConcurrency(settings.searchConcurrency));
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SELECTED_SOURCE_GROUPS, settings.selectedSourceGroupsRaw);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_SOURCE_SORT, settings.sourceSortRaw);
     AppStorage.setOrCreate(SearchExploreSettingsStore.KEY_EXPLORE_SOURCE_URL, settings.exploreSourceUrl);
@@ -129,7 +139,20 @@ export class SearchExploreSettingsStore {
       return cached;
     }
     const value = AppStorage.get<number>(SearchExploreSettingsStore.KEY_SEARCH_CONCURRENCY);
-    return typeof value === 'number' && value > 0 ? value : 8;
+    return typeof value === 'number' && value > 0 ?
+      SearchExploreSettingsStore.normalizeSearchConcurrency(value) :
+      SearchExploreSettingsStore.DEFAULT_SEARCH_CONCURRENCY;
+  }
+
+  static normalizeSearchConcurrency(value: number): number {
+    const parsed = Math.round(value);
+    if (Number.isNaN(parsed)) {
+      return SearchExploreSettingsStore.DEFAULT_SEARCH_CONCURRENCY;
+    }
+    return Math.max(
+      SearchExploreSettingsStore.MIN_SEARCH_CONCURRENCY,
+      Math.min(parsed, SearchExploreSettingsStore.MAX_SEARCH_CONCURRENCY)
+    );
   }
 
   private static async getBoolean(
@@ -150,7 +173,7 @@ export class SearchExploreSettingsStore {
     settings.exactSearch = source.exactSearch;
     settings.exactSearchMatchAuthor = source.exactSearchMatchAuthor;
     settings.showSearchProgress = source.showSearchProgress;
-    settings.searchConcurrency = source.searchConcurrency;
+    settings.searchConcurrency = SearchExploreSettingsStore.normalizeSearchConcurrency(source.searchConcurrency);
     settings.selectedSourceGroupsRaw = source.selectedSourceGroupsRaw;
     settings.sourceSortRaw = source.sourceSortRaw;
     settings.exploreSourceUrl = source.exploreSourceUrl;
@@ -173,6 +196,15 @@ export class SearchExploreSettingsStore {
     fallback: number
   ): Promise<number> {
     const value = await store.get(key, fallback);
-    return typeof value === 'number' && !isNaN(value) && value > 0 ? value : fallback;
+    if (typeof value === 'number' && !isNaN(value) && value > 0) {
+      return SearchExploreSettingsStore.normalizeSearchConcurrency(value);
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        return SearchExploreSettingsStore.normalizeSearchConcurrency(parsed);
+      }
+    }
+    return fallback;
   }
 }
