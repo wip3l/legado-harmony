@@ -306,9 +306,12 @@ export class AnalyzeUrl {
     };
   }
 
-  async fetch(urlTemplate: string): Promise<HttpResponse> {
+  async fetch(urlTemplate: string, maxResponseBytes?: number): Promise<HttpResponse> {
     this.parse(urlTemplate);
     const req = this.buildRequest();
+    if (maxResponseBytes !== undefined) {
+      req.maxResponseBytes = maxResponseBytes;
+    }
     if (!req.url) {
       return { url: urlTemplate, statusCode: 0, headers: {}, body: '', success: false, error: 'empty url' };
     }

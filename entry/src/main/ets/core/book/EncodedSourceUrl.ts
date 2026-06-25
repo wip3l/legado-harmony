@@ -86,18 +86,20 @@ export class EncodedSourceUrl {
       payload.type === 'shushanDetail' || payload.type === 'shushanCatalog' || payload.type === 'shushanContent';
   }
 
-  static async requestJsonForDataUrl(http: HttpClient, url: string, preferredHost?: string):
+  static async requestJsonForDataUrl(http: HttpClient, url: string, preferredHost?: string, maxResponseBytes?: number):
     Promise<EncodedJsonMap | null> {
     const payload = EncodedSourceUrl.decode(url);
     if (!payload) return null;
-    return await EncodedSourceUrl.requestJsonForPayload(http, payload, preferredHost);
+    return await EncodedSourceUrl.requestJsonForPayload(http, payload, preferredHost, maxResponseBytes);
   }
 
-  static async requestJsonForPayload(http: HttpClient, payload: EncodedSourcePayload, preferredHost?: string):
+  static async requestJsonForPayload(http: HttpClient, payload: EncodedSourcePayload, preferredHost?: string,
+    maxResponseBytes?: number):
     Promise<EncodedJsonMap | null> {
     const req = EncodedSourceUrl.buildRequest(payload);
     if (!req.path) return null;
-    return await EncodedSourceUrl.requestJson(http, req.path, req.method, req.body, preferredHost || req.host);
+    return await EncodedSourceUrl.requestJson(http, req.path, req.method, req.body, preferredHost || req.host,
+      undefined, maxResponseBytes);
   }
 
   static buildSearchUrl(keyword: string, page: number = 1, tab: string = '小说', source: string = '全部'): string {
@@ -146,7 +148,7 @@ export class EncodedSourceUrl {
   }
 
   static async requestJson(http: HttpClient, path: string, method: string = 'GET', body?: string, preferredHost?: string,
-    extraHeaders?: Record<string, string>):
+    extraHeaders?: Record<string, string>, maxResponseBytes?: number):
     Promise<EncodedJsonMap | null> {
     const hosts = EncodedSourceUrl.hosts(preferredHost);
     for (const host of hosts) {
@@ -159,7 +161,8 @@ export class EncodedSourceUrl {
           ...EncodedSourceUrl.buildCookieHeaders(host),
           ...(extraHeaders || {})
         },
-        body: body
+        body: body,
+        maxResponseBytes: maxResponseBytes
       });
       if (!resp.success || !resp.body) continue;
       try {

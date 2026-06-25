@@ -11,6 +11,7 @@ export interface HttpRequest {
   connectTimeout?: number;
   readTimeout?: number;
   contentType?: string;
+  maxResponseBytes?: number;
 }
 
 export interface HttpResponse {
@@ -61,6 +62,18 @@ export class HttpClient {
       if (setCookie) {
         CookieStore.setCookies(req.url, setCookie);
         CookieStore.saveAsync();
+      }
+
+      const responseBytes = this.responseByteLength(resp.result);
+      if (req.maxResponseBytes && responseBytes > req.maxResponseBytes) {
+        return {
+          url: req.url,
+          statusCode: resp.responseCode,
+          headers: responseHeaders,
+          body: '',
+          success: false,
+          error: `response too large: ${responseBytes}`
+        };
       }
 
       const charset = req.charset || this.responseCharset(responseHeaders);
@@ -123,6 +136,12 @@ export class HttpClient {
       }
     }
     return String(result || '');
+  }
+
+  private responseByteLength(result: string | Object): number {
+    if (typeof result === 'string') return (result as string).length;
+    if (result instanceof ArrayBuffer) return (result as ArrayBuffer).byteLength;
+    return 0;
   }
 
   private decodeBodyWithMetaCharset(result: string | Object, decoded: string, charset: string): string {

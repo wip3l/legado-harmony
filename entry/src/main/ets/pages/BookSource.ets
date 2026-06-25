@@ -37,6 +37,8 @@ struct BookSourcePage {
   @State groupNameInput: string = '';
   @State importUrl: string = '';
   @State isImporting: boolean = false;
+  @State isBatchOperating: boolean = false;
+  @State batchOperationText: string = '正在操作书源...';
   @State showCheckDialog: boolean = false;
   @State isCheckingSources: boolean = false;
   @State checkDone: number = 0;
@@ -105,11 +107,14 @@ struct BookSourcePage {
 
           Text(this.selectionMode ? '取消' : '选择')
             .fontSize(15)
-            .fontColor(this.primaryTextColor())
+            .fontColor(this.isBatchOperating ? this.subTextColor() : this.primaryTextColor())
             .width(52)
             .height(56)
             .textAlign(TextAlign.Center)
             .onClick(() => {
+              if (this.isBatchOperating) {
+                return;
+              }
               if (this.selectionMode) {
                 this.exitSelectionMode();
               } else {
@@ -172,6 +177,9 @@ struct BookSourcePage {
               .width(28)
               .textAlign(TextAlign.Center)
               .onClick(() => {
+                if (this.isBatchOperating) {
+                  return;
+                }
                 this.toggleAllSources();
               })
 
@@ -183,8 +191,11 @@ struct BookSourcePage {
 
             Text(this.isAllSelected() ? '取消全选' : '全选')
               .fontSize(14)
-              .fontColor(this.accentColor())
+              .fontColor(this.isBatchOperating ? this.subTextColor() : this.accentColor())
               .onClick(() => {
+                if (this.isBatchOperating) {
+                  return;
+                }
                 this.toggleAllSources();
               })
           }
@@ -227,8 +238,12 @@ struct BookSourcePage {
                   if (this.selectionMode) {
                     Toggle({ type: ToggleType.Checkbox, isOn: this.isSourceSelected(source.bookSourceUrl) })
                       .selectedColor(this.buttonColor())
+                      .enabled(!this.isBatchOperating)
                       .margin({ right: 12 })
                       .onChange((isOn: boolean) => {
+                        if (this.isBatchOperating) {
+                          return;
+                        }
                         this.setSourceSelected(source.bookSourceUrl, isOn);
                       })
                   }
@@ -296,6 +311,9 @@ struct BookSourcePage {
                 .border({ width: 1, color: this.glassBorderColor() })
                 .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
                 .onClick(() => {
+                  if (this.isBatchOperating) {
+                    return;
+                  }
                   if (this.selectionMode) {
                     this.toggleSourceSelected(source.bookSourceUrl);
                   } else {
@@ -318,7 +336,7 @@ struct BookSourcePage {
             Button('启用')
               .layoutWeight(1)
               .height(42)
-              .enabled(this.selectedSourceUrls.length > 0)
+              .enabled(this.selectedSourceUrls.length > 0 && !this.isBatchOperating)
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
@@ -329,7 +347,7 @@ struct BookSourcePage {
               .layoutWeight(1)
               .height(42)
               .margin({ left: 8 })
-              .enabled(this.selectedSourceUrls.length > 0)
+              .enabled(this.selectedSourceUrls.length > 0 && !this.isBatchOperating)
               .backgroundColor(this.inputColor())
               .fontColor(this.primaryTextColor())
               .onClick(() => {
@@ -340,7 +358,7 @@ struct BookSourcePage {
               .layoutWeight(1)
               .height(42)
               .margin({ left: 8 })
-              .enabled(this.selectedSourceUrls.length > 0)
+              .enabled(this.selectedSourceUrls.length > 0 && !this.isBatchOperating)
               .backgroundColor(this.inputColor())
               .fontColor(this.primaryTextColor())
               .onClick(() => {
@@ -352,7 +370,7 @@ struct BookSourcePage {
               .layoutWeight(1)
               .height(42)
               .margin({ left: 8 })
-              .enabled(this.selectedSourceUrls.length > 0)
+              .enabled(this.selectedSourceUrls.length > 0 && !this.isBatchOperating)
               .backgroundColor(this.inputColor())
               .fontColor(this.primaryTextColor())
               .onClick(() => {
@@ -367,6 +385,7 @@ struct BookSourcePage {
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
       .backgroundColor(this.pageColor())
 
       if (this.showAddDialog) {
@@ -862,10 +881,42 @@ struct BookSourcePage {
         .onClick(() => {
         })
       }
+
+      if (this.isBatchOperating) {
+        Column() {
+          Column() {
+            LoadingProgress()
+              .width(46)
+              .height(46)
+              .color(this.accentColor())
+
+            Text(this.batchOperationText)
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .margin({ top: 14 })
+
+            Text('请稍候')
+              .fontSize(13)
+              .fontColor(this.subTextColor())
+              .margin({ top: 6 })
+          }
+          .width(190)
+          .padding({ left: 24, right: 24, top: 26, bottom: 24 })
+          .backgroundColor(this.cardColor())
+          .borderRadius(12)
+          .alignItems(HorizontalAlign.Center)
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#80000000')
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+        })
+      }
     }
     .width('100%')
     .height('100%')
-    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
@@ -1033,6 +1084,9 @@ struct BookSourcePage {
   }
 
   async applySelectedSourceGroup(): Promise<void> {
+    if (this.isBatchOperating) {
+      return;
+    }
     const selectedSources = this.getSelectedSources();
     if (selectedSources.length === 0) {
       promptAction.showToast({ message: '请先选择书源' });
@@ -1040,6 +1094,8 @@ struct BookSourcePage {
     }
 
     const groupName = this.groupNameInput.trim();
+    this.isBatchOperating = true;
+    this.batchOperationText = '正在设置分组...';
     try {
       const db = AppDatabase.getInstance();
       for (const source of selectedSources) {
@@ -1058,16 +1114,23 @@ struct BookSourcePage {
     } catch (e) {
       console.error('设置书源分组失败:', e);
       promptAction.showToast({ message: '设置分组失败' });
+    } finally {
+      this.isBatchOperating = false;
     }
   }
 
   async batchSetEnabled(enabled: boolean): Promise<void> {
+    if (this.isBatchOperating) {
+      return;
+    }
     const selectedSources = this.getSelectedSources();
     if (selectedSources.length === 0) {
       promptAction.showToast({ message: '请先选择书源' });
       return;
     }
 
+    this.isBatchOperating = true;
+    this.batchOperationText = enabled ? '正在启用书源...' : '正在禁用书源...';
     try {
       const db = AppDatabase.getInstance();
       for (const source of selectedSources) {
@@ -1085,16 +1148,23 @@ struct BookSourcePage {
     } catch (e) {
       console.error('批量更新书源失败:', e);
       promptAction.showToast({ message: '批量操作失败' });
+    } finally {
+      this.isBatchOperating = false;
     }
   }
 
   async batchSetExploreEnabled(enabled: boolean): Promise<void> {
+    if (this.isBatchOperating) {
+      return;
+    }
     const selectedSources = this.getSelectedSources();
     if (selectedSources.length === 0) {
       promptAction.showToast({ message: '请先选择书源' });
       return;
     }
 
+    this.isBatchOperating = true;
+    this.batchOperationText = enabled ? '正在启用发现...' : '正在禁用发现...';
     try {
       const db = AppDatabase.getInstance();
       for (const source of selectedSources) {
@@ -1112,16 +1182,23 @@ struct BookSourcePage {
     } catch (e) {
       console.error('批量更新发现状态失败:', e);
       promptAction.showToast({ message: '批量操作失败' });
+    } finally {
+      this.isBatchOperating = false;
     }
   }
 
   async batchDeleteSelectedSources(): Promise<void> {
+    if (this.isBatchOperating) {
+      return;
+    }
     const selectedUrls = this.selectedSourceUrls.slice();
     if (selectedUrls.length === 0) {
       promptAction.showToast({ message: '请先选择书源' });
       return;
     }
 
+    this.isBatchOperating = true;
+    this.batchOperationText = '正在删除书源...';
     try {
       const db = AppDatabase.getInstance();
       for (const url of selectedUrls) {
@@ -1134,6 +1211,8 @@ struct BookSourcePage {
     } catch (e) {
       console.error('批量删除书源失败:', e);
       promptAction.showToast({ message: '批量删除失败' });
+    } finally {
+      this.isBatchOperating = false;
     }
   }
 
@@ -1227,10 +1306,15 @@ struct BookSourcePage {
   }
 
   async disableFailedCheckedSources(): Promise<void> {
+    if (this.isBatchOperating) {
+      return;
+    }
     if (this.checkBadUrls.length === 0) {
       return;
     }
 
+    this.isBatchOperating = true;
+    this.batchOperationText = '正在禁用书源...';
     try {
       const db = AppDatabase.getInstance();
       for (const url of this.checkBadUrls) {
@@ -1248,6 +1332,8 @@ struct BookSourcePage {
     } catch (e) {
       console.error('禁用异常书源失败:', e);
       promptAction.showToast({ message: '禁用失败' });
+    } finally {
+      this.isBatchOperating = false;
     }
   }
 

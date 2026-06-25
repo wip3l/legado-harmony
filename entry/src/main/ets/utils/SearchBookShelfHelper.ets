@@ -69,11 +69,17 @@ export class SearchBookShelfHelper {
     const db = AppDatabase.getInstance();
     await db.initWithContext(context);
     const shelfBooks = SearchExplorePendingBook.filterShelfBooks(await db.getAllBooks());
-    const shelfKeys = shelfBooks.map((book: Book) => BookIdentity.keyOfBook(book));
+    const shelfKeySet = new Set<string>();
+    for (const book of shelfBooks) {
+      const key = BookIdentity.keyOfBook(book);
+      if (key) {
+        shelfKeySet.add(key);
+      }
+    }
     const keys: string[] = [];
     for (const book of books) {
       const key = SearchBookShelfHelper.keyOf(book);
-      if (key && shelfKeys.includes(key)) {
+      if (key && shelfKeySet.has(key) && !keys.includes(key)) {
         keys.push(key);
       }
     }

@@ -96,7 +96,8 @@ export class BookSourceDataUrlSupport {
     return BookSourceDataUrlSupport.backendHost(source);
   }
 
-  static async search(http: HttpClient, source: BookSource, keyword: string, page: number = 1): Promise<SearchBook[]> {
+  static async search(http: HttpClient, source: BookSource, keyword: string, page: number = 1,
+    maxResponseBytes?: number): Promise<SearchBook[]> {
     if (BookSourceDataUrlSupport.sourceUsesShushan(source)) {
       const host = BookSourceDataUrlSupport.shushanHost(source);
       const secretKey = BookSourceDataUrlSupport.shushanSecretKey(source);
@@ -107,16 +108,16 @@ export class BookSourceDataUrlSupport {
       const selectedSource = query.source || BookSourceDataUrlSupport.shushanSelectedSource(source);
       const path = `/search?login=search&key=${encodeURIComponent(query.keyword)}&page=${page}` +
         (selectedSource ? `&source=${encodeURIComponent(selectedSource)}` : '');
-      const root = await BookSourceDataUrlSupport.requestShushanJson(http, host, path);
+      const root = await BookSourceDataUrlSupport.requestShushanJson(http, host, path, maxResponseBytes);
       const books = root ? BookSourceDataUrlSupport.parseShushanBookList(root, source, host) : [];
       if (books.length > 0 || !selectedSource || query.source) return books;
       const fallbackRoot = await BookSourceDataUrlSupport.requestShushanJson(http, host,
-        `/search?login=search&key=${encodeURIComponent(query.keyword)}&page=${page}`);
+        `/search?login=search&key=${encodeURIComponent(query.keyword)}&page=${page}`, maxResponseBytes);
       return fallbackRoot ? BookSourceDataUrlSupport.parseShushanBookList(fallbackRoot, source, host) : [];
     }
     const host = BookSourceDataUrlSupport.firstHostFromSource(source);
     const url = EncodedSourceUrl.buildSearchUrl(keyword, page);
-    const root = await EncodedSourceUrl.requestJsonForDataUrl(http, url, host);
+    const root = await EncodedSourceUrl.requestJsonForDataUrl(http, url, host, maxResponseBytes);
     if (!root) return [];
     return BookSourceDataUrlSupport.parseBookList(root, source, host);
   }
@@ -654,7 +655,8 @@ export class BookSourceDataUrlSupport {
     }
   }
 
-  private static async requestShushanJson(http: HttpClient, host: string, path: string): Promise<EncodedJsonMap | null> {
+  private static async requestShushanJson(http: HttpClient, host: string, path: string,
+    maxResponseBytes?: number): Promise<EncodedJsonMap | null> {
     const isFullUrl = path.startsWith('http://') || path.startsWith('https://');
     const hosts = isFullUrl ? [''] : BookSourceDataUrlSupport.shushanHostCandidates(host);
     let deniedRoot: EncodedJsonMap | null = null;
@@ -665,7 +667,8 @@ export class BookSourceDataUrlSupport {
         method: 'GET',
         headers: BookSourceDataUrlSupport.shushanHeaders(),
         connectTimeout: SHUSHAN_REQUEST_TIMEOUT_MS,
-        readTimeout: SHUSHAN_REQUEST_TIMEOUT_MS
+        readTimeout: SHUSHAN_REQUEST_TIMEOUT_MS,
+        maxResponseBytes: maxResponseBytes
       });
       const root = BookSourceDataUrlSupport.parseShushanResponse(resp);
       if (root && BookSourceDataUrlSupport.isShushanAccessDenied(root)) {

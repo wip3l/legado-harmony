@@ -44,6 +44,9 @@ struct SearchPage {
   private shelfStatusVersion: number = 0;
   private shelfSyncRunning: boolean = false;
   private pendingShelfSyncBooks: SearchBook[] = [];
+  private searchResultKeySet: Set<string> = new Set<string>();
+  private coordinator: SearchCoordinator | null = null;
+  private searchSessionId: number = 0;
   private readonly NO_SOURCE_GROUPS_SELECTED: string = '__NO_SOURCE_GROUPS_SELECTED__';
 
   aboutToAppear() {
@@ -54,6 +57,13 @@ struct SearchPage {
   onPageShow(): void {
     this.syncBars();
     this.refreshSearchShelfStatus();
+  }
+
+  aboutToDisappear(): void {
+    this.searchSessionId++;
+    this.coordinator?.cancel();
+    this.coordinator = null;
+    this.isSearching = false;
   }
 
   async initPage() {
@@ -286,20 +296,39 @@ struct SearchPage {
     this.showResult = true;
     this.statusMessage = '正在搜索...';
     this.searchResults = [];
+    this.searchResultKeySet.clear();
     this.verificationUrl = '';
 
+    let sessionId = 0;
+    let activeCoordinator: SearchCoordinator | null = null;
     try {
       const db = AppDatabase.getInstance();
+      this.coordinator?.cancel();
+      sessionId = ++this.searchSessionId;
       const coordinator = new SearchCoordinator(SearchExploreSettingsStore.getSearchConcurrency());
+      activeCoordinator = coordinator;
+      this.coordinator = coordinator;
       const keyword = this.keyword.trim();
       const allBooks = await coordinator.search(keyword, (progress: SearchProgress) => {
-        this.searchResults = progress.results;
+        if (sessionId !== this.searchSessionId || this.coordinator !== coordinator) {
+          return;
+        }
+        if (progress.finished) {
+          this.searchResults = progress.results;
+          this.rebuildSearchResultKeys(progress.results);
+        } else if (progress.deltaResults && progress.deltaResults.length > 0) {
+          this.searchResults = this.appendSearchResults(this.searchResults, progress.deltaResults);
+        }
         if (this.showSearchProgress) {
           this.statusMessage = progress.status;
         }
         this.verificationUrl = progress.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
         this.verificationTitle = progress.verificationTitle || AppStorage.get<string>('pendingVerificationTitle') || '网页验证';
-        this.requestSearchShelfStatusSync(progress.results);
+        if (progress.finished) {
+          this.requestSearchShelfStatusSync(this.searchResults);
+        } else if (progress.deltaResults && progress.deltaResults.length > 0) {
+          this.requestSearchShelfStatusSync(progress.deltaResults);
+        }
         if (progress.finished) {
           this.isSearching = false;
         }
@@ -308,10 +337,13 @@ struct SearchPage {
         exactMatchAuthor: this.exactSearchMatchAuthor,
         sourceGroups: this.searchSourceGroups()
       });
+      if (sessionId !== this.searchSessionId || this.coordinator !== coordinator) {
+        return;
+      }
 
       const verifyUrl = this.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
-      this.statusMessage = verifyUrl ? `搜索完成，共找到 ${allBooks.length} 本书；有书源需要网页验证` :
-        allBooks.length > 0 ? `搜索完成，共找到 ${allBooks.length} 本书` : '搜索完成，未找到相关书籍';
+      const resultText = allBooks.length > 0 ? `搜索完成，共找到 ${allBooks.length} 本书` : '搜索完成，未找到相关书籍';
+      this.statusMessage = verifyUrl ? `${resultText}；有书源需要网页验证` : resultText;
       console.log('搜索完成, 总结果:', allBooks.length);
 
       // 保存搜索历史
@@ -319,10 +351,17 @@ struct SearchPage {
       const keywords = await db.getSearchKeywords();
       this.searchHistory = keywords.map(k => k.keyword);
     } catch (e) {
+      if (sessionId !== this.searchSessionId || this.coordinator !== activeCoordinator) {
+        return;
+      }
       console.error('搜索失败:', e);
       this.statusMessage = '搜索失败';
-    } finally {
       this.isSearching = false;
+    } finally {
+      if (sessionId === this.searchSessionId && this.coordinator === activeCoordinator) {
+        this.coordinator = null;
+        this.isSearching = false;
+      }
     }
   }
 
@@ -347,6 +386,24 @@ struct SearchPage {
     this.pendingShelfSyncBooks = books;
     if (!this.shelfSyncRunning) {
       this.drainSearchShelfStatusSync();
+    }
+  }
+
+  appendSearchResults(existing: SearchBook[], incoming: SearchBook[]): SearchBook[] {
+    const merged = existing.slice();
+    for (const book of incoming) {
+      const key = `${book.origin || ''}::${book.bookUrl || ''}`;
+      if (this.searchResultKeySet.has(key)) continue;
+      this.searchResultKeySet.add(key);
+      merged.push(book);
+    }
+    return merged;
+  }
+
+  rebuildSearchResultKeys(books: SearchBook[]): void {
+    this.searchResultKeySet.clear();
+    for (const book of books) {
+      this.searchResultKeySet.add(`${book.origin || ''}::${book.bookUrl || ''}`);
     }
   }
 

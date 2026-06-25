@@ -14,6 +14,7 @@ export interface SearchProgress {
   done: number;
   total: number;
   results: SearchBook[];
+  deltaResults?: SearchBook[];
   finished: boolean;
   status: string;
   needVerification?: boolean;
@@ -24,6 +25,9 @@ export interface SearchProgress {
 export type SearchCallback = (progress: SearchProgress) => void;
 
 const MAX_SEARCH_CONCURRENCY = 32;
+const SEARCH_PROGRESS_EMIT_INTERVAL_MS = 250;
+const MAX_SEARCH_RESPONSE_BYTES = 1024 * 1024;
+const ENABLE_SEARCH_DEBUG_LOG = false;
 
 export interface SearchOptions {
   exactMatch?: boolean;
@@ -65,17 +69,32 @@ export class SearchCoordinator {
     }
 
     const all: SearchBook[] = [];
+    let displayResultCount = 0;
     let done = 0;
     let nextIndex = 0;
+    let lastProgressEmitAt = 0;
+    let currentSourceLabel = '';
+    let pendingDeltaResults: SearchBook[] = [];
     const workerCount = Math.min(this.concurrency, sources.length);
 
-    const emitProgress = (): void => {
+    const emitProgress = (force: boolean = false): void => {
+      const now = Date.now();
+      if (!force && done < sources.length && now - lastProgressEmitAt < SEARCH_PROGRESS_EMIT_INTERVAL_MS) {
+        return;
+      }
+      lastProgressEmitAt = now;
       const verifyUrl = AppStorage.get<string>('pendingVerificationUrl') || '';
+      const finished = done >= sources.length;
+      const deltaResults = finished ? [] : pendingDeltaResults;
+      pendingDeltaResults = [];
       callback({
-        done: done, total: sources.length, results: this.filterAndSortSearchResults(all, keyword, options),
-        finished: done >= sources.length,
-        status: verifyUrl ? `已搜索 ${done}/${sources.length}，找到 ${all.length} 本；有书源需要网页验证` :
-          `已搜索 ${done}/${sources.length}，找到 ${all.length} 本`,
+        done: done, total: sources.length,
+        results: finished ? this.filterAndSortSearchResults(all, keyword, options) : [],
+        deltaResults: deltaResults,
+        finished: finished,
+        status: verifyUrl ?
+          `已搜索 ${done}/${sources.length}，当前：${currentSourceLabel || '准备中'}，找到 ${displayResultCount} 本；有书源需要网页验证` :
+          `已搜索 ${done}/${sources.length}，当前：${currentSourceLabel || '准备中'}，找到 ${displayResultCount} 本`,
         needVerification: verifyUrl.length > 0,
         verificationUrl: verifyUrl,
         verificationTitle: AppStorage.get<string>('pendingVerificationTitle') || '网页验证'
@@ -88,10 +107,16 @@ export class SearchCoordinator {
         nextIndex++;
         if (sourceIndex >= sources.length) break;
 
-        const books = await this.searchOne(sources[sourceIndex], keyword);
+        currentSourceLabel = sources[sourceIndex].bookSourceName || `书源 ${sourceIndex + 1}`;
+        AppStorage.setOrCreate('searchLastSource', currentSourceLabel);
+        AppStorage.setOrCreate('searchLastSourceIndex', sourceIndex + 1);
+        const books = await this.searchOne(sources[sourceIndex], keyword, options);
         if (this.cancelled) break;
+        const displayBooks = this.filterSearchResults(books, keyword, options);
 
         done++;
+        displayResultCount += displayBooks.length;
+        pendingDeltaResults.push(...displayBooks);
         all.push(...books);
         emitProgress();
       }
@@ -102,19 +127,22 @@ export class SearchCoordinator {
       workers.push(runWorker());
     }
     await Promise.all(workers);
+    emitProgress(true);
 
     return this.filterAndSortSearchResults(all, keyword, options);
   }
 
-  private async searchOne(source: BookSource, keyword: string): Promise<SearchBook[]> {
+  private async searchOne(source: BookSource, keyword: string, options: SearchOptions): Promise<SearchBook[]> {
     try {
       if (this.cancelled) return [];
       if (BookSourceDataUrlSupport.sourceUsesGySearch(source)) {
-        return await BookSourceDataUrlSupport.search(this.http, source, keyword);
+        return await BookSourceDataUrlSupport.search(this.http, source, keyword, 1, MAX_SEARCH_RESPONSE_BYTES);
       }
       if (this.cancelled) return [];
       if (!source.searchUrl || !source.searchRule?.bookList || !source.searchRule?.name || !source.searchRule?.bookUrl) {
-        console.warn('[SC] skip source without search rules:', source.bookSourceName);
+        if (ENABLE_SEARCH_DEBUG_LOG) {
+          console.warn('[SC] skip source without search rules:', source.bookSourceName);
+        }
         return [];
       }
       const js = new JsRuntime();
@@ -129,22 +157,25 @@ export class SearchCoordinator {
       if (!urlTemplate && source.searchUrl.includes('gysearch')) {
         urlTemplate = EncodedSourceUrl.buildSearchUrl(keyword);
       }
-      console.log('[SC] search source:', source.bookSourceName, 'url:', urlTemplate);
+      if (ENABLE_SEARCH_DEBUG_LOG) {
+        console.log('[SC] search source:', source.bookSourceName, 'url:', urlTemplate);
+      }
       const resp = EncodedSourceUrl.canHandle(urlTemplate) ?
-        await this.fetchEncodedDataUrl(urlTemplate, source) : await au.fetch(urlTemplate);
+        await this.fetchEncodedDataUrl(urlTemplate, source) : await au.fetch(urlTemplate, MAX_SEARCH_RESPONSE_BYTES);
       if (this.cancelled) return [];
 
-      console.log('[SC] response:', source.bookSourceName, resp.statusCode, 'len:', resp.body?.length || 0);
+      if (ENABLE_SEARCH_DEBUG_LOG) {
+        console.log('[SC] response:', source.bookSourceName, resp.statusCode, 'len:', resp.body?.length || 0);
+      }
       if (VerificationSupport.shouldRequestBrowserVerification(source, resp.body, resp.statusCode, source.searchUrl)) {
         const verifyUrl = VerificationSupport.pickVerificationUrl(source, urlTemplate, source.searchUrl);
         VerificationSupport.requestVerification(verifyUrl, `${source.bookSourceName} 验证`, source);
-        console.warn('[SC] source needs browser verification:', source.bookSourceName, verifyUrl);
+        if (ENABLE_SEARCH_DEBUG_LOG) {
+          console.warn('[SC] source needs browser verification:', source.bookSourceName, verifyUrl);
+        }
         return [];
       }
       if (!resp.success || !resp.body) return [];
-
-      // 防止超大响应导致 OOM
-      if (resp.body.length > 500000) return [];
 
       const baseUrl = BookUrlResolver.effectiveBase(resp, urlTemplate, source.bookSourceUrl);
       const rule = new AnalyzeRule(resp.body, baseUrl);
@@ -156,9 +187,13 @@ export class SearchCoordinator {
       const searchRule = source.searchRule;
       const items = rule.getElements(searchRule.bookList || '');
       if (this.cancelled) return [];
-      console.log('[SC] parsed list:', source.bookSourceName, 'rule:', searchRule.bookList, 'count:', items.length);
+      if (ENABLE_SEARCH_DEBUG_LOG) {
+        console.log('[SC] parsed list:', source.bookSourceName, 'rule:', searchRule.bookList, 'count:', items.length);
+      }
 
       const books: SearchBook[] = [];
+      const seenBookKeys = new Set<string>();
+      const normalizedKeyword = this.normalizeSearchText(keyword);
       const sourceBackendHost = BookSourceDataUrlSupport.sourceBackendHost(source);
       for (const item of items) {
         if (this.cancelled) return [];
@@ -171,12 +206,19 @@ export class SearchCoordinator {
         const book = new SearchBook();
         book.name = ir.analyzeFirst(searchRule.name) || '';
         book.author = ir.analyzeFirst(searchRule.author) || '';
+        book.bookUrl = BookUrlResolver.resolve(ir.analyzeFirst(searchRule.bookUrl), baseUrl);
+        if (options.exactMatch) {
+          if (!this.matchesExactSearch(this.normalizeSearchText(book.name), this.normalizeSearchText(book.author),
+            normalizedKeyword, options)) {
+            continue;
+          }
+        }
+
         book.coverUrl = BookSourceDataUrlSupport.normalizeCoverUrlFromItem(source,
           ir.analyzeFirst(searchRule.coverUrl), item, baseUrl);
         book.intro = ir.analyzeFirst(searchRule.intro) || '';
         book.kind = ir.analyzeFirst(searchRule.kind) || '';
         book.latestChapterTitle = ir.analyzeFirst(searchRule.lastChapter) || '';
-        book.bookUrl = BookUrlResolver.resolve(ir.analyzeFirst(searchRule.bookUrl), baseUrl);
         book.variable = ir.getContext().toJson();
         // 如果解析后仍含 JSONPath 表达式，直接从 item 提取
         if (!book.bookUrl || book.bookUrl.startsWith('$') || book.bookUrl.includes('$._id') || book.bookUrl.includes('$..')) {
@@ -197,7 +239,9 @@ export class SearchCoordinator {
           baseUrl);
         if (responseCoverUrl && this.shouldReplaceCover(book.coverUrl)) {
           book.coverUrl = responseCoverUrl;
-          console.log('[SC] cover from response:', source.bookSourceName, book.name, searchBookId);
+          if (ENABLE_SEARCH_DEBUG_LOG) {
+            console.log('[SC] cover from response:', source.bookSourceName, book.name, searchBookId);
+          }
         }
         book.origin = source.bookSourceUrl;
         book.originName = source.bookSourceName;
@@ -205,21 +249,27 @@ export class SearchCoordinator {
         book.customOrder = source.customOrder;
         book.weight = source.weight;
 
-        if (book.name && book.bookUrl && !books.some(b => b.bookUrl === book.bookUrl && b.origin === book.origin)) {
-          if (books.length === 0) {
+        const bookKey = `${book.origin || ''}::${book.bookUrl || ''}`;
+        if (book.name && book.bookUrl && !seenBookKeys.has(bookKey)) {
+          seenBookKeys.add(bookKey);
+          if (ENABLE_SEARCH_DEBUG_LOG && books.length === 0) {
             console.log('[SC] 第一条结果:', book.name, book.bookUrl, 'from:', source.bookSourceName);
           }
           books.push(book);
         }
       }
       if (books.length === 0 && items.length > 0) {
-        console.warn('[SC] list matched but no valid book:', source.bookSourceName,
-          'nameRule:', searchRule.name, 'urlRule:', searchRule.bookUrl,
-          'firstItem:', items[0].substring(0, Math.min(items[0].length, 240)));
+        if (ENABLE_SEARCH_DEBUG_LOG) {
+          console.warn('[SC] list matched but no valid book:', source.bookSourceName,
+            'nameRule:', searchRule.name, 'urlRule:', searchRule.bookUrl,
+            'firstItem:', items[0].substring(0, Math.min(items[0].length, 240)));
+        }
       }
       return books;
     } catch (e) {
-      console.error('[SC] search failed:', source.bookSourceName, e);
+      if (ENABLE_SEARCH_DEBUG_LOG) {
+        console.error('[SC] search failed:', source.bookSourceName, e);
+      }
       return [];
     }
   }
@@ -291,18 +341,30 @@ export class SearchCoordinator {
   }
 
   private filterAndSortSearchResults(results: SearchBook[], keyword: string, options: SearchOptions): SearchBook[] {
-    const sorted = this.sortSearchResults(results, keyword);
+    const sorted = this.sortSearchResults(this.filterSearchResults(results, keyword, options), keyword);
+    return sorted;
+  }
+
+  private filterSearchResults(results: SearchBook[], keyword: string, options: SearchOptions): SearchBook[] {
     if (!options.exactMatch) {
-      return sorted;
+      return results;
     }
     const normalizedKeyword = this.normalizeSearchText(keyword);
-    return sorted.filter((book: SearchBook) => {
+    return results.filter((book: SearchBook) => {
       if (this.normalizeSearchText(book.name) === normalizedKeyword) {
         return true;
       }
       return options.exactMatchAuthor === true &&
         this.normalizeSearchText(book.author) === normalizedKeyword;
     });
+  }
+
+  private matchesExactSearch(normalizedName: string, normalizedAuthor: string, normalizedKeyword: string,
+    options: SearchOptions): boolean {
+    if (normalizedName === normalizedKeyword) {
+      return true;
+    }
+    return options.exactMatchAuthor === true && normalizedAuthor === normalizedKeyword;
   }
 
   private normalizeSelectedGroups(groups: string[]): string[] {
@@ -534,7 +596,7 @@ export class SearchCoordinator {
 
   private async fetchEncodedDataUrl(url: string, source: BookSource): Promise<{ url: string, statusCode: number, headers: Record<string, string>, body: string, success: boolean, error?: string }> {
     const root = await EncodedSourceUrl.requestJsonForDataUrl(this.http, url,
-      BookSourceDataUrlSupport.sourceBackendHost(source));
+      BookSourceDataUrlSupport.sourceBackendHost(source), MAX_SEARCH_RESPONSE_BYTES);
     if (!root) {
       return { url: url, statusCode: 0, headers: {}, body: '', success: false, error: 'encoded data url request failed' };
     }
