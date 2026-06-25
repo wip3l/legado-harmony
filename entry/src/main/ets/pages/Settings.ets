@@ -2,9 +2,11 @@ import { router, promptAction } from '@kit.ArkUI';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
+import { ReaderThemeHelper, ReaderThemeItem } from '../utils/ReaderThemeHelper';
 import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
+import { ColorCodePicker } from '../components/ColorCodePicker';
 import fs from '@ohos.file.fs';
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -26,7 +28,12 @@ struct SettingsPage {
   @StorageLink('readerFontSize') readerFontSize: number = 20;
   @StorageLink('readerLineHeight') readerLineHeight: number = 12;
   @StorageLink('readerParagraphSpacing') readerParagraphSpacing: number = 10;
-  @StorageLink('readerThemeIndex') readerThemeIndex: number = 0;
+  @StorageLink('readerLightThemeIndex') readerLightThemeIndex: number = 0;
+  @StorageLink('readerDarkThemeIndex') readerDarkThemeIndex: number = 0;
+  @StorageLink('readerLightCustomThemeBackgroundColor') readerLightCustomThemeBackgroundColor: string = ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR;
+  @StorageLink('readerLightCustomThemeTextColor') readerLightCustomThemeTextColor: string = ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR;
+  @StorageLink('readerDarkCustomThemeBackgroundColor') readerDarkCustomThemeBackgroundColor: string = ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR;
+  @StorageLink('readerDarkCustomThemeTextColor') readerDarkCustomThemeTextColor: string = ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR;
   @StorageLink('readerFontFamily') readerFontFamily: string = '';
   @StorageLink('readerFontFilePath') readerFontFilePath: string = '';
   @StorageLink('readerFontSourceName') readerFontSourceName: string = '系统默认';
@@ -47,8 +54,6 @@ struct SettingsPage {
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
 
-  private themes: string[] = ['#F7F1E3', '#FFFFFF', '#E9F3E5', '#1F2329'];
-  private themeNames: string[] = ['米黄', '素白', '青绿', '夜间'];
   @State customFonts: ReaderCustomFontItem[] = [];
   @State previewFontRenderVersion: number = 0;
 
@@ -108,32 +113,7 @@ struct SettingsPage {
           this.paragraphSpacingSlider()
 
           this.sectionTitle('阅读背景')
-          Row() {
-            ForEach(this.themes, (color: string, index: number) => {
-              Column() {
-                Text('')
-                  .width(44)
-                  .height(44)
-                  .borderRadius(22)
-                  .backgroundColor(color)
-                  .border({
-                    width: this.readerThemeIndex === index ? 3 : 1,
-                    color: this.readerThemeIndex === index ? this.accentColor() : '#22000000'
-                  })
-                Text(this.themeNames[index])
-                  .fontSize(12)
-                  .fontColor(this.subTextColor())
-                  .margin({ top: 6 })
-              }
-              .margin({ right: 18 })
-              .onClick(() => {
-                this.setReaderThemeIndex(index);
-              })
-            })
-          }
-          .width('100%')
-          .padding({ left: 16, right: 16, top: 12, bottom: 16 })
-          .backgroundColor(this.cardColor())
+          this.readerThemePanel()
 
           this.sectionTitle('翻页方式')
           this.pageTurnOptions()
@@ -397,7 +377,12 @@ struct SettingsPage {
     this.readerFontSize = settings.fontSize;
     this.readerLineHeight = settings.lineHeight;
     this.readerParagraphSpacing = settings.paragraphSpacing;
-    this.readerThemeIndex = settings.themeIndex;
+    this.readerLightThemeIndex = settings.lightThemeIndex;
+    this.readerDarkThemeIndex = settings.darkThemeIndex;
+    this.readerLightCustomThemeBackgroundColor = settings.lightCustomThemeBackgroundColor;
+    this.readerLightCustomThemeTextColor = settings.lightCustomThemeTextColor;
+    this.readerDarkCustomThemeBackgroundColor = settings.darkCustomThemeBackgroundColor;
+    this.readerDarkCustomThemeTextColor = settings.darkCustomThemeTextColor;
     this.readerPageTurnMode = settings.pageTurnMode;
     this.readerVolumeTurnPage = settings.volumeTurnPage;
     this.readerKeepScreenOn = settings.keepScreenOn;
@@ -697,8 +682,7 @@ struct SettingsPage {
       getContext(this),
       this.readerFontSize,
       this.readerLineHeight,
-      this.readerParagraphSpacing,
-      this.readerThemeIndex
+      this.readerParagraphSpacing
     ).catch((e: Error) => {
       console.warn('保存阅读排版设置失败:', e);
     });
@@ -720,8 +704,48 @@ struct SettingsPage {
   }
 
   setReaderThemeIndex(index: number): void {
-    this.readerThemeIndex = Math.max(0, Math.min(Math.round(index), this.themes.length - 1));
-    this.saveReaderLayoutSettings();
+    const nextIndex = ReaderThemeHelper.normalizeIndex(index);
+    if (this.appDarkMode) {
+      this.readerDarkThemeIndex = nextIndex;
+    } else {
+      this.readerLightThemeIndex = nextIndex;
+    }
+    this.saveReaderThemeSettings();
+  }
+
+  setCurrentThemeBackgroundColor(color: string): void {
+    const value = this.normalizeColor(color, this.currentCustomThemeBackgroundColor());
+    if (this.appDarkMode) {
+      this.readerDarkCustomThemeBackgroundColor = value;
+    } else {
+      this.readerLightCustomThemeBackgroundColor = value;
+    }
+    this.saveReaderThemeSettings();
+  }
+
+  setCurrentThemeTextColor(color: string): void {
+    const value = this.normalizeColor(color, this.currentCustomThemeTextColor());
+    if (this.appDarkMode) {
+      this.readerDarkCustomThemeTextColor = value;
+    } else {
+      this.readerLightCustomThemeTextColor = value;
+    }
+    this.saveReaderThemeSettings();
+  }
+
+  saveReaderThemeSettings(): void {
+    ReaderSettingsStore.saveThemeSettings(
+      getContext(this),
+      this.readerLightThemeIndex,
+      this.readerDarkThemeIndex,
+      this.readerLightCustomThemeBackgroundColor,
+      this.readerLightCustomThemeTextColor,
+      this.readerDarkCustomThemeBackgroundColor,
+      this.readerDarkCustomThemeTextColor,
+      this.appDarkMode
+    ).catch((e: Error) => {
+      console.warn('保存阅读配色设置失败:', e);
+    });
   }
 
   setReaderPageTurnMode(mode: number): void {
@@ -797,23 +821,70 @@ struct SettingsPage {
   }
 
   previewBackgroundColor(): string {
-    return this.themes[this.effectivePreviewThemeIndex()] || this.themes[0];
+    return this.currentReaderTheme().backgroundColor;
   }
 
   previewTitleColor(): string {
-    return this.effectivePreviewThemeIndex() === 3 ? '#E8EAED' : '#1F1F1F';
+    return this.currentReaderTheme().textColor;
   }
 
   previewTextColor(): string {
-    return this.effectivePreviewThemeIndex() === 3 ? '#DADCE0' : '#333333';
+    return this.currentReaderTheme().textColor;
   }
 
   previewSubTextColor(): string {
-    return this.effectivePreviewThemeIndex() === 3 ? '#9AA0A6' : '#776B5F';
+    return this.currentReaderTheme().subTextColor;
   }
 
   effectivePreviewThemeIndex(): number {
-    return this.appDarkMode ? 3 : this.readerThemeIndex;
+    return this.currentReaderThemeIndex();
+  }
+
+  currentReaderThemeIndex(): number {
+    return this.appDarkMode ? this.readerDarkThemeIndex : this.readerLightThemeIndex;
+  }
+
+  currentCustomThemeBackgroundColor(): string {
+    return this.appDarkMode ? this.readerDarkCustomThemeBackgroundColor : this.readerLightCustomThemeBackgroundColor;
+  }
+
+  currentCustomThemeTextColor(): string {
+    return this.appDarkMode ? this.readerDarkCustomThemeTextColor : this.readerLightCustomThemeTextColor;
+  }
+
+  currentReaderThemes(): ReaderThemeItem[] {
+    return ReaderThemeHelper.themes(this.appDarkMode, this.currentCustomThemeBackgroundColor(), this.currentCustomThemeTextColor());
+  }
+
+  currentReaderTheme(): ReaderThemeItem {
+    return ReaderThemeHelper.themeAt(
+      this.appDarkMode,
+      this.currentReaderThemeIndex(),
+      this.currentCustomThemeBackgroundColor(),
+      this.currentCustomThemeTextColor()
+    );
+  }
+
+  isDarkHexColor(color: string): boolean {
+    const normalized = (color || '').trim();
+    if (!/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+      return this.appDarkMode;
+    }
+    const red = parseInt(normalized.substring(1, 3), 16);
+    const green = parseInt(normalized.substring(3, 5), 16);
+    const blue = parseInt(normalized.substring(5, 7), 16);
+    return red * 0.299 + green * 0.587 + blue * 0.114 < 128;
+  }
+
+  normalizeColor(color: string, fallback: string): string {
+    const trimmed = (color || '').trim();
+    const normalized = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+    if (/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+      return normalized.toUpperCase();
+    }
+    const fallbackTrimmed = (fallback || '').trim();
+    const normalizedFallback = fallbackTrimmed.startsWith('#') ? fallbackTrimmed : `#${fallbackTrimmed}`;
+    return /^#[0-9a-fA-F]{6}$/.test(normalizedFallback) ? normalizedFallback.toUpperCase() : '#333333';
   }
 
   syncBars(): void {
@@ -988,6 +1059,67 @@ struct SettingsPage {
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .backgroundColor(this.cardColor())
+  }
+
+  @Builder
+  readerThemePanel() {
+    Column({ space: 14 }) {
+      Row({ space: 10 }) {
+        ForEach(this.currentReaderThemes(), (theme: ReaderThemeItem, index: number) => {
+          Column({ space: 6 }) {
+            Text(index === ReaderThemeHelper.CUSTOM_THEME_INDEX ? '自' : '')
+              .fontSize(14)
+              .fontColor(theme.textColor)
+              .textAlign(TextAlign.Center)
+              .width(44)
+              .height(44)
+              .borderRadius(22)
+              .backgroundColor(theme.backgroundColor)
+              .border({
+                width: this.currentReaderThemeIndex() === index ? 3 : 1,
+                color: this.currentReaderThemeIndex() === index ? this.accentColor() : '#22000000'
+              })
+            Text(theme.name)
+              .fontSize(12)
+              .fontColor(this.subTextColor())
+          }
+          .margin({ right: 18 })
+          .onClick(() => {
+            this.setReaderThemeIndex(index);
+          })
+        }, (theme: ReaderThemeItem) => `${theme.name}_${theme.backgroundColor}_${theme.textColor}`)
+      }
+      .width('100%')
+
+      if (this.currentReaderThemeIndex() === ReaderThemeHelper.CUSTOM_THEME_INDEX) {
+        Column({ space: 10 }) {
+          ColorCodePicker({
+            value: this.currentCustomThemeBackgroundColor(),
+            placeholder: this.currentCustomThemeBackgroundColor(),
+            appDarkMode: this.appDarkMode,
+            accentColor: this.accentColor(),
+            optionTitle: '背景颜色',
+            onColorChange: (value: string) => {
+              this.setCurrentThemeBackgroundColor(value);
+            }
+          })
+          ColorCodePicker({
+            value: this.currentCustomThemeTextColor(),
+            placeholder: this.currentCustomThemeTextColor(),
+            appDarkMode: this.appDarkMode,
+            accentColor: this.accentColor(),
+            optionTitle: '文字颜色',
+            onColorChange: (value: string) => {
+              this.setCurrentThemeTextColor(value);
+            }
+          })
+        }
+        .width('100%')
+      }
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 12, bottom: 16 })
     .backgroundColor(this.cardColor())
   }
 

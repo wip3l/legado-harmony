@@ -1,11 +1,18 @@
 import { Context } from '@kit.AbilityKit';
 import preferences from '@ohos.data.preferences';
+import { ReaderThemeHelper } from './ReaderThemeHelper';
 
 export class ReaderSettings {
   fontSize: number = 20;
   lineHeight: number = 12;
   paragraphSpacing: number = 10;
   themeIndex: number = 0;
+  lightThemeIndex: number = 0;
+  darkThemeIndex: number = 0;
+  lightCustomThemeBackgroundColor: string = ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR;
+  lightCustomThemeTextColor: string = ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR;
+  darkCustomThemeBackgroundColor: string = ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR;
+  darkCustomThemeTextColor: string = ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR;
   pageTurnMode: number = 1;
   volumeTurnPage: boolean = false;
   keepScreenOn: boolean = true;
@@ -38,6 +45,12 @@ export class ReaderSettingsStore {
   static readonly KEY_LINE_HEIGHT_MODE: string = 'readerLineHeightMode';
   static readonly KEY_PARAGRAPH_SPACING: string = 'readerParagraphSpacing';
   static readonly KEY_THEME_INDEX: string = 'readerThemeIndex';
+  static readonly KEY_LIGHT_THEME_INDEX: string = 'readerLightThemeIndex';
+  static readonly KEY_DARK_THEME_INDEX: string = 'readerDarkThemeIndex';
+  static readonly KEY_LIGHT_CUSTOM_THEME_BACKGROUND_COLOR: string = 'readerLightCustomThemeBackgroundColor';
+  static readonly KEY_LIGHT_CUSTOM_THEME_TEXT_COLOR: string = 'readerLightCustomThemeTextColor';
+  static readonly KEY_DARK_CUSTOM_THEME_BACKGROUND_COLOR: string = 'readerDarkCustomThemeBackgroundColor';
+  static readonly KEY_DARK_CUSTOM_THEME_TEXT_COLOR: string = 'readerDarkCustomThemeTextColor';
   static readonly KEY_PAGE_TURN_MODE: string = 'readerPageTurnMode';
   static readonly KEY_VOLUME_TURN_PAGE: string = 'readerVolumeTurnPage';
   static readonly KEY_KEEP_SCREEN_ON: string = 'readerKeepScreenOn';
@@ -91,11 +104,56 @@ export class ReaderSettingsStore {
       10,
       'paragraphSpacing'
     );
-    settings.themeIndex = await ReaderSettingsStore.getNumber(
+    const legacyThemeIndex = await ReaderSettingsStore.getNumber(
       store,
       ReaderSettingsStore.KEY_THEME_INDEX,
       0,
       'themeIndex'
+    );
+    settings.themeIndex = legacyThemeIndex;
+    settings.lightThemeIndex = await ReaderSettingsStore.getNumber(
+      store,
+      ReaderSettingsStore.KEY_LIGHT_THEME_INDEX,
+      legacyThemeIndex,
+      'themeIndex'
+    );
+    settings.darkThemeIndex = await ReaderSettingsStore.getNumber(
+      store,
+      ReaderSettingsStore.KEY_DARK_THEME_INDEX,
+      legacyThemeIndex,
+      'themeIndex'
+    );
+    settings.lightCustomThemeBackgroundColor = ReaderSettingsStore.normalizeColor(
+      await ReaderSettingsStore.getString(
+        store,
+        ReaderSettingsStore.KEY_LIGHT_CUSTOM_THEME_BACKGROUND_COLOR,
+        ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR
+      ),
+      ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR
+    );
+    settings.lightCustomThemeTextColor = ReaderSettingsStore.normalizeColor(
+      await ReaderSettingsStore.getString(
+        store,
+        ReaderSettingsStore.KEY_LIGHT_CUSTOM_THEME_TEXT_COLOR,
+        ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR
+      ),
+      ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR
+    );
+    settings.darkCustomThemeBackgroundColor = ReaderSettingsStore.normalizeColor(
+      await ReaderSettingsStore.getString(
+        store,
+        ReaderSettingsStore.KEY_DARK_CUSTOM_THEME_BACKGROUND_COLOR,
+        ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR
+      ),
+      ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR
+    );
+    settings.darkCustomThemeTextColor = ReaderSettingsStore.normalizeColor(
+      await ReaderSettingsStore.getString(
+        store,
+        ReaderSettingsStore.KEY_DARK_CUSTOM_THEME_TEXT_COLOR,
+        ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR
+      ),
+      ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR
     );
     settings.pageTurnMode = await ReaderSettingsStore.getNumber(
       store,
@@ -157,13 +215,12 @@ export class ReaderSettingsStore {
     fontSize: number,
     lineHeight: number,
     paragraphSpacing: number,
-    themeIndex: number
+    _themeIndex?: number
   ): Promise<void> {
     const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
     settings.fontSize = ReaderSettingsStore.normalizeFontSize(fontSize);
     settings.lineHeight = ReaderSettingsStore.normalizeLineHeight(lineHeight);
     settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(paragraphSpacing);
-    settings.themeIndex = ReaderSettingsStore.normalizeThemeIndex(themeIndex);
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
     ReaderSettingsStore.applyLayoutToStorage(settings);
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
@@ -171,7 +228,55 @@ export class ReaderSettingsStore {
     await store.put(ReaderSettingsStore.KEY_LINE_HEIGHT, settings.lineHeight);
     await store.put(ReaderSettingsStore.KEY_LINE_HEIGHT_MODE, 'spacing');
     await store.put(ReaderSettingsStore.KEY_PARAGRAPH_SPACING, settings.paragraphSpacing);
+    await store.flush();
+  }
+
+  static async saveThemeSettings(
+    context: Context,
+    lightThemeIndex: number,
+    darkThemeIndex: number,
+    lightCustomThemeBackgroundColor: string,
+    lightCustomThemeTextColor: string,
+    darkCustomThemeBackgroundColor: string,
+    darkCustomThemeTextColor: string,
+    currentDarkMode: boolean
+  ): Promise<void> {
+    const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
+    settings.lightThemeIndex = ReaderSettingsStore.normalizeThemeIndex(lightThemeIndex);
+    settings.darkThemeIndex = ReaderSettingsStore.normalizeThemeIndex(darkThemeIndex);
+    settings.lightCustomThemeBackgroundColor = ReaderSettingsStore.normalizeColor(
+      lightCustomThemeBackgroundColor,
+      ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR
+    );
+    settings.lightCustomThemeTextColor = ReaderSettingsStore.normalizeColor(
+      lightCustomThemeTextColor,
+      ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR
+    );
+    settings.darkCustomThemeBackgroundColor = ReaderSettingsStore.normalizeColor(
+      darkCustomThemeBackgroundColor,
+      ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR
+    );
+    settings.darkCustomThemeTextColor = ReaderSettingsStore.normalizeColor(
+      darkCustomThemeTextColor,
+      ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR
+    );
+    settings.themeIndex = currentDarkMode ? settings.darkThemeIndex : settings.lightThemeIndex;
+    ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
+    ReaderSettingsStore.applyThemeToStorage(settings);
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
     await store.put(ReaderSettingsStore.KEY_THEME_INDEX, settings.themeIndex);
+    await store.put(ReaderSettingsStore.KEY_LIGHT_THEME_INDEX, settings.lightThemeIndex);
+    await store.put(ReaderSettingsStore.KEY_DARK_THEME_INDEX, settings.darkThemeIndex);
+    await store.put(
+      ReaderSettingsStore.KEY_LIGHT_CUSTOM_THEME_BACKGROUND_COLOR,
+      settings.lightCustomThemeBackgroundColor
+    );
+    await store.put(ReaderSettingsStore.KEY_LIGHT_CUSTOM_THEME_TEXT_COLOR, settings.lightCustomThemeTextColor);
+    await store.put(
+      ReaderSettingsStore.KEY_DARK_CUSTOM_THEME_BACKGROUND_COLOR,
+      settings.darkCustomThemeBackgroundColor
+    );
+    await store.put(ReaderSettingsStore.KEY_DARK_CUSTOM_THEME_TEXT_COLOR, settings.darkCustomThemeTextColor);
     await store.flush();
   }
 
@@ -287,6 +392,7 @@ export class ReaderSettingsStore {
     const normalized = ReaderSettingsStore.clone(settings);
     ReaderSettingsStore.cachedSettings = normalized;
     ReaderSettingsStore.applyLayoutToStorage(normalized);
+    ReaderSettingsStore.applyThemeToStorage(normalized);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PAGE_TURN_MODE, normalized.pageTurnMode);
     ReaderSettingsStore.applyInteractionToStorage(normalized);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_ENABLED, normalized.preloadEnabled);
@@ -326,7 +432,28 @@ export class ReaderSettingsStore {
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_LINE_HEIGHT, settings.lineHeight);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_LINE_HEIGHT_MODE, 'spacing');
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PARAGRAPH_SPACING, settings.paragraphSpacing);
+  }
+
+  private static applyThemeToStorage(settings: ReaderSettings): void {
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_THEME_INDEX, settings.themeIndex);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_LIGHT_THEME_INDEX, settings.lightThemeIndex);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_DARK_THEME_INDEX, settings.darkThemeIndex);
+    AppStorage.setOrCreate(
+      ReaderSettingsStore.KEY_LIGHT_CUSTOM_THEME_BACKGROUND_COLOR,
+      settings.lightCustomThemeBackgroundColor
+    );
+    AppStorage.setOrCreate(
+      ReaderSettingsStore.KEY_LIGHT_CUSTOM_THEME_TEXT_COLOR,
+      settings.lightCustomThemeTextColor
+    );
+    AppStorage.setOrCreate(
+      ReaderSettingsStore.KEY_DARK_CUSTOM_THEME_BACKGROUND_COLOR,
+      settings.darkCustomThemeBackgroundColor
+    );
+    AppStorage.setOrCreate(
+      ReaderSettingsStore.KEY_DARK_CUSTOM_THEME_TEXT_COLOR,
+      settings.darkCustomThemeTextColor
+    );
   }
 
   private static async getNumber(
@@ -440,8 +567,18 @@ export class ReaderSettingsStore {
   }
 
   private static normalizeThemeIndex(themeIndex: number): number {
-    const value = Math.round(themeIndex);
-    return value >= 0 && value <= 3 ? value : 0;
+    return ReaderThemeHelper.normalizeIndex(themeIndex);
+  }
+
+  private static normalizeColor(color: string, fallback: string): string {
+    const trimmed = (color || '').trim();
+    const normalized = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+    if (/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+      return normalized.toUpperCase();
+    }
+    const fallbackTrimmed = (fallback || '').trim();
+    const normalizedFallback = fallbackTrimmed.startsWith('#') ? fallbackTrimmed : `#${fallbackTrimmed}`;
+    return /^#[0-9a-fA-F]{6}$/.test(normalizedFallback) ? normalizedFallback.toUpperCase() : '#333333';
   }
 
   private static normalizePageTurnMode(mode: number): number {
@@ -467,6 +604,24 @@ export class ReaderSettingsStore {
     settings.lineHeight = ReaderSettingsStore.normalizeLineHeight(source.lineHeight);
     settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(source.paragraphSpacing);
     settings.themeIndex = ReaderSettingsStore.normalizeThemeIndex(source.themeIndex);
+    settings.lightThemeIndex = ReaderSettingsStore.normalizeThemeIndex(source.lightThemeIndex);
+    settings.darkThemeIndex = ReaderSettingsStore.normalizeThemeIndex(source.darkThemeIndex);
+    settings.lightCustomThemeBackgroundColor = ReaderSettingsStore.normalizeColor(
+      source.lightCustomThemeBackgroundColor,
+      ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR
+    );
+    settings.lightCustomThemeTextColor = ReaderSettingsStore.normalizeColor(
+      source.lightCustomThemeTextColor,
+      ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR
+    );
+    settings.darkCustomThemeBackgroundColor = ReaderSettingsStore.normalizeColor(
+      source.darkCustomThemeBackgroundColor,
+      ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR
+    );
+    settings.darkCustomThemeTextColor = ReaderSettingsStore.normalizeColor(
+      source.darkCustomThemeTextColor,
+      ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR
+    );
     settings.pageTurnMode = ReaderSettingsStore.normalizePageTurnMode(source.pageTurnMode);
     settings.volumeTurnPage = source.volumeTurnPage;
     settings.keepScreenOn = source.keepScreenOn;
@@ -506,8 +661,31 @@ export class ReaderSettingsStore {
     settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PARAGRAPH_SPACING) ?? 10
     );
-    settings.themeIndex = ReaderSettingsStore.normalizeThemeIndex(
+    const legacyThemeIndex = ReaderSettingsStore.normalizeThemeIndex(
       AppStorage.get<number>(ReaderSettingsStore.KEY_THEME_INDEX) ?? 0
+    );
+    settings.themeIndex = legacyThemeIndex;
+    settings.lightThemeIndex = ReaderSettingsStore.normalizeThemeIndex(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_LIGHT_THEME_INDEX) ?? legacyThemeIndex
+    );
+    settings.darkThemeIndex = ReaderSettingsStore.normalizeThemeIndex(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_DARK_THEME_INDEX) ?? legacyThemeIndex
+    );
+    settings.lightCustomThemeBackgroundColor = ReaderSettingsStore.normalizeColor(
+      AppStorage.get<string>(ReaderSettingsStore.KEY_LIGHT_CUSTOM_THEME_BACKGROUND_COLOR) || '',
+      ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR
+    );
+    settings.lightCustomThemeTextColor = ReaderSettingsStore.normalizeColor(
+      AppStorage.get<string>(ReaderSettingsStore.KEY_LIGHT_CUSTOM_THEME_TEXT_COLOR) || '',
+      ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR
+    );
+    settings.darkCustomThemeBackgroundColor = ReaderSettingsStore.normalizeColor(
+      AppStorage.get<string>(ReaderSettingsStore.KEY_DARK_CUSTOM_THEME_BACKGROUND_COLOR) || '',
+      ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR
+    );
+    settings.darkCustomThemeTextColor = ReaderSettingsStore.normalizeColor(
+      AppStorage.get<string>(ReaderSettingsStore.KEY_DARK_CUSTOM_THEME_TEXT_COLOR) || '',
+      ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR
     );
     settings.pageTurnMode = ReaderSettingsStore.normalizePageTurnMode(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PAGE_TURN_MODE) ?? 1
