@@ -596,6 +596,20 @@ function runCapabilitySmoke(modules) {
     pass: sourceRule.analyzeFirst("<js>cache.putMemory('aid','42');cache.getFromMemory('aid');</js>") === '42' &&
       ctx.get('cache.aid') === '42'
   });
+  const scriptEngineRule = new AnalyzeRule('{"name":"斗破苍穹","id":7}', 'https://example.com', ctx);
+  checks.push({
+    name: 'ScriptEngine JSON.parse chain',
+    pass: scriptEngineRule.analyzeFirst("<js>var data=JSON.parse(result); data.name + '-' + data.id;</js>") === '斗破苍穹-7'
+  });
+  checks.push({
+    name: 'ScriptEngine function and branch',
+    pass: scriptEngineRule.analyzeFirst("<js>function pick(v){ if(v.length>2){ return v.substring(0,2); } return v; } pick('斗破苍穹');</js>") === '斗破'
+  });
+  checks.push({
+    name: 'ScriptEngine replace match chain',
+    pass: new AnalyzeRule('abc123', 'https://example.com', ctx)
+      .analyzeFirst("text@js:result.replace(/\\d+/g,'').toUpperCase()") === 'ABC'
+  });
   const tripleDesRule = new AnalyzeRule('', '');
   const tripleDesPlain = '兼容3DES';
   const tripleDesExpr = `java.desEncodeToBase64String('${tripleDesPlain}','OW84U8Eerdb99rtsTXWSILDO','DESede/CBC/PKCS5Padding','SK8bncVu')`;
