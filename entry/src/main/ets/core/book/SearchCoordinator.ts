@@ -9,6 +9,7 @@ import { VerificationSupport } from '../http/VerificationSupport';
 import { EncodedSourceUrl } from './EncodedSourceUrl';
 import { BookSourceDataUrlSupport } from './BookSourceDataUrlSupport';
 import { BookUrlResolver } from './BookUrlResolver';
+import { BookFieldSanitizer } from '../../utils/BookFieldSanitizer';
 
 export interface SearchProgress {
   done: number;
@@ -58,13 +59,20 @@ export class SearchCoordinator {
   async search(keyword: string, callback: SearchCallback, options: SearchOptions = {}): Promise<SearchBook[]> {
     this.cancelled = false;
     VerificationSupport.clearVerification();
+    const safeCallback = (progress: SearchProgress): void => {
+      try {
+        callback(progress);
+      } catch (e) {
+        console.error('[SC] search progress callback failed:', e);
+      }
+    };
     const enabledSources = await appDb.getEnabledBookSources();
     const selectedGroups = this.normalizeSelectedGroups(options.sourceGroups || []);
     const sources = selectedGroups.length > 0 ?
       enabledSources.filter((source: BookSource) => selectedGroups.includes(this.normalizeGroupName(source.bookSourceGroup))) :
       enabledSources;
     if (sources.length === 0) {
-      callback({ done: 0, total: 0, results: [], finished: true, status: '没有符合设置的启用书源' });
+      safeCallback({ done: 0, total: 0, results: [], finished: true, status: '没有符合设置的启用书源' });
       return [];
     }
 
@@ -87,7 +95,7 @@ export class SearchCoordinator {
       const finished = done >= sources.length;
       const deltaResults = finished ? [] : pendingDeltaResults;
       pendingDeltaResults = [];
-      callback({
+      safeCallback({
         done: done, total: sources.length,
         results: finished ? this.filterAndSortSearchResults(all, keyword, options) : [],
         deltaResults: deltaResults,
@@ -136,7 +144,8 @@ export class SearchCoordinator {
     try {
       if (this.cancelled) return [];
       if (BookSourceDataUrlSupport.sourceUsesGySearch(source)) {
-        return await BookSourceDataUrlSupport.search(this.http, source, keyword, 1, MAX_SEARCH_RESPONSE_BYTES);
+        const books = await BookSourceDataUrlSupport.search(this.http, source, keyword, 1, MAX_SEARCH_RESPONSE_BYTES);
+        return this.sanitizeSearchBooks(books);
       }
       if (this.cancelled) return [];
       if (!source.searchUrl || !source.searchRule?.bookList || !source.searchRule?.name || !source.searchRule?.bookUrl) {
@@ -234,6 +243,11 @@ export class SearchCoordinator {
           }
           book.bookUrl = BookUrlResolver.resolve(book.bookUrl, baseUrl);
         }
+        if (!book.bookUrl || /["']\s*\+\s*result|\bresult\s*\+\s*["']|@js:/.test(book.bookUrl) ||
+          (/result/.test(searchRule.bookUrl || '') && /\+/.test(searchRule.bookUrl || ''))) {
+          const repaired = this.repairResultConcatUrl(searchRule.bookUrl || '', ir, baseUrl);
+          if (repaired) book.bookUrl = repaired;
+        }
         const searchBookId = this.extractBookId(ir, item, book.bookUrl);
         const responseCoverUrl = BookSourceDataUrlSupport.normalizeCoverUrlFromResponse(source, resp.body, searchBookId,
           baseUrl);
@@ -249,6 +263,7 @@ export class SearchCoordinator {
         book.customOrder = source.customOrder;
         book.weight = source.weight;
 
+        this.sanitizeSearchBook(book);
         const bookKey = `${book.origin || ''}::${book.bookUrl || ''}`;
         if (book.name && book.bookUrl && !seenBookKeys.has(bookKey)) {
           seenBookKeys.add(bookKey);
@@ -294,6 +309,79 @@ export class SearchCoordinator {
       return a.index - b.index;
     });
     return scored.map((item: ScoredSearchBook): SearchBook => item.book);
+  }
+
+  private sanitizeSearchBook(book: SearchBook): void {
+    book.name = this.cleanTextField(book.name, 120);
+    book.author = this.cleanTextField(book.author, 120);
+    book.kind = this.cleanTextField(book.kind, 240);
+    book.intro = this.cleanTextField(book.intro, 1200);
+    book.latestChapterTitle = this.cleanTextField(book.latestChapterTitle, 160);
+    book.wordCount = this.cleanTextField(book.wordCount, 80);
+    book.bookUrl = this.cleanUrlField(book.bookUrl, 2048);
+    book.tocUrl = this.cleanUrlField(book.tocUrl, 2048);
+    book.coverUrl = this.cleanUrlField(book.coverUrl, 4096);
+    book.origin = this.cleanUrlField(book.origin, 2048);
+    book.originName = this.cleanTextField(book.originName, 160);
+    book.bookSourceComment = this.cleanTextField(book.bookSourceComment, 1200);
+    book.variable = this.cleanJsonField(book.variable, 8192);
+  }
+
+  private sanitizeSearchBooks(books: SearchBook[]): SearchBook[] {
+    const cleaned: SearchBook[] = [];
+    const seen = new Set<string>();
+    for (const book of books || []) {
+      this.sanitizeSearchBook(book);
+      if (!book.name || !book.bookUrl) continue;
+      const key = `${book.origin || ''}::${book.bookUrl || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      cleaned.push(book);
+    }
+    return cleaned;
+  }
+
+  private cleanTextField(value: string, maxLength: number): string {
+    const text = BookFieldSanitizer.clean(this.safeString(value));
+    return text.length > maxLength ? text.substring(0, maxLength) : text;
+  }
+
+  private cleanUrlField(value: string, maxLength: number): string {
+    const text = this.safeString(value).trim();
+    if (!text || BookFieldSanitizer.isUnresolved(text)) return '';
+    return text.length > maxLength ? text.substring(0, maxLength) : text;
+  }
+
+  private cleanJsonField(value: string, maxLength: number): string {
+    const text = this.safeString(value).trim();
+    return text.length > maxLength ? text.substring(0, maxLength) : text;
+  }
+
+  private safeString(value: Object | string | null | undefined): string {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    try {
+      return JSON.stringify(value);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  private repairResultConcatUrl(rule: string, ir: AnalyzeRule, baseUrl: string): string {
+    const jsIndex = String(rule || '').indexOf('@js:');
+    if (jsIndex < 0) return '';
+    const baseExpr = String(rule || '').substring(0, jsIndex).trim();
+    const jsExpr = String(rule || '').substring(jsIndex + 4).trim();
+    const baseValue = ir.analyzeFirst(baseExpr);
+    if (!baseValue) return '';
+    const prefixMatch = jsExpr.match(/^["']([\s\S]*?)["']\s*\+\s*result(?:\s*\+\s*["']([\s\S]*?)["'])?$/);
+    const suffixMatch = jsExpr.match(/^result\s*\+\s*["']([\s\S]*?)["']$/);
+    const headMatch = jsExpr.match(/^["']([\s\S]*?)["']\s*\+\s*result$/);
+    if (prefixMatch) return BookUrlResolver.resolve(prefixMatch[1] + baseValue + (prefixMatch[2] || ''), baseUrl);
+    if (suffixMatch) return BookUrlResolver.resolve(baseValue + suffixMatch[1], baseUrl);
+    if (headMatch) return BookUrlResolver.resolve(headMatch[1] + baseValue, baseUrl);
+    return '';
   }
 
   private searchRelevanceScore(book: SearchBook, normalizedKeyword: string): number {

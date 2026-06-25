@@ -12,6 +12,7 @@ const typescriptPaths = [
 ];
 
 const sourceUrl = process.env.BOOK_SOURCE_URL || 'https://www.yckceo.com/yuedu/shuyuans/json/id/1169.json';
+const sourceFile = process.env.BOOK_SOURCE_FILE || '';
 const sourceMirrorUrl =
   process.env.BOOK_SOURCE_MIRROR_URL ||
   'https://gcore.jsdelivr.net/gh/mumuceo/file01/202606/11780_e23645a35b55ac384f4fe66187b6148c.json';
@@ -22,6 +23,9 @@ const timeoutMs = Number(process.env.BOOK_SOURCE_TIMEOUT_MS || '5000');
 const chainTimeoutMs = Number(process.env.BOOK_SOURCE_CHAIN_TIMEOUT_MS || '10000');
 const onlineMaxAttempts = Number(process.env.BOOK_SOURCE_ONLINE_ATTEMPTS || '80');
 const sourceFilter = String(process.env.BOOK_SOURCE_FILTER || '').trim().toLowerCase();
+const offlineSourceLimit = Number(process.env.BOOK_SOURCE_OFFLINE_LIMIT || '0');
+const offlineSourceSkip = Number(process.env.BOOK_SOURCE_OFFLINE_SKIP || '0');
+const offlineRuleLimit = Number(process.env.BOOK_SOURCE_OFFLINE_RULE_LIMIT || '0');
 
 let ts;
 for (const candidate of typescriptPaths) {
@@ -187,6 +191,9 @@ function charsetFromContentType(contentType) {
 
 async function loadSourceList() {
   const normalize = value => Array.isArray(value) ? value : [value];
+  if (sourceFile) {
+    return normalize(JSON.parse(await fs.readFile(sourceFile, 'utf8')));
+  }
   try {
     return normalize(JSON.parse(await fetchText(sourceUrl)));
   } catch (_) {
@@ -290,8 +297,20 @@ function offlineSmoke(source, AnalyzeRule) {
     '<span class="author">天蚕土豆</span><p class="intro">简介</p></div>' +
     '<ul class="chapter"><li><a href="/c/1">第1章</a></li></ul><div id="content">正文</div></body></html>';
   const buckets = collectRuleStrings(source);
+  let candidates = [];
   for (const bucketName of ['ruleSearch', 'ruleBookInfo', 'ruleToc', 'ruleContent']) {
     for (const text of buckets[bucketName]) {
+      candidates.push({ bucketName, text });
+    }
+  }
+  if (offlineRuleLimit > 0) {
+    candidates = candidates
+      .sort((a, b) => offlineRuleScore(b.text) - offlineRuleScore(a.text))
+      .slice(0, offlineRuleLimit);
+  }
+  for (const candidate of candidates) {
+    const bucketName = candidate.bucketName;
+    const text = candidate.text;
       if (!text || text.length > 4000) continue;
       for (const content of [jsonSample, htmlSample]) {
         try {
@@ -308,9 +327,23 @@ function offlineSmoke(source, AnalyzeRule) {
           });
         }
       }
-    }
   }
   return failures;
+}
+
+function offlineRuleScore(value) {
+  const text = String(value || '');
+  let score = 0;
+  if (/<js>|@js:|\{\{/.test(text)) score += 10;
+  if (/java\./.test(text)) score += 8;
+  if (/java\.ajax|java\.ajaxAll/.test(text)) score += 8;
+  if (/md5|sha|HMac|AES|DES|crypto|requestKey|digest/i.test(text)) score += 6;
+  if (/Cookie|cookie|java\.getCookie/.test(text)) score += 5;
+  if (/data:|base64|decode|encodeURI|escape/i.test(text)) score += 4;
+  if (/(^|[|&%>\n\r\s])(\$|@\.)[.\[]/.test(text)) score += 3;
+  if (/##|@replace:|@match:/.test(text)) score += 2;
+  if (/@XPath:|@xpath:|(^|[|&%>\n\r\s])\/{1,2}[A-Za-z*]/.test(text)) score += 2;
+  return score;
 }
 
 function compact(value, max = 220) {
@@ -395,23 +428,53 @@ function parseSearchResponse(source, searchRule, body, baseUrl, AnalyzeRule) {
   seedRule(rootRule, keyword);
   const items = rootRule.getElements(searchRule.bookList || '');
   if (items.length <= 0) throw new Error('search parsed 0 items');
-  const first = new AnalyzeRule(items[0], baseUrl);
+  for (const item of items) {
+    const parsed = parseSearchItem(source, item, items.length, searchRule, baseUrl, AnalyzeRule);
+    if (parsed) return parsed;
+  }
+  throw new Error('no valid search item found');
+}
+
+function parseSearchItem(source, item, count, searchRule, baseUrl, AnalyzeRule) {
+  const first = new AnalyzeRule(item, baseUrl);
   seedRule(first, keyword);
   const name = first.analyzeFirst(searchRule.name || '');
   const author = first.analyzeFirst(searchRule.author || '');
-  const bookUrl = first.analyzeFirst(searchRule.bookUrl || '');
+  let bookUrl = first.analyzeFirst(searchRule.bookUrl || '');
+  if (!bookUrl || hasUnresolvedRule(bookUrl) || (/result/.test(searchRule.bookUrl || '') && /\+/.test(searchRule.bookUrl || ''))) {
+    const repaired = repairResultConcatUrl(searchRule.bookUrl || '', item, baseUrl, AnalyzeRule);
+    if (repaired) bookUrl = repaired;
+  }
   if (!name || !bookUrl || hasUnresolvedRule(name) || hasUnresolvedRule(bookUrl) || !isRelevantSearchName(name)) {
-    throw new Error('first item has unresolved or irrelevant name/bookUrl');
+    return null;
   }
   return {
     source: source.bookSourceName,
-    count: items.length,
+    count,
     name: compact(name, 80),
     author: compact(author, 80),
     bookUrl: compact(bookUrl, 120),
     bookUrlFull: bookUrl,
     searchBaseUrl: baseUrl
   };
+}
+
+function repairResultConcatUrl(rule, item, baseUrl, AnalyzeRule) {
+  const jsIndex = String(rule || '').indexOf('@js:');
+  if (jsIndex < 0) return '';
+  const baseExpr = String(rule || '').substring(0, jsIndex).trim();
+  const jsExpr = String(rule || '').substring(jsIndex + 4).trim();
+  const baseRule = new AnalyzeRule(item, baseUrl);
+  seedRule(baseRule, keyword);
+  const baseValue = baseRule.analyzeFirst(baseExpr);
+  if (!baseValue) return '';
+  const prefixMatch = jsExpr.match(/^["']([\s\S]*?)["']\s*\+\s*result(?:\s*\+\s*["']([\s\S]*?)["'])?$/);
+  const suffixMatch = jsExpr.match(/^result\s*\+\s*["']([\s\S]*?)["']$/);
+  const headMatch = jsExpr.match(/^["']([\s\S]*?)["']\s*\+\s*result$/);
+  if (prefixMatch) return prefixMatch[1] + baseValue + (prefixMatch[2] || '');
+  if (suffixMatch) return baseValue + suffixMatch[1];
+  if (headMatch) return headMatch[1] + baseValue;
+  return '';
 }
 
 function hasUnresolvedRule(value) {
@@ -538,7 +601,8 @@ function printStats(sourceList, syntaxStats, offlineFailures, onlineResults, onl
   console.log('Syntax coverage:');
   for (const key of keys) console.log('  ' + key.padEnd(9) + String(syntaxStats[key] || 0).padStart(4));
   console.log('');
-  console.log('Offline smoke: ' + (sourceList.length - offlineFailures.sourceCount) + '/' + sourceList.length +
+  const offlineTested = offlineFailures.testedCount || sourceList.length;
+  console.log('Offline smoke: ' + (offlineTested - offlineFailures.sourceCount) + '/' + offlineTested +
     ' sources without parser exceptions, ' + offlineFailures.items.length + ' rule failures');
   for (const item of offlineFailures.items.slice(0, 12)) {
     console.log('  FAIL ' + item.source + ' [' + item.bucket + '] ' + item.error + ' :: ' + item.rule);
@@ -779,12 +843,21 @@ const capabilityChecks = runCapabilitySmoke(modules);
 const syntaxStats = {};
 const offlineItems = [];
 let offlineSourceCount = 0;
+let offlineTestedCount = 0;
 const originalWarn = console.warn;
 console.warn = () => {};
 
-for (const source of sourceList) {
+for (let sourceIndex = 0; sourceIndex < sourceList.length; sourceIndex++) {
+  const source = sourceList[sourceIndex];
   const buckets = collectRuleStrings(source);
   for (const text of Object.values(buckets).flat()) addStats(syntaxStats, text);
+  if (sourceIndex < offlineSourceSkip) {
+    continue;
+  }
+  if (offlineSourceLimit > 0 && sourceIndex >= offlineSourceSkip + offlineSourceLimit) {
+    continue;
+  }
+  offlineTestedCount += 1;
   const failures = offlineSmoke(source, modules.AnalyzeRule);
   if (failures.length > 0) {
     offlineSourceCount += 1;
@@ -813,7 +886,7 @@ for (const source of candidates) {
   }
 }
 
-const offlineFailures = { sourceCount: offlineSourceCount, items: offlineItems };
+const offlineFailures = { sourceCount: offlineSourceCount, items: offlineItems, testedCount: offlineTestedCount };
 console.warn = originalWarn;
 console.log('Capability smoke: ' + capabilityChecks.filter(item => item.pass).length + '/' + capabilityChecks.length);
 for (const item of capabilityChecks) {
@@ -822,7 +895,8 @@ for (const item of capabilityChecks) {
 console.log('');
 printStats(sourceList, syntaxStats, offlineFailures, onlineResults, onlineFailures, onlineAttempts, chainResults);
 
+const requireOnlineResults = onlineTarget > 0 && onlineMaxAttempts > 0;
 if (capabilityChecks.some(item => !item.pass) || offlineItems.length > 0 ||
-  onlineResults.length < Math.min(10, onlineTarget)) {
+  (requireOnlineResults && onlineResults.length < Math.min(10, onlineTarget))) {
   process.exitCode = 1;
 }

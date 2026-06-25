@@ -49,6 +49,8 @@ export class AnalyzeRule {
     if (!rule) return [this.content];
     // 防止超大 HTML 进入正则/CSS 解析，但 JSON 接口列表仍需要正常走 JSONPath。
     if (this.content.length > 500000 && !this.isJsonPathLikeRule(rule)) return [];
+    const jsElements = this.evalJsElementsRule(rule);
+    if (jsElements.length > 0) return jsElements;
     const items = this.analyze(rule);
     return items.length > 0 ? items : [this.content];
   }
@@ -56,6 +58,25 @@ export class AnalyzeRule {
   private isJsonPathLikeRule(rule: string): boolean {
     const effective = this.stripProcessor((rule || '').trim());
     return effective.startsWith('$') || effective.startsWith('@.') || effective.startsWith('@json:');
+  }
+
+  private evalJsElementsRule(rule: string): string[] {
+    const match = (rule || '').match(/^\s*\+?\s*<js>([\s\S]*?)<\/js>\s*$/i);
+    if (!match) return [];
+    const value = this.evalJsBlockSideEffects(match[1]);
+    return this.jsonArrayToElementStrings(value);
+  }
+
+  private jsonArrayToElementStrings(value: string): string[] {
+    const text = (value || '').trim();
+    if (!text.startsWith('[')) return [];
+    try {
+      const data = JSON.parse(text) as Object[];
+      if (!Array.isArray(data)) return [];
+      return data.map((item: Object): string => typeof item === 'string' ? item : JSON.stringify(item));
+    } catch (_) {
+      return [];
+    }
   }
 
   // === 核心解析 ===
@@ -112,6 +133,12 @@ export class AnalyzeRule {
 
     if (this.isJsonContent() && effective.startsWith('.') && !effective.startsWith('..')) {
       const jsonV = this.evalJsonPath('$' + effective);
+      if (Array.isArray(jsonV)) return this.jsonPathArrayToStrings(jsonV as Object[]);
+      if (jsonV !== undefined && jsonV !== null) return [this.jsonValueToString(jsonV)];
+    }
+
+    if (this.isJsonContent() && /^[A-Za-z_][A-Za-z0-9_]*$/.test(effective)) {
+      const jsonV = this.evalJsonPath(`$.${effective}`);
       if (Array.isArray(jsonV)) return this.jsonPathArrayToStrings(jsonV as Object[]);
       if (jsonV !== undefined && jsonV !== null) return [this.jsonValueToString(jsonV)];
     }
@@ -182,6 +209,11 @@ export class AnalyzeRule {
     rule = rule.replace(/@get:\{([^}]+)\}/g, (_: string, key: string) => {
       return this.ctx.get(key.trim());
     });
+
+    if (!rule.startsWith('@js:') && rule.includes('result') && rule.includes('+')) {
+      const jsLikeValue = this.evalResultJs(rule, this.content);
+      if (jsLikeValue && jsLikeValue !== rule) return this.applyProcessor(jsLikeValue, originalRule);
+    }
 
     // 处理 @js: 前缀规则（JS 模板拼接，如 @js:'url'+$.nid+'/'+$.cid）
     if (rule.startsWith('@js:')) {
@@ -858,9 +890,11 @@ export class AnalyzeRule {
   private evalJsBlockSideEffects(code: string): string {
     if (!code) return '';
     const engineValue = this.scriptEngine.evalBlock(code, this.scriptEnv());
-    if (engineValue.handled) return engineValue.value;
+    if (engineValue.handled && engineValue.value) return engineValue.value;
     const knownValue = this.evalKnownJsLibBlock(code);
     if (knownValue) return knownValue;
+    const generatedList = this.evalGeneratedChapterListJs(code);
+    if (generatedList) return generatedList;
     let lastValue = '';
     this.applySimpleAssignmentsToContext(code);
     const putRe = /java\.put\(\s*([^,]+)\s*,\s*([^)]+(?:\)[^,;]*)?)\s*\)/g;
@@ -907,6 +941,19 @@ export class AnalyzeRule {
       }
     }
     return lastValue;
+  }
+
+  private evalGeneratedChapterListJs(code: string): string {
+    if (!/list\s*=\s*\[\s*\{[\s\S]*href\s*:\s*baseUrl/.test(code) || !/list\.push/.test(code)) return '';
+    const pageMatch = this.content.match(/<b>\s*1\s*<\/b>\s*\/\s*<b>\s*(\d+)\s*<\/b>/i);
+    if (!pageMatch) return '';
+    const pageCount = Math.max(1, Math.min(parseInt(pageMatch[1]), 500));
+    const items: Record<string, string>[] = [];
+    for (let i = 1; i <= pageCount; i++) {
+      const href = i === 1 ? this.baseUrl : this.baseUrl.replace(/\.html(?:([?#][\s\S]*))?$/i, `_${i}.html$1`);
+      items.push({ text: `第${i}页`, href });
+    }
+    return JSON.stringify(items);
   }
 
   private splitJsStatements(code: string): string[] {

@@ -44,14 +44,14 @@ export struct SearchBookResultList {
             }
 
             Column() {
-              Text(book.name)
+              Text(this.safeText(book.name, '未知书名'))
                 .fontSize(16)
                 .fontWeight(FontWeight.Bold)
                 .fontColor(this.primaryTextColor)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-              Text(book.author || '作者未知')
+              Text(this.safeText(book.author, '作者未知'))
                 .fontSize(14)
                 .fontColor(this.secondaryTextColor)
                 .margin({ top: 4 })
@@ -134,14 +134,14 @@ export struct SearchBookResultList {
   }
 
   sourceLine(book: SearchBook): string {
-    return book.originName;
+    return this.safeText(book.originName, '');
   }
 
   getTags(book: SearchBook): string[] {
     if (!this.showResultTags) {
       return [];
     }
-    return BookDisplayHelper.splitTags(book.kind, '');
+    return BookDisplayHelper.splitTags(this.safeText(book.kind, ''), '');
   }
 
   @Builder
@@ -159,7 +159,7 @@ export struct SearchBookResultList {
   coverView(book: SearchBook) {
     Stack() {
       Column() {
-        Text(book.name ? book.name.substring(0, 1) : '书')
+        Text(this.safeText(book.name, '书').substring(0, 1))
           .fontSize(22)
           .fontColor('#FFFFFF')
       }
@@ -197,15 +197,15 @@ export struct SearchBookResultList {
         return galleryCover;
       }
     }
-    return book.coverUrl;
+    return this.safeText(book.coverUrl, '');
   }
 
   bookshelfGalleryCover(searchBook: SearchBook): string {
     const book = new Book();
-    book.name = searchBook.name;
-    book.author = searchBook.author;
-    book.bookUrl = searchBook.bookUrl;
-    book.coverUrl = searchBook.coverUrl;
+    book.name = this.safeText(searchBook.name, '');
+    book.author = this.safeText(searchBook.author, '');
+    book.bookUrl = this.safeText(searchBook.bookUrl, '');
+    book.coverUrl = this.safeText(searchBook.coverUrl, '');
     const covers = CoverGallerySettings.getDisplayCoverList(
       book,
       this.isDarkMode(),
@@ -222,6 +222,11 @@ export struct SearchBookResultList {
 
   itemKey(book: SearchBook): string {
     const key = SearchBookShelfHelper.keyOf(book);
-    return `${key}|${book.originName}|${book.name}`;
+    return `${key || this.safeText(book.bookUrl, '')}|${this.safeText(book.originName, '')}|${this.safeText(book.name, '')}`;
+  }
+
+  safeText(value: string, fallback: string): string {
+    const text = (value || '').trim();
+    return text || fallback;
   }
 }

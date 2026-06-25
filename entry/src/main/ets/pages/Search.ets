@@ -393,6 +393,7 @@ struct SearchPage {
     const merged = existing.slice();
     for (const book of incoming) {
       const key = `${book.origin || ''}::${book.bookUrl || ''}`;
+      if (!book.name || !book.bookUrl) continue;
       if (this.searchResultKeySet.has(key)) continue;
       this.searchResultKeySet.add(key);
       merged.push(book);
@@ -403,6 +404,7 @@ struct SearchPage {
   rebuildSearchResultKeys(books: SearchBook[]): void {
     this.searchResultKeySet.clear();
     for (const book of books) {
+      if (!book.name || !book.bookUrl) continue;
       this.searchResultKeySet.add(`${book.origin || ''}::${book.bookUrl || ''}`);
     }
   }

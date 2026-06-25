@@ -36,6 +36,21 @@ export class JsRuntime {
         for (const statement of statements) last = this.evalExpr(statement);
         return last;
       }
+      const commaStatements = this.splitTopLevel(expr, [',']);
+      if (commaStatements.length > 1) {
+        let last = '';
+        for (const statement of commaStatements) last = this.evalExpr(statement);
+        return last;
+      }
+      const assignIndex = this.indexOfTopLevelAssignment(expr);
+      if (assignIndex > 0) {
+        const key = expr.substring(0, assignIndex).replace(/^(?:var|let|const)\s+/, '').trim();
+        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+          const value = this.evalExpr(expr.substring(assignIndex + 1));
+          this.setVar(key, value);
+          return value;
+        }
+      }
       expr = this.replaceDateExpressions(expr);
       expr = expr.replace(/Date\.now\(\)/g, String(Date.now()));
 
@@ -419,20 +434,30 @@ export class JsRuntime {
   }
 
   private splitStatements(expr: string): string[] {
+    return this.splitTopLevel(expr, [';']);
+  }
+
+  private splitTopLevel(expr: string, separators: string[]): string[] {
     const parts: string[] = [];
     let depth = 0;
     let quote = '';
+    let regex = false;
     let start = 0;
     for (let i = 0; i < expr.length; i++) {
       const ch = expr.charAt(i);
+      if (regex) {
+        if (ch === '/' && expr.charAt(i - 1) !== '\\') regex = false;
+        continue;
+      }
       if (quote) {
         if (ch === quote && expr.charAt(i - 1) !== '\\') quote = '';
         continue;
       }
       if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '/' && this.isRegexStart(expr, i)) { regex = true; continue; }
       if (ch === '(' || ch === '[' || ch === '{') depth++;
       if (ch === ')' || ch === ']' || ch === '}') depth--;
-      if (ch === ';' && depth === 0) {
+      if (depth === 0 && separators.includes(ch)) {
         const part = expr.substring(start, i).trim();
         if (part) parts.push(part);
         start = i + 1;
@@ -441,6 +466,40 @@ export class JsRuntime {
     const last = expr.substring(start).trim();
     if (last) parts.push(last);
     return parts;
+  }
+
+  private indexOfTopLevelAssignment(expr: string): number {
+    let depth = 0;
+    let quote = '';
+    let regex = false;
+    for (let i = 0; i < expr.length; i++) {
+      const ch = expr.charAt(i);
+      if (regex) {
+        if (ch === '/' && expr.charAt(i - 1) !== '\\') regex = false;
+        continue;
+      }
+      if (quote) {
+        if (ch === quote && expr.charAt(i - 1) !== '\\') quote = '';
+        continue;
+      }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '/' && this.isRegexStart(expr, i)) { regex = true; continue; }
+      if (ch === '(' || ch === '[' || ch === '{') depth++;
+      if (ch === ')' || ch === ']' || ch === '}') depth--;
+      if (depth === 0 && ch === '=') {
+        const prev = i > 0 ? expr.charAt(i - 1) : '';
+        const next = i + 1 < expr.length ? expr.charAt(i + 1) : '';
+        if (prev !== '=' && prev !== '!' && prev !== '>' && prev !== '<' && next !== '=' && next !== '>') return i;
+      }
+    }
+    return -1;
+  }
+
+  private isRegexStart(expr: string, index: number): boolean {
+    let i = index - 1;
+    while (i >= 0 && /\s/.test(expr.charAt(i))) i--;
+    if (i < 0) return true;
+    return '([{=,:?;!&|'.includes(expr.charAt(i));
   }
 
   private hexEncodeToString(input: string): string {
