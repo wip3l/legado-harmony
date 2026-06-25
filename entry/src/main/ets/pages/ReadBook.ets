@@ -11,8 +11,9 @@ import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinato
 import { WebBookService } from '../core/book/WebBookService';
 import { OPEN_BOOK_SHORTCUT_ACTION, RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
-import { SystemTtsReader, TtsChunk } from '../utils/SystemTtsReader';
+import { SystemTtsReader, TtsChunk, TtsVoiceOption } from '../utils/SystemTtsReader';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
+import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
@@ -89,6 +90,7 @@ struct ReadBookPage {
   @State showMenu: boolean = false;
   @State showToc: boolean = false;
   @State showSettings: boolean = false;
+  @State settingsPanelTab: number = 0;
   @State loadStatus: string = '';
   @State verificationUrl: string = '';
   @State verificationTitle: string = '网页验证';
@@ -195,7 +197,16 @@ struct ReadBookPage {
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
+  @StorageLink('ttsPerson') ttsPerson: number = 0;
+  @StorageLink('ttsOnline') ttsOnline: number = 1;
+  @StorageLink('ttsStyle') ttsStyle: string = '';
+  @StorageLink('ttsLanguage') ttsLanguage: string = 'zh-CN';
+  @StorageLink('ttsSpeed') ttsSpeed: number = 1;
+  @StorageLink('ttsInstalledVoiceKeys') ttsInstalledVoiceKeys: string = '';
   @StorageLink('launchShortcutNonce') @Watch('onLaunchShortcutChanged') launchShortcutNonce: number = 0;
+  @State ttsVoices: TtsVoiceOption[] = [ReadBookPage.defaultTtsVoice()];
+  @State ttsSelectedVoiceKey: string = '';
+  @State ttsVoicesLoading: boolean = false;
   private themeBackgrounds: string[] = ['#F6F0E5', '#F5F5F5', '#E8F1EA', '#1F1F1F'];
   private themeTextColors: string[] = ['#2F261D', '#333333', '#26352A', '#D8D8D8'];
   private volumeUpCallback?: (event: KeyEvent) => void;
@@ -207,6 +218,7 @@ struct ReadBookPage {
     this.enterReaderImmersive();
     this.updateVolumeKeySubscription();
     await this.loadReaderSettings();
+    this.loadTtsSettingsAndVoices();
     const params = router.getParams() as Record<string, string>;
     if (params && params['bookUrl']) {
       this.bookUrl = params['bookUrl'];
@@ -744,8 +756,7 @@ struct ReadBookPage {
               .backgroundColor(this.buttonColor())
               .fontColor('#FFFFFF')
               .onClick(() => {
-                this.showSettings = true;
-                this.showMenu = false;
+                this.openSettingsPanel();
               })
 
             Button(this.isTtsSpeaking ? '停止朗读' : '朗读')
@@ -858,143 +869,7 @@ struct ReadBookPage {
       }
 
       if (this.showSettings) {
-        Column({ space: 14 }) {
-          Row() {
-            Text('阅读设置')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .layoutWeight(1)
-          }
-          .width('100%')
-
-          Row() {
-            Text('字号')
-              .fontSize(15)
-              .layoutWeight(1)
-            Button('-')
-              .width(44)
-              .height(36)
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.applyReaderFontSize(this.readerFontSize - 1);
-              })
-            Text(`${this.readerFontSize}`)
-              .fontSize(15)
-              .width(48)
-              .textAlign(TextAlign.Center)
-            Button('+')
-              .width(44)
-              .height(36)
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.applyReaderFontSize(this.readerFontSize + 1);
-              })
-          }
-          .width('100%')
-
-          Row() {
-            Text('行距')
-              .fontSize(15)
-              .layoutWeight(1)
-            Button('-')
-              .width(44)
-              .height(36)
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.applyReaderLineHeight(this.readerLineHeight - 1);
-              })
-            Text(`${this.readerLineHeight}`)
-              .fontSize(15)
-              .width(48)
-              .textAlign(TextAlign.Center)
-            Button('+')
-              .width(44)
-              .height(36)
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.applyReaderLineHeight(this.readerLineHeight + 1);
-              })
-          }
-          .width('100%')
-
-          Row() {
-            Text('段落间距')
-              .fontSize(15)
-              .layoutWeight(1)
-            Button('-')
-              .width(44)
-              .height(36)
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.applyReaderParagraphSpacing(this.readerParagraphSpacing - 1);
-              })
-            Text(`${this.readerParagraphSpacing}`)
-              .fontSize(15)
-              .width(48)
-              .textAlign(TextAlign.Center)
-            Button('+')
-              .width(44)
-              .height(36)
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.applyReaderParagraphSpacing(this.readerParagraphSpacing + 1);
-              })
-          }
-          .width('100%')
-
-          Row({ space: 8 }) {
-            this.pageTurnModeButton('滚动', 0)
-            this.pageTurnModeButton('滑动', 1)
-            this.pageTurnModeButton('点击', 2)
-          }
-          .width('100%')
-
-          this.readerSwitchSettingItem('翻页动画', '开启后滑动或点击翻页会预览上一页/下一页', this.readerPageTurnAnimation,
-            (checked: boolean) => {
-              this.readerPageTurnAnimation = checked;
-            })
-
-          this.readerSwitchSettingItem('音量键翻页', '阅读页获得焦点时使用音量上/下键翻页', this.readerVolumeTurnPage,
-            (checked: boolean) => {
-              this.setReaderVolumeTurnPage(checked);
-            })
-
-          Row({ space: 10 }) {
-            ForEach(this.themeBackgrounds, (bg: string, index: number) => {
-              Text('')
-                .width(42)
-                .height(42)
-                .borderRadius(21)
-                .backgroundColor(bg)
-                .border({
-                  width: this.readerThemeIndex === index ? 3 : 1,
-                  color: this.readerThemeIndex === index ? this.accentColor() : '#22000000'
-                })
-                .onClick(() => {
-                  this.applyReaderThemeIndex(index);
-                })
-            })
-          }
-          .width('100%')
-
-          this.readerSwitchSettingItem('正文扩展至状态栏', '开启后正文阅读区域会延伸到顶部状态栏安全区', this.readerExtendToStatusBar,
-            (checked: boolean) => {
-              this.setReaderExtendToStatusBar(checked);
-            })
-
-          this.readerPreloadSettingItem()
-        }
-        .width('100%')
-        .padding({ left: 20, right: 20, top: 18, bottom: 24 })
-        .backgroundColor(this.readerSolidPanelColor())
-        .position({ x: 0, y: '100%' })
-        .translate({ y: '-100%' })
+        this.settingsPanel()
       }
 
       if (this.showChangeSourceDialog) {
@@ -1507,6 +1382,277 @@ struct ReadBookPage {
     this.showToc = true;
     this.showMenu = false;
     this.scrollTocToCurrentChapter(false);
+  }
+
+  openSettingsPanel(): void {
+    this.settingsPanelTab = 0;
+    this.showSettings = true;
+    this.showMenu = false;
+    this.loadTtsSettingsAndVoices();
+  }
+
+  static defaultTtsVoice(): TtsVoiceOption {
+    const option = new TtsVoiceOption();
+    option.id = 0;
+    option.name = '默认音色';
+    option.online = 1;
+    option.status = 'default';
+    option.language = 'zh-CN';
+    option.available = true;
+    return option;
+  }
+
+  async loadTtsSettingsAndVoices(): Promise<void> {
+    try {
+      const settings = await TtsSettingsStore.load(getContext(this));
+      this.applyLoadedTtsSettings(settings);
+    } catch (e) {
+      console.warn('读取朗读设置失败:', e);
+    }
+    this.normalizeDefaultTtsVoice();
+    this.ttsSelectedVoiceKey = this.currentTtsVoiceKey();
+    this.loadTtsVoices();
+  }
+
+  applyLoadedTtsSettings(settings: TtsSettings): void {
+    this.ttsPerson = settings.person;
+    this.ttsOnline = settings.online;
+    this.ttsStyle = settings.style;
+    this.ttsLanguage = settings.language;
+    this.ttsSpeed = settings.speed;
+    this.ttsInstalledVoiceKeys = settings.installedVoiceKeys;
+  }
+
+  normalizeDefaultTtsVoice(): void {
+    if (this.ttsOnline === 0 && this.ttsPerson === 0 && !this.ttsStyle &&
+      this.sameTtsLanguage(this.ttsLanguage || 'zh-CN', 'zh-CN')) {
+      this.ttsOnline = 1;
+      this.saveTtsSettings();
+    }
+  }
+
+  currentTtsSettings(): TtsSettings {
+    const settings = new TtsSettings();
+    settings.person = this.ttsPerson;
+    settings.online = this.ttsOnline;
+    settings.style = this.ttsStyle;
+    settings.language = this.ttsLanguage;
+    settings.speed = this.ttsSpeed;
+    settings.installedVoiceKeys = this.ttsInstalledVoiceKeys;
+    return settings;
+  }
+
+  saveTtsSettings(): void {
+    const settings = this.currentTtsSettings();
+    TtsSettingsStore.applyToStorage(settings);
+    TtsSettingsStore.save(getContext(this), settings).catch((e: Error) => {
+      console.warn('保存朗读设置失败:', e);
+    });
+  }
+
+  async loadTtsVoices(): Promise<void> {
+    if (this.ttsVoicesLoading) {
+      return;
+    }
+    this.ttsVoicesLoading = true;
+    try {
+      const voices = await SystemTtsReader.listAvailableVoices();
+      this.ttsVoices = this.applyInstalledTtsVoiceOverrides(this.mergeWithDefaultTtsVoice(voices));
+      const currentVoice = this.findCurrentTtsVoice();
+      if (currentVoice && currentVoice.available) {
+        this.ttsSelectedVoiceKey = this.ttsVoiceKey(currentVoice);
+      } else {
+        this.applyTtsVoice(this.firstAvailableTtsVoice(), false);
+      }
+    } catch (e) {
+      this.ttsVoices = [ReadBookPage.defaultTtsVoice()];
+      this.ttsPerson = 0;
+      this.ttsOnline = 1;
+      this.ttsStyle = '';
+      this.ttsLanguage = 'zh-CN';
+      this.saveTtsSettings();
+      this.ttsSelectedVoiceKey = this.currentTtsVoiceKey();
+      console.warn('加载朗读音色失败:', e);
+    } finally {
+      this.ttsVoicesLoading = false;
+    }
+  }
+
+  mergeWithDefaultTtsVoice(voices: TtsVoiceOption[]): TtsVoiceOption[] {
+    const options: TtsVoiceOption[] = [ReadBookPage.defaultTtsVoice()];
+    for (const voice of voices) {
+      const existingIndex = options.findIndex((item: TtsVoiceOption) =>
+        this.isSameTtsVoiceOption(item, voice) || this.isSameTtsDisplayVoice(item, voice));
+      if (existingIndex < 0) {
+        options.push(voice);
+      } else if (this.shouldPreferTtsVoiceOption(voice, options[existingIndex])) {
+        options[existingIndex] = voice;
+      }
+    }
+    return options;
+  }
+
+  firstAvailableTtsVoice(): TtsVoiceOption {
+    return this.ttsVoices.find((voice: TtsVoiceOption) => voice.available) || this.ttsVoices[0] ||
+      ReadBookPage.defaultTtsVoice();
+  }
+
+  applyInstalledTtsVoiceOverrides(voices: TtsVoiceOption[]): TtsVoiceOption[] {
+    const options: TtsVoiceOption[] = [];
+    for (const voice of voices) {
+      options.push(this.isLocallyInstalledTtsVoice(voice) ? this.markTtsVoiceOptionInstalled(voice) : voice);
+    }
+    return options;
+  }
+
+  markTtsVoiceOptionInstalled(voice: TtsVoiceOption): TtsVoiceOption {
+    const option = new TtsVoiceOption();
+    option.id = voice.id;
+    option.name = voice.name;
+    option.online = voice.online;
+    option.status = 'INSTALLED';
+    option.systemStatus = 'INSTALLED';
+    option.style = voice.style;
+    option.language = voice.language;
+    option.downloadLanguage = voice.downloadLanguage;
+    option.gender = voice.gender;
+    option.available = true;
+    option.downloadable = false;
+    return option;
+  }
+
+  isLocallyInstalledTtsVoice(voice: TtsVoiceOption): boolean {
+    const key = this.installedTtsVoiceKey(voice);
+    return !!key && this.ttsInstalledVoiceKeys.split('\n').includes(key);
+  }
+
+  installedTtsVoiceKey(voice: TtsVoiceOption): string {
+    const style = this.isKnownTtsVoiceId(voice.id) ? '' : (voice.style || '');
+    return `${voice.id}_${voice.online}_${this.normalizeTtsLanguage(voice.language || 'zh-CN')}_${style}`;
+  }
+
+  isSameTtsVoiceOption(left: TtsVoiceOption, right: TtsVoiceOption): boolean {
+    if (left.id !== right.id || left.online !== right.online ||
+      !this.sameTtsLanguage(left.language || 'zh-CN', right.language || 'zh-CN')) {
+      return false;
+    }
+    if (this.isKnownTtsVoiceId(left.id)) {
+      return true;
+    }
+    return (left.style || '') === (right.style || '');
+  }
+
+  isSameTtsDisplayVoice(left: TtsVoiceOption, right: TtsVoiceOption): boolean {
+    if (this.ttsVoiceTitle(left) === this.ttsVoiceTitle(right)) {
+      return true;
+    }
+    return (left.name || '') === (right.name || '') && left.online === right.online &&
+      this.sameTtsLanguage(left.language || 'zh-CN', right.language || 'zh-CN');
+  }
+
+  shouldPreferTtsVoiceOption(candidate: TtsVoiceOption, current: TtsVoiceOption): boolean {
+    if (candidate.available !== current.available) {
+      return candidate.available;
+    }
+    if (this.isKnownTtsVoiceId(candidate.id) !== this.isKnownTtsVoiceId(current.id)) {
+      return this.isKnownTtsVoiceId(candidate.id);
+    }
+    if (candidate.downloadable !== current.downloadable) {
+      return candidate.downloadable;
+    }
+    return !current.style && !!candidate.style;
+  }
+
+  isKnownTtsVoiceId(id: number): boolean {
+    return id === 0 || id === 8 || id === 13 || id === 21;
+  }
+
+  applyTtsVoice(voice: TtsVoiceOption, restartSpeaking: boolean): void {
+    if (!voice.available) {
+      promptAction.showToast({ message: voice.downloadable ? '请到朗读设置下载该音色' : '该系统音色当前不可用' });
+      return;
+    }
+    const shouldResume = restartSpeaking && (this.isTtsSpeaking || this.ttsReader.isSpeaking());
+    if (shouldResume) {
+      this.stopTtsReading();
+    }
+    this.ttsPerson = voice.id;
+    this.ttsOnline = voice.online;
+    this.ttsStyle = voice.style;
+    this.ttsLanguage = voice.language;
+    this.ttsSelectedVoiceKey = this.ttsVoiceKey(voice);
+    this.saveTtsSettings();
+    if (shouldResume) {
+      this.startTtsReadingFromCurrentPosition(false).catch((e: Error) => {
+        console.warn('切换朗读音色后恢复朗读失败:', e);
+      });
+    }
+  }
+
+  applyTtsSpeed(value: number): void {
+    this.ttsSpeed = Math.max(0.5, Math.min(2, Math.round(value * 10) / 10));
+    this.saveTtsSettings();
+    if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
+      this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY).catch((e: Error) => {
+        console.warn('更新朗读倍速媒体状态失败:', e);
+      });
+    }
+  }
+
+  currentTtsVoiceKey(): string {
+    const matched = this.findCurrentTtsVoice();
+    return matched ? this.ttsVoiceKey(matched) :
+      `${this.ttsPerson}_${this.ttsOnline}_${this.ttsLanguage || 'zh-CN'}_${this.ttsStyle || ''}_`;
+  }
+
+  findCurrentTtsVoice(): TtsVoiceOption | undefined {
+    return this.ttsVoices.find((voice: TtsVoiceOption) => this.isCurrentTtsVoice(voice));
+  }
+
+  isCurrentTtsVoice(voice: TtsVoiceOption): boolean {
+    return voice.id === this.ttsPerson && voice.online === this.ttsOnline &&
+      (voice.style || '') === (this.ttsStyle || '') &&
+      this.sameTtsLanguage(voice.language || 'zh-CN', this.ttsLanguage || 'zh-CN');
+  }
+
+  ttsVoiceKey(voice: TtsVoiceOption): string {
+    return `${voice.id}_${voice.online}_${voice.language || 'zh-CN'}_${voice.style || ''}_${voice.name || ''}`;
+  }
+
+  ttsVoiceTitle(voice: TtsVoiceOption): string {
+    if (voice.status === 'default') {
+      return `${voice.name} · 系统默认`;
+    }
+    const suffix = voice.online === 0 ? '在线' : '离线';
+    const gender = this.ttsVoiceGenderText(voice);
+    const state = voice.available ? '' : (voice.downloadable ? ' · 需下载' : ' · 不可用');
+    return `${voice.name} · ${suffix}${gender}${state}`;
+  }
+
+  ttsVoiceGenderText(voice: TtsVoiceOption): string {
+    const value = (voice.gender || '').toLowerCase();
+    if (value === 'male' || value === '男' || value === '男声') {
+      return ' · 男声';
+    }
+    if (value === 'female' || value === '女' || value === '女声') {
+      return ' · 女声';
+    }
+    return '';
+  }
+
+  sameTtsLanguage(left: string, right: string): boolean {
+    return this.normalizeTtsLanguage(left) === this.normalizeTtsLanguage(right);
+  }
+
+  normalizeTtsLanguage(language: string): string {
+    const value = (language || 'zh-CN').trim().replace(/_/g, '-').toLowerCase();
+    if (value === 'zh' || value === 'zh-cn' || value.startsWith('zh-hans')) {
+      return 'zh-CN';
+    }
+    if (value === 'en' || value === 'en-us') {
+      return 'en-US';
+    }
+    return value || 'zh-CN';
   }
 
   getTocInitialIndex(): number {
@@ -2478,6 +2624,296 @@ struct ReadBookPage {
     } else {
       this.resetSlidePageEffect();
     }
+  }
+
+  @Builder
+  settingsPanel() {
+    Column({ space: 12 }) {
+      Row({ space: 8 }) {
+        this.settingsTabButton('阅读', 0)
+        this.settingsTabButton('朗读', 1)
+      }
+      .width('100%')
+
+      Scroll() {
+        Column({ space: 14 }) {
+          if (this.settingsPanelTab === 0) {
+            this.readerQuickSettingsPanel()
+          } else {
+            this.ttsQuickSettingsPanel()
+          }
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .height(430)
+      .scrollBar(BarState.Auto)
+      .scrollBarColor(this.appDarkMode || this.readerThemeIndex === 3 ? '#668A8F98' : '#667A6F63')
+    }
+    .width('100%')
+    .padding({ left: 20, right: 20, top: 16, bottom: 22 })
+    .backgroundColor(this.readerSolidPanelColor())
+    .position({ x: 0, y: '100%' })
+    .translate({ y: '-100%' })
+  }
+
+  @Builder
+  settingsTabButton(title: string, tab: number) {
+    Text(title)
+      .fontSize(15)
+      .fontWeight(this.settingsPanelTab === tab ? FontWeight.Bold : FontWeight.Regular)
+      .fontColor(this.settingsPanelTab === tab ? '#FFFFFF' : this.getTextColor())
+      .textAlign(TextAlign.Center)
+      .layoutWeight(1)
+      .height(38)
+      .borderRadius(19)
+      .backgroundColor(this.settingsPanelTab === tab ? this.accentColor() :
+        (this.appDarkMode || this.readerThemeIndex === 3 ? '#24272D' : '#EEF0F3'))
+      .onClick(() => {
+        this.settingsPanelTab = tab;
+        if (tab === 1) {
+          this.loadTtsSettingsAndVoices();
+        }
+      })
+  }
+
+  @Builder
+  readerQuickSettingsPanel() {
+    Column({ space: 14 }) {
+      Row() {
+        Text('字号')
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+          .layoutWeight(1)
+        Button('-')
+          .width(44)
+          .height(36)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.applyReaderFontSize(this.readerFontSize - 1);
+          })
+        Text(`${this.readerFontSize}`)
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+          .width(48)
+          .textAlign(TextAlign.Center)
+        Button('+')
+          .width(44)
+          .height(36)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.applyReaderFontSize(this.readerFontSize + 1);
+          })
+      }
+      .width('100%')
+
+      Row() {
+        Text('行距')
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+          .layoutWeight(1)
+        Button('-')
+          .width(44)
+          .height(36)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.applyReaderLineHeight(this.readerLineHeight - 1);
+          })
+        Text(`${this.readerLineHeight}`)
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+          .width(48)
+          .textAlign(TextAlign.Center)
+        Button('+')
+          .width(44)
+          .height(36)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.applyReaderLineHeight(this.readerLineHeight + 1);
+          })
+      }
+      .width('100%')
+
+      Row() {
+        Text('段落间距')
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+          .layoutWeight(1)
+        Button('-')
+          .width(44)
+          .height(36)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.applyReaderParagraphSpacing(this.readerParagraphSpacing - 1);
+          })
+        Text(`${this.readerParagraphSpacing}`)
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+          .width(48)
+          .textAlign(TextAlign.Center)
+        Button('+')
+          .width(44)
+          .height(36)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.applyReaderParagraphSpacing(this.readerParagraphSpacing + 1);
+          })
+      }
+      .width('100%')
+
+      Row({ space: 8 }) {
+        this.pageTurnModeButton('滚动', 0)
+        this.pageTurnModeButton('滑动', 1)
+        this.pageTurnModeButton('点击', 2)
+      }
+      .width('100%')
+
+      this.readerSwitchSettingItem('翻页动画', '开启后滑动或点击翻页会预览上一页/下一页', this.readerPageTurnAnimation,
+        (checked: boolean) => {
+          this.readerPageTurnAnimation = checked;
+        })
+
+      this.readerSwitchSettingItem('音量键翻页', '阅读页获得焦点时使用音量上/下键翻页', this.readerVolumeTurnPage,
+        (checked: boolean) => {
+          this.setReaderVolumeTurnPage(checked);
+        })
+
+      Row({ space: 10 }) {
+        ForEach(this.themeBackgrounds, (bg: string, index: number) => {
+          Text('')
+            .width(42)
+            .height(42)
+            .borderRadius(21)
+            .backgroundColor(bg)
+            .border({
+              width: this.readerThemeIndex === index ? 3 : 1,
+              color: this.readerThemeIndex === index ? this.accentColor() : '#22000000'
+            })
+            .onClick(() => {
+              this.applyReaderThemeIndex(index);
+            })
+        })
+      }
+      .width('100%')
+
+      this.readerSwitchSettingItem('正文扩展至状态栏', '开启后正文阅读区域会延伸到顶部状态栏安全区', this.readerExtendToStatusBar,
+        (checked: boolean) => {
+          this.setReaderExtendToStatusBar(checked);
+        })
+
+      this.readerPreloadSettingItem()
+    }
+    .width('100%')
+  }
+
+  @Builder
+  ttsQuickSettingsPanel() {
+    Column({ space: 14 }) {
+      Row() {
+        Text('朗读倍速')
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+          .layoutWeight(1)
+        Text(`${this.ttsSpeed.toFixed(1)}x`)
+          .fontSize(14)
+          .fontColor(this.getSubTextColor())
+      }
+      .width('100%')
+
+      Slider({ value: this.ttsSpeed, min: 0.5, max: 2, step: 0.1 })
+        .width('100%')
+        .selectedColor(this.accentColor())
+        .onChange((value: number) => {
+          this.applyTtsSpeed(value);
+        })
+
+      Row({ space: 8 }) {
+        this.ttsSpeedChip(0.8)
+        this.ttsSpeedChip(1.0)
+        this.ttsSpeedChip(1.2)
+        this.ttsSpeedChip(1.5)
+        this.ttsSpeedChip(2.0)
+      }
+      .width('100%')
+
+      Row() {
+        Text('朗读音色')
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+          .layoutWeight(1)
+        if (this.ttsVoicesLoading) {
+          Text('加载中')
+            .fontSize(12)
+            .fontColor(this.getSubTextColor())
+        }
+      }
+      .width('100%')
+
+      Column({ space: 8 }) {
+        ForEach(this.ttsVoices, (voice: TtsVoiceOption) => {
+          this.ttsVoiceRow(voice)
+        }, (voice: TtsVoiceOption) => this.ttsVoiceKey(voice))
+      }
+      .width('100%')
+
+      Button(this.isTtsSpeaking ? '停止朗读' : '开始朗读')
+        .width('100%')
+        .height(40)
+        .backgroundColor(this.isTtsSpeaking ? '#E53935' : this.buttonColor())
+        .fontColor('#FFFFFF')
+        .onClick(() => {
+          this.toggleTtsReading();
+        })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  ttsSpeedChip(value: number) {
+    Text(`${value.toFixed(1)}x`)
+      .fontSize(13)
+      .fontColor(Math.abs(this.ttsSpeed - value) < 0.01 ? '#FFFFFF' : this.getTextColor())
+      .textAlign(TextAlign.Center)
+      .layoutWeight(1)
+      .height(32)
+      .borderRadius(16)
+      .backgroundColor(Math.abs(this.ttsSpeed - value) < 0.01 ? this.accentColor() :
+        (this.appDarkMode || this.readerThemeIndex === 3 ? '#24272D' : '#EEF0F3'))
+      .onClick(() => {
+        this.applyTtsSpeed(value);
+      })
+  }
+
+  @Builder
+  ttsVoiceRow(voice: TtsVoiceOption) {
+    Row() {
+      Text(this.ttsVoiceTitle(voice))
+        .fontSize(14)
+        .fontColor(voice.available ? this.getTextColor() : this.getSubTextColor())
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+      Text(this.isCurrentTtsVoice(voice) ? '✓' : (voice.downloadable ? '下载' : ''))
+        .fontSize(voice.downloadable && !voice.available ? 13 : 18)
+        .fontColor(this.accentColor())
+        .width(44)
+        .textAlign(TextAlign.Center)
+    }
+    .width('100%')
+    .padding({ left: 12, right: 12, top: 11, bottom: 11 })
+    .borderRadius(8)
+    .backgroundColor(this.isCurrentTtsVoice(voice) ? this.tocSelectedBackgroundColor() :
+      (this.appDarkMode || this.readerThemeIndex === 3 ? '#202329' : '#F6F7F9'))
+    .onClick(() => {
+      this.applyTtsVoice(voice, true);
+    })
   }
 
   @Builder
@@ -4090,7 +4526,7 @@ struct ReadBookPage {
         })
       Blank()
         .width('100%')
-        .height(430)
+        .height(520)
     }
       .width('100%')
       .height('100%')
