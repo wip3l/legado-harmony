@@ -31,6 +31,9 @@ struct OtherSettingsPage {
           this.menuItem('字体设置', '阅读字体 / 自定义字体', () => {
             router.pushUrl({ url: 'pages/FontSettings' });
           })
+          this.menuItem('图标设置', '桌面图标 / 候选图标', () => {
+            router.pushUrl({ url: 'pages/AppIconSettings' });
+          })
         }
         .width('100%')
         .padding({ bottom: 32 })

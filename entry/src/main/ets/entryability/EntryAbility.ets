@@ -8,6 +8,7 @@ import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore'
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 import { AppThemeModeStore } from '../utils/AppThemeModeStore';
+import { AppIconSettingsStore } from '../utils/AppIconSettingsStore';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 
@@ -97,6 +98,7 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('appDarkAccentColor', '#4E9BFF');
     PersistentStorage.persistProp('appLightButtonColor', '#007DFF');
     PersistentStorage.persistProp('appDarkButtonColor', '#3F8CFF');
+    PersistentStorage.persistProp('appIconId', AppIconSettingsStore.DEFAULT_ICON_ID);
     PersistentStorage.persistProp('explorePlatform', '番茄');
     PersistentStorage.persistProp('exploreSourceUrl', '');
     CoverGalleryStore.load(this.context).then((snapshot) => {
@@ -124,6 +126,11 @@ export default class EntryAbility extends UIAbility {
       AppThemeSettingsStore.applyToStorage(settings);
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Sync app theme settings failed: %{public}s', JSON.stringify(e));
+    });
+    AppIconSettingsStore.load(this.context).then((settings) => {
+      AppIconSettingsStore.applyToStorage(settings);
+    }).catch((e: Error) => {
+      hilog.warn(0x0000, 'testTag', 'Sync app icon settings failed: %{public}s', JSON.stringify(e));
     });
     this.handleLaunchWant(want);
   }

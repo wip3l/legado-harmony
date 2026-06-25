@@ -14,6 +14,7 @@
     "pages/SearchExploreSettings",
     "pages/ExploreSourceSort",
     "pages/OtherSettings",
+    "pages/AppIconSettings",
     "pages/ThemeColorSettings",
     "pages/FontSettings",
     "pages/ReaderFontSettings",
