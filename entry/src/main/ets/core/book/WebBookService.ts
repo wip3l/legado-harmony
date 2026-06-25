@@ -737,6 +737,8 @@ export class WebBookService {
     ctx.put('bookSourceGroup', source.bookSourceGroup || '');
     ctx.put('source.bookSourceComment', source.bookSourceComment || '');
     ctx.put('bookSourceComment', source.bookSourceComment || '');
+    ctx.put('source.jsLib', source.jsLib || '');
+    ctx.put('jsLib', source.jsLib || '');
     if (!ctx.has('source.variable')) ctx.put('source.variable', source.variableComment || '');
   }
 

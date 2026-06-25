@@ -38,6 +38,8 @@ struct SearchBookDetailPage {
   @State wordCount: string = '';
   @State isInShelf: boolean = false;
   @State isSaving: boolean = false;
+  @State isLoadingBookInfo: boolean = false;
+  private hasLoadedBookInfo: boolean = false;
   @State promptAddToShelfOnBackFromResult: boolean = false;
   @State promptAddToShelfAfterRead: boolean = false;
   @State pendingAddToShelfBookUrl: string = '';
@@ -61,6 +63,7 @@ struct SearchBookDetailPage {
       this.wordCount = params['wordCount'] || '';
       this.promptAddToShelfOnBackFromResult = params['promptAddToShelfOnBack'] === 'true';
       this.checkShelf();
+      this.loadBookInfo();
     }
   }
 
@@ -187,12 +190,12 @@ struct SearchBookDetailPage {
                 .width('100%')
                 .textAlign(TextAlign.Center)
 
-              Text(this.intro || '暂无简介')
-                .fontSize(20)
+              Text(this.intro || (this.isLoadingBookInfo ? '简介加载中...' : '暂无简介'))
+                .fontSize(16)
                 .fontColor(this.secondaryTextColor())
-                .lineHeight(32)
+                .lineHeight(26)
                 .width('100%')
-                .margin({ top: 16 })
+                .margin({ top: 12 })
             }
             .width('100%')
             .padding({ left: 20, right: 20, top: 18, bottom: 22 })
@@ -386,6 +389,53 @@ struct SearchBookDetailPage {
       return false;
     } finally {
       this.isSaving = false;
+    }
+  }
+
+  async loadBookInfo(): Promise<void> {
+    if (this.hasLoadedBookInfo || this.isLoadingBookInfo || !this.bookUrl || !this.origin) {
+      return;
+    }
+
+    this.hasLoadedBookInfo = true;
+    this.isLoadingBookInfo = true;
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const source = await db.getBookSource(this.origin);
+      if (!source) {
+        return;
+      }
+
+      const book = new Book();
+      book.bookUrl = this.bookUrl;
+      book.tocUrl = this.tocUrl;
+      book.origin = this.origin;
+      book.originName = this.originName;
+      book.name = this.name;
+      book.author = this.author;
+      book.kind = BookFieldSanitizer.clean(this.kind);
+      book.coverUrl = CoverUrlNormalizer.normalize(this.coverUrl);
+      book.intro = BookFieldSanitizer.clean(this.intro);
+      book.latestChapterTitle = BookFieldSanitizer.clean(this.latestChapterTitle);
+      book.wordCount = BookFieldSanitizer.clean(this.wordCount);
+
+      const fallbackCoverUrl = book.coverUrl;
+      const service = new WebBookService();
+      const fullBook = await service.getBookInfo(source, book);
+      this.bookUrl = fullBook.bookUrl || this.bookUrl;
+      this.tocUrl = fullBook.tocUrl || this.tocUrl;
+      this.name = fullBook.name || this.name;
+      this.author = fullBook.author || this.author;
+      this.kind = BookFieldSanitizer.prefer(fullBook.kind, this.kind);
+      this.coverUrl = CoverUrlNormalizer.prefer(fallbackCoverUrl, fullBook.coverUrl || this.coverUrl);
+      this.intro = BookFieldSanitizer.prefer(fullBook.intro, this.intro);
+      this.latestChapterTitle = BookFieldSanitizer.prefer(fullBook.latestChapterTitle, this.latestChapterTitle);
+      this.wordCount = BookFieldSanitizer.prefer(fullBook.wordCount, this.wordCount);
+    } catch (e) {
+      console.warn('加载书籍详情失败:', e);
+    } finally {
+      this.isLoadingBookInfo = false;
     }
   }
 

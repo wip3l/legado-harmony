@@ -790,6 +790,8 @@ export class AnalyzeRule {
 
   private evalJsBlockSideEffects(code: string): string {
     if (!code) return '';
+    const knownValue = this.evalKnownJsLibBlock(code);
+    if (knownValue) return knownValue;
     let lastValue = '';
     this.applySimpleAssignmentsToContext(code);
     const putRe = /java\.put\(\s*([^,]+)\s*,\s*([^)]+(?:\)[^,;]*)?)\s*\)/g;
@@ -1674,6 +1676,8 @@ export class AnalyzeRule {
 
   private evalResultJs(jsCode: string, value: string): string {
     if (!jsCode) return value;
+    const knownValue = this.evalKnownResultJs(jsCode, value);
+    if (knownValue !== null) return knownValue;
     const simpleValue = this.evalSimpleJsExpression(jsCode, { result: value, baseUrl: this.baseUrl });
     if (simpleValue !== null) return simpleValue;
     const encodedDataUrl = this.evalEncodedDataUrlJs(jsCode, value);
@@ -1721,6 +1725,158 @@ export class AnalyzeRule {
       return this.js.evaluate(jsCode, value);
     }
     return value;
+  }
+
+  private evalKnownJsLibBlock(code: string): string {
+    const normalized = code || '';
+    const vars: Record<string, string> = { result: this.content, baseUrl: this.baseUrl };
+
+    if (normalized.includes('J(result)') || normalized.includes('JSON.parse')) {
+      const articleId = this.extractArticleIdFromContent() || this.extractArticleIdFromUrl(this.baseUrl);
+      if (articleId) {
+        vars['id'] = articleId;
+        vars['aid'] = articleId;
+      }
+    }
+
+    const cacheGet = normalized.match(/cache\.getFromMemory\(\s*['"]([^'"]+)['"]\s*\)/);
+    if (cacheGet) {
+      const value = this.ctx.get(`cache.${cacheGet[1]}`) || this.ctx.get(cacheGet[1]);
+      if (value) {
+        vars['aid'] = value;
+        vars[cacheGet[1]] = value;
+      }
+    }
+
+    if (!vars['aid']) {
+      const fromUrl = this.extractArticleIdFromUrl(this.baseUrl);
+      if (fromUrl) vars['aid'] = fromUrl;
+    }
+
+    const cachePut = normalized.match(/cache\.putMemory\(\s*['"]([^'"]+)['"]\s*,\s*String\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\)/);
+    if (cachePut) {
+      const value = vars[cachePut[2]] || this.ctx.get(cachePut[2]) || '';
+      if (value) {
+        this.ctx.put(`cache.${cachePut[1]}`, value);
+        this.ctx.put(cachePut[1], value);
+      }
+    }
+
+    const baseExprIndex = normalized.lastIndexOf('Base()');
+    const lastExpr = baseExprIndex >= 0 ? normalized.substring(baseExprIndex) : this.extractLastJsExpression(normalized);
+    if (!lastExpr) return '';
+    return this.evalKnownJsExpression(lastExpr, vars);
+  }
+
+  private evalKnownResultJs(jsCode: string, value: string): string | null {
+    const trimmed = jsCode.trim();
+    if (/^Clean\(\s*result\s*\)\s*;?$/.test(trimmed)) return this.cleanJsLibText(value);
+    if (/^T\(\s*result\s*\)\s*;?$/.test(trimmed)) return this.cleanJsLibText(value);
+    if (/^Cover\(\s*result\s*\)\s*;?$/.test(trimmed)) return this.coverFromArticleId(value);
+    if (trimmed.includes('Base()')) {
+      const vars: Record<string, string> = { result: value, baseUrl: this.baseUrl };
+      const cacheGet = trimmed.match(/cache\.getFromMemory\(\s*['"]([^'"]+)['"]\s*\)/);
+      if (cacheGet) {
+        const cached = this.ctx.get(`cache.${cacheGet[1]}`) || this.ctx.get(cacheGet[1]);
+        if (cached) {
+          vars['aid'] = cached;
+          vars[cacheGet[1]] = cached;
+        }
+      }
+      if (!vars['aid']) {
+        const fromUrl = this.extractArticleIdFromUrl(this.baseUrl);
+        if (fromUrl) vars['aid'] = fromUrl;
+      }
+      const baseExprIndex = trimmed.lastIndexOf('Base()');
+      if (baseExprIndex >= 0) {
+        const resolved = this.evalKnownJsExpression(trimmed.substring(baseExprIndex), vars);
+        if (resolved) return resolved;
+      }
+    }
+    return null;
+  }
+
+  private evalKnownJsExpression(expr: string, vars: Record<string, string>): string {
+    let value = (expr || '').trim().replace(/;$/, '');
+    if (!value) return '';
+    const cleanCall = value.match(/^(?:Clean|T)\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)$/);
+    if (cleanCall) return this.cleanJsLibText(vars[cleanCall[1]] || '');
+    const coverCall = value.match(/^Cover\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)$/);
+    if (coverCall) return this.coverFromArticleId(vars[coverCall[1]] || '');
+    value = value.replace(/\bBase\(\)/g, `'${this.extractBaseFunctionHost()}'`);
+    value = value.replace(/\bString\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g, (_: string, key: string) => {
+      return `'${(vars[key] || '').replace(/'/g, "\\'")}'`;
+    });
+    const parts = this.splitJsConcat(value);
+    if (parts.length <= 1 && !/^['"]/.test(value)) return vars[value] || '';
+    let out = '';
+    for (const part of parts) {
+      const token = part.trim();
+      if (!token) continue;
+      if ((token.startsWith("'") && token.endsWith("'")) || (token.startsWith('"') && token.endsWith('"'))) {
+        out += token.substring(1, token.length - 1);
+      } else if (vars[token] !== undefined) {
+        out += vars[token];
+      } else if (/^\d+$/.test(token)) {
+        out += token;
+      } else {
+        return '';
+      }
+    }
+    return out;
+  }
+
+  private extractArticleIdFromContent(): string {
+    try {
+      const data = EncodedSourceUrl.asMap(JSON.parse(this.content || '{}') as Object);
+      const direct = EncodedSourceUrl.str(data['articleid']);
+      if (direct) return direct;
+      const nested = EncodedSourceUrl.asMap(data['data'] as Object);
+      return EncodedSourceUrl.str(nested['articleid']);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  private extractArticleIdFromUrl(url: string): string {
+    const value = url || '';
+    const match = value.match(/\/(?:detail|list)\/(\d+)(?:\D|$)/) || value.match(/[?&]articleid=(\d+)/i);
+    return match ? match[1] : '';
+  }
+
+  private extractBaseFunctionHost(): string {
+    const raw = this.ctx.get('source.jsLib') || this.ctx.get('jsLib') || '';
+    const baseMatch = raw.match(/function\s+Base\s*\(\s*\)\s*\{\s*return\s*['"]([^'"]+)['"]/);
+    if (baseMatch) return baseMatch[1];
+    const hostMatch = raw.match(/https?:\/\/[^'"`\s,)]+/);
+    if (hostMatch) return hostMatch[0];
+    const base = (this.ctx.get('source.bookSourceUrl') || this.ctx.get('bookSourceUrl') || this.baseUrl || '')
+      .match(/^(https?:\/\/[^/]+)/);
+    return base ? base[1] : '';
+  }
+
+  private coverFromArticleId(value: string): string {
+    const id = (value || '').replace(/\D/g, '');
+    if (!id) return '';
+    return `https://pic.cooks.tw/${Math.floor(Number(id) / 1000)}/${id}/${id}s.jpg`;
+  }
+
+  private cleanJsLibText(value: string): string {
+    return (value || '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<p[^>]*>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/\r/g, '')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   private evalResultReplaceChain(jsCode: string, value: string): string | null {
