@@ -3,18 +3,21 @@ import { RuleContext } from './RuleContext';
 import { VerificationSupport } from '../http/VerificationSupport';
 import { EncodedJsonMap, EncodedSourceUrl } from '../book/EncodedSourceUrl';
 import { JsonPathEvaluator } from './JsonPathEvaluator';
+import { ScriptEngine, ScriptEngineContext } from './ScriptEngine';
 
 export class AnalyzeRule {
   private content: string = '';
   private baseUrl: string = '';
   private ctx: RuleContext;
   private js: JsRuntime;
+  private scriptEngine: ScriptEngine;
 
   constructor(content: string = '', baseUrl: string = '', ctx?: RuleContext) {
     this.content = content;
     this.baseUrl = baseUrl;
     this.ctx = ctx || new RuleContext();
     this.js = new JsRuntime();
+    this.scriptEngine = new ScriptEngine(this.js);
   }
 
   setContent(c: string): AnalyzeRule { this.content = c; return this; }
@@ -22,6 +25,14 @@ export class AnalyzeRule {
   setContext(ctx: RuleContext): AnalyzeRule { this.ctx = ctx; return this; }
   getContext(): RuleContext { return this.ctx; }
   setJsVar(k: string, v: string): AnalyzeRule { this.js.setVar(k, v); return this; }
+
+  private scriptEnv(): ScriptEngineContext {
+    const env = new ScriptEngineContext();
+    env.content = this.content;
+    env.baseUrl = this.baseUrl;
+    env.ctx = this.ctx;
+    return env;
+  }
 
   // === 主入口 ===
 
@@ -339,6 +350,8 @@ export class AnalyzeRule {
   private evalJsTemplate(expr: string, sourceJson: string): string {
     if (!expr) return '';
     expr = expr.trim();
+    const javaRuleValue = this.evalJavaRuleExtractionJs(expr);
+    if (javaRuleValue !== null) return javaRuleValue;
     const javaStringValue = this.evalJavaGetStringExpression(expr, sourceJson);
     if (javaStringValue !== null) return javaStringValue;
     const javaStringListValue = this.evalJavaGetStringListExpression(expr);
@@ -371,6 +384,10 @@ export class AnalyzeRule {
           return this.handlePrefixAes(expr.substring(parenStart + 1, parenEnd), sourceJson);
         }
       }
+    }
+    if (/\bjava\.(?:base64|hex|md5|sha|url|encodeURI|aes|des|getCookie|getString|getStringList)/.test(expr)) {
+      this.js.setVar('baseUrl', this.baseUrl);
+      return this.js.evaluate(expr, sourceJson);
     }
     const simpleValue = this.evalSimpleJsExpression(expr, { result: sourceJson });
     if (simpleValue !== null) return simpleValue;
@@ -405,12 +422,12 @@ export class AnalyzeRule {
   }
 
   private evalJavaGetStringExpression(expr: string, sourceJson: string): string | null {
-    const getStringMatch = expr.match(/(?:replaceCover\s*\(\s*)?java\.getString\(\s*["']([^"']+)["']\s*\)\s*\)?/);
+    const getStringMatch = expr.match(/^\s*(?:replaceCover\s*\(\s*)?java\.getString\(\s*["']([^"']+)["']\s*\)\s*\)?\s*$/);
     if (!getStringMatch) return null;
     const keyOrPath = getStringMatch[1];
     let data: Object | null = null;
     try { data = JSON.parse(sourceJson) as Object; } catch (_) {}
-    if (!data) return '';
+    if (!data) return this.analyze(keyOrPath).join('\n');
     let value: Object | string | undefined = undefined;
     if (keyOrPath.startsWith('$')) {
       value = this.getByPath(data, keyOrPath);
@@ -418,8 +435,53 @@ export class AnalyzeRule {
       value = (data as Record<string, Object>)[keyOrPath] as Object | string;
       if (value === undefined) value = this.deepFind(data, keyOrPath);
     }
+    if (value === undefined || value === null) {
+      const values = this.analyze(keyOrPath);
+      if (values.length > 0) return values.join('\n');
+    }
     if (Array.isArray(value)) return value.map(item => String(item)).join(',');
     return value === undefined || value === null ? '' : String(value);
+  }
+
+  private evalJavaRuleExtractionJs(expr: string): string | null {
+    const getMatch = expr.match(/\b(?:let|var|const)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*java\.getString\(\s*(['"])([\s\S]*?)\2\s*\)\s*;?/);
+    if (!getMatch) return null;
+    const varName = getMatch[1];
+    const values = this.analyze(getMatch[3]);
+    const joined = values.join('\n');
+
+    const splitMap = new RegExp(
+      `String\\(\\s*${varName}\\s*\\)\\s*\\.split\\(\\s*(['"])([\\s\\S]*?)\\1\\s*\\)` +
+      `\\s*\\.map\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=>\\s*([\\s\\S]+?)\\)` +
+      `\\s*\\.join\\(\\s*(['"])([\\s\\S]*?)\\5\\s*\\)`
+    ).exec(expr);
+    if (splitMap) {
+      const separator = this.unescapeJsString(splitMap[2]);
+      const itemName = splitMap[3];
+      const body = splitMap[4].trim();
+      const joiner = this.unescapeJsString(splitMap[6]);
+      const items = (separator ? joined.split(separator) : joined.split(''))
+        .map(item => item.trim())
+        .filter(item => item.length > 0);
+      return items.map(item => this.evalMapBody(body, itemName, item)).join(joiner);
+    }
+
+    const finalVar = expr.match(new RegExp(`(?:^|;)\\s*${varName}\\s*;?\\s*$`));
+    return finalVar ? joined : null;
+  }
+
+  private evalMapBody(body: string, name: string, value: string): string {
+    const tpl = body.match(/^`([\s\S]*)`$/);
+    if (tpl) {
+      const marker = new RegExp('\\$\\{\\s*' + this.escapeRegex(name) + '\\s*\\}', 'g');
+      return tpl[1].replace(marker, value);
+    }
+    return this.evalSimpleJsExpression(body, { [name]: value }) || value;
+  }
+
+  private unescapeJsString(value: string): string {
+    return (value || '').replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"').replace(/\\'/g, "'");
   }
 
   private evalJavaGetStringListExpression(expr: string): string | null {
@@ -540,6 +602,10 @@ export class AnalyzeRule {
     return typeof value === 'string' ? value as string : JSON.stringify(value);
   }
 
+  private normalizeJsonPath(path: string): string {
+    return (path || '').replace(/\[(\*|\d+)\]([A-Za-z_$][A-Za-z0-9_$-]*)/g, '[$1].$2');
+  }
+
   private parseJsonSafe(text: string): EncodedJsonMap {
     try {
       return EncodedSourceUrl.asMap(JSON.parse(text || '{}') as Object);
@@ -582,6 +648,7 @@ export class AnalyzeRule {
   // === JSONPath ===
 
   private evalJsonPath(rule: string): Object | string | undefined {
+    rule = this.normalizeJsonPath(rule);
     const isBareKey = /^[A-Za-z_][A-Za-z0-9_]*$/.test(rule);
     if (!rule.startsWith('$') && !rule.startsWith('@.') && !isBareKey) return undefined;
     try {
@@ -598,7 +665,7 @@ export class AnalyzeRule {
 
   private getByPath(obj: Object, path: string): Object | string | undefined {
     if (!obj || !path) return undefined;
-    path = path.trim();
+    path = this.normalizeJsonPath(path.trim());
     const normalized = path.startsWith('$') || path.startsWith('@') ? path : '$.' + path;
     const evaluated = JsonPathEvaluator.evaluate(obj, normalized);
     if (evaluated.length > 0) return evaluated.length === 1 ? evaluated[0] as Object | string : evaluated as Object[];
@@ -790,6 +857,8 @@ export class AnalyzeRule {
 
   private evalJsBlockSideEffects(code: string): string {
     if (!code) return '';
+    const engineValue = this.scriptEngine.evalBlock(code, this.scriptEnv());
+    if (engineValue.handled) return engineValue.value;
     const knownValue = this.evalKnownJsLibBlock(code);
     if (knownValue) return knownValue;
     let lastValue = '';
@@ -1068,7 +1137,7 @@ export class AnalyzeRule {
 
   private isAttrName(part: string): boolean {
     return part === 'href' || part === 'src' || part === 'content' || part === 'data-src' ||
-      part === 'data-lazy' || part === 'data-bid' || part === 'onclick' || part === 'title' ||
+      part === 'data-lazy' || part === 'data-original' || part === 'data-bid' || part === 'onclick' || part === 'title' ||
       part === 'alt' || part === 'class' || part === 'id';
   }
 
@@ -1676,6 +1745,8 @@ export class AnalyzeRule {
 
   private evalResultJs(jsCode: string, value: string): string {
     if (!jsCode) return value;
+    const engineValue = this.scriptEngine.evalResultJs(jsCode, value, this.scriptEnv());
+    if (engineValue.handled) return engineValue.value;
     const knownValue = this.evalKnownResultJs(jsCode, value);
     if (knownValue !== null) return knownValue;
     const simpleValue = this.evalSimpleJsExpression(jsCode, { result: value, baseUrl: this.baseUrl });

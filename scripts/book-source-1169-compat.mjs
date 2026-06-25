@@ -30,8 +30,10 @@ async function loadRuleModule() {
   const rulePath = path.join(root, 'entry/src/main/ets/core/rule/AnalyzeRule.ts');
   const jsonPath = path.join(root, 'entry/src/main/ets/core/rule/JsonPathEvaluator.ts');
   const jsRuntimePath = path.join(root, 'entry/src/main/ets/core/rule/JsRuntime.ts');
-  const [ruleSource, jsonSource, jsSource] = await Promise.all([
-    fs.readFile(rulePath, 'utf8'), fs.readFile(jsonPath, 'utf8'), fs.readFile(jsRuntimePath, 'utf8')
+  const scriptEnginePath = path.join(root, 'entry/src/main/ets/core/rule/ScriptEngine.ts');
+  const [ruleSource, jsonSource, jsSource, scriptEngineSource] = await Promise.all([
+    fs.readFile(rulePath, 'utf8'), fs.readFile(jsonPath, 'utf8'), fs.readFile(jsRuntimePath, 'utf8'),
+    fs.readFile(scriptEnginePath, 'utf8')
   ]);
   const stubs = `
 const util = {
@@ -61,11 +63,15 @@ const VerificationSupport = {
   pickStartBrowserUrl: () => '',
   requestVerification: () => {}
 };
-const EncodedSourceUrl = { asMap: value => value || {} };
+const EncodedSourceUrl = {
+  asMap: value => value || {},
+  str: value => value === undefined || value === null ? '' : String(value).trim()
+};
 `;
   const combined = [
     stubs,
     stripImportsAndExports(jsSource),
+    stripImportsAndExports(scriptEngineSource),
     stripImportsAndExports(jsonSource),
     stripImportsAndExports(ruleSource),
     'export { AnalyzeRule, JsonPathEvaluator, JsRuntime, RuleContext };'

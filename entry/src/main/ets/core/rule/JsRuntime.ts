@@ -1,15 +1,25 @@
 import { util } from '@kit.ArkTS';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { CookieStore } from '../http/CookieStore';
+import { JsonPathEvaluator } from './JsonPathEvaluator';
 
 export class JsRuntime {
   private vars: Record<string, string> = {};
+  private jsonContext: Object | null = null;
 
   setVar(k: string, v: string): void { this.vars[k] = v; }
   getVar(k: string): string { return this.vars[k] || ''; }
+  setJsonContext(text: string): void {
+    try {
+      this.jsonContext = JSON.parse(text || '{}') as Object;
+    } catch (_) {
+      this.jsonContext = null;
+    }
+  }
 
   evaluate(expression: string, result: string = ''): string {
     this.vars['result'] = result;
+    this.setJsonContext(result);
     return this.evalExpr(expression.replace(/^\s*(?:return\s+)?/, '').replace(/;\s*$/, ''));
   }
 
@@ -49,8 +59,9 @@ export class JsRuntime {
       expr = this.replaceFunctionCalls(expr, 'java.get', (v: string) => this.getVarCall(v));
       expr = this.replaceFunctionCalls(expr, 'cookie.getCookie', (v: string) => this.cookieValue(v));
       expr = this.replaceFunctionCalls(expr, 'java.timeFormat', (v: string) => this.timeFormatCall(v));
-      expr = this.replaceFunctionCalls(expr, 'java.getString', (_v: string) => '');
-      expr = this.replaceFunctionCalls(expr, 'java.getElement', (_v: string) => '');
+      expr = this.replaceGetStringListCalls(expr);
+      expr = this.replaceFunctionCalls(expr, 'java.getString', (v: string) => this.javaGetStringCall(v));
+      expr = this.replaceFunctionCalls(expr, 'java.getElement', (v: string) => this.javaGetStringCall(v));
       expr = this.replaceFunctionCalls(expr, 'java.t2s', (v: string) => this.evalStr(v));
       expr = this.replaceFunctionCalls(expr, 'String', (v: string) => this.evalStr(v));
       expr = this.replaceFunctionCalls(expr, 'encodeURIComponent', (v: string) => encodeURIComponent(this.evalStr(v)));
@@ -120,16 +131,26 @@ export class JsRuntime {
 
   private replaceFunctionCalls(expr: string, name: string, mapper: (arg: string) => string): string {
     let result = expr;
-    let start = result.indexOf(`${name}(`);
+    let start = this.indexOfFunctionCall(result, name);
     while (start >= 0) {
       const openIndex = start + name.length;
       const closeIndex = this.findMatchingParen(result, openIndex);
       if (closeIndex < 0) break;
       const arg = result.substring(openIndex + 1, closeIndex);
       result = result.substring(0, start) + mapper(arg) + result.substring(closeIndex + 1);
-      start = result.indexOf(`${name}(`);
+      start = this.indexOfFunctionCall(result, name);
     }
     return result;
+  }
+
+  private indexOfFunctionCall(text: string, name: string): number {
+    let start = text.indexOf(`${name}(`);
+    while (start >= 0) {
+      const prev = start > 0 ? text.charAt(start - 1) : '';
+      if (!/[A-Za-z0-9_.$]/.test(prev)) return start;
+      start = text.indexOf(`${name}(`, start + 1);
+    }
+    return -1;
   }
 
   private replaceNoArgCalls(expr: string): string {
@@ -137,6 +158,98 @@ export class JsRuntime {
       .replace(/\bjava\.androidId\(\)/g, this.androidId())
       .replace(/\bjava\.randomUUID\(\)/g, this.randomUuid())
       .replace(/\bDate\.now\(\)/g, String(Date.now()));
+  }
+
+  private replaceGetStringListCalls(expr: string): string {
+    let result = expr;
+    let start = this.indexOfFunctionCall(result, 'java.getStringList');
+    while (start >= 0) {
+      const openIndex = start + 'java.getStringList'.length;
+      const closeIndex = this.findMatchingParen(result, openIndex);
+      if (closeIndex < 0) break;
+      const arg = result.substring(openIndex + 1, closeIndex);
+      let end = closeIndex + 1;
+      let replacement = this.quoteString(this.javaGetStringListCall(arg).join(','));
+
+      const tail = result.substring(end);
+      const joinMatch = tail.match(/^\s*\.join\s*\(\s*([\s\S]*?)\s*\)/);
+      const toArrayJoinMatch = tail.match(/^\s*\.toArray\s*\(\s*\)\s*\.join\s*\(\s*([\s\S]*?)\s*\)/);
+      const mapJoinMatch = tail.match(/^\s*\.toArray\s*\(\s*\)\s*\.map\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*=>\s*([\s\S]+?)\)\s*\.join\s*\(\s*([\s\S]*?)\s*\)/);
+      if (mapJoinMatch) {
+        end += mapJoinMatch[0].length;
+        const values = this.javaGetStringListCall(arg);
+        const mapped: string[] = [];
+        for (const value of values) mapped.push(this.evalArrowExpression(mapJoinMatch[2], mapJoinMatch[1], value));
+        replacement = this.quoteString(mapped.join(this.evalStr(mapJoinMatch[3])));
+      } else if (toArrayJoinMatch) {
+        end += toArrayJoinMatch[0].length;
+        replacement = this.quoteString(this.javaGetStringListCall(arg).join(this.evalStr(toArrayJoinMatch[1])));
+      } else if (joinMatch) {
+        end += joinMatch[0].length;
+        replacement = this.quoteString(this.javaGetStringListCall(arg).join(this.evalStr(joinMatch[1])));
+      }
+
+      result = result.substring(0, start) + replacement + result.substring(end);
+      start = this.indexOfFunctionCall(result, 'java.getStringList');
+    }
+    return result;
+  }
+
+  private javaGetStringCall(rawArgs: string): string {
+    const args = this.splitArgs(rawArgs);
+    const key = this.evalStr(args[0] || '');
+    const values = this.readJsonValues(key);
+    if (values.length === 0) return '';
+    return this.jsonValueToString(values[0]);
+  }
+
+  private javaGetStringListCall(rawArgs: string): string[] {
+    const args = this.splitArgs(rawArgs);
+    const key = this.evalStr(args[0] || '');
+    return this.readJsonValues(key).map(value => this.jsonValueToString(value));
+  }
+
+  private readJsonValues(pathOrKey: string): Object[] {
+    const data = this.jsonContext;
+    if (!data || !pathOrKey) return [];
+    const key = this.normalizeJsonPath(pathOrKey.trim());
+    if (key.startsWith('$') || key.startsWith('@.')) {
+      return JsonPathEvaluator.evaluate(data, key.startsWith('@.') ? '$.' + key.substring(2) : key);
+    }
+    const direct = (data as Record<string, Object>)[key];
+    if (direct !== undefined && direct !== null) return [direct];
+    const deep: Object[] = [];
+    this.deepRead(data, key, deep);
+    return deep;
+  }
+
+  private normalizeJsonPath(path: string): string {
+    return (path || '').replace(/\[(\*|\d+)\]([A-Za-z_$][A-Za-z0-9_$-]*)/g, '[$1].$2');
+  }
+
+  private deepRead(value: Object, key: string, out: Object[]): void {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const item of value as Object[]) this.deepRead(item, key, out);
+      return;
+    }
+    const record = value as Record<string, Object>;
+    if (record[key] !== undefined && record[key] !== null) out.push(record[key]);
+    for (const childKey in record) this.deepRead(record[childKey], key, out);
+  }
+
+  private jsonValueToString(value: Object): string {
+    if (value === undefined || value === null) return '';
+    return typeof value === 'string' ? value as string : JSON.stringify(value);
+  }
+
+  private evalArrowExpression(expr: string, name: string, value: string): string {
+    const marker = new RegExp('\\b' + name + '\\b', 'g');
+    return this.evalStr(expr.replace(marker, this.quoteString(value)));
+  }
+
+  private quoteString(value: string): string {
+    return `"${(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   }
 
   private applyCookieSideEffects(expr: string): void {
@@ -443,18 +556,21 @@ export class JsRuntime {
       const textDecoder = util.TextDecoder.create('utf-8');
       const base64 = new util.Base64Helper();
       const upper = transformation.toUpperCase();
-      const isDes = upper.startsWith('DES');
+      const isTripleDes = upper.startsWith('DESEDE') || upper.startsWith('3DES') || upper.startsWith('TRIPLEDES');
+      const isDes = !isTripleDes && upper.startsWith('DES');
       const mode = upper.includes('/ECB/') ? 'ECB' : 'CBC';
       const padding = upper.includes('NOPADDING') ? 'NoPadding' : upper.includes('PKCS7') ? 'PKCS7' : 'PKCS5';
       const rawKey = textEncoder.encodeInto(key);
-      const keyLength = isDes ? 8 : (rawKey.length >= 32 ? 32 : rawKey.length >= 24 ? 24 : 16);
-      const keyAlgorithm = isDes ? 'DES' : `AES${keyLength * 8}`;
+      const keyLength = isTripleDes ? 24 : isDes ? 8 : (rawKey.length >= 32 ? 32 : rawKey.length >= 24 ? 24 : 16);
+      const keyAlgorithm = isTripleDes ? '3DES192' : isDes ? 'DES' : `AES${keyLength * 8}`;
       const keyGen = cryptoFramework.createSymKeyGenerator(keyAlgorithm);
       const symKey = keyGen.convertKeySync({ data: this.fixedBytes(rawKey, keyLength) });
-      const cipher = cryptoFramework.createCipher(`${keyAlgorithm}|${mode}|${padding}`);
+      const cipherName = isTripleDes ? `${keyAlgorithm}|${mode}|${padding}` :
+        isDes ? `${keyAlgorithm}|${mode}|${padding}` : `${keyAlgorithm}|${mode}|${padding}`;
+      const cipher = cryptoFramework.createCipher(cipherName);
       const params: cryptoFramework.IvParamsSpec | null = mode === 'ECB' ? null : {
         algName: 'IvParamsSpec',
-        iv: { data: this.fixedBytes(textEncoder.encodeInto(iv), isDes ? 8 : 16) }
+        iv: { data: this.fixedBytes(textEncoder.encodeInto(iv), (isDes || isTripleDes) ? 8 : 16) }
       };
       cipher.initSync(encrypt ? cryptoFramework.CryptoMode.ENCRYPT_MODE : cryptoFramework.CryptoMode.DECRYPT_MODE, symKey, params);
       const input = encrypt ? textEncoder.encodeInto(data) : base64.decodeSync(data);

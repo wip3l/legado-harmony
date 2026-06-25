@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import crypto from 'node:crypto';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, '..');
@@ -35,6 +36,7 @@ async function loadModules() {
   const files = [
     'entry/src/main/ets/core/book/EncodedSourceUrl.ts',
     'entry/src/main/ets/core/rule/JsRuntime.ts',
+    'entry/src/main/ets/core/rule/ScriptEngine.ts',
     'entry/src/main/ets/core/rule/JsonPathEvaluator.ts',
     'entry/src/main/ets/core/rule/AjaxRuleCompat.ts',
     'entry/src/main/ets/core/rule/AnalyzeRule.ts',
@@ -42,6 +44,7 @@ async function loadModules() {
   ];
   const sources = await Promise.all(files.map(file => fs.readFile(path.join(root, file), 'utf8')));
   const stubs = [
+    "import crypto from 'node:crypto';",
     "class CompatTextEncoder {",
     "  constructor(label) { this.label = label || 'utf-8'; }",
     "  encodeInto(value) { return new Uint8Array(Buffer.from(String(value), 'utf8')); }",
@@ -55,7 +58,45 @@ async function loadModules() {
     "    decodeSync(v) { return new Uint8Array(Buffer.from(v, 'base64')); }",
     "  }",
     "};",
-    "const cryptoFramework = { createMd() { throw new Error('crypto not used by batch compatibility scan'); } };",
+    "const cryptoFramework = {",
+    "  CryptoMode: { ENCRYPT_MODE: 1, DECRYPT_MODE: 2 },",
+    "  createMd(algorithm) {",
+    "    const normalized = String(algorithm).replace('-', '').toLowerCase();",
+    "    const hash = crypto.createHash(normalized);",
+    "    return { updateSync(blob) { hash.update(Buffer.from(blob.data)); }, digestSync() { return { data: new Uint8Array(hash.digest()) }; } };",
+    "  },",
+    "  createSymKeyGenerator(_algorithm) {",
+    "    return { convertKeySync(blob) { return { data: Buffer.from(blob.data) }; } };",
+    "  },",
+    "  createCipher(algorithm) {",
+    "    function normalizeAlg(name, key) {",
+    "      const upper = String(name).toUpperCase();",
+    "      const mode = upper.includes('ECB') ? 'ecb' : 'cbc';",
+    "      if (upper.startsWith('3DES')) return 'des-ede3-' + mode;",
+    "      if (upper.startsWith('DES')) return 'des-' + mode;",
+    "      if (upper.startsWith('AES256')) return 'aes-256-' + mode;",
+    "      if (upper.startsWith('AES192')) return 'aes-192-' + mode;",
+    "      return (key.length >= 32 ? 'aes-256-' : key.length >= 24 ? 'aes-192-' : 'aes-128-') + mode;",
+    "    }",
+    "    function usesPadding(name) { return !String(name).toUpperCase().includes('NOPADDING'); }",
+    "    let encrypt = true;",
+    "    let key = Buffer.alloc(0);",
+    "    let iv = null;",
+    "    return {",
+    "      initSync(mode, symKey, params) {",
+    "        encrypt = mode === cryptoFramework.CryptoMode.ENCRYPT_MODE;",
+    "        key = Buffer.from(symKey.data);",
+    "        iv = params && params.iv ? Buffer.from(params.iv.data) : null;",
+    "      },",
+    "      doFinalSync(blob) {",
+    "        const alg = normalizeAlg(algorithm, key);",
+    "        const cipher = encrypt ? crypto.createCipheriv(alg, key, alg.includes('ecb') ? null : iv) : crypto.createDecipheriv(alg, key, alg.includes('ecb') ? null : iv);",
+    "        cipher.setAutoPadding(usesPadding(algorithm));",
+    "        return { data: new Uint8Array(Buffer.concat([cipher.update(Buffer.from(blob.data)), cipher.final()])) };",
+    "      }",
+    "    };",
+    "  }",
+    "};",
     "class CookieStore {",
     "  static getCookie() { return ''; }",
     "  static getCookieValue() { return ''; }",
@@ -525,7 +566,7 @@ function yesNo(value) {
 }
 
 function runCapabilitySmoke(modules) {
-  const { AjaxRuleCompat, AnalyzeRule, EncodedSourceUrl, RuleContext } = modules;
+  const { AjaxRuleCompat, AnalyzeRule, AnalyzeUrl, EncodedSourceUrl, RuleContext } = modules;
   const checks = [];
   const ctx = new RuleContext();
   ctx.put('source.bookSourceUrl', 'https://example.com');
@@ -545,14 +586,76 @@ function runCapabilitySmoke(modules) {
     pass: sourceRule.analyzeFirst("<js>source.setVariable('next');result=source.getVariable();</js>") === 'next' &&
       ctx.get('source.variable') === 'next'
   });
+  checks.push({
+    name: 'source named variable bridge',
+    pass: sourceRule.analyzeFirst("<js>source.setVariable('token','abc');source.getVariable('token');</js>") === 'abc' &&
+      ctx.get('source.variable.token') === 'abc'
+  });
+  checks.push({
+    name: 'cache memory bridge',
+    pass: sourceRule.analyzeFirst("<js>cache.putMemory('aid','42');cache.getFromMemory('aid');</js>") === '42' &&
+      ctx.get('cache.aid') === '42'
+  });
+  const tripleDesRule = new AnalyzeRule('', '');
+  const tripleDesPlain = '兼容3DES';
+  const tripleDesExpr = `java.desEncodeToBase64String('${tripleDesPlain}','OW84U8Eerdb99rtsTXWSILDO','DESede/CBC/PKCS5Padding','SK8bncVu')`;
+  const tripleDesCipher = tripleDesRule.analyzeFirst('@js:' + tripleDesExpr);
+  checks.push({
+    name: 'DESede compat crypto',
+    pass: tripleDesCipher.length > 0 &&
+      tripleDesRule.analyzeFirst(`@js:java.desBase64DecodeToString('${tripleDesCipher}','OW84U8Eerdb99rtsTXWSILDO','DESede/CBC/PKCS5Padding','SK8bncVu')`) === tripleDesPlain
+  });
+  const javaImporterCtx = new RuleContext();
+  javaImporterCtx.put('source.bookSourceComment', `
+var javaImport = new JavaImporter();
+javaImport.importPackage(Packages.java.lang, Packages.javax.crypto.spec, Packages.javax.crypto, Packages.android.util);
+with(javaImport){
+  function decode(str){
+    var key = SecretKeySpec(String("OW84U8Eerdb99rtsTXWSILDO").getBytes(),"DESede");
+    var iv = IvParameterSpec(String("SK8bncVu").getBytes());
+    var bytes = Base64.decode(String(str).getBytes(),2);
+    var chipher = Cipher.getInstance("DESede/CBC/PKCS5Padding");
+    chipher.init(2,key,iv);
+    return String(chipher.doFinal(bytes));
+  }
+}`);
+  const javaImporterRule = new AnalyzeRule(tripleDesCipher, '', javaImporterCtx);
+  checks.push({
+    name: 'JavaImporter Cipher decode bridge',
+    pass: javaImporterRule.analyzeFirst('text@js:decode(result)') === tripleDesPlain
+  });
 
   const imageRule = new AnalyzeRule('{"data":{"page":[{"image":"a.jpg"},{"image":"b.jpg"}]}}', '');
+  const jsonBridgeRule = new AnalyzeRule(
+    '{"data":{"book":{"name":"斗破苍穹"},"page":[{"image":"a.jpg"},{"image":"b.jpg"}]}}',
+    ''
+  );
+  checks.push({
+    name: 'JsRuntime java.getString bridge',
+    pass: jsonBridgeRule.analyzeFirst("@js:java.getString('$.data.book.name') + '-ok'") === '斗破苍穹-ok'
+  });
+  checks.push({
+    name: 'JsRuntime java.getStringList join',
+    pass: jsonBridgeRule.analyzeFirst("@js:java.getStringList('$.data.page[*].image').join('|')") === 'a.jpg|b.jpg'
+  });
+  checks.push({
+    name: 'JsRuntime loose jsonPath',
+    pass: jsonBridgeRule.analyzeFirst("@js:java.getStringList('$.data.page[*]image').join('|')") === 'a.jpg|b.jpg'
+  });
   const images = imageRule.analyzeFirst(
     "@js:java.getStringList('$.data.page[*].image').toArray().map(a=>'<img src=\"'+a+'\">').join(' ')"
   );
   checks.push({
     name: 'java.getStringList map',
     pass: images === '<img src="a.jpg"> <img src="b.jpg">'
+  });
+  const htmlGetStringRule = new AnalyzeRule(
+    '<div><img data-original="a.jpg"><img data-original="b.jpg"></div>',
+    ''
+  );
+  checks.push({
+    name: 'java.getString html selector',
+    pass: htmlGetStringRule.analyzeFirst("@js:java.getString('img@data-original')") === 'a.jpg\nb.jpg'
   });
 
   const templateRule = new AnalyzeRule('{"bookId":"10","chapterId":"20"}', '');
@@ -565,8 +668,38 @@ function runCapabilitySmoke(modules) {
   );
   checks.push({
     name: 'direct java.ajax plan',
-    pass: ajaxPlan?.urlRule === '#resource@value' &&
+    pass: ajaxPlan?.urlRule === '#resource@value' && ajaxPlan?.ajaxAll === false &&
       AjaxRuleCompat.applyReplaceChain("callback_1:'正文'})", ajaxPlan?.jsCode || '') === '正文'
+  });
+  const ajaxAllPlan = AjaxRuleCompat.directResultPlan("#next@href@js:String(java.ajaxAll(result)).match(/content:'([^']+)'/)[1]");
+  checks.push({
+    name: 'direct java.ajaxAll match plan',
+    pass: ajaxAllPlan?.urlRule === '#next@href' && ajaxAllPlan?.ajaxAll === true &&
+      AjaxRuleCompat.applyReplaceChain("content:'下一页正文'", ajaxAllPlan?.jsCode || '') === '下一页正文'
+  });
+  const ajaxJsonPlan = AjaxRuleCompat.directResultPlan("$.api@js:JSON.parse(java.ajax(result)).data.content");
+  checks.push({
+    name: 'direct java.ajax JSON.parse plan',
+    pass: ajaxJsonPlan?.urlRule === '$.api' &&
+      AjaxRuleCompat.applyReplaceChain('{"data":{"content":"接口正文"}}', ajaxJsonPlan?.jsCode || '') === '接口正文'
+  });
+  const analyzeUrlSource = {
+    bookSourceUrl: 'https://example.com/base/path.html',
+    header: "{User-Agent:'UA',Cookie:'sid=1'}"
+  };
+  const analyzeUrl = new AnalyzeUrl(analyzeUrlSource, { execute: async request => ({ url: request.url, statusCode: 200, headers: {}, body: '', success: true }) });
+  const analyzeConfig = analyzeUrl.parse("/api/search,{method:'POST',body:'a=1&b=2',headers:{X-Test:'1','X-Flag':'2'},charset:'gbk'}");
+  const analyzeRequest = analyzeUrl.buildRequest();
+  checks.push({
+    name: 'AnalyzeUrl loose object parse',
+    pass: analyzeConfig.url === 'https://example.com/api/search' &&
+      analyzeConfig.method === 'POST' &&
+      analyzeConfig.charset === 'gbk' &&
+      analyzeConfig.headers['X-Test'] === '1' &&
+      analyzeConfig.headers['X-Flag'] === '2' &&
+      analyzeRequest.headers['User-Agent'] === 'UA' &&
+      analyzeRequest.headers['Cookie'] === 'sid=1' &&
+      analyzeRequest.headers['Content-Type'] === 'application/x-www-form-urlencoded'
   });
   const htmlRule = new AnalyzeRule(
     '<ul id="chapterlist"><li><a href="/c1">第一章</a></li><li><a href="/c2">第二章</a></li></ul>' +

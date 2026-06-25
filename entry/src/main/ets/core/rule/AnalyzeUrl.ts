@@ -78,7 +78,7 @@ export class AnalyzeUrl {
 
   private parseOption(optStr: string): void {
     try {
-      const opt = JSON.parse(optStr.replace(/'/g, '"')) as Record<string, Object>;
+      const opt = this.parseLooseObject(optStr) || {};
       if (opt['method']) this.config.method = String(opt['method']).toUpperCase();
       if (opt['body'] !== undefined && opt['body'] !== null) {
         this.config.body = typeof opt['body'] === 'string' ? String(opt['body']) : JSON.stringify(opt['body']);
@@ -94,12 +94,12 @@ export class AnalyzeUrl {
       if (opt['webJs']) this.config.webJs = String(opt['webJs']);
     } catch (e) {
       // 正则保底提取
-      const m = optStr.match(/"method"\s*:\s*"(\w+)"/);
+      const m = optStr.match(/['"]?method['"]?\s*:\s*['"]?(\w+)['"]?/i);
       if (m) this.config.method = m[1].toUpperCase();
-      const b = optStr.match(/"body"\s*:\s*"([^"]*)"/);
-      if (b) this.config.body = b[1];
-      const c = optStr.match(/"charset"\s*:\s*"([^"]*)"/);
-      if (c) this.config.charset = c[1];
+      const b = optStr.match(/['"]?body['"]?\s*:\s*(['"])([\s\S]*?)\1/i);
+      if (b) this.config.body = b[2];
+      const c = optStr.match(/['"]?charset['"]?\s*:\s*(['"])([\s\S]*?)\1/i);
+      if (c) this.config.charset = c[2];
     }
   }
 
@@ -128,7 +128,7 @@ export class AnalyzeUrl {
     const text = (hdr || '').trim();
     if (text.startsWith('{')) {
       try {
-        const source = JSON.parse(text.replace(/'/g, '"')) as Record<string, Object>;
+        const source = this.parseLooseObject(text) || {};
         for (const key in source) result[key] = String(source[key]);
         return result;
       } catch (_) {}
@@ -145,7 +145,18 @@ export class AnalyzeUrl {
   private loadSourceHeaders(): Record<string, string> {
     if (!this.source?.header) return {};
     try {
-      return JSON.parse(this.source.header.replace(/'/g, '"')) as Record<string, string>;
+      const parsed = this.parseLooseObject(this.source.header);
+      if (parsed) {
+        const headers: Record<string, string> = {};
+        for (const key in parsed) headers[key] = String(parsed[key]);
+        return headers;
+      }
+      const h: Record<string, string> = {};
+      for (const line of this.source.header.split(/[\n\r]+/)) {
+        const idx = line.indexOf(':');
+        if (idx > 0) h[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+      }
+      return h;
     } catch (e) {
       const h: Record<string, string> = {};
       for (const line of this.source.header.split(/[\n\r]+/)) {
@@ -240,6 +251,29 @@ export class AnalyzeUrl {
       else result += '%u' + code.toString(16).toUpperCase().padStart(4, '0');
     }
     return result;
+  }
+
+  private parseLooseObject(text: string): Record<string, Object> | null {
+    const value = (text || '').trim();
+    if (!value.startsWith('{') || !value.endsWith('}')) return null;
+    try {
+      return JSON.parse(this.normalizeLooseJson(value)) as Record<string, Object>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  private normalizeLooseJson(text: string): string {
+    return (text || '')
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/'((?:\\.|[^'\\])*)'/g, (_: string, body: string) => {
+        return JSON.stringify(body.replace(/\\'/g, "'"));
+      })
+      .replace(/([{,]\s*)([A-Za-z_$][A-Za-z0-9_$-]*)\s*:/g, (_: string, prefix: string, key: string) => {
+        return `${prefix}"${key}":`;
+      })
+      .replace(/,\s*([}\]])/g, '$1');
   }
 
   private looksLikeStructuredBody(body: string): boolean {
