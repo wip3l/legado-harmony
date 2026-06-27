@@ -87,7 +87,9 @@ export class SearchCoordinator {
 
     const emitProgress = (force: boolean = false): void => {
       const now = Date.now();
-      if (!force && done < sources.length && now - lastProgressEmitAt < SEARCH_PROGRESS_EMIT_INTERVAL_MS) {
+      const hasDeltaResults = pendingDeltaResults.length > 0;
+      if (!force && !hasDeltaResults && done < sources.length &&
+        now - lastProgressEmitAt < SEARCH_PROGRESS_EMIT_INTERVAL_MS) {
         return;
       }
       lastProgressEmitAt = now;

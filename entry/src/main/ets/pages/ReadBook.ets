@@ -2109,7 +2109,15 @@ struct ReadBookPage {
         if (!this.isChangeSourceSessionActive(sessionId)) {
           return;
         }
-        this.changeSourceResults = this.filterChangeSourceResults(progress.results, currentBookUrl, currentOrigin);
+        if (progress.finished) {
+          this.changeSourceResults = this.filterChangeSourceResults(progress.results, currentBookUrl, currentOrigin);
+        } else if (progress.deltaResults && progress.deltaResults.length > 0) {
+          this.changeSourceResults = this.filterChangeSourceResults(
+            this.changeSourceResults.concat(progress.deltaResults),
+            currentBookUrl,
+            currentOrigin
+          );
+        }
         this.changeSourceStatus = progress.status;
         if (progress.finished) {
           this.isChangingSource = false;
