@@ -48,13 +48,6 @@ struct AppIconSettingsPage {
           }
           .width('100%')
           .padding({ left: 12, right: 12 })
-
-          Text('前 5 个动态图标无需申请扩容；图标 ID 需在 AppGallery Connect 的“分发 > 服务 > 图标管理”新增图标时填写，并与应用内 ID 保持一致。')
-            .fontSize(12)
-            .fontColor(this.subTextColor())
-            .lineHeight(18)
-            .width('100%')
-            .padding({ left: 16, right: 16, top: 14, bottom: 32 })
         }
         .width('100%')
       }
