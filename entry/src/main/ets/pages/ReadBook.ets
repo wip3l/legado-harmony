@@ -3,13 +3,15 @@ import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
 import { inputConsumer, KeyCode, Action, KeyEvent } from '@kit.InputKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { avSession } from '@kit.AVSessionKit';
+import image from '@ohos.multimedia.image';
+import fs from '@ohos.file.fs';
 import graphicsText from '@ohos.graphics.text';
 import { Book, BookChapter, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
 import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
 import { WebBookService } from '../core/book/WebBookService';
-import { OPEN_BOOK_SHORTCUT_ACTION, RecentReadShortcut } from '../utils/RecentReadShortcut';
+import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { SystemTtsReader, TtsChunk, TtsVoiceOption } from '../utils/SystemTtsReader';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
@@ -22,6 +24,9 @@ import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
+import { BookDisplayHelper } from '../utils/BookDisplayHelper';
+import { BookCoverCache } from '../utils/BookCoverCache';
+import { CoverGallerySettings } from '../utils/CoverGallerySettings';
 
 interface ReadTextSlice {
   text: string;
@@ -110,6 +115,8 @@ struct ReadBookPage {
   @State pageViewHeight: number = 0;
   @State statusBarSafeHeight: number = 0;
   @State isTtsSpeaking: boolean = false;
+  @State ttsMediaControlsExpanded: boolean = false;
+  @State ttsMediaImage: string = '';
   @State ttsDisplayText: string = '';
   @State ttsHighlightStart: number = -1;
   @State ttsHighlightEnd: number = -1;
@@ -127,6 +134,9 @@ struct ReadBookPage {
   private ttsBackgroundDesired: boolean = false;
   private ttsAvSession: avSession.AVSession | null = null;
   private ttsAvSessionRequesting: boolean = false;
+  private ttsMediaImageRefreshSerial: number = 0;
+  private ttsMediaImageRaw: string = '';
+  private ttsMediaPixelMap: image.PixelMap | null = null;
   private contentPageStarts: number[] = [];
   private contentPageEnds: number[] = [];
   private pagedContentText: string = '';
@@ -204,6 +214,14 @@ struct ReadBookPage {
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
+  @StorageLink('bookshelfCoverAlbums') @Watch('onTtsCoverSettingsChanged') bookshelfCoverAlbums: string = '';
+  @StorageLink('bookshelfLightCoverAlbumId') @Watch('onTtsCoverSettingsChanged') bookshelfLightCoverAlbumId: string = '';
+  @StorageLink('bookshelfDarkCoverAlbumId') @Watch('onTtsCoverSettingsChanged') bookshelfDarkCoverAlbumId: string = '';
+  @StorageLink('bookshelfCoverApplyScope') @Watch('onTtsCoverSettingsChanged') bookshelfCoverApplyScope: string = 'all';
+  @StorageLink('bookshelfCoverTargetBooks') @Watch('onTtsCoverSettingsChanged') bookshelfCoverTargetBooks: string = '';
+  @StorageLink('bookshelfIgnoreSourceCover') @Watch('onTtsCoverSettingsChanged') bookshelfIgnoreSourceCover: boolean = false;
+  @StorageLink('bookshelfCoverMode') @Watch('onTtsCoverSettingsChanged') bookshelfCoverMode: string = 'sequence';
+  @StorageLink('coverGalleryUpdateTime') @Watch('onTtsCoverSettingsChanged') coverGalleryUpdateTime: number = 0;
   @StorageLink('ttsPerson') ttsPerson: number = 0;
   @StorageLink('ttsOnline') ttsOnline: number = 1;
   @StorageLink('ttsStyle') ttsStyle: string = '';
@@ -610,6 +628,10 @@ struct ReadBookPage {
       if (!this.showMenu && !this.showToc && !this.showSettings &&
         !this.shouldBlockReaderInteraction()) {
         this.readerTapLayer()
+      }
+
+      if (this.shouldShowTtsMediaControls()) {
+        this.ttsMediaControlsBar()
       }
 
       if (this.showMenu && !this.showToc && !this.showSettings) {
@@ -1842,6 +1864,24 @@ struct ReadBookPage {
     this.enterReaderImmersive();
     this.paginateContent(this.content);
     this.saveReadingProgress();
+    this.onTtsCoverSettingsChanged();
+  }
+
+  onTtsCoverSettingsChanged(): void {
+    if (!this.isTtsSpeaking && !this.ttsReader.isSpeaking() && !this.ttsAvSession) {
+      this.refreshTtsMediaImage().catch((e: Error) => {
+        console.warn('刷新朗读媒体封面失败:', e);
+      });
+      return;
+    }
+    this.refreshTtsMediaImage().then(() => {
+      return this.updateTtsAvSessionPlaybackState(
+        this.isTtsSpeaking || this.ttsReader.isSpeaking() ?
+          avSession.PlaybackState.PLAYBACK_STATE_PLAY : avSession.PlaybackState.PLAYBACK_STATE_STOP
+      );
+    }).catch((e: Error) => {
+      console.warn('同步朗读媒体封面失败:', e);
+    });
   }
 
   onReaderVolumeTurnPageChanged(): void {
@@ -2395,6 +2435,138 @@ struct ReadBookPage {
     .alignItems(VerticalAlign.Center)
     .backgroundColor(this.getBackgroundColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  ttsMediaControlsBar() {
+    if (this.ttsMediaControlsExpanded) {
+      this.ttsExpandedMediaControlsBar()
+    } else {
+      this.ttsCollapsedMediaControlButton()
+    }
+  }
+
+  @Builder
+  ttsCollapsedMediaControlButton() {
+    Row() {
+      Text('朗读')
+        .fontSize(13)
+        .fontWeight(FontWeight.Bold)
+        .fontColor('#FFFFFF')
+        .textAlign(TextAlign.Center)
+      Text(this.ttsSpeed.toFixed(1) + 'x')
+        .fontSize(11)
+        .fontColor('#EAF2FF')
+        .margin({ left: 6 })
+    }
+    .height(38)
+    .padding({ left: 14, right: 14 })
+    .borderRadius(19)
+    .backgroundColor(this.accentColor())
+    .shadow({
+      radius: 10,
+      color: this.isReaderThemeDark() ? '#66000000' : '#26000000',
+      offsetX: 0,
+      offsetY: 3
+    })
+    .position({ x: '100%', y: '100%' })
+    .translate({ x: -94, y: -92 })
+    .onClick(() => {
+      this.ttsMediaControlsExpanded = true;
+      this.syncTtsSystemMediaControls();
+    })
+  }
+
+  @Builder
+  ttsExpandedMediaControlsBar() {
+    Column({ space: 8 }) {
+      Row() {
+        Column({ space: 2 }) {
+          Text(this.book?.name || '朗读')
+            .fontSize(14)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.getTextColor())
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(`${this.getChapterTitle()} · ${this.ttsSpeed.toFixed(1)}x`)
+            .fontSize(12)
+            .fontColor(this.getSubTextColor())
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .layoutWeight(1)
+
+        Button('上一章')
+          .height(34)
+          .fontSize(13)
+          .backgroundColor(this.canPlayPreviousTtsChapter() ? this.buttonColor() : this.disabledButtonColor())
+          .fontColor('#FFFFFF')
+          .enabled(this.canPlayPreviousTtsChapter())
+          .onClick(() => {
+            this.playPreviousChapterFromMediaSession();
+          })
+
+        Button(this.isTtsSpeaking ? '停止' : '朗读')
+          .height(34)
+          .fontSize(13)
+          .margin({ left: 8 })
+          .backgroundColor(this.isTtsSpeaking ? '#E53935' : this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.toggleTtsReading();
+          })
+
+        Button('下一章')
+          .height(34)
+          .fontSize(13)
+          .margin({ left: 8 })
+          .backgroundColor(this.canPlayNextTtsChapter() ? this.buttonColor() : this.disabledButtonColor())
+          .fontColor('#FFFFFF')
+          .enabled(this.canPlayNextTtsChapter())
+          .onClick(() => {
+            this.playNextChapterFromMediaSession();
+          })
+
+        Button('收起')
+          .height(34)
+          .fontSize(13)
+          .margin({ left: 8 })
+          .backgroundColor(this.isReaderThemeDark() ? '#343941' : '#EEF0F3')
+          .fontColor(this.getTextColor())
+          .onClick(() => {
+            this.ttsMediaControlsExpanded = false;
+            this.syncTtsSystemMediaControls();
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+    .backgroundColor(this.readerSolidPanelColor())
+    .border({
+      width: { top: 1 },
+      color: this.isReaderThemeDark() ? '#33404752' : '#22000000'
+    })
+    .position({ x: 0, y: '100%' })
+    .translate({ y: -98 })
+  }
+
+  shouldShowTtsMediaControls(): boolean {
+    return !this.showMenu && !this.showToc && !this.showSettings &&
+      !this.shouldBlockReaderInteraction() && (this.isTtsSpeaking || this.ttsReader.isSpeaking());
+  }
+
+  canPlayPreviousTtsChapter(): boolean {
+    return this.chapters.length > 0 && this.currentChapterIndex > 0;
+  }
+
+  canPlayNextTtsChapter(): boolean {
+    return this.chapters.length > 0 && this.currentChapterIndex < this.chapters.length - 1;
+  }
+
+  disabledButtonColor(): string {
+    return this.isReaderThemeDark() ? '#44515A66' : '#C8CDD4';
   }
 
   @Builder
@@ -3288,6 +3460,7 @@ struct ReadBookPage {
       promptAction.showToast({ message: '已停止朗读' });
       return;
     }
+    this.ttsMediaControlsExpanded = false;
     await this.startTtsReadingFromCurrentPosition(true);
   }
 
@@ -3357,11 +3530,23 @@ struct ReadBookPage {
     this.ttsAutoTurningPage = false;
     this.ttsPendingTargetPageIndex = -1;
     this.ttsPendingHighlightChunk = null;
+    this.ttsMediaControlsExpanded = false;
     this.stopTtsBackgroundRunning();
     if (!this.isTtsSpeaking && !this.ttsReader.isSpeaking()) {
       this.clearTtsHighlight();
       return;
     }
+    this.ttsReader.stop();
+    this.isTtsSpeaking = false;
+    this.clearTtsHighlight();
+  }
+
+  stopTtsReaderForChapterSwitch(): void {
+    this.ttsAutoContinue = false;
+    this.ttsReadToken++;
+    this.ttsAutoTurningPage = false;
+    this.ttsPendingTargetPageIndex = -1;
+    this.ttsPendingHighlightChunk = null;
     this.ttsReader.stop();
     this.isTtsSpeaking = false;
     this.clearTtsHighlight();
@@ -3415,6 +3600,7 @@ struct ReadBookPage {
   finishTtsReading(): void {
     this.ttsAutoContinue = false;
     this.isTtsSpeaking = false;
+    this.ttsMediaControlsExpanded = false;
     this.ttsReader.stop();
     this.stopTtsBackgroundRunning();
     this.clearTtsHighlight();
@@ -3498,15 +3684,8 @@ struct ReadBookPage {
       }
       await this.ttsAvSession.setLaunchAbility(agent);
       await this.ttsAvSession.setAVQueueTitle(this.book?.name || '听书');
-      await this.ttsAvSession.setAVMetadata({
-        assetId: this.getTtsAvAssetId(),
-        title: this.book?.name || '朗读',
-        subtitle: this.getTtsAvSubtitle(),
-        artist: this.book?.author || '阅读',
-        author: this.book?.author || '阅读',
-        avQueueName: this.book?.name || '听书',
-        avQueueId: this.bookUrl || 'reader_tts'
-      });
+      await this.refreshTtsMediaImage();
+      await this.ttsAvSession.setAVMetadata(this.getTtsAvMetadata());
       await this.ttsAvSession.setExtras({
         bookUrl: this.bookUrl || '',
         chapterIndex: this.currentChapterIndex,
@@ -3514,6 +3693,7 @@ struct ReadBookPage {
       });
       await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY);
       await this.ttsAvSession.activate();
+      await this.syncTtsSystemMediaControls();
     } catch (error) {
       console.warn('启动朗读媒体会话失败:', error);
     } finally {
@@ -3539,29 +3719,46 @@ struct ReadBookPage {
     session.on('playPrevious', () => {
       this.playPreviousChapterFromMediaSession();
     });
+    session.on('setSpeed', (speed: number) => {
+      this.applyTtsSpeed(speed);
+    });
   }
 
   async playNextChapterFromMediaSession(): Promise<void> {
-    if (this.chapters.length === 0 || this.currentChapterIndex >= this.chapters.length - 1) {
+    if (!this.canPlayNextTtsChapter()) {
       return;
     }
     const shouldResume = this.isTtsSpeaking || this.ttsReader.isSpeaking();
-    this.stopTtsReading();
+    if (shouldResume) {
+      this.stopTtsReaderForChapterSwitch();
+      await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_BUFFERING);
+    } else {
+      this.stopTtsReading();
+    }
     await this.loadNextChapter();
     if (shouldResume) {
       await this.startTtsReadingFromCurrentPosition(false);
+    } else {
+      await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_STOP);
     }
   }
 
   async playPreviousChapterFromMediaSession(): Promise<void> {
-    if (this.chapters.length === 0 || this.currentChapterIndex <= 0) {
+    if (!this.canPlayPreviousTtsChapter()) {
       return;
     }
     const shouldResume = this.isTtsSpeaking || this.ttsReader.isSpeaking();
-    this.stopTtsReading();
+    if (shouldResume) {
+      this.stopTtsReaderForChapterSwitch();
+      await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_BUFFERING);
+    } else {
+      this.stopTtsReading();
+    }
     await this.loadPrevChapter();
     if (shouldResume) {
       await this.startTtsReadingFromCurrentPosition(false);
+    } else {
+      await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_STOP);
     }
   }
 
@@ -3570,31 +3767,198 @@ struct ReadBookPage {
       return;
     }
     try {
-      await this.ttsAvSession.setAVMetadata({
-        assetId: this.getTtsAvAssetId(),
-        title: this.book?.name || '朗读',
-        subtitle: this.getTtsAvSubtitle(),
-        artist: this.book?.author || '阅读',
-        author: this.book?.author || '阅读',
-        avQueueName: this.book?.name || '听书',
-        avQueueId: this.bookUrl || 'reader_tts'
-      });
+      await this.refreshTtsMediaImage();
+      await this.ttsAvSession.setAVMetadata(this.getTtsAvMetadata());
       await this.ttsAvSession.setAVPlaybackState({
         state: state,
         speed: AppStorage.get<number>('ttsSpeed') || 1,
         position: {
-          elapsedTime: Date.now(),
+          elapsedTime: this.getTtsPlaybackElapsedTime(),
           updateTime: Date.now()
         },
+        bufferedTime: this.getTtsPlaybackDuration(),
+        loopMode: avSession.LoopMode.LOOP_MODE_SEQUENCE,
         activeItemId: this.currentChapterIndex
       });
+      if (state === avSession.PlaybackState.PLAYBACK_STATE_PLAY ||
+        state === avSession.PlaybackState.PLAYBACK_STATE_BUFFERING) {
+        await this.ttsAvSession.activate();
+      }
     } catch (error) {
       console.warn('更新朗读媒体状态失败:', error);
     }
   }
 
+  async syncTtsSystemMediaControls(): Promise<void> {
+    if (!this.isTtsSpeaking && !this.ttsReader.isSpeaking()) {
+      return;
+    }
+    try {
+      if (!this.ttsAvSession) {
+        await this.startTtsBackgroundRunning();
+        return;
+      }
+      await this.ttsAvSession.activate();
+      await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY);
+    } catch (error) {
+      console.warn('同步系统媒体控件失败:', error);
+    }
+  }
+
+  getTtsAvMetadata(): avSession.AVMetadata {
+    const metadata: avSession.AVMetadata = {
+      assetId: this.getTtsAvAssetId(),
+      title: this.book?.name || '朗读',
+      subtitle: this.getTtsAvSubtitle(),
+      artist: this.book?.author || '阅读',
+      author: this.book?.author || '阅读',
+      album: this.book?.name || '听书',
+      duration: this.getTtsPlaybackDuration(),
+      previousAssetId: this.canPlayPreviousTtsChapter() ? this.getTtsChapterAssetId(this.currentChapterIndex - 1) : '',
+      nextAssetId: this.canPlayNextTtsChapter() ? this.getTtsChapterAssetId(this.currentChapterIndex + 1) : '',
+      avQueueName: this.book?.name || '听书',
+      avQueueId: this.bookUrl || 'reader_tts'
+    };
+    if (this.ttsMediaPixelMap) {
+      metadata.mediaImage = this.ttsMediaPixelMap;
+      metadata.avQueueImage = this.ttsMediaPixelMap;
+    } else if (this.ttsMediaImage) {
+      metadata.mediaImage = this.ttsMediaImage;
+      metadata.avQueueImage = this.ttsMediaImage;
+    }
+    return metadata;
+  }
+
+  async refreshTtsMediaImage(): Promise<void> {
+    const serial = ++this.ttsMediaImageRefreshSerial;
+    const raw = this.getBookshelfDisplayCoverRaw();
+    if (raw && raw === this.ttsMediaImageRaw && this.ttsMediaPixelMap) {
+      return;
+    }
+    if (!raw) {
+      if (serial === this.ttsMediaImageRefreshSerial) {
+        this.ttsMediaImage = '';
+        this.ttsMediaImageRaw = '';
+        this.releaseTtsMediaPixelMap();
+      }
+      return;
+    }
+    let resolved = raw;
+    let pixelMap: image.PixelMap | null = null;
+    try {
+      const context = getContext(this);
+      const coverPath = await BookCoverCache.prepareCoverFile(context, raw);
+      if (coverPath) {
+        pixelMap = await this.createTtsMediaPixelMap(coverPath);
+        resolved = pixelMap ? coverPath : await BookCoverCache.resolveCover(context, raw);
+      } else {
+        resolved = await BookCoverCache.resolveCover(context, raw);
+      }
+    } catch (error) {
+      console.warn('解析朗读媒体封面失败:', error);
+    }
+    if (serial === this.ttsMediaImageRefreshSerial) {
+      this.releaseTtsMediaPixelMap();
+      this.ttsMediaImage = resolved || raw;
+      this.ttsMediaImageRaw = raw;
+      this.ttsMediaPixelMap = pixelMap;
+    } else if (pixelMap) {
+      pixelMap.release().catch((e: Error) => {
+        console.warn('释放过期朗读媒体封面失败:', e);
+      });
+    }
+  }
+
+  async createTtsMediaPixelMap(path: string): Promise<image.PixelMap | null> {
+    let file: fs.File | null = null;
+    let source: image.ImageSource | null = null;
+    try {
+      file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      source = image.createImageSource(file.fd);
+      return await source.createPixelMap({
+        desiredSize: {
+          width: 512,
+          height: 512
+        }
+      });
+    } catch (error) {
+      console.warn('创建朗读媒体封面 PixelMap 失败:', error);
+      return null;
+    } finally {
+      if (source) {
+        try {
+          await source.release();
+        } catch (e) {
+        }
+      }
+      if (file) {
+        try {
+          fs.closeSync(file);
+        } catch (e) {
+        }
+      }
+    }
+  }
+
+  releaseTtsMediaPixelMap(): void {
+    if (!this.ttsMediaPixelMap) {
+      return;
+    }
+    try {
+      this.ttsMediaPixelMap.release().catch((e: Error) => {
+        console.warn('释放朗读媒体封面失败:', e);
+      });
+    } catch (e) {
+      console.warn('释放朗读媒体封面失败:', e);
+    }
+    this.ttsMediaPixelMap = null;
+  }
+
+  getBookshelfDisplayCoverRaw(): string {
+    if (!this.book) {
+      return '';
+    }
+    const covers = CoverGallerySettings.getDisplayCoverList(
+      this.book,
+      this.appDarkMode,
+      this.bookshelfCoverAlbums,
+      this.bookshelfLightCoverAlbumId,
+      this.bookshelfDarkCoverAlbumId,
+      this.bookshelfCoverApplyScope,
+      this.bookshelfCoverTargetBooks,
+      this.bookshelfIgnoreSourceCover,
+      this.bookshelfCoverMode
+    );
+    return covers.length > 0 ? BookDisplayHelper.pickCover(covers) : '';
+  }
+
+  getTtsPlaybackElapsedTime(): number {
+    const pageCount = Math.max(this.contentPages.length, 1);
+    const clampedPageIndex = Math.max(0, Math.min(this.currentPageIndex, pageCount - 1));
+    return Math.round((clampedPageIndex / pageCount) * this.getTtsPlaybackDuration());
+  }
+
+  getTtsPlaybackDuration(): number {
+    const charCount = Math.max((this.content || this.currentPageText || '').length, 1);
+    const charsPerMinute = 260 * Math.max(this.ttsSpeed || 1, 0.5);
+    return Math.max(60000, Math.round((charCount / charsPerMinute) * 60000));
+  }
+
   getTtsAvAssetId(): string {
-    return `${this.bookUrl || 'reader_tts'}_${this.currentChapterIndex}_${this.currentPageIndex}`;
+    return `${this.getTtsChapterAssetId(this.currentChapterIndex)}_${this.currentPageIndex}_${this.getTtsMediaImageIdentity()}`;
+  }
+
+  getTtsChapterAssetId(chapterIndex: number): string {
+    return `${this.bookUrl || 'reader_tts'}_${chapterIndex}`;
+  }
+
+  getTtsMediaImageIdentity(): string {
+    const value = this.ttsMediaImageRaw || this.ttsMediaImage || 'cover';
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+      hash = value.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return Math.abs(hash).toString(16);
   }
 
   getTtsAvSubtitle(): string {
@@ -3617,6 +3981,10 @@ struct ReadBookPage {
       await session.destroy();
     } catch (error) {
       console.warn('停止朗读媒体会话失败:', error);
+    } finally {
+      this.ttsMediaImage = '';
+      this.ttsMediaImageRaw = '';
+      this.releaseTtsMediaPixelMap();
     }
   }
 
@@ -3625,11 +3993,7 @@ struct ReadBookPage {
     return await wantAgent.getWantAgent({
       wants: [{
         bundleName: context.abilityInfo.bundleName,
-        abilityName: 'EntryAbility',
-        parameters: {
-          shortcutAction: OPEN_BOOK_SHORTCUT_ACTION,
-          bookUrl: this.bookUrl
-        }
+        abilityName: 'EntryAbility'
       }],
       actionType: wantAgent.OperationType.START_ABILITY,
       requestCode: 1001,

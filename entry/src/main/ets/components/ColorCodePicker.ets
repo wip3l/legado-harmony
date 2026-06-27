@@ -12,6 +12,7 @@ export struct ColorCodePicker {
   @Prop accentColor: string = '#007DFF';
   @Prop allowEmpty: boolean = false;
   @Prop optionTitle: string = '';
+  @Prop hideOptionTrigger: boolean = false;
   @Prop colorMode: string = '';
   @State pickerVisible: boolean = false;
   @State draftColor: string = '#007DFF';
@@ -289,26 +290,38 @@ export struct ColorCodePicker {
         .height(56)
         .alignItems(VerticalAlign.Center)
       } else if (this.optionTitle !== '') {
-        Row() {
-          Text(this.optionTitle)
-            .fontSize(16)
-            .fontColor(this.primaryTextColor())
-            .layoutWeight(1)
-          Row()
-            .width(30)
-            .height(30)
-            .borderRadius(15)
-            .backgroundColor(this.normalizeColor(this.value, this.placeholder))
-            .border({ width: 2, color: this.appDarkMode ? '#55FFFFFF' : '#22000000' })
+        if (this.hideOptionTrigger) {
+          Button('')
+            .width('100%')
+            .height(60)
+            .padding(0)
+            .backgroundColor(Color.Transparent)
+            .opacity(0.01)
+            .onClick(() => {
+              this.openPicker();
+            })
+        } else {
+          Row() {
+            Text(this.optionTitle)
+              .fontSize(16)
+              .fontColor(this.primaryTextColor())
+              .layoutWeight(1)
+            Row()
+              .width(30)
+              .height(30)
+              .borderRadius(15)
+              .backgroundColor(this.normalizeColor(this.value, this.placeholder))
+              .border({ width: 2, color: this.appDarkMode ? '#55FFFFFF' : '#22000000' })
+          }
+          .width('100%')
+          .height(60)
+          .padding({ left: 16, right: 16 })
+          .backgroundColor(this.pageColor())
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.openPicker();
+          })
         }
-        .width('100%')
-        .height(60)
-        .padding({ left: 16, right: 16 })
-        .backgroundColor(this.pageColor())
-        .alignItems(VerticalAlign.Center)
-        .onClick(() => {
-          this.openPicker();
-        })
       } else {
         TextInput({ text: this.value, placeholder: this.placeholder })
           .height(42)

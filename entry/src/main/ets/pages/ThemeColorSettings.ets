@@ -3,6 +3,54 @@ import { syncSystemBars } from '../utils/SystemBars';
 import { AppThemeSettings, AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 import { ColorCodePicker } from '../components/ColorCodePicker';
 
+@Component
+struct ThemeColorOption {
+  @Link color: string;
+  @Prop title: string = '';
+  @Prop appDarkMode: boolean = false;
+  @Prop cardColor: string = '#FFFFFF';
+  @Prop primaryTextColor: string = '#1F1F1F';
+  @Prop accentColor: string = '#007DFF';
+  onColorChange: (color: string) => void = (_color: string): void => {};
+
+  build() {
+    Stack() {
+      Row() {
+        Text(this.title)
+          .fontSize(16)
+          .fontColor(this.primaryTextColor)
+          .layoutWeight(1)
+        Row()
+          .width(30)
+          .height(30)
+          .borderRadius(15)
+          .backgroundColor(this.color)
+          .border({ width: 2, color: this.appDarkMode ? '#55FFFFFF' : '#22000000' })
+      }
+      .width('100%')
+      .height(60)
+      .padding({ left: 16, right: 16 })
+      .backgroundColor(this.cardColor)
+      .alignItems(VerticalAlign.Center)
+
+      ColorCodePicker({
+        value: this.color,
+        placeholder: this.color,
+        appDarkMode: this.appDarkMode,
+        accentColor: this.accentColor,
+        optionTitle: this.title,
+        hideOptionTrigger: true,
+        onColorChange: (color: string) => {
+          this.color = color;
+          this.onColorChange(color);
+        }
+      })
+    }
+    .width('100%')
+    .margin({ top: 1 })
+  }
+}
+
 @Entry
 @Component
 struct ThemeColorSettingsPage {
@@ -33,12 +81,7 @@ struct ThemeColorSettingsPage {
         Column() {
           this.sectionTitle('主题色设置')
           this.modeOptions()
-          this.colorPanel('按钮色', this.currentButtonColor(), (color: string) => {
-            this.setCurrentButtonColor(color);
-          })
-          this.colorPanel('强调色', this.currentAccentColor(), (color: string) => {
-            this.setCurrentAccentColor(color);
-          })
+          this.colorOptions()
           this.previewPanel()
         }
         .width('100%')
@@ -190,18 +233,54 @@ struct ThemeColorSettingsPage {
   }
 
   @Builder
-  colorPanel(title: string, value: string, onChange: (color: string) => void) {
-    ColorCodePicker({
-      value: value,
-      placeholder: '#007DFF',
-      appDarkMode: this.appDarkMode,
-      accentColor: this.currentAccentColor(),
-      optionTitle: title,
-      onColorChange: (color: string) => {
-        onChange(color);
-      }
-    })
-      .margin({ top: 1 })
+  colorOptions() {
+    if (this.selectedMode === 'dark') {
+      ThemeColorOption({
+        title: '按钮色',
+        color: $darkButtonColor,
+        appDarkMode: this.appDarkMode,
+        cardColor: this.cardColor(),
+        primaryTextColor: this.primaryTextColor(),
+        accentColor: this.darkAccentColor,
+        onColorChange: (color: string) => {
+          this.setCurrentButtonColor(color);
+        }
+      })
+      ThemeColorOption({
+        title: '强调色',
+        color: $darkAccentColor,
+        appDarkMode: this.appDarkMode,
+        cardColor: this.cardColor(),
+        primaryTextColor: this.primaryTextColor(),
+        accentColor: this.darkAccentColor,
+        onColorChange: (color: string) => {
+          this.setCurrentAccentColor(color);
+        }
+      })
+    } else {
+      ThemeColorOption({
+        title: '按钮色',
+        color: $lightButtonColor,
+        appDarkMode: this.appDarkMode,
+        cardColor: this.cardColor(),
+        primaryTextColor: this.primaryTextColor(),
+        accentColor: this.lightAccentColor,
+        onColorChange: (color: string) => {
+          this.setCurrentButtonColor(color);
+        }
+      })
+      ThemeColorOption({
+        title: '强调色',
+        color: $lightAccentColor,
+        appDarkMode: this.appDarkMode,
+        cardColor: this.cardColor(),
+        primaryTextColor: this.primaryTextColor(),
+        accentColor: this.lightAccentColor,
+        onColorChange: (color: string) => {
+          this.setCurrentAccentColor(color);
+        }
+      })
+    }
   }
 
   @Builder
