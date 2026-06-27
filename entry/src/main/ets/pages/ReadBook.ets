@@ -1787,7 +1787,7 @@ struct ReadBookPage {
   }
 
   getReaderContentBottomReserve(): number {
-    return Math.ceil(Math.max(12, this.getEffectiveReaderLineHeight() * 0.75));
+    return 0;
   }
 
   getEffectiveReaderLineHeight(): number {
@@ -3307,6 +3307,7 @@ struct ReadBookPage {
     this.ttsHighlightEnd = -1;
     try {
       this.isTtsSpeaking = true;
+      this.preloadReaderContent();
       await this.startTtsBackgroundRunning();
       if (token !== this.ttsReadToken || !this.ttsAutoContinue) {
         this.stopTtsReading(false);
@@ -3314,7 +3315,12 @@ struct ReadBookPage {
       }
       await this.ttsReader.start(text, {
         onFinished: () => {
-          this.continueTtsReading(token);
+          this.continueTtsReading(token).catch((e: Error) => {
+            console.warn('连续朗读续播失败:', e);
+            if (token === this.ttsReadToken) {
+              this.finishTtsReading();
+            }
+          });
         },
         onError: (message: string) => {
           if (token !== this.ttsReadToken) {
@@ -3365,7 +3371,7 @@ struct ReadBookPage {
     if (token !== this.ttsReadToken || !this.ttsAutoContinue) {
       return;
     }
-    const advanced = await this.advanceTtsReadingTarget();
+    const advanced = await this.advanceTtsReadingToNextChapter();
     if (token !== this.ttsReadToken || !this.ttsAutoContinue) {
       return;
     }
@@ -3374,6 +3380,21 @@ struct ReadBookPage {
       return;
     }
     await this.startTtsReadingFromCurrentPosition(false);
+  }
+
+  async advanceTtsReadingToNextChapter(): Promise<boolean> {
+    if (this.chapters.length === 0 || this.currentChapterIndex >= this.chapters.length - 1) {
+      return false;
+    }
+    this.ttsAutoTurningPage = false;
+    this.ttsPendingTargetPageIndex = -1;
+    this.ttsPendingHighlightChunk = null;
+    this.currentPageIndex = 0;
+    this.pendingRestorePageIndex = 0;
+    await this.loadContent(true, this.currentChapterIndex + 1);
+    await this.saveReadingProgress();
+    await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY);
+    return true;
   }
 
   async advanceTtsReadingTarget(): Promise<boolean> {
@@ -3394,6 +3415,7 @@ struct ReadBookPage {
   finishTtsReading(): void {
     this.ttsAutoContinue = false;
     this.isTtsSpeaking = false;
+    this.ttsReader.stop();
     this.stopTtsBackgroundRunning();
     this.clearTtsHighlight();
   }
@@ -3893,6 +3915,45 @@ struct ReadBookPage {
   measureReaderSingleParagraphHeight(text: string, availableWidth: number): number {
     if (!text) {
       return 0;
+    }
+    try {
+      const fontSizePx = this.toMeasurePx(this.readerFontSize);
+      const lineHeightPx = this.toMeasurePx(this.getEffectiveReaderLineHeight());
+      const textStyle: graphicsText.TextStyle = {
+        fontSize: fontSizePx,
+        fontFamilies: [this.getReaderFontFamily()],
+        fontWeight: graphicsText.FontWeight.W400,
+        lineHeightMinimum: lineHeightPx,
+        lineHeightMaximum: lineHeightPx,
+        halfLeading: true,
+        heightOnly: false,
+        locale: 'zh-Hans'
+      };
+      const paragraphStyle: graphicsText.ParagraphStyle = {
+        textStyle: textStyle,
+        align: graphicsText.TextAlign.START,
+        textDirection: graphicsText.TextDirection.LTR,
+        wordBreak: graphicsText.WordBreak.BREAK_ALL,
+        breakStrategy: graphicsText.BreakStrategy.GREEDY,
+        trailingSpaceOptimized: true,
+        includeFontPadding: false
+      };
+      const builder = new graphicsText.ParagraphBuilder(paragraphStyle, graphicsText.FontCollection.getGlobalInstance());
+      builder.pushStyle(textStyle);
+      builder.addText(text);
+      builder.popStyle();
+      const paragraph = builder.build();
+      paragraph.layoutSync(this.toMeasurePx(availableWidth));
+      const metrics = paragraph.getLineMetrics();
+      if (metrics.length > 0) {
+        const lastMetric = metrics[metrics.length - 1];
+        const height = Number(lastMetric.topHeight + lastMetric.height);
+        if (height > 0) {
+          return height;
+        }
+      }
+    } catch (error) {
+      console.error('官方段落布局测量阅读文本高度失败，回退到组件测量:', error);
     }
     const options: MeasureOptions = {
         textContent: text,
@@ -4714,8 +4775,7 @@ struct ReadBookPage {
     }
 
     const horizontalPadding = 36;
-    const verticalPadding = 36 + this.getReaderContentBottomReserve() +
-      Math.ceil(this.getEffectiveReaderLineHeight() * 0.35);
+    const verticalPadding = 36 + this.getReaderContentBottomReserve();
     const availableWidth = Math.max(1, this.pageViewWidth - horizontalPadding);
     const availableHeight = Math.max(1, this.pageViewHeight - verticalPadding);
     const measuredAvailableHeight = this.toMeasurePx(availableHeight);

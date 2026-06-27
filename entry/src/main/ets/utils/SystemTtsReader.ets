@@ -55,6 +55,15 @@ export class SystemTtsReader {
   private completionPending: boolean = false;
   private currentAudioSampleRate: number = 16000;
   private chunkFocusChain: Promise<void> = Promise.resolve();
+  private currentFocusChunk: TtsChunk | null = null;
+  private currentFocusChunkIndex: number = -1;
+  private currentFocusDuration: number = 0;
+  private currentFocusQueued: boolean = false;
+  private currentFocusAudioReceived: boolean = false;
+  private currentFocusAudioWritten: boolean = false;
+  private currentFocusRetryCount: number = 0;
+  private speakWatchdogId: number = -1;
+  private suppressEngineStopEvent: boolean = false;
   private enginePerson: number = -1;
   private engineOnline: number = -1;
   private engineStyle: string = '';
@@ -271,7 +280,11 @@ export class SystemTtsReader {
     if (!cleanText) {
       throw new Error('朗读内容为空');
     }
-    this.stop();
+    if (this.active || this.currentRequestId || this.chunks.length > 0) {
+      this.stop();
+    } else {
+      this.clearSpeakWatchdog();
+    }
     const generation = ++this.readGeneration;
     this.onFinished = options?.onFinished;
     this.onError = options?.onError;
@@ -301,6 +314,11 @@ export class SystemTtsReader {
     if (!this.active || this.readGeneration !== generation) {
       return;
     }
+    this.bindEngineListener(generation, engine);
+    this.speakNext(generation);
+  }
+
+  private bindEngineListener(generation: number, engine: textToSpeech.TextToSpeechEngine): void {
     engine.setListener({
       onStart: (_utteranceId: string, response: textToSpeech.StartResponse) => {
         this.currentAudioSampleRate = response && response.sampleRate ? response.sampleRate : 16000;
@@ -309,9 +327,18 @@ export class SystemTtsReader {
         if (this.readGeneration !== generation || !this.active || !this.currentRequestId) {
           return;
         }
+        if (!this.currentFocusAudioReceived) {
+          this.queueCurrentChunkFocusOnAudio(generation);
+          this.clearSpeakWatchdog();
+        } else if (this.currentFocusAudioWritten) {
+          this.clearSpeakWatchdog();
+        }
         this.completeCurrentChunk(generation);
       },
       onStop: () => {
+        if (this.suppressEngineStopEvent) {
+          return;
+        }
         if (this.readGeneration !== generation || !this.active) {
           return;
         }
@@ -323,6 +350,7 @@ export class SystemTtsReader {
         }
         this.currentRequestId = '';
         this.active = false;
+        this.clearSpeakWatchdog();
         const message = `${errorMessage || `系统朗读失败(${errorCode})`}：${this.currentVoiceLabel()}`;
         console.error('[TTS] speak error:', message);
         if (this.onError) this.onError(message);
@@ -331,13 +359,33 @@ export class SystemTtsReader {
         if (this.readGeneration !== generation || !this.active || !audioData || audioData.byteLength === 0) {
           return;
         }
+        this.currentFocusAudioReceived = true;
+        if (!this.currentFocusQueued && this.currentFocusChunk && this.currentFocusChunkIndex >= 0) {
+          const focusChunk = this.currentFocusChunk;
+          const focusIndex = this.currentFocusChunkIndex;
+          const focusDuration = this.currentFocusDuration;
+          this.currentFocusQueued = true;
+          this.pcmPlayer.write(audioData, this.currentAudioSampleRate)
+            .then(() => {
+              this.clearSpeakWatchdog();
+              this.currentFocusAudioWritten = true;
+              this.queueChunkFocus(generation, focusChunk, focusIndex, focusDuration);
+            })
+            .catch((error: Error) => {
+              console.warn(`[TTS] write synthesis data failed: sequence=${response ? response.sequence : -1}`, error);
+            });
+          return;
+        }
         this.pcmPlayer.write(audioData, this.currentAudioSampleRate)
+          .then(() => {
+            this.clearSpeakWatchdog();
+            this.currentFocusAudioWritten = true;
+          })
           .catch((error: Error) => {
             console.warn(`[TTS] write synthesis data failed: sequence=${response ? response.sequence : -1}`, error);
           });
       }
     });
-    this.speakNext(generation);
   }
 
   stop(): void {
@@ -355,6 +403,14 @@ export class SystemTtsReader {
     this.currentSpeakStartedAt = 0;
     this.currentSpeakMinDuration = 0;
     this.completionPending = false;
+    this.currentFocusChunk = null;
+    this.currentFocusChunkIndex = -1;
+    this.currentFocusDuration = 0;
+    this.currentFocusQueued = false;
+    this.currentFocusAudioReceived = false;
+    this.currentFocusAudioWritten = false;
+    this.currentFocusRetryCount = 0;
+    this.clearSpeakWatchdog();
     this.chunkFocusChain = Promise.resolve();
     this.pcmPlayer.stop();
     try {
@@ -428,6 +484,9 @@ export class SystemTtsReader {
       this.speakNext(generation);
       return;
     }
+    if (this.currentFocusChunkIndex !== index) {
+      this.currentFocusRetryCount = 0;
+    }
     const extraParams: Record<string, Object> = {};
     extraParams['queueMode'] = 0 as Object;
     extraParams['speed'] = this.getTtsSpeed() as Object;
@@ -443,8 +502,14 @@ export class SystemTtsReader {
       this.currentSpeakStartedAt = Date.now();
       this.currentSpeakMinDuration = this.estimateSpeakDuration(speakText);
       this.completionPending = false;
+      this.currentFocusChunk = chunk;
+      this.currentFocusChunkIndex = index;
+      this.currentFocusDuration = this.currentSpeakMinDuration;
+      this.currentFocusQueued = false;
+      this.currentFocusAudioReceived = false;
+      this.currentFocusAudioWritten = false;
       this.currentAudioSampleRate = 16000;
-      this.queueChunkFocus(generation, chunk, index, this.currentSpeakMinDuration);
+      this.armSpeakWatchdog(generation, index);
       this.engine.speak(speakText, {
         requestId: requestId,
         extraParams: extraParams
@@ -454,6 +519,14 @@ export class SystemTtsReader {
       this.currentSpeakStartedAt = 0;
       this.currentSpeakMinDuration = 0;
       this.completionPending = false;
+      this.currentFocusChunk = null;
+      this.currentFocusChunkIndex = -1;
+      this.currentFocusDuration = 0;
+      this.currentFocusQueued = false;
+      this.currentFocusAudioReceived = false;
+      this.currentFocusAudioWritten = false;
+      this.currentFocusRetryCount = 0;
+      this.clearSpeakWatchdog();
       this.active = false;
       const message = `系统朗读失败：${this.currentVoiceLabel()} ${this.formatError(error)}`;
       console.error('[TTS] speak throw:', message);
@@ -471,8 +544,18 @@ export class SystemTtsReader {
     this.currentSpeakStartedAt = 0;
     this.currentSpeakMinDuration = 0;
     this.completionPending = false;
+    this.currentFocusChunk = null;
+    this.currentFocusChunkIndex = -1;
+    this.currentFocusDuration = 0;
+    this.currentFocusQueued = false;
+    this.currentFocusAudioReceived = false;
+    this.currentFocusAudioWritten = false;
+    this.currentFocusRetryCount = 0;
+    this.clearSpeakWatchdog();
     this.chunkFocusChain = Promise.resolve();
-    this.pcmPlayer.stop();
+    if (!notify) {
+      this.pcmPlayer.stop();
+    }
     if (notify && this.onFinished) this.onFinished();
   }
 
@@ -488,6 +571,7 @@ export class SystemTtsReader {
       this.currentSpeakStartedAt = 0;
       this.currentSpeakMinDuration = 0;
       this.completionPending = false;
+      this.clearSpeakWatchdog();
       this.speakNext(generation);
       return;
     }
@@ -499,6 +583,86 @@ export class SystemTtsReader {
         console.warn('[TTS] drain pcm audio failed:', error);
         this.finishCurrentRead(generation, waitMs);
       });
+  }
+
+  private queueCurrentChunkFocusOnAudio(generation: number): void {
+    if (this.readGeneration !== generation || !this.active || this.currentFocusQueued ||
+      !this.currentFocusChunk || this.currentFocusChunkIndex < 0) {
+      return;
+    }
+    this.currentFocusQueued = true;
+    this.queueChunkFocus(generation, this.currentFocusChunk, this.currentFocusChunkIndex, this.currentFocusDuration);
+  }
+
+  private armSpeakWatchdog(generation: number, chunkIndex: number): void {
+    this.clearSpeakWatchdog();
+    this.speakWatchdogId = setTimeout(() => {
+      this.recoverStalledSpeak(generation, chunkIndex);
+    }, 12000);
+  }
+
+  private clearSpeakWatchdog(): void {
+    if (this.speakWatchdogId < 0) {
+      return;
+    }
+    clearTimeout(this.speakWatchdogId);
+    this.speakWatchdogId = -1;
+  }
+
+  private async recoverStalledSpeak(generation: number, chunkIndex: number): Promise<void> {
+    if (this.readGeneration !== generation || !this.active || this.currentFocusAudioWritten ||
+      this.completionPending || this.currentFocusChunkIndex !== chunkIndex) {
+      return;
+    }
+    if (this.currentFocusRetryCount >= 2) {
+      this.currentRequestId = '';
+      this.active = false;
+      const message = `系统朗读无音频回调：${this.currentVoiceLabel()}`;
+      console.warn('[TTS] speak watchdog exhausted:', message);
+      if (this.onError) {
+        this.onError(message);
+      }
+      return;
+    }
+    this.currentFocusRetryCount++;
+    console.warn(`[TTS] speak watchdog retry ${this.currentFocusRetryCount}: ${this.currentVoiceLabel()}`);
+    try {
+      this.currentRequestId = '';
+      this.currentSpeakStartedAt = 0;
+      this.currentSpeakMinDuration = 0;
+      this.completionPending = false;
+      this.currentFocusQueued = false;
+      this.currentFocusAudioReceived = false;
+      this.currentFocusAudioWritten = false;
+      this.chunkIndex = Math.max(0, Math.min(chunkIndex, this.chunks.length));
+      this.pcmPlayer.stop();
+      if (this.engine) {
+        try {
+          this.suppressEngineStopEvent = true;
+          this.engine.shutdown();
+        } catch (_) {
+        } finally {
+          setTimeout(() => {
+            this.suppressEngineStopEvent = false;
+          }, 500);
+        }
+        this.engine = null;
+      }
+      const engine = await this.ensureEngine();
+      if (this.readGeneration !== generation || !this.active) {
+        return;
+      }
+      this.bindEngineListener(generation, engine);
+      this.speakNext(generation);
+    } catch (error) {
+      this.currentRequestId = '';
+      this.active = false;
+      const message = `系统朗读恢复失败：${this.currentVoiceLabel()} ${this.formatError(error)}`;
+      console.error('[TTS] speak watchdog recover failed:', message);
+      if (this.onError) {
+        this.onError(message);
+      }
+    }
   }
 
   private finishCurrentRead(generation: number, waitMs: number): void {
