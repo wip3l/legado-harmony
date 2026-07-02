@@ -126,12 +126,18 @@ struct ReadBookPage {
   private ttsAutoContinue: boolean = false;
   private ttsReadToken: number = 0;
   private ttsTextStartOffset: number = 0;
+  private ttsLastFocusChunk: TtsChunk | null = null;
+  private ttsLastFocusPageIndex: number = -1;
+  private ttsResumeSyncSerial: number = 0;
   private ttsAutoTurningPage: boolean = false;
+  private ttsPageTurnSerial: number = 0;
   private ttsPendingTargetPageIndex: number = -1;
   private ttsPendingHighlightChunk: TtsChunk | null = null;
   private ttsBackgroundRunning: boolean = false;
   private ttsBackgroundRequesting: boolean = false;
   private ttsBackgroundDesired: boolean = false;
+  private ttsBackgroundHeartbeatId: number = -1;
+  private ttsBackgroundLastLogAt: number = 0;
   private ttsAvSession: avSession.AVSession | null = null;
   private ttsAvSessionRequesting: boolean = false;
   private ttsMediaImageRefreshSerial: number = 0;
@@ -252,6 +258,8 @@ struct ReadBookPage {
   onPageShow(): void {
     this.reregisterReaderFontAfterShow(0);
     this.reregisterReaderFontAfterShow(120);
+    this.syncTtsFocusAfterResumeLater(0);
+    this.syncTtsFocusAfterResumeLater(180);
   }
 
   reregisterReaderFontAfterShow(delayMs: number): void {
@@ -3478,10 +3486,15 @@ struct ReadBookPage {
     this.ttsDisplayText = this.currentPageText;
     this.ttsHighlightStart = -1;
     this.ttsHighlightEnd = -1;
+    this.ttsLastFocusChunk = null;
+    this.ttsLastFocusPageIndex = -1;
     try {
       this.isTtsSpeaking = true;
       this.preloadReaderContent();
-      await this.startTtsBackgroundRunning();
+      const backgroundStarted = await this.startTtsBackgroundRunning();
+      if (!backgroundStarted && showToast) {
+        promptAction.showToast({ message: '后台朗读任务启动失败，息屏后可能中断' });
+      }
       if (token !== this.ttsReadToken || !this.ttsAutoContinue) {
         this.stopTtsReading(false);
         return;
@@ -3507,6 +3520,12 @@ struct ReadBookPage {
             return;
           }
           this.followTtsChunk(chunk);
+        },
+        onAudioStart: () => {
+          if (token !== this.ttsReadToken) {
+            return;
+          }
+          this.onTtsAudioStarted();
         }
       });
       if (showToast) {
@@ -3530,7 +3549,10 @@ struct ReadBookPage {
     this.ttsAutoTurningPage = false;
     this.ttsPendingTargetPageIndex = -1;
     this.ttsPendingHighlightChunk = null;
+    this.ttsLastFocusChunk = null;
+    this.ttsLastFocusPageIndex = -1;
     this.ttsMediaControlsExpanded = false;
+    this.ttsPageTurnSerial++;
     this.stopTtsBackgroundRunning();
     if (!this.isTtsSpeaking && !this.ttsReader.isSpeaking()) {
       this.clearTtsHighlight();
@@ -3538,7 +3560,10 @@ struct ReadBookPage {
     }
     this.ttsReader.stop();
     this.isTtsSpeaking = false;
+    this.ttsPageTurnSerial++;
     this.clearTtsHighlight();
+    this.ttsLastFocusChunk = null;
+    this.ttsLastFocusPageIndex = -1;
   }
 
   stopTtsReaderForChapterSwitch(): void {
@@ -3547,6 +3572,9 @@ struct ReadBookPage {
     this.ttsAutoTurningPage = false;
     this.ttsPendingTargetPageIndex = -1;
     this.ttsPendingHighlightChunk = null;
+    this.ttsLastFocusChunk = null;
+    this.ttsLastFocusPageIndex = -1;
+    this.ttsPageTurnSerial++;
     this.ttsReader.stop();
     this.isTtsSpeaking = false;
     this.clearTtsHighlight();
@@ -3574,6 +3602,7 @@ struct ReadBookPage {
     this.ttsAutoTurningPage = false;
     this.ttsPendingTargetPageIndex = -1;
     this.ttsPendingHighlightChunk = null;
+    this.ttsPageTurnSerial++;
     this.currentPageIndex = 0;
     this.pendingRestorePageIndex = 0;
     await this.loadContent(true, this.currentChapterIndex + 1);
@@ -3603,7 +3632,10 @@ struct ReadBookPage {
     this.ttsMediaControlsExpanded = false;
     this.ttsReader.stop();
     this.stopTtsBackgroundRunning();
+    this.ttsPageTurnSerial++;
     this.clearTtsHighlight();
+    this.ttsLastFocusChunk = null;
+    this.ttsLastFocusPageIndex = -1;
   }
 
   async loadReaderSettings(): Promise<void> {
@@ -3625,14 +3657,15 @@ struct ReadBookPage {
     }
   }
 
-  async startTtsBackgroundRunning(): Promise<void> {
+  async startTtsBackgroundRunning(): Promise<boolean> {
     this.ttsBackgroundDesired = true;
     if (this.ttsBackgroundRunning) {
       await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY);
-      return;
+      this.startTtsBackgroundHeartbeat();
+      return true;
     }
     if (this.ttsBackgroundRequesting) {
-      return;
+      return this.ttsBackgroundRunning;
     }
     this.ttsBackgroundRequesting = true;
     try {
@@ -3645,11 +3678,17 @@ struct ReadBookPage {
       );
       if (this.ttsBackgroundDesired) {
         this.ttsBackgroundRunning = true;
+        this.startTtsBackgroundHeartbeat();
+        console.info(`[TTS-BG] background audio task started: ${this.ttsBackgroundDebugState()}`);
       } else {
         await backgroundTaskManager.stopBackgroundRunning(getContext(this));
       }
+      return this.ttsBackgroundRunning;
     } catch (error) {
-      console.warn('启动后台听书任务失败:', error);
+      this.ttsBackgroundRunning = false;
+      this.stopTtsBackgroundHeartbeat();
+      console.warn(`[TTS-BG] start background audio task failed: ${this.formatTtsBackgroundError(error as Object)}; ${this.ttsBackgroundDebugState()}`, error);
+      return false;
     } finally {
       this.ttsBackgroundRequesting = false;
     }
@@ -3657,7 +3696,8 @@ struct ReadBookPage {
 
   async stopTtsBackgroundRunning(): Promise<void> {
     this.ttsBackgroundDesired = false;
-    this.stopTtsAvSession();
+    this.stopTtsBackgroundHeartbeat();
+    await this.stopTtsAvSession();
     if (!this.ttsBackgroundRunning && !this.ttsBackgroundRequesting) {
       return;
     }
@@ -3667,9 +3707,61 @@ struct ReadBookPage {
     this.ttsBackgroundRunning = false;
     try {
       await backgroundTaskManager.stopBackgroundRunning(getContext(this));
+      console.info(`[TTS-BG] background audio task stopped: ${this.ttsBackgroundDebugState()}`);
     } catch (error) {
-      console.warn('停止后台听书任务失败:', error);
+      console.warn(`[TTS-BG] stop background audio task failed: ${this.formatTtsBackgroundError(error as Object)}; ${this.ttsBackgroundDebugState()}`, error);
     }
+  }
+
+  startTtsBackgroundHeartbeat(): void {
+    if (this.ttsBackgroundHeartbeatId >= 0) {
+      return;
+    }
+    this.ttsBackgroundHeartbeatId = setInterval(() => {
+      this.keepTtsBackgroundAlive().catch((error: Error) => {
+        console.warn(`[TTS-BG] heartbeat failed: ${this.formatTtsBackgroundError(error as Object)}; ${this.ttsBackgroundDebugState()}`, error);
+      });
+    }, 30000);
+  }
+
+  stopTtsBackgroundHeartbeat(): void {
+    if (this.ttsBackgroundHeartbeatId < 0) {
+      return;
+    }
+    clearInterval(this.ttsBackgroundHeartbeatId);
+    this.ttsBackgroundHeartbeatId = -1;
+  }
+
+  async keepTtsBackgroundAlive(): Promise<void> {
+    if (!this.ttsBackgroundDesired || (!this.isTtsSpeaking && !this.ttsReader.isSpeaking())) {
+      this.stopTtsBackgroundHeartbeat();
+      return;
+    }
+    if (!this.ttsBackgroundRunning && !this.ttsBackgroundRequesting) {
+      await this.startTtsBackgroundRunning();
+      return;
+    }
+    await this.syncTtsSystemMediaControls();
+    const now = Date.now();
+    if (now - this.ttsBackgroundLastLogAt >= 120000) {
+      this.ttsBackgroundLastLogAt = now;
+      console.info(`[TTS-BG] heartbeat: ${this.ttsBackgroundDebugState()}`);
+    }
+  }
+
+  onTtsAudioStarted(): void {
+    console.info(`[TTS-BG] audio started: ${this.ttsBackgroundDebugState()}`);
+    this.refreshTtsBackgroundAfterAudioStarted().catch((error: Error) => {
+      console.warn(`[TTS-BG] refresh after audio started failed: ${this.formatTtsBackgroundError(error as Object)}; ${this.ttsBackgroundDebugState()}`, error);
+    });
+  }
+
+  async refreshTtsBackgroundAfterAudioStarted(): Promise<void> {
+    if (!this.ttsBackgroundRunning && !this.ttsBackgroundRequesting) {
+      await this.startTtsBackgroundRunning();
+      return;
+    }
+    await this.syncTtsSystemMediaControls();
   }
 
   async startTtsAvSession(agent: WantAgent): Promise<void> {
@@ -3694,8 +3786,9 @@ struct ReadBookPage {
       await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY);
       await this.ttsAvSession.activate();
       await this.syncTtsSystemMediaControls();
+      console.info(`[TTS-BG] AVSession activated: ${this.ttsBackgroundDebugState()}`);
     } catch (error) {
-      console.warn('启动朗读媒体会话失败:', error);
+      console.warn(`[TTS-BG] start AVSession failed: ${this.formatTtsBackgroundError(error as Object)}; ${this.ttsBackgroundDebugState()}`, error);
     } finally {
       this.ttsAvSessionRequesting = false;
     }
@@ -3785,7 +3878,7 @@ struct ReadBookPage {
         await this.ttsAvSession.activate();
       }
     } catch (error) {
-      console.warn('更新朗读媒体状态失败:', error);
+      console.warn(`[TTS-BG] update AVSession playback state failed: ${this.formatTtsBackgroundError(error as Object)}; ${this.ttsBackgroundDebugState()}`, error);
     }
   }
 
@@ -3801,7 +3894,7 @@ struct ReadBookPage {
       await this.ttsAvSession.activate();
       await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY);
     } catch (error) {
-      console.warn('同步系统媒体控件失败:', error);
+      console.warn(`[TTS-BG] sync media controls failed: ${this.formatTtsBackgroundError(error as Object)}; ${this.ttsBackgroundDebugState()}`, error);
     }
   }
 
@@ -3979,8 +4072,9 @@ struct ReadBookPage {
       });
       await session.deactivate();
       await session.destroy();
+      console.info('[TTS-BG] AVSession destroyed');
     } catch (error) {
-      console.warn('停止朗读媒体会话失败:', error);
+      console.warn(`[TTS-BG] stop AVSession failed: ${this.formatTtsBackgroundError(error as Object)}`, error);
     } finally {
       this.ttsMediaImage = '';
       this.ttsMediaImageRaw = '';
@@ -3999,6 +4093,27 @@ struct ReadBookPage {
       requestCode: 1001,
       actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
     });
+  }
+
+  ttsBackgroundDebugState(): string {
+    return `desired=${this.ttsBackgroundDesired},running=${this.ttsBackgroundRunning},requesting=${this.ttsBackgroundRequesting},speaking=${this.isTtsSpeaking},readerSpeaking=${this.ttsReader.isSpeaking()},avSession=${this.ttsAvSession ? 'yes' : 'no'},audio=${this.ttsReader.audioDebugState()}`;
+  }
+
+  formatTtsBackgroundError(error: Object | null | undefined): string {
+    if (!error) {
+      return 'unknown';
+    }
+    const record = error as Record<string, Object>;
+    const code = record['code'];
+    const message = record['message'];
+    const parts: string[] = [];
+    if (code !== undefined) {
+      parts.push(`code=${String(code)}`);
+    }
+    if (message !== undefined) {
+      parts.push(`message=${String(message)}`);
+    }
+    return parts.length > 0 ? parts.join(',') : String(error);
   }
 
   clearTtsHighlight(): void {
@@ -4374,16 +4489,59 @@ struct ReadBookPage {
   }
 
   followTtsChunk(chunk: TtsChunk): void {
-    const absoluteStart = this.ttsTextStartOffset + chunk.start;
-    const absoluteEnd = this.ttsTextStartOffset + chunk.end;
-    const currentPageEnd = this.getPageEndOffset(this.currentPageIndex);
-    const targetOffset = absoluteEnd > currentPageEnd ? absoluteEnd - 1 : absoluteStart;
-    const pageIndex = this.findPageIndexByOffset(targetOffset);
+    const pageIndex = this.resolveTtsChunkPageIndex(chunk);
+    this.ttsLastFocusChunk = chunk;
+    this.ttsLastFocusPageIndex = pageIndex;
     if (pageIndex !== this.currentPageIndex) {
       this.animateTtsToPage(pageIndex, chunk);
       return;
     }
     this.updateTtsChunkHighlight(chunk, pageIndex);
+  }
+
+  syncTtsFocusAfterResumeLater(delayMs: number): void {
+    const serial = ++this.ttsResumeSyncSerial;
+    setTimeout(() => {
+      if (serial < this.ttsResumeSyncSerial - 1) {
+        return;
+      }
+      this.syncTtsFocusAfterResume();
+    }, delayMs);
+  }
+
+  syncTtsFocusAfterResume(): void {
+    if (!this.isTtsSpeaking || !this.ttsAutoContinue || !this.ttsLastFocusChunk ||
+      this.contentPages.length === 0) {
+      return;
+    }
+    const pageIndex = this.resolveTtsChunkPageIndex(this.ttsLastFocusChunk);
+    if (pageIndex < 0 || pageIndex >= this.contentPages.length) {
+      return;
+    }
+    this.ttsLastFocusPageIndex = pageIndex;
+    this.ttsPendingTargetPageIndex = -1;
+    this.ttsPendingHighlightChunk = null;
+    this.ttsAutoTurningPage = false;
+    this.ttsPageTurnSerial++;
+    this.finishPageTurnAnimation();
+    if (pageIndex !== this.currentPageIndex) {
+      this.currentPageIndex = pageIndex;
+      this.saveReadingProgress().catch((error: Error) => {
+        console.warn('同步朗读恢复页码失败:', error);
+      });
+    }
+    this.syncCurrentPageText();
+    this.updateTtsChunkHighlight(this.ttsLastFocusChunk, pageIndex);
+    console.info(`[TTS] resume focus synced: page=${pageIndex},highlight=${this.ttsHighlightStart}-${this.ttsHighlightEnd}`);
+  }
+
+  resolveTtsChunkPageIndex(chunk: TtsChunk): number {
+    const absoluteStart = this.ttsTextStartOffset + chunk.start;
+    const absoluteEnd = this.ttsTextStartOffset + chunk.end;
+    const startPageIndex = this.findPageIndexByOffset(absoluteStart);
+    const startPageEnd = this.getPageEndOffset(startPageIndex);
+    const targetOffset = absoluteEnd > startPageEnd ? absoluteEnd - 1 : absoluteStart;
+    return this.findPageIndexByOffset(targetOffset);
   }
 
   updateTtsChunkHighlight(chunk: TtsChunk, pageIndex: number): void {
@@ -4414,41 +4572,47 @@ struct ReadBookPage {
 
   async runPendingTtsPageTurn(): Promise<void> {
     this.ttsAutoTurningPage = true;
+    const turnSerial = this.ttsPageTurnSerial;
     try {
       while (this.isTtsSpeaking && this.ttsAutoContinue &&
         this.ttsPendingTargetPageIndex > this.currentPageIndex && this.canTurnPage(1)) {
-        await this.runTtsPageTurnAnimation(1);
+        await this.runTtsPageTurnAnimation(1, turnSerial);
+        if (turnSerial !== this.ttsPageTurnSerial) {
+          return;
+        }
       }
-      if (this.isTtsSpeaking && this.ttsPendingHighlightChunk) {
+      if (turnSerial === this.ttsPageTurnSerial && this.isTtsSpeaking && this.ttsPendingHighlightChunk) {
         this.updateTtsChunkHighlight(this.ttsPendingHighlightChunk, this.currentPageIndex);
       }
     } finally {
-      this.ttsAutoTurningPage = false;
-      this.ttsPendingTargetPageIndex = -1;
-      this.ttsPendingHighlightChunk = null;
+      if (turnSerial === this.ttsPageTurnSerial) {
+        this.ttsAutoTurningPage = false;
+        this.ttsPendingTargetPageIndex = -1;
+        this.ttsPendingHighlightChunk = null;
+      }
     }
   }
 
-  async runTtsPageTurnAnimation(direction: number): Promise<void> {
+  async runTtsPageTurnAnimation(direction: number, turnSerial: number = this.ttsPageTurnSerial): Promise<void> {
     if (this.isPageTurning || !this.canTurnPage(direction)) {
       return;
     }
     this.isPageTurning = true;
     try {
       if (!this.readerPageTurnAnimation) {
-        await this.applyTtsPageTurn(direction);
+        await this.applyTtsPageTurn(direction, turnSerial);
         this.finishPageTurnAnimation();
       } else if (this.readerPageTurnMode === 1) {
-        await this.runTtsSlidePageTurn(direction);
+        await this.runTtsSlidePageTurn(direction, turnSerial);
       } else {
-        await this.runTtsTapPageTurn(direction);
+        await this.runTtsTapPageTurn(direction, turnSerial);
       }
     } finally {
       this.isPageTurning = false;
     }
   }
 
-  async runTtsTapPageTurn(direction: number): Promise<void> {
+  async runTtsTapPageTurn(direction: number, turnSerial: number): Promise<void> {
     const distance = this.getPageTurnDistance();
     this.prepareSlidePageTurn(direction, 0);
     animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
@@ -4456,11 +4620,11 @@ struct ReadBookPage {
       this.pageTransitionOpacity = 1;
     });
     await this.delay(230);
-    await this.applyTtsPageTurn(direction);
+    await this.applyTtsPageTurn(direction, turnSerial);
     this.finishPageTurnAnimation();
   }
 
-  async runTtsSlidePageTurn(direction: number): Promise<void> {
+  async runTtsSlidePageTurn(direction: number, turnSerial: number): Promise<void> {
     const distance = this.getPageTurnDistance();
     this.prepareSlidePageTurn(direction, this.getPageSlideAxisOffset());
     animateTo({ duration: 240, curve: Curve.EaseOut }, () => {
@@ -4468,11 +4632,14 @@ struct ReadBookPage {
       this.pageTransitionOpacity = 1;
     });
     await this.delay(250);
-    await this.applyTtsPageTurn(direction);
+    await this.applyTtsPageTurn(direction, turnSerial);
     this.finishPageTurnAnimation();
   }
 
-  async applyTtsPageTurn(direction: number): Promise<void> {
+  async applyTtsPageTurn(direction: number, turnSerial: number): Promise<void> {
+    if (turnSerial !== this.ttsPageTurnSerial || !this.isTtsSpeaking || !this.ttsAutoContinue) {
+      return;
+    }
     if (direction > 0) {
       if (this.currentPageIndex < this.contentPages.length - 1) {
         this.currentPageIndex++;

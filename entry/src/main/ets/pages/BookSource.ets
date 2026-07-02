@@ -807,18 +807,30 @@ struct BookSourcePage {
 
               Row() {
                 Button('一键禁用')
-                  .width('45%')
+                  .layoutWeight(1)
                   .height(44)
-                  .enabled(this.checkBadUrls.length > 0)
-                  .backgroundColor(this.checkBadUrls.length > 0 ? '#E53935' : this.inputColor())
-                  .fontColor(this.checkBadUrls.length > 0 ? '#FFFFFF' : this.subTextColor())
+                  .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
+                  .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#E53935' : this.inputColor())
+                  .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
                   .onClick(() => {
                     this.disableFailedCheckedSources();
                   })
 
-                Button('取消')
-                  .width('45%')
+                Button('一键删除')
+                  .layoutWeight(1)
                   .height(44)
+                  .margin({ left: 8 })
+                  .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
+                  .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#B71C1C' : this.inputColor())
+                  .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
+                  .onClick(() => {
+                    this.deleteFailedCheckedSources();
+                  })
+
+                Button('取消')
+                  .layoutWeight(1)
+                  .height(44)
+                  .margin({ left: 8 })
                   .backgroundColor(this.inputColor())
                   .fontColor(this.primaryTextColor())
                   .onClick(() => {
@@ -1292,7 +1304,7 @@ struct BookSourcePage {
 
   formatCheckProgressStatus(progress: SearchProgress): string {
     const verifyText = progress.needVerification ? '；有书源需要网页验证' : '';
-    return `已校验 ${progress.done}/${progress.total}，命中 ${progress.results.length} 本${verifyText}`;
+    return `已校验 ${progress.done}/${progress.total}${verifyText}`;
   }
 
   checkResultText(): string {
@@ -1332,6 +1344,35 @@ struct BookSourcePage {
     } catch (e) {
       console.error('禁用异常书源失败:', e);
       promptAction.showToast({ message: '禁用失败' });
+    } finally {
+      this.isBatchOperating = false;
+    }
+  }
+
+  async deleteFailedCheckedSources(): Promise<void> {
+    if (this.isBatchOperating) {
+      return;
+    }
+    const failedUrls = this.checkBadUrls.slice();
+    if (failedUrls.length === 0) {
+      return;
+    }
+
+    this.isBatchOperating = true;
+    this.batchOperationText = '正在删除书源...';
+    try {
+      const db = AppDatabase.getInstance();
+      for (const url of failedUrls) {
+        await db.deleteBookSource(url);
+      }
+      this.checkBadUrls = [];
+      this.checkBadNames = [];
+      this.showCheckDialog = false;
+      await this.loadSources();
+      promptAction.showToast({ message: `已删除 ${failedUrls.length} 个异常书源` });
+    } catch (e) {
+      console.error('删除异常书源失败:', e);
+      promptAction.showToast({ message: '删除失败' });
     } finally {
       this.isBatchOperating = false;
     }

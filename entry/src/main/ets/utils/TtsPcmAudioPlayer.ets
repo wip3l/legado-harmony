@@ -66,6 +66,28 @@ export class TtsPcmAudioPlayer {
     this.stop();
   }
 
+  debugState(): string {
+    if (!this.renderer) {
+      return 'renderer=none';
+    }
+    return `renderer=${this.audioStateName(this.renderer.state)},sampleRate=${this.currentSampleRate},generation=${this.playGeneration}`;
+  }
+
+  private audioStateName(state: audio.AudioState): string {
+    switch (state) {
+      case audio.AudioState.STATE_RUNNING:
+        return 'STATE_RUNNING';
+      case audio.AudioState.STATE_STOPPED:
+        return 'STATE_STOPPED';
+      case audio.AudioState.STATE_RELEASED:
+        return 'STATE_RELEASED';
+      case audio.AudioState.STATE_PAUSED:
+        return 'STATE_PAUSED';
+      default:
+        return `STATE_${state}`;
+    }
+  }
+
   private async ensureRenderer(sampleRate: number): Promise<audio.AudioRenderer> {
     const nextSampleRate = this.toAudioSampleRate(sampleRate);
     if (this.renderer && this.currentSampleRate === nextSampleRate &&
@@ -94,6 +116,7 @@ export class TtsPcmAudioPlayer {
       }
     };
     this.renderer = await audio.createAudioRenderer(options);
+    console.info(`[TTS] audio renderer created: ${this.debugState()}`);
     return this.renderer;
   }
 

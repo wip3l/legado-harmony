@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "io.legado.read",
     "vendor": "legado",
-    "versionCode": 230626,
-    "versionName": "2.3.626",
+    "versionCode": 24072,
+    "versionName": "2.4.72",
     "bundleType": "app",
     "debug": false,
     "icon": "$media:layered_image",
