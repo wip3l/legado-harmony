@@ -256,6 +256,9 @@ struct ReadBookPage {
   }
 
   onPageShow(): void {
+    this.loadReaderSettings().catch((error: Error) => {
+      console.warn('恢复阅读设置失败:', error);
+    });
     this.reregisterReaderFontAfterShow(0);
     this.reregisterReaderFontAfterShow(120);
     this.syncTtsFocusAfterResumeLater(0);
