@@ -19,7 +19,7 @@ export struct SearchBookResultList {
   @Prop showLoadingMore: boolean = false;
   @Prop showKind: boolean = false;
   @Prop showResultCover: boolean = true;
-  @Prop useBookshelfCoverGallery: boolean = true;
+  @Prop useBookshelfCoverGallery: boolean = false;
   @Prop showResultTags: boolean = true;
   @Prop showSourceLine: boolean = true;
   @Prop pageColor: string = '#F5F5F5';

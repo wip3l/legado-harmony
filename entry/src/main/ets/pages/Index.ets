@@ -1960,7 +1960,7 @@ struct ExplorePage {
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
-  @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = true;
+  @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = false;
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   @StorageLink('searchExploreSourceSort') searchExploreSourceSort: string = '';
@@ -2713,7 +2713,7 @@ struct SearchPage {
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
-  @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = true;
+  @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = false;
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   @StorageLink('searchExploreExactSearch') exactSearch: boolean = false;

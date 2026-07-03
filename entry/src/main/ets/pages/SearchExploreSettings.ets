@@ -8,7 +8,7 @@ import { AppDatabase } from '../model/data/AppDatabase';
 @Component
 struct SearchExploreSettingsPage {
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
-  @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = true;
+  @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = false;
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
   @StorageLink('searchExploreExactSearch') searchExploreExactSearch: boolean = false;

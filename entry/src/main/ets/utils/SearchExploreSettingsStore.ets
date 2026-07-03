@@ -3,7 +3,7 @@ import preferences from '@ohos.data.preferences';
 
 export class SearchExploreSettings {
   showResultCover: boolean = true;
-  useBookshelfCoverGallery: boolean = true;
+  useBookshelfCoverGallery: boolean = false;
   showResultTags: boolean = true;
   promptAddToShelfOnBack: boolean = true;
   exactSearch: boolean = false;
@@ -44,7 +44,7 @@ export class SearchExploreSettingsStore {
     settings.showResultCover = await SearchExploreSettingsStore.getBoolean(
       store, SearchExploreSettingsStore.KEY_SHOW_RESULT_COVER, true);
     settings.useBookshelfCoverGallery = await SearchExploreSettingsStore.getBoolean(
-      store, SearchExploreSettingsStore.KEY_USE_BOOKSHELF_COVER_GALLERY, true);
+      store, SearchExploreSettingsStore.KEY_USE_BOOKSHELF_COVER_GALLERY, false);
     settings.showResultTags = await SearchExploreSettingsStore.getBoolean(
       store, SearchExploreSettingsStore.KEY_SHOW_RESULT_TAGS, true);
     settings.promptAddToShelfOnBack = await SearchExploreSettingsStore.getBoolean(
