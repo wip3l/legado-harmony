@@ -43,7 +43,7 @@ struct SettingsPage {
   @StorageLink('readerActiveFontFamily') readerActiveFontFamily: string = '';
   @StorageLink('readerFontRegistered') readerFontRegistered: boolean = false;
   @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
-  @StorageLink('readerPageTurnAnimation') readerPageTurnAnimation: boolean = true;
+  @StorageLink('readerPageTurnAnimationType') readerPageTurnAnimationType: number = ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE;
   @StorageLink('readerVolumeTurnPage') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
   @StorageLink('readerExtendToStatusBar') readerExtendToStatusBar: boolean = false;
@@ -118,9 +118,10 @@ struct SettingsPage {
 
           this.sectionTitle('翻页方式')
           this.pageTurnOptions()
-          this.switchItem('翻页动画', '开启后滑动或点击翻页会预览上一页/下一页，并在松手后补完整页动画', this.readerPageTurnAnimation, (value: boolean) => {
-            this.readerPageTurnAnimation = value;
-          })
+          this.selectItem('翻页动画', '选择滑动或点击翻页时使用的页面切换效果',
+            this.pageTurnAnimationOptions(), this.pageTurnAnimationSelectedIndex(), (index: number) => {
+              this.setReaderPageTurnAnimationType(index);
+            })
           this.switchItem('音量键翻页', '阅读页获得焦点时使用音量上/下键切换上一页/下一页', this.readerVolumeTurnPage, (value: boolean) => {
             this.setReaderVolumeTurnPage(value);
           })
@@ -385,6 +386,7 @@ struct SettingsPage {
     this.readerDarkCustomThemeBackgroundColor = settings.darkCustomThemeBackgroundColor;
     this.readerDarkCustomThemeTextColor = settings.darkCustomThemeTextColor;
     this.readerPageTurnMode = settings.pageTurnMode;
+    this.readerPageTurnAnimationType = settings.pageTurnAnimationType;
     this.readerVolumeTurnPage = settings.volumeTurnPage;
     this.readerKeepScreenOn = settings.keepScreenOn;
     this.readerExtendToStatusBar = settings.extendToStatusBar;
@@ -678,6 +680,35 @@ struct SettingsPage {
     return '滚动阅读';
   }
 
+  pageTurnAnimationOptions(): SelectOption[] {
+    return [
+      { value: '无动画' },
+      { value: '平移' },
+      { value: '淡入' },
+      { value: '叠页' }
+    ];
+  }
+
+  pageTurnAnimationTypes(): number[] {
+    return [
+      ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER,
+      ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE,
+      ReaderSettingsStore.PAGE_TURN_ANIMATION_FADE,
+      ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK
+    ];
+  }
+
+  pageTurnAnimationSelectedIndex(): number {
+    const types = this.pageTurnAnimationTypes();
+    const value = this.normalizePageTurnAnimationType(this.readerPageTurnAnimationType);
+    for (let i = 0; i < types.length; i++) {
+      if (types[i] === value) {
+        return i;
+      }
+    }
+    return 0;
+  }
+
   saveReaderLayoutSettings(): void {
     ReaderSettingsStore.saveLayoutSettings(
       getContext(this),
@@ -754,6 +785,26 @@ struct SettingsPage {
     ReaderSettingsStore.savePageTurnMode(getContext(this), mode).catch((e: Error) => {
       console.error('保存翻页方式失败:', e);
     });
+  }
+
+  setReaderPageTurnAnimationType(index: number): void {
+    const types = this.pageTurnAnimationTypes();
+    const type = index >= 0 && index < types.length ? types[index] : ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER;
+    this.readerPageTurnAnimationType = this.normalizePageTurnAnimationType(type);
+    ReaderSettingsStore.savePageTurnAnimationType(getContext(this), this.readerPageTurnAnimationType).catch((e: Error) => {
+      console.error('保存翻页动画失败:', e);
+    });
+  }
+
+  normalizePageTurnAnimationType(type: number): number {
+    const value = Math.round(type);
+    if (value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE ||
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER ||
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_FADE ||
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK) {
+      return value;
+    }
+    return ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER;
   }
 
   saveReaderInteractionSettings(): void {
@@ -1301,6 +1352,48 @@ struct SettingsPage {
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     .backgroundColor(this.cardColor())
+  }
+
+  @Builder
+  selectItem(title: string, desc: string, options: SelectOption[], selected: number, onSelect: (index: number) => void) {
+    Row() {
+      Column() {
+        Text(title)
+          .fontSize(16)
+          .fontColor(this.primaryTextColor())
+        Text(desc)
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+          .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Select(options)
+        .selected(selected)
+        .value(this.optionValue(options, selected))
+        .font({ size: 14 })
+        .fontColor(this.primaryTextColor())
+        .backgroundColor(this.appDarkMode ? '#24272D' : '#F0F2F5')
+        .borderRadius(8)
+        .constraintSize({ minWidth: 136, maxWidth: 180 })
+        .margin({ left: 12 })
+        .onSelect((index: number) => {
+          onSelect(index);
+        })
+    }
+    .width('100%')
+    .constraintSize({ minHeight: 64 })
+    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+    .backgroundColor(this.cardColor())
+    .alignItems(VerticalAlign.Center)
+  }
+
+  optionValue(options: SelectOption[], index: number): ResourceStr {
+    if (index >= 0 && index < options.length) {
+      return options[index].value;
+    }
+    return options.length > 0 ? options[0].value : '';
   }
 
   @Builder

@@ -70,6 +70,7 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate('ttsOfflineSdkModeMigrated', true);
     }
     PersistentStorage.persistProp('readerPageTurnAnimation', true);
+    PersistentStorage.persistProp('readerPageTurnAnimationType', 1);
     PersistentStorage.persistProp('readerVolumeTurnPage', false);
     PersistentStorage.persistProp('readerKeepScreenOn', true);
     PersistentStorage.persistProp('readerExtendToStatusBar', false);

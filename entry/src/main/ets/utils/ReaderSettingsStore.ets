@@ -14,6 +14,7 @@ export class ReaderSettings {
   darkCustomThemeBackgroundColor: string = ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR;
   darkCustomThemeTextColor: string = ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR;
   pageTurnMode: number = 1;
+  pageTurnAnimationType: number = 1;
   volumeTurnPage: boolean = false;
   keepScreenOn: boolean = true;
   extendToStatusBar: boolean = false;
@@ -40,6 +41,12 @@ export class ReaderSettings {
 }
 
 export class ReaderSettingsStore {
+  static readonly PAGE_TURN_ANIMATION_NONE: number = 0;
+  static readonly PAGE_TURN_ANIMATION_SLIDE: number = 1;
+  static readonly PAGE_TURN_ANIMATION_COVER: number = 2;
+  static readonly PAGE_TURN_ANIMATION_FADE: number = 3;
+  static readonly PAGE_TURN_ANIMATION_STACK: number = 4;
+  static readonly PAGE_TURN_ANIMATION_VERTICAL: number = 5;
   static readonly KEY_FONT_SIZE: string = 'readerFontSize';
   static readonly KEY_LINE_HEIGHT: string = 'readerLineHeight';
   static readonly KEY_LINE_HEIGHT_MODE: string = 'readerLineHeightMode';
@@ -52,6 +59,8 @@ export class ReaderSettingsStore {
   static readonly KEY_DARK_CUSTOM_THEME_BACKGROUND_COLOR: string = 'readerDarkCustomThemeBackgroundColor';
   static readonly KEY_DARK_CUSTOM_THEME_TEXT_COLOR: string = 'readerDarkCustomThemeTextColor';
   static readonly KEY_PAGE_TURN_MODE: string = 'readerPageTurnMode';
+  static readonly KEY_PAGE_TURN_ANIMATION: string = 'readerPageTurnAnimation';
+  static readonly KEY_PAGE_TURN_ANIMATION_TYPE: string = 'readerPageTurnAnimationType';
   static readonly KEY_VOLUME_TURN_PAGE: string = 'readerVolumeTurnPage';
   static readonly KEY_KEEP_SCREEN_ON: string = 'readerKeepScreenOn';
   static readonly KEY_EXTEND_TO_STATUS_BAR: string = 'readerExtendToStatusBar';
@@ -160,6 +169,19 @@ export class ReaderSettingsStore {
       ReaderSettingsStore.KEY_PAGE_TURN_MODE,
       1,
       'pageTurnMode'
+    );
+    const legacyPageTurnAnimation = await ReaderSettingsStore.getBoolean(
+      store,
+      ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION,
+      AppStorage.get<boolean>(ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION) ?? true
+    );
+    settings.pageTurnAnimationType = await ReaderSettingsStore.getNumber(
+      store,
+      ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION_TYPE,
+      legacyPageTurnAnimation ?
+        ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE :
+        ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE,
+      'pageTurnAnimationType'
     );
     settings.volumeTurnPage = await ReaderSettingsStore.getBoolean(
       store,
@@ -388,12 +410,35 @@ export class ReaderSettingsStore {
     await store.flush();
   }
 
+  static async savePageTurnAnimationType(context: Context, type: number): Promise<void> {
+    const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
+    settings.pageTurnAnimationType = ReaderSettingsStore.normalizePageTurnAnimationType(type);
+    ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION_TYPE, settings.pageTurnAnimationType);
+    AppStorage.setOrCreate(
+      ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION,
+      settings.pageTurnAnimationType !== ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE
+    );
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    await store.put(ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION_TYPE, settings.pageTurnAnimationType);
+    await store.put(
+      ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION,
+      settings.pageTurnAnimationType !== ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE
+    );
+    await store.flush();
+  }
+
   static applyToStorage(settings: ReaderSettings): void {
     const normalized = ReaderSettingsStore.clone(settings);
     ReaderSettingsStore.cachedSettings = normalized;
     ReaderSettingsStore.applyLayoutToStorage(normalized);
     ReaderSettingsStore.applyThemeToStorage(normalized);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PAGE_TURN_MODE, normalized.pageTurnMode);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION_TYPE, normalized.pageTurnAnimationType);
+    AppStorage.setOrCreate(
+      ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION,
+      normalized.pageTurnAnimationType !== ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE
+    );
     ReaderSettingsStore.applyInteractionToStorage(normalized);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_ENABLED, normalized.preloadEnabled);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_CHAPTER_COUNT, normalized.preloadChapterCount);
@@ -537,6 +582,9 @@ export class ReaderSettingsStore {
     if (type === 'pageTurnMode') {
       return ReaderSettingsStore.normalizePageTurnMode(value);
     }
+    if (type === 'pageTurnAnimationType') {
+      return ReaderSettingsStore.normalizePageTurnAnimationType(value);
+    }
     if (type === 'preloadChapterCount') {
       return ReaderSettingsStore.normalizePreloadChapterCount(value);
     }
@@ -586,6 +634,17 @@ export class ReaderSettingsStore {
     return value >= 0 && value <= 2 ? value : 1;
   }
 
+  private static normalizePageTurnAnimationType(type: number): number {
+    const value = Math.round(type);
+    if (value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE ||
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER ||
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_FADE ||
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK) {
+      return value;
+    }
+    return ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER;
+  }
+
   private static normalizePreloadChapterCount(count: number): number {
     const value = Math.round(count);
     return Math.max(1, Math.min(value, 10));
@@ -623,6 +682,7 @@ export class ReaderSettingsStore {
       ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR
     );
     settings.pageTurnMode = ReaderSettingsStore.normalizePageTurnMode(source.pageTurnMode);
+    settings.pageTurnAnimationType = ReaderSettingsStore.normalizePageTurnAnimationType(source.pageTurnAnimationType);
     settings.volumeTurnPage = source.volumeTurnPage;
     settings.keepScreenOn = source.keepScreenOn;
     settings.extendToStatusBar = source.extendToStatusBar;
@@ -689,6 +749,13 @@ export class ReaderSettingsStore {
     );
     settings.pageTurnMode = ReaderSettingsStore.normalizePageTurnMode(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PAGE_TURN_MODE) ?? 1
+    );
+    const legacyPageTurnAnimation = AppStorage.get<boolean>(ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION) ?? true;
+    settings.pageTurnAnimationType = ReaderSettingsStore.normalizePageTurnAnimationType(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION_TYPE) ??
+        (legacyPageTurnAnimation ?
+          ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE :
+          ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE)
     );
     settings.volumeTurnPage = AppStorage.get<boolean>(ReaderSettingsStore.KEY_VOLUME_TURN_PAGE) ?? false;
     settings.keepScreenOn = AppStorage.get<boolean>(ReaderSettingsStore.KEY_KEEP_SCREEN_ON) ?? true;
