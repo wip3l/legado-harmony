@@ -28,7 +28,7 @@ struct OtherSettingsPage {
           this.menuItem('主题色设置', '按钮色 / 强调色', () => {
             router.pushUrl({ url: 'pages/ThemeColorSettings' });
           })
-          this.menuItem('字体设置', '阅读字体 / 自定义字体', () => {
+          this.menuItem('字体设置', '全局字体 / 自定义字体', () => {
             router.pushUrl({ url: 'pages/FontSettings' });
           })
           this.menuItem('图标设置', '桌面图标 / 候选图标', () => {

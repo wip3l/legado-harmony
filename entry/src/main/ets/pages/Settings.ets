@@ -111,6 +111,7 @@ struct SettingsPage {
           this.fontSizeSlider()
           this.lineHeightSlider()
           this.paragraphSpacingSlider()
+          this.readerFontEntryItem()
 
           this.sectionTitle('阅读背景')
           this.readerThemePanel()
@@ -975,6 +976,31 @@ struct SettingsPage {
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
       router.pushUrl({ url: 'pages/CustomFontManager' });
+    })
+  }
+
+  @Builder
+  readerFontEntryItem() {
+    Row() {
+      Text('阅读字体')
+        .fontColor(this.primaryTextColor())
+        .fontSize(16)
+        .layoutWeight(1)
+      Text('正文 / 标题 / 正则')
+        .fontSize(13)
+        .fontColor(this.subTextColor())
+        .margin({ right: 8 })
+      Text('>')
+        .fontSize(18)
+        .fontColor(this.subTextColor())
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 16, right: 16 })
+    .backgroundColor(this.cardColor())
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      router.pushUrl({ url: 'pages/ReaderFontSettings' });
     })
   }
 

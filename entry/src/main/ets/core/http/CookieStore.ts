@@ -67,6 +67,14 @@ export class CookieStore {
     } catch (_) {}
   }
 
+  static saveSync(): void {
+    try {
+      webview.WebCookieManager.saveCookieSync();
+    } catch (_) {
+      this.saveAsync();
+    }
+  }
+
   private static splitSetCookie(cookies: string): string[] {
     if (!cookies) return [];
     if (!cookies.includes(',')) return [cookies.trim()].filter(v => v.length > 0);

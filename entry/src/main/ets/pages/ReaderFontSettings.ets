@@ -42,19 +42,19 @@ struct ReaderFontSettingsPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
-  @StorageLink('readerFontSize') readerFontSize: number = 20;
-  @StorageLink('readerBodyFontMode') readerBodyFontMode: string = 'global';
-  @StorageLink('readerBodyFontFamily') readerBodyFontFamily: string = '';
-  @StorageLink('readerTitleFontMode') readerTitleFontMode: string = 'global';
-  @StorageLink('readerTitleFontFamily') readerTitleFontFamily: string = '';
-  @StorageLink('readerTitleFontSize') readerTitleFontSize: number = 22;
-  @StorageLink('readerRegexFontEnabled') readerRegexFontEnabled: boolean = false;
-  @StorageLink('readerRegexFontPattern') readerRegexFontPattern: string = '';
-  @StorageLink('readerRegexFontMode') readerRegexFontMode: string = 'global';
-  @StorageLink('readerRegexFontFamily') readerRegexFontFamily: string = '';
-  @StorageLink('readerRegexFontSize') readerRegexFontSize: number = 20;
-  @StorageLink('readerRegexShadowColor') readerRegexShadowColor: string = '';
-  @StorageLink('readerRegexFontRulesRaw') readerRegexFontRulesRaw: string = '';
+  @State readerFontSize: number = 20;
+  @State readerBodyFontMode: string = 'global';
+  @State readerBodyFontFamily: string = '';
+  @State readerTitleFontMode: string = 'global';
+  @State readerTitleFontFamily: string = '';
+  @State readerTitleFontSize: number = 22;
+  @State readerRegexFontEnabled: boolean = false;
+  @State readerRegexFontPattern: string = '';
+  @State readerRegexFontMode: string = 'global';
+  @State readerRegexFontFamily: string = '';
+  @State readerRegexFontSize: number = 20;
+  @State readerRegexShadowColor: string = '';
+  @State readerRegexFontRulesRaw: string = '';
   @StorageLink('readerFontFamily') readerFontFamily: string = '';
   @StorageLink('readerSystemFontFamily') readerSystemFontFamily: string = '';
   @StorageLink('readerCustomFontsRaw') readerCustomFontsRaw: string = '';
@@ -62,6 +62,7 @@ struct ReaderFontSettingsPage {
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State regexRules: ReaderRegexFontRule[] = [];
   @State regexHighlightRefreshKey: number = 0;
+  @State activeRegexInputKey: string = '';
 
   aboutToAppear(): void {
     this.loadSettings();
@@ -121,10 +122,7 @@ struct ReaderFontSettingsPage {
           this.titlePreviewItem()
 
           this.sectionTitle('正则字体设置')
-          this.switchItem('启用正则字体', this.readerRegexFontEnabled, (value: boolean) => {
-            this.readerRegexFontEnabled = value;
-            this.saveSettings();
-          })
+          this.regexEnableSwitchItem()
           if (this.readerRegexFontEnabled) {
             this.regexTemplateActions()
             if (this.regexRules.length === 0) {
@@ -272,6 +270,15 @@ struct ReaderFontSettingsPage {
     this.saveSettings();
   }
 
+  updateRegexRuleById(ruleId: string, updater: (rule: ReaderRegexFontRule) => void): void {
+    for (let i = 0; i < this.regexRules.length; i++) {
+      if (this.regexRules[i].id === ruleId) {
+        this.updateRegexRule(i, updater);
+        return;
+      }
+    }
+  }
+
   removeRegexRule(index: number): void {
     const next = this.regexRules.slice();
     if (index < 0 || index >= next.length) {
@@ -285,6 +292,25 @@ struct ReaderFontSettingsPage {
 
   bumpRegexHighlightRefresh(): void {
     this.regexHighlightRefreshKey = this.regexHighlightRefreshKey + 1;
+  }
+
+  regexInputKey(ruleId: string, field: string): string {
+    return `${ruleId}:${field}`;
+  }
+
+  setRegexInputEditing(ruleId: string, field: string, editing: boolean): void {
+    const key = this.regexInputKey(ruleId, field);
+    if (editing) {
+      this.activeRegexInputKey = key;
+      return;
+    }
+    if (this.activeRegexInputKey === key) {
+      this.activeRegexInputKey = '';
+    }
+  }
+
+  isRegexInputEditing(ruleId: string, field: string): boolean {
+    return this.activeRegexInputKey === this.regexInputKey(ruleId, field);
   }
 
   normalizeFontMode(mode: string): string {
@@ -651,8 +677,14 @@ struct ReaderFontSettingsPage {
           .placeholderColor(this.subTextColor())
           .backgroundColor(this.inputColor())
           .borderRadius(8)
+          .onEditChange((isEditing: boolean) => {
+            this.setRegexInputEditing(rule.id, 'name', isEditing);
+          })
           .onChange((value: string) => {
-            this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+            if (!this.isRegexInputEditing(rule.id, 'name')) {
+              return;
+            }
+            this.updateRegexRuleById(rule.id, (target: ReaderRegexFontRule) => {
               target.name = value;
             });
           })
@@ -663,8 +695,14 @@ struct ReaderFontSettingsPage {
           .placeholderColor(this.subTextColor())
           .backgroundColor(this.inputColor())
           .borderRadius(8)
+          .onEditChange((isEditing: boolean) => {
+            this.setRegexInputEditing(rule.id, 'pattern', isEditing);
+          })
           .onChange((value: string) => {
-            this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+            if (!this.isRegexInputEditing(rule.id, 'pattern')) {
+              return;
+            }
+            this.updateRegexRuleById(rule.id, (target: ReaderRegexFontRule) => {
               target.pattern = value;
             });
           })
@@ -1052,17 +1090,49 @@ struct ReaderFontSettingsPage {
   }
 
   @Builder
-  switchItem(title: string, value: boolean, onChange: (value: boolean) => void) {
+  regexEnableSwitchItem() {
     Row() {
-      Text(title)
+      Text('启用正则字体')
         .fontSize(16)
         .fontColor(this.primaryTextColor())
         .layoutWeight(1)
-      Toggle({ type: ToggleType.Switch, isOn: value })
-        .selectedColor(this.accentColor())
-        .onChange((checked: boolean) => {
-          onChange(checked);
+      if (this.readerRegexFontEnabled) {
+        Row() {
+          Row() {}
+            .width(24)
+            .height(24)
+            .borderRadius(12)
+            .backgroundColor('#FFFFFF')
+        }
+        .width(48)
+        .height(28)
+        .padding(2)
+        .borderRadius(14)
+        .backgroundColor(this.accentColor())
+        .justifyContent(FlexAlign.End)
+        .onClick(() => {
+          this.readerRegexFontEnabled = false;
+          this.saveSettings();
         })
+      } else {
+        Row() {
+          Row() {}
+            .width(24)
+            .height(24)
+            .borderRadius(12)
+            .backgroundColor('#FFFFFF')
+        }
+        .width(48)
+        .height(28)
+        .padding(2)
+        .borderRadius(14)
+        .backgroundColor(this.inputColor())
+        .justifyContent(FlexAlign.Start)
+        .onClick(() => {
+          this.readerRegexFontEnabled = true;
+          this.saveSettings();
+        })
+      }
     }
     .width('100%')
     .height(56)

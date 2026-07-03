@@ -9,6 +9,11 @@ import { CoverAlbum, CoverGallerySettings } from '../utils/CoverGallerySettings'
 import { CoverGalleryStore, CoverGallerySnapshot } from '../utils/CoverGalleryStore';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 
+class CoverGalleryExportResult {
+  zipPath: string = '';
+  imageCount: number = 0;
+}
+
 @Entry
 @Component
 struct CoverGalleryManagerPage {
@@ -344,6 +349,34 @@ struct CoverGalleryManagerPage {
     }
   }
 
+  async exportSelectedAlbumZip(): Promise<void> {
+    const album = this.getSelectedAlbum();
+    if (!album) {
+      promptAction.showToast({ message: '请先选择或新建图集' });
+      return;
+    }
+    if (album.covers.length === 0) {
+      promptAction.showToast({ message: '当前图集还没有图片' });
+      return;
+    }
+    try {
+      const options: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+      options.newFileNames = [`${this.safeFileName(album.name)}.zip`];
+      options.fileSuffixChoices = ['ZIP 压缩包|.zip'];
+      const result = await new picker.DocumentViewPicker(getContext(this)).save(options);
+      if (!result || result.length === 0) {
+        return;
+      }
+      promptAction.showToast({ message: '正在导出图集...' });
+      const exportResult = await this.createAlbumZip(album);
+      await fs.copy(fileUri.getUriFromPath(exportResult.zipPath), result[0]);
+      promptAction.showToast({ message: `已导出 ${exportResult.imageCount} 张图片` });
+    } catch (e) {
+      console.error('导出图集压缩包失败:', e);
+      promptAction.showToast({ message: '导出 ZIP 失败' });
+    }
+  }
+
   async addCoversToAlbum(albumId: string, sourceUris: string[]): Promise<void> {
     const context = getContext(this);
     const dir = `${context.filesDir}/cover_albums/${albumId}`;
@@ -379,6 +412,42 @@ struct CoverGalleryManagerPage {
       return album;
     });
     this.saveAlbums(next, albumId);
+  }
+
+  async createAlbumZip(album: CoverAlbum): Promise<CoverGalleryExportResult> {
+    const context = getContext(this);
+    const safeName = this.safeFileName(album.name);
+    const exportRoot = `${context.tempDir}/album_export_${Date.now()}`;
+    const imageDir = `${exportRoot}/${safeName}`;
+    const zipPath = `${exportRoot}/${safeName}.zip`;
+    await this.ensureDir(exportRoot);
+    await this.ensureDir(imageDir);
+
+    let copiedCount = 0;
+    for (let i = 0; i < album.covers.length; i++) {
+      const source = album.covers[i];
+      if (!source) {
+        continue;
+      }
+      const fileName = `${this.padIndex(i + 1, album.covers.length)}${this.coverExt(source)}`;
+      const destPath = `${imageDir}/${fileName}`;
+      try {
+        const copySource = source.startsWith('/') ? fileUri.getUriFromPath(source) : source;
+        await fs.copy(copySource, fileUri.getUriFromPath(destPath));
+        copiedCount++;
+      } catch (e) {
+        console.warn('复制待导出的图集图片失败:', e);
+      }
+    }
+    if (copiedCount === 0) {
+      throw new Error('no images copied');
+    }
+
+    await zlib.compressFile(imageDir, zipPath, {});
+    const result = new CoverGalleryExportResult();
+    result.zipPath = zipPath;
+    result.imageCount = copiedCount;
+    return result;
   }
 
   async extractImagesFromZip(zipUri: string): Promise<string[]> {
@@ -428,6 +497,20 @@ struct CoverGalleryManagerPage {
     if (lower.includes('.bmp')) return '.bmp';
     if (lower.includes('.gif')) return '.gif';
     return '.jpg';
+  }
+
+  safeFileName(value: string): string {
+    const name = value.trim().replace(/[\\/:*?"<>|]/g, '_');
+    return name.length > 0 ? name : 'cover_album';
+  }
+
+  padIndex(index: number, total: number): string {
+    const width = `${total}`.length;
+    let value = `${index}`;
+    while (value.length < width) {
+      value = `0${value}`;
+    }
+    return value;
   }
 
   isImageFile(name: string): boolean {
@@ -773,7 +856,8 @@ struct CoverGalleryManagerPage {
       }
 
       Row({ space: 8 }) {
-        this.actionButton('管理图片', '#EF6C00', () => this.openImageManager())
+        this.actionButton('导出 ZIP', this.buttonColor(), () => this.exportSelectedAlbumZip())
+        this.actionButton('管理图片', this.buttonColor(), () => this.openImageManager())
         this.actionButton('删除图集', '#E53935', () => this.requestDeleteSelectedAlbum())
       }
 

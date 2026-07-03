@@ -96,12 +96,17 @@ class ArkTsJsRunner {
     if (!script || this.requiresHostFallback(script)) return out;
     this.vars['result'] = resultValue;
     this.vars['baseUrl'] = this.env.baseUrl;
+    this.vars['location'] = { href: this.env.baseUrl };
     try {
       const body = this.collectFunctions(this.stripLineComments(script));
       let last: Object = '';
       const statements = this.splitStatements(body);
       for (const statement of statements) {
         const value = this.evalStatement(statement);
+        if (value instanceof ScriptReturnSignal) {
+          last = value.value;
+          break;
+        }
         if (value !== undefined && value !== null) last = value;
       }
       out.handled = true;

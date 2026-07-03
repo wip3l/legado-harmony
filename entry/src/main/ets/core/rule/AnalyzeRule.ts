@@ -5,6 +5,8 @@ import { EncodedJsonMap, EncodedSourceUrl } from '../book/EncodedSourceUrl';
 import { JsonPathEvaluator } from './JsonPathEvaluator';
 import { ScriptEngine, ScriptEngineContext } from './ScriptEngine';
 
+const MAX_HTML_PARSE_LENGTH = 4 * 1024 * 1024;
+
 export class AnalyzeRule {
   private content: string = '';
   private baseUrl: string = '';
@@ -48,7 +50,7 @@ export class AnalyzeRule {
   getElements(rule: string): string[] {
     if (!rule) return [this.content];
     // 防止超大 HTML 进入正则/CSS 解析，但 JSON 接口列表仍需要正常走 JSONPath。
-    if (this.content.length > 500000 && !this.isJsonPathLikeRule(rule)) return [];
+    if (this.content.length > MAX_HTML_PARSE_LENGTH && !this.isJsonPathLikeRule(rule)) return [];
     const jsElements = this.evalJsElementsRule(rule);
     if (jsElements.length > 0) return jsElements;
     const items = this.analyze(rule);
@@ -89,6 +91,11 @@ export class AnalyzeRule {
 
     if (effective.startsWith('@json:')) {
       return this.jsonPathToStrings(effective.substring(6).trim());
+    }
+
+    if (effective.startsWith('js:')) {
+      const value = this.evalJsBlockSideEffects(effective.substring(3));
+      return value ? [value] : [];
     }
 
     const orParts = this.splitCombinedRule(effective, '||');
@@ -218,6 +225,10 @@ export class AnalyzeRule {
     // 处理 @js: 前缀规则（JS 模板拼接，如 @js:'url'+$.nid+'/'+$.cid）
     if (rule.startsWith('@js:')) {
       return this.evalJsTemplate(rule.substring(4), this.content);
+    }
+
+    if (rule.startsWith('js:')) {
+      return this.evalJsBlockSideEffects(rule.substring(3));
     }
 
     if (rule.startsWith('@json:')) {
@@ -1183,9 +1194,20 @@ export class AnalyzeRule {
   }
 
   private isAttrName(part: string): boolean {
-    return part === 'href' || part === 'src' || part === 'content' || part === 'data-src' ||
-      part === 'data-lazy' || part === 'data-original' || part === 'data-bid' || part === 'onclick' || part === 'title' ||
-      part === 'alt' || part === 'class' || part === 'id';
+    if (!part || part.includes('.') || part.includes('[') || part.includes(']') || part.includes('(') ||
+      part.includes(')') || part.includes(':')) {
+      return false;
+    }
+    const knownAttrs = ['href', 'src', 'content', 'data-src', 'data-lazy', 'data-original', 'data-bid',
+      'onclick', 'title', 'alt', 'class', 'id'];
+    if (knownAttrs.includes(part)) return true;
+    if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(part)) return false;
+    const commonTags = ['a', 'article', 'audio', 'body', 'br', 'button', 'dd', 'div', 'dl', 'dt', 'em',
+      'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'html', 'i', 'iframe',
+      'img', 'input', 'label', 'li', 'main', 'meta', 'nav', 'ol', 'option', 'p', 'script', 'section',
+      'select', 'source', 'span', 'strong', 'table', 'tbody', 'td', 'textarea', 'th', 'thead', 'title',
+      'tr', 'ul', 'video'];
+    return !commonTags.includes(part.toLowerCase());
   }
 
   private normalizeAttrName(part: string): string {
@@ -1280,7 +1302,7 @@ export class AnalyzeRule {
 
   private matchElements(sel: string): string[] {
     // 防止大内容导致 OOM
-    const MAX_LEN = 500000;
+    const MAX_LEN = MAX_HTML_PARSE_LENGTH;
     if (this.content.length > MAX_LEN) return [];
 
     sel = this.normalizeCssSelector(this.stripJsWrapper(sel).trim());

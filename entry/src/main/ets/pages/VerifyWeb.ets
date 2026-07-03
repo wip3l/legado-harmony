@@ -119,6 +119,7 @@ struct VerifyWebPage {
           if (event?.url) {
             this.currentUrl = event.url;
             this.saveCookies(event.url);
+            this.syncDocumentCookies(event.url);
             this.syncGuangYuDocumentCookies(event.url);
             this.syncGuangYuDeviceCookie(event.url);
           }
@@ -134,17 +135,20 @@ struct VerifyWebPage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
-  finishVerify(): void {
-    this.syncGuangYuDocumentCookies(this.currentUrl || this.url);
-    this.syncGuangYuDeviceCookie(this.currentUrl || this.url);
-    this.saveCookies(this.currentUrl || this.url);
+  async finishVerify(): Promise<void> {
+    const verifyUrl = this.currentUrl || this.url;
+    await this.syncDocumentCookiesAwait(verifyUrl);
+    this.syncGuangYuDocumentCookies(verifyUrl);
+    this.syncGuangYuDeviceCookie(verifyUrl);
+    this.saveCookies(verifyUrl);
     if (this.currentUrl && this.currentUrl !== this.url) {
       this.saveCookies(this.url);
       CookieStore.copyCookies(this.currentUrl, this.url);
     }
     this.syncBookSourceLoginCookies();
-    this.syncGuangYuCookies(this.currentUrl || this.url);
-    const isGuangYu = this.isGuangYuVerify(this.currentUrl || this.url);
+    this.syncGuangYuCookies(verifyUrl);
+    CookieStore.saveSync();
+    const isGuangYu = this.isGuangYuVerify(verifyUrl);
     const verified = !isGuangYu || this.hasGuangYuToken();
     if (verified) {
       AppStorage.setOrCreate('pendingVerificationUrl', '');
@@ -162,7 +166,7 @@ struct VerifyWebPage {
   saveCookies(url: string): void {
     if (!url) return;
     CookieStore.getCookie(url);
-    CookieStore.saveAsync();
+    CookieStore.saveSync();
   }
 
   async resolveBookSourceLoginUrl(url: string): Promise<void> {
@@ -212,6 +216,74 @@ struct VerifyWebPage {
     const loginUrl = AppStorage.get<string>('pendingVerificationLoginUrl') || this.url;
     if (!sourceUrl || !loginUrl) return;
     VerificationSupport.syncLoginCookiesToSourceHosts(sourceUrl, loginUrl, this.currentUrl || this.url);
+  }
+
+  syncDocumentCookies(sourceUrl: string): void {
+    this.syncDocumentCookiesAwait(sourceUrl).catch(() => {
+    });
+  }
+
+  async syncDocumentCookiesAwait(sourceUrl: string): Promise<void> {
+    if (!sourceUrl || !this.shouldSyncDocumentCookies(sourceUrl)) {
+      return;
+    }
+    try {
+      const value = await this.controller.runJavaScript('document.cookie || ""');
+      const cookies = this.cleanJsString(value);
+      if (!cookies) return;
+      const pairs = cookies.split(';').map((item: string) => item.trim()).filter((item: string) => item.includes('='));
+      if (pairs.length === 0) return;
+      const targets = this.documentCookieTargets(sourceUrl);
+      for (const target of targets) {
+        for (const pair of pairs) {
+          CookieStore.setCookies(target, pair);
+          CookieStore.setCookies(target, `${pair}; Path=/`);
+        }
+      }
+      CookieStore.saveSync();
+    } catch (_) {
+    }
+  }
+
+  shouldSyncDocumentCookies(url: string): boolean {
+    const sourceUrl = AppStorage.get<string>('pendingVerificationSourceUrl') || '';
+    const loginUrl = AppStorage.get<string>('pendingVerificationLoginUrl') || this.url;
+    const raw = `${url || ''}\n${this.url || ''}\n${this.currentUrl || ''}\n${sourceUrl}\n${loginUrl}`.toLowerCase();
+    return raw.includes('chaoxing.com') || raw.includes('fanqienovel.com') || raw.includes('snssdk.com') ||
+      raw.includes('fqnovel.com');
+  }
+
+  documentCookieTargets(url: string): string[] {
+    const sourceUrl = AppStorage.get<string>('pendingVerificationSourceUrl') || '';
+    const loginUrl = AppStorage.get<string>('pendingVerificationLoginUrl') || this.url;
+    const raw = `${url || ''}\n${this.url || ''}\n${this.currentUrl || ''}\n${sourceUrl}\n${loginUrl}`.toLowerCase();
+    const targets: string[] = [
+      url,
+      this.currentUrl,
+      this.url,
+      sourceUrl,
+      loginUrl,
+      this.originOf(url),
+      this.originOf(this.currentUrl),
+      this.originOf(this.url),
+      this.originOf(sourceUrl),
+      this.originOf(loginUrl)
+    ];
+    if (raw.includes('chaoxing.com')) {
+      targets.push('https://chaoxing.com');
+      targets.push('https://qikan.chaoxing.com');
+      targets.push('https://fxlogin.chaoxing.com');
+      targets.push('https://passport2.chaoxing.com');
+      targets.push('https://i.chaoxing.com');
+    }
+    if (raw.includes('fanqienovel.com') || raw.includes('snssdk.com') || raw.includes('fqnovel.com')) {
+      targets.push('https://fanqienovel.com');
+      targets.push('https://novel.snssdk.com');
+      targets.push('https://api5-normal-sinfonlineb.fqnovel.com');
+    }
+    return targets.filter((item: string, index: number, array: string[]) => {
+      return this.isHttpUrl(item) && array.indexOf(item) === index;
+    });
   }
 
   syncGuangYuCookies(sourceUrl: string): void {
@@ -323,6 +395,15 @@ struct VerifyWebPage {
       result = result.substring(1, result.length - 1);
     }
     return result.trim();
+  }
+
+  originOf(url: string): string {
+    const match = (url || '').match(/^(https?:\/\/[^/:?#]+(?::\d+)?)/i);
+    return match ? match[1] : '';
+  }
+
+  isHttpUrl(url: string): boolean {
+    return (url || '').startsWith('http://') || (url || '').startsWith('https://');
   }
 
   pageColor(): string {

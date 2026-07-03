@@ -27,7 +27,7 @@ export type SearchCallback = (progress: SearchProgress) => void;
 
 const MAX_SEARCH_CONCURRENCY = 32;
 const SEARCH_PROGRESS_EMIT_INTERVAL_MS = 250;
-const MAX_SEARCH_RESPONSE_BYTES = 1024 * 1024;
+const MAX_SEARCH_RESPONSE_BYTES = 4 * 1024 * 1024;
 const ENABLE_SEARCH_DEBUG_LOG = false;
 
 export interface SearchOptions {
@@ -218,6 +218,7 @@ export class SearchCoordinator {
         book.name = ir.analyzeFirst(searchRule.name) || '';
         book.author = ir.analyzeFirst(searchRule.author) || '';
         book.bookUrl = BookUrlResolver.resolve(ir.analyzeFirst(searchRule.bookUrl), baseUrl);
+        this.fillSearchFallbackFields(source, ir, book, baseUrl, item);
         if (options.exactMatch) {
           if (!this.matchesExactSearch(this.normalizeSearchText(book.name), this.normalizeSearchText(book.author),
             normalizedKeyword, options)) {
@@ -341,6 +342,82 @@ export class SearchCoordinator {
       cleaned.push(book);
     }
     return cleaned;
+  }
+
+  private fillSearchFallbackFields(source: BookSource, ir: AnalyzeRule, book: SearchBook, baseUrl: string,
+    item: string): void {
+    const isChaoxing = this.isChaoxingSource(source);
+    if (!book.name) {
+      book.name = this.cleanFallbackTitle(ir.analyzeFirst('a@title') || ir.analyzeFirst('a@text') ||
+        ir.analyzeFirst('span.sr-only@text') || ir.analyzeFirst('.sr-only@text'));
+    }
+    if (!book.name && isChaoxing) {
+      book.name = this.cleanFallbackTitle(this.extractChaoxingTitle(item));
+    }
+    if (!book.bookUrl) {
+      book.bookUrl = BookUrlResolver.resolve(ir.analyzeFirst('a@href') || ir.analyzeFirst('[href]@href'), baseUrl);
+    }
+    if (!book.bookUrl && isChaoxing) {
+      const rawUrl = this.extractChaoxingUrl(item);
+      if (rawUrl) {
+        book.bookUrl = BookUrlResolver.resolve(rawUrl, baseUrl || source.bookSourceUrl);
+      }
+    }
+    if (!book.bookUrl && isChaoxing) {
+      const id = ir.analyzeFirst('input.save@value') || ir.analyzeFirst('input[name=checkDxidName]@value') ||
+        this.extractChaoxingId(item);
+      if (id) {
+        book.bookUrl = BookUrlResolver.resolve(`/detail_${id}`, baseUrl || source.bookSourceUrl);
+      }
+    }
+  }
+
+  private cleanFallbackTitle(value: string): string {
+    return (value || '')
+      .replace(/^复选框\s*/, '')
+      .replace(/Html|PDF下载|评审材料/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private isChaoxingSource(source: BookSource): boolean {
+    const raw = `${source.bookSourceUrl || ''}\n${source.loginUrl || ''}\n${source.searchUrl || ''}\n${source.exploreUrl || ''}`.toLowerCase();
+    return raw.includes('chaoxing.com');
+  }
+
+  private extractChaoxingTitle(item: string): string {
+    const title = this.firstRegexGroup(item, /<a\b[^>]*\btitle\s*=\s*(["'])([\s\S]*?)\1/i, 2) ||
+      this.firstRegexGroup(item, /<span\b[^>]*class\s*=\s*(["'])[^"']*\bsr-only\b[^"']*\1[^>]*>([\s\S]*?)<\/span>/i, 2) ||
+      this.firstRegexGroup(item, /<a\b[^>]*>([\s\S]*?)<\/a>/i, 1);
+    return this.decodeHtmlEntities(title.replace(/<[^>]+>/g, ' '));
+  }
+
+  private extractChaoxingUrl(item: string): string {
+    return this.decodeHtmlEntities(this.firstRegexGroup(item, /<a\b[^>]*\bhref\s*=\s*(["'])([\s\S]*?)\1/i, 2));
+  }
+
+  private extractChaoxingId(item: string): string {
+    return this.firstRegexGroup(item,
+      /<input\b[^>]*(?:\bclass\s*=\s*(["'])[^"']*\bsave\b[^"']*\1|\bname\s*=\s*(["'])checkDxidName\2)[^>]*\bvalue\s*=\s*(["'])([\s\S]*?)\3/i, 4) ||
+      this.firstRegexGroup(item,
+        /<input\b[^>]*\bvalue\s*=\s*(["'])([\s\S]*?)\1[^>]*(?:\bclass\s*=\s*(["'])[^"']*\bsave\b[^"']*\3|\bname\s*=\s*(["'])checkDxidName\4)/i, 2);
+  }
+
+  private firstRegexGroup(text: string, pattern: RegExp, groupIndex: number): string {
+    const match = (text || '').match(pattern);
+    return match ? (match[groupIndex] || '').trim() : '';
+  }
+
+  private decodeHtmlEntities(value: string): string {
+    return (value || '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#(\d+);/g, (_: string, code: string) => String.fromCharCode(parseInt(code)))
+      .replace(/&#x([0-9a-f]+);/gi, (_: string, code: string) => String.fromCharCode(parseInt(code, 16)));
   }
 
   private cleanTextField(value: string, maxLength: number): string {

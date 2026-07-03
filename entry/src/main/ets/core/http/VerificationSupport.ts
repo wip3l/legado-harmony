@@ -12,7 +12,10 @@ export class VerificationSupport {
       sample.includes('确认您是真人') || sample.includes('人机验证') ||
       sample.includes('请输入验证码') || sample.includes('验证码') ||
       sample.includes('cookie 验证') || sample.includes('Cookie 验证') ||
-      sample.includes('安全验证') || sample.includes('滑动验证');
+      sample.includes('安全验证') || sample.includes('滑动验证') ||
+      sample.includes('禁用cookie功能') || sample.includes('禁用 cookie 功能') ||
+      sample.includes('开启后重新访问') || sample.includes('findlogin.jsp') ||
+      sample.includes('fxlogin.chaoxing.com');
   }
 
   static canBrowserVerify(rule: string): boolean {
@@ -22,7 +25,13 @@ export class VerificationSupport {
   }
 
   static shouldRequestBrowserVerification(source: BookSource, body: string, statusCode: number, rule?: string): boolean {
+    if (statusCode >= 200 && statusCode < 300 && this.looksLikeExpectedListResponse(source, body)) {
+      return false;
+    }
     if (this.isChallengeResponse(body)) {
+      return true;
+    }
+    if (this.isLoginGateResponse(source, body)) {
       return true;
     }
     if (statusCode === 0) {
@@ -100,6 +109,10 @@ export class VerificationSupport {
     if (fromRule) return this.resolveUrl(fromRule, source.bookSourceUrl);
 
     const loginUrl = this.cleanUrl(source.loginUrl || '');
+    if (this.isHttpUrl(loginUrl) && this.hasLoginEntry(source)) {
+      return loginUrl;
+    }
+
     if (this.isHttpUrl(loginUrl) && this.shouldPreferLoginUrl(source, requestUrl)) {
       return loginUrl;
     }
@@ -146,6 +159,75 @@ export class VerificationSupport {
       header.includes('client-version') || header.includes('okhttp');
   }
 
+  private static isLoginGateResponse(source: BookSource, body: string): boolean {
+    if (!body || !source) return false;
+    if (!this.hasLoginEntry(source)) return false;
+    const sample = body.substring(0, Math.min(body.length, 4000)).toLowerCase();
+    return sample.includes('请先登录') || sample.includes('请登录后') ||
+      sample.includes('登录后再') || sample.includes('cookie功能') ||
+      sample.includes('findlogin.jsp') || sample.includes('fxlogin.chaoxing.com') ||
+      sample.includes('name="uname"') || sample.includes("name='uname'") ||
+      sample.includes('name="username"') || sample.includes("name='username'") ||
+      sample.includes('type="password"') || sample.includes("type='password'");
+  }
+
+  private static looksLikeExpectedListResponse(source: BookSource, body: string): boolean {
+    if (!body || !source) return false;
+    return this.bodyMatchesListRule(body, source.searchRule?.bookList || '') ||
+      this.bodyMatchesListRule(body, source.exploreRule?.bookList || '');
+  }
+
+  private static bodyMatchesListRule(body: string, rule: string): boolean {
+    const cleanRule = this.cleanListRule(rule || '');
+    if (!cleanRule) return false;
+
+    const classMatch = cleanRule.match(/^(?:class\.|\.)([A-Za-z0-9_-]+)/);
+    if (classMatch) return this.bodyHasClass(body, classMatch[1]);
+
+    const idMatch = cleanRule.match(/^(?:id\.|#)([A-Za-z0-9_-]+)/);
+    if (idMatch) return this.bodyHasId(body, idMatch[1]);
+
+    const tagMatch = cleanRule.match(/^tag\.([A-Za-z][A-Za-z0-9_-]*)/);
+    if (tagMatch) return this.bodyHasTag(body, tagMatch[1]);
+
+    const cssClassMatch = cleanRule.match(/^[A-Za-z][A-Za-z0-9_-]*\.([A-Za-z0-9_-]+)/);
+    if (cssClassMatch) return this.bodyHasClass(body, cssClassMatch[1]);
+
+    return false;
+  }
+
+  private static cleanListRule(rule: string): string {
+    return (rule || '')
+      .replace(/<js>[\s\S]*?<\/js>/gi, '')
+      .split('||')[0]
+      .split('&&')[0]
+      .split('@')[0]
+      .trim();
+  }
+
+  private static bodyHasClass(body: string, className: string): boolean {
+    if (!className) return false;
+    const escaped = this.escapeRegExp(className);
+    const re = new RegExp(`<[A-Za-z][^>]*\\sclass\\s*=\\s*["'](?:[^"']*\\s)?${escaped}(?:\\s|["'])`, 'i');
+    return re.test(body);
+  }
+
+  private static bodyHasId(body: string, id: string): boolean {
+    if (!id) return false;
+    const escaped = this.escapeRegExp(id);
+    const re = new RegExp(`<[A-Za-z][^>]*\\sid\\s*=\\s*["']${escaped}["']`, 'i');
+    return re.test(body);
+  }
+
+  private static bodyHasTag(body: string, tag: string): boolean {
+    if (!tag) return false;
+    return new RegExp(`<${this.escapeRegExp(tag)}(?:\\s|>|/)`, 'i').test(body);
+  }
+
+  private static escapeRegExp(value: string): string {
+    return (value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   private static firstScriptHost(source: BookSource): string {
     const raw = `${source.jsLib || ''}\n${source.loginUrl || ''}\n${source.exploreUrl || ''}\n${source.searchUrl || ''}`;
     const hostBlock = raw.match(/\bhosts?\s*=\s*\[([\s\S]*?)\]/);
@@ -157,20 +239,19 @@ export class VerificationSupport {
   static sourceCookieHeader(source: BookSource, requestUrl: string): string {
     if (!source || !requestUrl) return '';
     const existing = CookieStore.getCookie(requestUrl);
-    if (existing) return existing;
-
     const loginUrl = this.cleanUrl(source.loginUrl || '');
     const loginCookie = CookieStore.getCookie(loginUrl) || CookieStore.getCookie(this.originOf(loginUrl));
-    if (!loginCookie) return '';
-
+    const relatedCookie = this.sourceRelatedCookieHeader(source, requestUrl, loginUrl);
     const requestHost = this.hostOf(requestUrl);
     const sourceHost = this.hostOf(source.bookSourceUrl || '');
     const loginHost = this.hostOf(loginUrl);
-    if (!requestHost || !loginHost) return '';
+    const baseCookie = this.mergeCookieHeaders(existing, relatedCookie);
+    if (!loginCookie) return this.withSourceRequiredCookies(source, requestUrl, baseCookie);
+    if (!requestHost || !loginHost) return this.withSourceRequiredCookies(source, requestUrl, baseCookie);
     if (requestHost === loginHost || requestHost === sourceHost || this.isFanqieRelatedHost(requestHost, source)) {
-      return loginCookie;
+      return this.withSourceRequiredCookies(source, requestUrl, this.mergeCookieHeaders(baseCookie, loginCookie));
     }
-    return '';
+    return this.withSourceRequiredCookies(source, requestUrl, baseCookie);
   }
 
   static syncLoginCookiesToSourceHosts(sourceUrl: string, loginUrl: string, currentUrl: string): void {
@@ -195,6 +276,7 @@ export class VerificationSupport {
       this.originOf(sourceUrl),
       loginUrl,
       this.originOf(loginUrl),
+      ...this.requiredCookieTargets(sourceUrl, loginUrl, currentUrl),
       'https://fanqienovel.com',
       'https://novel.snssdk.com',
       'https://api5-normal-sinfonlineb.fqnovel.com'
@@ -206,7 +288,62 @@ export class VerificationSupport {
       CookieStore.copyCookies(fromUrl, `${target}/content`);
       CookieStore.copyCookies(fromUrl, `${target}/info`);
     }
+    this.seedRequiredCookies(sourceUrl, loginUrl, currentUrl);
     CookieStore.saveAsync();
+  }
+
+  private static withSourceRequiredCookies(source: BookSource, requestUrl: string, cookie: string): string {
+    let value = cookie || '';
+    if (this.isChaoxingSource(source, requestUrl) && !/(^|;\s*)cookiecheck=/.test(value)) {
+      value = value ? `${value}; cookiecheck=true` : 'cookiecheck=true';
+    }
+    return value;
+  }
+
+  private static mergeCookieHeaders(primary: string, secondary: string): string {
+    const values: Record<string, string> = {};
+    for (const header of [primary || '', secondary || '']) {
+      for (const part of header.split(';')) {
+        const item = part.trim();
+        const index = item.indexOf('=');
+        if (index <= 0) continue;
+        values[item.substring(0, index).trim()] = item.substring(index + 1).trim();
+      }
+    }
+    return Object.keys(values).map((key: string) => `${key}=${values[key]}`).join('; ');
+  }
+
+  private static sourceRelatedCookieHeader(source: BookSource, requestUrl: string, loginUrl: string): string {
+    if (!this.isChaoxingSource(source, requestUrl)) return '';
+    let merged = '';
+    for (const target of this.requiredCookieTargets(source.bookSourceUrl || '', loginUrl, requestUrl)) {
+      merged = this.mergeCookieHeaders(merged, CookieStore.getCookie(target));
+      merged = this.mergeCookieHeaders(merged, CookieStore.getCookie(`${target}/`));
+    }
+    return merged;
+  }
+
+  private static seedRequiredCookies(sourceUrl: string, loginUrl: string, currentUrl: string): void {
+    const raw = `${sourceUrl || ''}\n${loginUrl || ''}\n${currentUrl || ''}`.toLowerCase();
+    if (!raw.includes('chaoxing.com')) return;
+    for (const target of this.requiredCookieTargets(sourceUrl, loginUrl, currentUrl)) {
+      CookieStore.setCookies(target, 'cookiecheck=true; Path=/');
+      CookieStore.setCookies(`${target}/`, 'cookiecheck=true; Path=/');
+    }
+  }
+
+  private static requiredCookieTargets(sourceUrl: string, loginUrl: string, currentUrl: string): string[] {
+    const raw = `${sourceUrl || ''}\n${loginUrl || ''}\n${currentUrl || ''}`.toLowerCase();
+    if (!raw.includes('chaoxing.com')) return [];
+    return [
+      'https://chaoxing.com',
+      'https://qikan.chaoxing.com',
+      'https://fxlogin.chaoxing.com',
+      'https://passport2.chaoxing.com',
+      this.originOf(sourceUrl || ''),
+      this.originOf(loginUrl || ''),
+      this.originOf(currentUrl || '')
+    ].filter((item: string, index: number, array: string[]) => this.isHttpUrl(item) && array.indexOf(item) === index);
   }
 
   private static shouldPreferLoginUrl(source: BookSource, requestUrl: string): boolean {
@@ -231,6 +368,12 @@ export class VerificationSupport {
     const raw = `${source.bookSourceUrl || ''}\n${source.loginUrl || ''}\n${source.searchUrl || ''}\n${source.exploreUrl || ''}`.toLowerCase();
     return raw.includes('fanqie') || raw.includes('fq-book') || raw.includes('snssdk') ||
       host.includes('fanqie') || host.includes('fqnovel') || host.includes('snssdk') || host.includes('fq-book');
+  }
+
+  private static isChaoxingSource(source: BookSource, requestUrl: string): boolean {
+    const raw = `${requestUrl || ''}\n${source.bookSourceUrl || ''}\n${source.loginUrl || ''}\n` +
+      `${source.searchUrl || ''}\n${source.exploreUrl || ''}`.toLowerCase();
+    return raw.includes('chaoxing.com');
   }
 
   private static hostOf(url: string): string {

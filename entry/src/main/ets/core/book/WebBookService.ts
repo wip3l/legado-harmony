@@ -159,8 +159,12 @@ export class WebBookService {
     console.log('[WS] getChapterList, tocUrl:', book.tocUrl);
     const tocUrl = this.resolveTocUrl(source, book);
     const au = new AnalyzeUrl(source, this.http);
-    const resp = EncodedSourceUrl.canHandle(tocUrl) ?
+    let resp = EncodedSourceUrl.canHandle(tocUrl) ?
       await this.fetchEncodedDataUrl(tocUrl, source) : await au.fetch(tocUrl);
+    if ((resp.statusCode >= 400 || !resp.success || !resp.body) && this.shouldFallbackChaoxingToc(source, tocUrl, book.bookUrl)) {
+      console.warn('[WS] Chaoxing toc api failed, fallback to detail page:', tocUrl);
+      resp = await au.fetch(book.bookUrl);
+    }
     if (this.requestVerificationIfNeeded(source, tocUrl, resp.body, resp.statusCode, source.tocRule.chapterList)) {
       return [];
     }
@@ -230,7 +234,7 @@ export class WebBookService {
       }
 
       const resolvedChapterUrl = this.resolveVars(BookUrlResolver.resolve(rawUrl, baseUrl), ctx);
-      chap.url = this.repairUrlWithBookId(resolvedChapterUrl, book.bookUrl);
+      chap.url = this.normalizeChaoxingUrl(source, this.repairUrlWithBookId(resolvedChapterUrl, book.bookUrl));
       chap.bookUrl = book.bookUrl;
       chap.index = i;
       chap.isVip = ir.getString(tocRule.isVip) === 'true';
@@ -242,6 +246,9 @@ export class WebBookService {
     book.variable = ctx.toJson();
     if (chapters.length > 0) return chapters;
 
+    const chaoxingDetailChapter = this.tryBuildChaoxingDetailChapter(source, book, resp.body, baseUrl);
+    if (chaoxingDetailChapter.length > 0) return chaoxingDetailChapter;
+
     const fallbackChapters = this.tryBuildGenericChapterList(book, resp.body, baseUrl);
     if (fallbackChapters.length > 0) return fallbackChapters;
     return chapters;
@@ -250,6 +257,10 @@ export class WebBookService {
   async getContent(source: BookSource, book: Book, chapter: BookChapter): Promise<string> {
     if (BookSourceDataUrlSupport.isEncodedSource(chapter.url)) {
       return await BookSourceDataUrlSupport.getContent(this.http, source, book, chapter);
+    }
+    const normalizedContentUrl = this.normalizeChaoxingUrl(source, chapter.url);
+    if (normalizedContentUrl !== chapter.url) {
+      chapter.url = normalizedContentUrl;
     }
     console.log('[WS] getContent, url:', chapter.url);
     const specialContent = await this.tryGetSpecialContent(source, chapter);
@@ -264,8 +275,14 @@ export class WebBookService {
         .trim();
     }
     const au = new AnalyzeUrl(source, this.http);
-    const resp = EncodedSourceUrl.canHandle(chapter.url) ?
+    let resp = EncodedSourceUrl.canHandle(chapter.url) ?
       await this.fetchEncodedDataUrl(chapter.url, source) : await au.fetch(chapter.url);
+    if ((!resp.success || !resp.body) && this.shouldRetryChaoxingHttps(source, chapter.url)) {
+      const httpsUrl = this.normalizeChaoxingUrl(source, chapter.url);
+      console.warn('[WS] Chaoxing content http failed, retry https:', httpsUrl);
+      resp = await au.fetch(httpsUrl);
+      chapter.url = httpsUrl;
+    }
     console.log('[WS] getContent resp:', resp.success, 'len:', resp.body.length);
     if (this.requestVerificationIfNeeded(source, chapter.url, resp.body, resp.statusCode, source.contentRule.content)) {
       return '';
@@ -286,6 +303,10 @@ export class WebBookService {
     if (!content || this.isBadExtractedContent(content)) {
       const fallbackContent = this.tryExtractReadableContentFromHtml(resp.body);
       if (fallbackContent) content = fallbackContent;
+    }
+    if ((!content || this.isBadExtractedContent(content)) && this.isChaoxingSource(source, chapter.url)) {
+      const chaoxingContent = this.tryExtractChaoxingDetailContent(book, resp.body);
+      if (chaoxingContent) content = chaoxingContent;
     }
     if (!content) return '';
 
@@ -338,6 +359,97 @@ export class WebBookService {
     VerificationSupport.requestVerification(verifyUrl, `${source.bookSourceName} 验证`, source);
     console.warn('[WS] source needs browser verification:', source.bookSourceName, verifyUrl);
     return true;
+  }
+
+  private shouldFallbackChaoxingToc(source: BookSource, tocUrl: string, bookUrl: string): boolean {
+    if (!bookUrl || !this.isChaoxingSource(source, tocUrl || bookUrl)) return false;
+    return (tocUrl || '').includes('/api/book/getChapters');
+  }
+
+  private isChaoxingSource(source: BookSource, requestUrl: string): boolean {
+    const raw = `${requestUrl || ''}\n${source.bookSourceUrl || ''}\n${source.loginUrl || ''}\n` +
+      `${source.searchUrl || ''}\n${source.exploreUrl || ''}`.toLowerCase();
+    return raw.includes('chaoxing.com');
+  }
+
+  private normalizeChaoxingUrl(source: BookSource, url: string): string {
+    if (!url || !this.isChaoxingSource(source, url)) return url;
+    return url.replace(/^http:\/\/((?:qikan|www)\.chaoxing\.com)(?=\/)/i, 'https://$1');
+  }
+
+  private shouldRetryChaoxingHttps(source: BookSource, url: string): boolean {
+    return /^http:\/\/(?:qikan|www)\.chaoxing\.com\//i.test(url || '') && this.isChaoxingSource(source, url);
+  }
+
+  private tryBuildChaoxingDetailChapter(source: BookSource, book: Book, body: string, baseUrl: string): BookChapter[] {
+    if (!this.isChaoxingSource(source, book.bookUrl || baseUrl) || !body || !book.bookUrl.includes('/detail_')) return [];
+    if (!this.looksLikeChaoxingDetailPage(body)) return [];
+    const chapter = new BookChapter();
+    chapter.title = book.latestChapterTitle || book.name || '详情';
+    chapter.url = this.normalizeChaoxingUrl(source, book.bookUrl);
+    chapter.bookUrl = book.bookUrl;
+    chapter.index = 0;
+    chapter.variable = BookUrlResolver.setVariableJson(chapter.variable, 'baseUrl', chapter.url);
+    console.log('[WS] Chaoxing detail fallback chapter:', chapter.title, chapter.url);
+    return chapter.title && chapter.url ? [chapter] : [];
+  }
+
+  private looksLikeChaoxingDetailPage(body: string): boolean {
+    const sample = (body || '').substring(0, Math.min(body.length, 200000));
+    return sample.includes('qikan.chaoxing.com') || sample.includes('chaoxing.com') ||
+      sample.includes('超星') || sample.includes('读秀') || sample.includes('文献') ||
+      /\/detail_[A-Za-z0-9]+/.test(sample);
+  }
+
+  private tryExtractChaoxingDetailContent(book: Book, body: string): string {
+    if (!body) return '';
+    const title = this.cleanInlineText(book.name || this.extractFirstMetaContent(body, ['citation_title', 'DC.title']) ||
+      this.extractTitleText(body));
+    const author = this.cleanInlineText(book.author || this.extractFirstMetaContent(body, ['citation_author', 'DC.creator']));
+    const abstractText = this.cleanInlineText(this.extractChaoxingField(body, ['摘要', '简介', '内容提要']) ||
+      this.extractFirstMetaContent(body, ['description', 'DC.description']));
+    const keywords = this.cleanInlineText(this.extractChaoxingField(body, ['关键词', '关键字']) ||
+      this.extractFirstMetaContent(body, ['keywords', 'citation_keywords']));
+    const sourceName = this.cleanInlineText(this.extractChaoxingField(body, ['来源', '刊名', '期刊']) ||
+      this.extractFirstMetaContent(body, ['citation_journal_title']));
+    const year = this.cleanInlineText(this.extractChaoxingField(body, ['年份', '出版日期']) ||
+      this.extractFirstMetaContent(body, ['citation_publication_date', 'DC.date']));
+
+    const lines: string[] = [];
+    if (title) lines.push(title);
+    if (author) lines.push(`作者：${author}`);
+    if (sourceName) lines.push(`来源：${sourceName}`);
+    if (year) lines.push(`日期：${year}`);
+    if (keywords) lines.push(`关键词：${keywords}`);
+    if (abstractText) lines.push(`摘要：${abstractText}`);
+    if (lines.length <= 1) return '';
+    lines.push('该超星条目未解析到可直接阅读的全文，已显示详情页信息。');
+    return lines.join('\n\n');
+  }
+
+  private extractFirstMetaContent(body: string, names: string[]): string {
+    for (const name of names) {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`<meta\\b[^>]*(?:name|property)\\s*=\\s*["']${escaped}["'][^>]*content\\s*=\\s*["']([\\s\\S]*?)["'][^>]*>`, 'i');
+      const match = body.match(re);
+      if (match && match[1]) return this.decodeHtmlEntities(match[1]);
+    }
+    return '';
+  }
+
+  private extractTitleText(body: string): string {
+    const match = (body || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    return match && match[1] ? this.decodeHtmlEntities(match[1]).replace(/[-_].*$/, '') : '';
+  }
+
+  private extractChaoxingField(body: string, labels: string[]): string {
+    for (const label of labels) {
+      const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`${escaped}\\s*[：:]\\s*</?[^>]*>??\\s*([\\s\\S]{0,800}?)(?:</p>|</li>|</div>|<br\\s*/?>|\\n)`, 'i');
+      const match = (body || '').match(re);
+      if (match && match[1]) return this.decodeHtmlEntities(match[1].replace(/<[^>]+>/g, ' '));
+    }
+    return '';
   }
 
   private isBadExtractedContent(content: string): boolean {

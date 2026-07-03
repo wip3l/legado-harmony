@@ -3035,6 +3035,8 @@ struct ReadBookPage {
       }
       .width('100%')
 
+      this.readerFontEntryItem()
+
       Row({ space: 8 }) {
         this.pageTurnModeButton('滚动', 0)
         this.pageTurnModeButton('滑动', 1)
@@ -3107,6 +3109,29 @@ struct ReadBookPage {
       this.readerPreloadSettingItem()
     }
     .width('100%')
+  }
+
+  @Builder
+  readerFontEntryItem() {
+    Row() {
+      Text('阅读字体')
+        .fontSize(15)
+        .fontColor(this.getTextColor())
+        .layoutWeight(1)
+      Text('正文 / 标题 / 正则')
+        .fontSize(13)
+        .fontColor(this.getSubTextColor())
+        .margin({ right: 8 })
+      Text('>')
+        .fontSize(18)
+        .fontColor(this.getSubTextColor())
+    }
+    .width('100%')
+    .height(40)
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      router.pushUrl({ url: 'pages/ReaderFontSettings' });
+    })
   }
 
   @Builder
@@ -4537,11 +4562,7 @@ struct ReadBookPage {
 
   resolveTtsChunkPageIndex(chunk: TtsChunk): number {
     const absoluteStart = this.ttsTextStartOffset + chunk.start;
-    const absoluteEnd = this.ttsTextStartOffset + chunk.end;
-    const startPageIndex = this.findPageIndexByOffset(absoluteStart);
-    const startPageEnd = this.getPageEndOffset(startPageIndex);
-    const targetOffset = absoluteEnd > startPageEnd ? absoluteEnd - 1 : absoluteStart;
-    return this.findPageIndexByOffset(targetOffset);
+    return this.findPageIndexByOffset(absoluteStart);
   }
 
   updateTtsChunkHighlight(chunk: TtsChunk, pageIndex: number): void {
@@ -4574,7 +4595,7 @@ struct ReadBookPage {
     this.ttsAutoTurningPage = true;
     const turnSerial = this.ttsPageTurnSerial;
     try {
-      while (this.isTtsSpeaking && this.ttsAutoContinue &&
+      if (this.isTtsSpeaking && this.ttsAutoContinue &&
         this.ttsPendingTargetPageIndex > this.currentPageIndex && this.canTurnPage(1)) {
         await this.runTtsPageTurnAnimation(1, turnSerial);
         if (turnSerial !== this.ttsPageTurnSerial) {
