@@ -1,7 +1,13 @@
 import { router, window } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
+import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
+import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
+import { notificationManager } from '@kit.NotificationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import deviceInfo from '@ohos.deviceInfo';
+import image from '@ohos.multimedia.image';
+import fs from '@ohos.file.fs';
+import commonEventManager from '@ohos.commonEventManager';
 import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
 import { Book, BookChapter, BookSource, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
@@ -20,6 +26,31 @@ import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 import { BookshelfSortHelper } from '../utils/BookshelfSortHelper';
 import { SearchExploreSettings, SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
+
+const SHELF_FULL_TEXT_CACHE_CANCEL_EVENT: string = 'com.legado.harmony.action.SHELF_FULL_TEXT_CACHE_CANCEL';
+
+interface FullTextCacheCancelSignal {
+  nonce: number;
+  taskKey: string;
+  bookUrl: string;
+}
+
+interface ShelfFullTextCacheTask {
+  taskId: number;
+  bookUrl: string;
+  bookName: string;
+  taskKey: string;
+  createdAt: number;
+  cancelRequested: boolean;
+  cancelSeenNonce: number;
+  notificationLastAt: number;
+  cancelAgent: WantAgent | null;
+  done: number;
+  total: number;
+  status: string;
+  coverPixelMap: image.PixelMap | null;
+  notificationFailureHintShown: boolean;
+}
 
 @Entry
 @Component
@@ -424,6 +455,7 @@ struct BookshelfPage {
   @State cacheChapters: BookChapter[] = [];
   @State cacheStatus: string = '';
   @State isCaching: boolean = false;
+  @State activeFullTextCacheBookUrls: string[] = [];
   @State isCacheTocLoading: boolean = false;
   @State isShelfRefreshing: boolean = false;
   @State shelfRefreshPrompt: string = '下拉刷新书架';
@@ -452,15 +484,43 @@ struct BookshelfPage {
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
+  @StorageLink('fullTextCacheCancelNonce') @Watch('onFullTextCacheCancelNonceChanged') fullTextCacheCancelNonce: number = 0;
+  @StorageLink('fullTextCacheCancelSignal') @Watch('onFullTextCacheCancelSignalChanged') fullTextCacheCancelSignal: string = '';
   private loadTimer: number = -1;
   private cacheTocLoadToken: number = 0;
   private cacheTocLoadBookUrl: string = '';
   private cacheTocLoadPromise: Promise<boolean> | null = null;
+  private cacheDialogOpenedAt: number = 0;
+  private fullTextCacheTasks: Map<string, ShelfFullTextCacheTask> = new Map();
+  private fullTextCacheCancelSubscriber: commonEventManager.CommonEventSubscriber | null = null;
+  private activeCacheBookUrl: string = '';
   private shelfRefreshRunning: boolean = false;
+  private fullTextCacheTaskId: number = 0;
+  private fullTextCacheCancelRequested: boolean = false;
+  private fullTextCacheCancelSeenNonce: number = 0;
+  private fullTextCacheNotificationLastAt: number = 0;
+  private fullTextCacheBackgroundRunning: boolean = false;
+  private fullTextCacheCancelAgent: WantAgent | null = null;
+  private fullTextCacheDone: number = 0;
+  private fullTextCacheTotal: number = 0;
+  private fullTextCacheStatus: string = '';
+  private fullTextCacheBookName: string = '';
+  private fullTextCacheTaskKey: string = '';
+  private fullTextCacheBookUrl: string = '';
+  private fullTextCacheCoverPixelMap: image.PixelMap | null = null;
+  private fullTextCacheContinuousNotificationId: number = 0;
+  private fullTextCacheContinuousSlotType: notificationManager.SlotType = notificationManager.SlotType.SERVICE_INFORMATION;
+  private fullTextCacheNotificationSlotReady: boolean = false;
+  private fullTextCacheNotificationFailureHintShown: boolean = false;
 
   aboutToAppear() {
     this.reloadDisplaySettings();
     this.scheduleLoadBooks();
+    this.ensureShelfFullTextCacheCancelSubscriber();
+  }
+
+  aboutToDisappear(): void {
+    this.releaseShelfFullTextCacheCancelSubscriber();
   }
 
   async reloadDisplaySettings(): Promise<void> {
@@ -759,7 +819,9 @@ struct BookshelfPage {
               if (this.pendingActionBook) {
                 const book = this.pendingActionBook;
                 this.showActionDialog = false;
-                this.openCacheDialog(book);
+                setTimeout(() => {
+                  this.openCacheDialog(book);
+                }, 0);
               }
             })
             this.actionItem('自定义标签', this.primaryTextColor(), () => {
@@ -797,7 +859,7 @@ struct BookshelfPage {
           Blank()
             .layoutWeight(1)
             .onClick(() => {
-              if (!this.isCaching) {
+              if (!this.isCacheTargetBookCaching()) {
                 this.closeCacheDialog();
               }
             })
@@ -822,17 +884,20 @@ struct BookshelfPage {
                 .margin({ bottom: 8 })
             }
 
-            this.actionItem(this.isCaching ? '正在缓存...' : '缓存全文', this.primaryTextColor(), () => {
+            this.actionItem(this.isCacheTargetBookCaching() ? '正在缓存...' : '缓存全文', this.primaryTextColor(), () => {
               this.cacheWholeBook();
             })
             this.actionItem('缓存指定章节', this.primaryTextColor(), () => {
-              if (!this.isCaching) {
+              if (!this.isCacheTargetBookCaching()) {
                 this.showCacheDialog = false;
                 this.showChapterCacheDialog = true;
                 if (this.cacheTargetBook) {
                   this.loadCacheChapters(this.cacheTargetBook);
                 }
               }
+            })
+            this.actionItem('清除已缓存章节', '#E53935', () => {
+              this.clearCachedChapters();
             })
 
             Button('取消')
@@ -842,9 +907,7 @@ struct BookshelfPage {
               .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
               .fontColor(this.primaryTextColor())
               .onClick(() => {
-                if (!this.isCaching) {
-                  this.closeCacheDialog();
-                }
+                this.closeCacheDialog(false);
               })
           }
           .width('100%')
@@ -863,7 +926,7 @@ struct BookshelfPage {
           Blank()
             .layoutWeight(1)
             .onClick(() => {
-              if (!this.isCaching) {
+              if (!this.isCacheTargetBookCaching()) {
                 this.closeCacheDialog();
               }
             })
@@ -880,7 +943,7 @@ struct BookshelfPage {
                 .fontSize(13)
                 .borderRadius(17)
                 .onClick(() => {
-                  if (!this.isCaching) {
+                  if (!this.isCacheTargetBookCaching()) {
                     this.closeCacheDialog();
                   }
                 })
@@ -918,7 +981,7 @@ struct BookshelfPage {
                   .width('100%')
                   .padding({ left: 2, right: 2, top: 12, bottom: 12 })
                   .onClick(() => {
-                    if (!this.isCaching) {
+                    if (!this.isCacheTargetBookCaching()) {
                       this.cacheSingleChapter(index);
                     }
                   })
@@ -1413,23 +1476,92 @@ struct BookshelfPage {
   async openCacheDialog(book: Book): Promise<void> {
     this.cacheTargetBook = book;
     this.cacheChapters = [];
-    this.cacheStatus = '正在加载目录...';
+    this.cacheStatus = this.isBookCaching(book) ? this.currentFullTextCacheDialogStatus(book) : '正在加载目录...';
+    this.cacheDialogOpenedAt = Date.now();
     this.showCacheDialog = true;
-    this.loadCacheChapters(book);
+    if (!this.isBookCaching(book)) {
+      this.loadCacheChapters(book);
+    }
   }
 
-  closeCacheDialog(): void {
+  closeCacheDialog(resetCaching: boolean = true): void {
     this.showCacheDialog = false;
     this.showChapterCacheDialog = false;
     this.cacheTargetBook = null;
     this.cacheChapters = [];
     this.cacheStatus = '';
-    this.isCaching = false;
     this.isCacheTocLoading = false;
     this.cacheTocLoadToken++;
     this.cacheTocLoadBookUrl = '';
     this.cacheTocLoadPromise = null;
     this.pendingActionBook = null;
+  }
+
+  isCacheTargetBookCaching(): boolean {
+    return this.isBookCaching(this.cacheTargetBook);
+  }
+
+  isBookCaching(book: Book | null): boolean {
+    const bookUrl = book?.bookUrl || '';
+    return !!bookUrl && this.fullTextCacheTasks.has(bookUrl);
+  }
+
+  currentFullTextCacheDialogStatus(book: Book): string {
+    const task = this.getShelfFullTextCacheTask(book.bookUrl);
+    if (task) {
+      return task.status || this.shelfFullTextCacheProgressText(task);
+    }
+    return '正在加载目录...';
+  }
+
+  setFullTextCacheStatus(task: ShelfFullTextCacheTask, status: string): void {
+    task.status = status;
+    if (this.cacheTargetBook?.bookUrl && this.cacheTargetBook.bookUrl === task.bookUrl) {
+      this.cacheStatus = status;
+    }
+  }
+
+  onFullTextCacheCancelNonceChanged(): void {
+    const nonce = this.fullTextCacheCancelNonce || 0;
+    if (!this.isCaching || nonce <= 0) {
+      return;
+    }
+    const signal = this.parseFullTextCacheCancelSignal();
+    if (signal) {
+      const task = this.findShelfFullTextCacheTaskBySignal(signal);
+      if (!task || task.cancelSeenNonce === signal.nonce) {
+        return;
+      }
+      task.cancelRequested = true;
+      task.cancelSeenNonce = signal.nonce;
+      promptAction.showToast({ message: '缓存已停止' });
+      return;
+    }
+    let stopped = false;
+    this.fullTextCacheTasks.forEach((task: ShelfFullTextCacheTask) => {
+      if (task.cancelSeenNonce !== nonce) {
+        task.cancelRequested = true;
+        task.cancelSeenNonce = nonce;
+        stopped = true;
+      }
+    });
+    if (stopped) {
+      promptAction.showToast({ message: '缓存已停止' });
+    }
+  }
+
+  onFullTextCacheCancelSignalChanged(): void {
+    const signal = this.parseFullTextCacheCancelSignal();
+    if (!signal || !this.isCaching) {
+      return;
+    }
+    const task = this.findShelfFullTextCacheTaskBySignal(signal);
+    if (!task || task.cancelSeenNonce === signal.nonce) {
+      return;
+    }
+    task.cancelRequested = true;
+    task.cancelSeenNonce = signal.nonce;
+    promptAction.showToast({ message: '缓存已停止' });
   }
 
   async loadCacheChapters(book: Book, forceRefresh: boolean = false): Promise<boolean> {
@@ -1473,7 +1605,12 @@ struct BookshelfPage {
       }
       const chapters = [...engine.chapters];
       this.cacheChapters = chapters;
-      this.cacheStatus = chapters.length > 0 ? `${chapters.length} 章可缓存` : '暂未获取到目录';
+      if (chapters.length > 0) {
+        const cachedCount = this.countCachedChapters(chapters);
+        this.cacheStatus = `${cachedCount}章已缓存 ${chapters.length - cachedCount}章待缓存`;
+      } else {
+        this.cacheStatus = '暂未获取到目录';
+      }
       return chapters.length > 0;
     } catch (e) {
       console.error('加载缓存目录失败:', e);
@@ -1486,52 +1623,702 @@ struct BookshelfPage {
   }
 
   async cacheWholeBook(): Promise<void> {
-    if (!this.cacheTargetBook || this.isCaching) {
+    if (!this.cacheTargetBook || this.isCacheTargetBookCaching()) {
       return;
     }
-    if (this.cacheTargetBook.origin === 'local') {
+    if (Date.now() - this.cacheDialogOpenedAt < 300) {
+      return;
+    }
+    const book = this.cacheTargetBook;
+    if (!book.origin || book.origin === 'local') {
       promptAction.showToast({ message: '本地书籍无需缓存' });
       return;
     }
-    this.isCaching = true;
+    this.closeCacheDialog();
+    promptAction.showToast({ message: '已转入后台缓存，可在通知栏取消' });
+    const task = this.createShelfFullTextCacheTask(book, ++this.fullTextCacheTaskId);
+    this.runShelfFullTextCache(book, task).catch((error: Error) => {
+      console.error('书架全文缓存任务失败:', error);
+      this.setFullTextCacheStatus(task, '全文缓存失败');
+      promptAction.showToast({ message: '全文缓存失败' });
+      this.publishShelfFullTextCacheNotification(task, '全文缓存失败', this.shelfFullTextCacheProgressText(task), false)
+        .catch((e: Error) => {
+          console.warn('更新书架缓存失败通知失败:', e);
+        });
+      this.finishShelfFullTextCacheTask(task);
+      this.stopShelfFullTextCacheBackgroundRunning().catch((e: Error) => {
+        console.warn('停止书架全文缓存后台任务失败:', e);
+      });
+    });
+  }
+
+  async runShelfFullTextCache(book: Book, task: ShelfFullTextCacheTask): Promise<void> {
+    this.registerShelfFullTextCacheTask(task);
+    this.setFullTextCacheStatus(task, '全文缓存后台进行中');
     try {
-      if (!await this.loadCacheChapters(this.cacheTargetBook)) {
+      await this.refreshFullTextCacheCover(book, task);
+      if (await this.prepareShelfFullTextCacheNotification()) {
+        await this.publishShelfFullTextCacheNotification(task, '准备缓存章节',
+          this.shelfFullTextCacheProgressText(task), true);
+      }
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const freshBook = await db.getBook(book.bookUrl) || book;
+      const engine = ReadBookEngine.createBackgroundWorker();
+      await engine.openBook(freshBook);
+      await engine.syncChapterCacheDates();
+      if (!this.isShelfFullTextCacheTaskActive(task)) {
         return;
       }
-      const engine = ReadBookEngine.get();
-      const total = this.cacheChapters.length;
+      const total = engine.chapters.length;
+      task.total = total;
+      task.done = this.countCachedChapters(engine.chapters);
       if (total === 0) {
-        this.cacheStatus = '暂无可缓存章节';
+        this.setFullTextCacheStatus(task, '暂无可缓存章节');
+        await this.publishShelfFullTextCacheNotification(task, '暂无可缓存章节',
+          this.shelfFullTextCacheProgressText(task), false);
         return;
       }
-      let success = 0;
+
+      await this.startShelfFullTextCacheBackgroundRunning(book);
+      await this.publishShelfFullTextCacheProgress(task, true);
+
       for (let i = 0; i < total; i++) {
-        this.cacheStatus = `正在缓存 ${i + 1}/${total}`;
+        if (!this.isShelfFullTextCacheTaskActive(task) || this.shouldCancelShelfFullTextCache(task)) {
+          break;
+        }
+        const chapter = engine.chapters[i];
+        if (!chapter || chapter.cacheDate > 0) {
+          continue;
+        }
+        this.setFullTextCacheStatus(task, `正在缓存 ${i + 1}/${total}`);
         try {
+          const title = chapter.title || `第${i + 1}章`;
+          await this.publishShelfFullTextCacheNotification(task, `正在缓存：${title}`,
+            this.shelfFullTextCacheProgressText(task), true);
           if (await engine.cacheChapter(i)) {
-            success++;
+            task.done = this.countCachedChapters(engine.chapters);
           }
         } catch (e) {
           console.error('缓存章节失败:', i, e);
         }
-        this.cacheChapters = [...engine.chapters];
+        await this.publishShelfFullTextCacheProgress(task, true);
+        await this.sleep(0);
       }
-      this.cacheStatus = `缓存完成：${success}/${total}`;
-      promptAction.showToast({ message: `缓存完成 ${success}/${total}` });
+
+      if (!this.isShelfFullTextCacheTaskActive(task)) {
+        return;
+      }
+      const canceled = this.shouldCancelShelfFullTextCache(task);
+      await engine.syncChapterCacheDates();
+      task.done = this.countCachedChapters(engine.chapters);
+      this.setFullTextCacheStatus(task, canceled ? '全文缓存已取消' : `缓存完成：${task.done}/${total}`);
+      await this.publishShelfFullTextCacheNotification(
+        task,
+        canceled ? '缓存已停止' : '全文缓存完成',
+        this.shelfFullTextCacheProgressText(task),
+        false
+      );
+      promptAction.showToast({ message: canceled ? '缓存已停止' : `缓存完成 ${task.done}/${total}` });
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     } finally {
-      this.isCaching = false;
+      this.finishShelfFullTextCacheTask(task);
+      await this.stopShelfFullTextCacheBackgroundRunning();
     }
   }
 
+  createShelfFullTextCacheTask(book: Book, taskId: number): ShelfFullTextCacheTask {
+    const bookUrl = book.bookUrl || '';
+    return {
+      taskId: taskId,
+      bookUrl: bookUrl,
+      bookName: book.name || '书籍',
+      taskKey: this.buildFullTextCacheTaskKey(book, taskId),
+      createdAt: Date.now(),
+      cancelRequested: false,
+      cancelSeenNonce: AppStorage.get<number>('fullTextCacheCancelNonce') || 0,
+      notificationLastAt: 0,
+      cancelAgent: null,
+      done: 0,
+      total: 0,
+      status: '',
+      coverPixelMap: null,
+      notificationFailureHintShown: false
+    };
+  }
+
+  registerShelfFullTextCacheTask(task: ShelfFullTextCacheTask): void {
+    this.fullTextCacheTasks.set(task.bookUrl, task);
+    this.syncShelfFullTextCacheTaskState();
+  }
+
+  async ensureShelfFullTextCacheCancelSubscriber(): Promise<void> {
+    if (this.fullTextCacheCancelSubscriber) {
+      return;
+    }
+    try {
+      const subscriber = await commonEventManager.createSubscriber({
+        events: [SHELF_FULL_TEXT_CACHE_CANCEL_EVENT]
+      });
+      this.fullTextCacheCancelSubscriber = subscriber;
+      commonEventManager.subscribe(subscriber, (error: Error | null, data: commonEventManager.CommonEventData) => {
+        if (error) {
+          console.warn('接收书架缓存取消事件失败:', error);
+          return;
+        }
+        this.handleShelfFullTextCacheCancelEvent(data);
+      });
+    } catch (error) {
+      console.warn('注册书架缓存取消事件失败:', error);
+    }
+  }
+
+  releaseShelfFullTextCacheCancelSubscriber(): void {
+    if (!this.fullTextCacheCancelSubscriber) {
+      return;
+    }
+    const subscriber = this.fullTextCacheCancelSubscriber;
+    this.fullTextCacheCancelSubscriber = null;
+    commonEventManager.unsubscribe(subscriber, (error: Error | null) => {
+      if (error) {
+        console.warn('注销书架缓存取消事件失败:', error);
+      }
+    });
+  }
+
+  handleShelfFullTextCacheCancelEvent(data: commonEventManager.CommonEventData): void {
+    const params = data.parameters || {};
+    const taskKey = typeof params['cacheTaskKey'] === 'string' ? params['cacheTaskKey'] as string : '';
+    const bookUrl = typeof params['bookUrl'] === 'string' ? params['bookUrl'] as string : '';
+    this.requestShelfFullTextCacheCancel({
+      nonce: Date.now(),
+      taskKey: taskKey,
+      bookUrl: bookUrl
+    });
+  }
+
+  finishShelfFullTextCacheTask(task: ShelfFullTextCacheTask): void {
+    const current = this.fullTextCacheTasks.get(task.bookUrl);
+    if (current && current.taskKey === task.taskKey) {
+      this.fullTextCacheTasks.delete(task.bookUrl);
+    }
+    task.cancelRequested = false;
+    this.releaseFullTextCacheCover(task);
+    this.syncShelfFullTextCacheTaskState();
+  }
+
+  syncShelfFullTextCacheTaskState(): void {
+    this.activeFullTextCacheBookUrls = Array.from(this.fullTextCacheTasks.keys());
+    this.isCaching = this.activeFullTextCacheBookUrls.length > 0;
+  }
+
+  getShelfFullTextCacheTask(bookUrl: string): ShelfFullTextCacheTask | null {
+    return bookUrl ? this.fullTextCacheTasks.get(bookUrl) || null : null;
+  }
+
+  isShelfFullTextCacheTaskActive(task: ShelfFullTextCacheTask): boolean {
+    const current = this.fullTextCacheTasks.get(task.bookUrl);
+    return !!current && current.taskKey === task.taskKey;
+  }
+
+  findShelfFullTextCacheTaskBySignal(signal: FullTextCacheCancelSignal): ShelfFullTextCacheTask | null {
+    if (signal.taskKey) {
+      for (const task of this.fullTextCacheTasks.values()) {
+        if (task.taskKey === signal.taskKey) {
+          return task;
+        }
+      }
+    }
+    return signal.bookUrl ? this.getShelfFullTextCacheTask(signal.bookUrl) : null;
+  }
+
+  requestShelfFullTextCacheCancel(signal: FullTextCacheCancelSignal): void {
+    const task = this.findShelfFullTextCacheTaskBySignal(signal);
+    if (!task || task.cancelSeenNonce === signal.nonce) {
+      return;
+    }
+    task.cancelRequested = true;
+    task.cancelSeenNonce = signal.nonce;
+    AppStorage.setOrCreate('fullTextCacheCancelSignal', JSON.stringify(signal));
+    AppStorage.setOrCreate('fullTextCacheCancelNonce', signal.nonce);
+    promptAction.showToast({ message: '缓存已停止' });
+  }
+
+  shouldCancelShelfFullTextCache(task: ShelfFullTextCacheTask): boolean {
+    if (task.cancelRequested) {
+      return true;
+    }
+    const nonce = AppStorage.get<number>('fullTextCacheCancelNonce') || 0;
+    if (nonce > 0 && nonce !== task.cancelSeenNonce) {
+      const signal = this.parseFullTextCacheCancelSignal();
+      if (signal && !this.isCurrentFullTextCacheSignal(task, signal)) {
+        task.cancelSeenNonce = signal.nonce;
+        return false;
+      }
+      if (!signal || this.isCurrentFullTextCacheSignal(task, signal)) {
+        task.cancelRequested = true;
+        task.cancelSeenNonce = signal ? signal.nonce : nonce;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  parseFullTextCacheCancelSignal(): FullTextCacheCancelSignal | null {
+    const raw = this.fullTextCacheCancelSignal || AppStorage.get<string>('fullTextCacheCancelSignal') || '';
+    if (!raw.trim()) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(raw) as Record<string, Object>;
+      const signal: FullTextCacheCancelSignal = {
+        nonce: typeof parsed['nonce'] === 'number' ? parsed['nonce'] as number : 0,
+        taskKey: typeof parsed['taskKey'] === 'string' ? parsed['taskKey'] as string : '',
+        bookUrl: typeof parsed['bookUrl'] === 'string' ? parsed['bookUrl'] as string : ''
+      };
+      return signal.nonce > 0 ? signal : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  isCurrentFullTextCacheSignal(task: ShelfFullTextCacheTask, signal: FullTextCacheCancelSignal): boolean {
+    if (signal.taskKey && task.taskKey && signal.taskKey === task.taskKey) {
+      return true;
+    }
+    return !!signal.bookUrl && signal.bookUrl === task.bookUrl;
+  }
+
+  countCachedChapters(chapters: BookChapter[]): number {
+    let count = 0;
+    for (const chapter of chapters) {
+      if (chapter.cacheDate > 0) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  shelfFullTextCacheProgressText(task: ShelfFullTextCacheTask): string {
+    const total = Math.max(task.total, 0);
+    if (total === 0) {
+      return '正在准备缓存章节（0%）';
+    }
+    const done = Math.max(0, Math.min(task.done, total));
+    const percent = Math.floor((done / total) * 100);
+    return `已缓存 ${done}/${total} 章（${percent}%）`;
+  }
+
+  shelfFullTextCachePercent(task: ShelfFullTextCacheTask): number {
+    const total = Math.max(task.total, 0);
+    if (total === 0) {
+      return 0;
+    }
+    const done = Math.max(0, Math.min(task.done, total));
+    return Math.floor((done / total) * 100);
+  }
+
+  shelfFullTextCacheNotificationTitle(task: ShelfFullTextCacheTask): string {
+    return `缓存全文：${task.bookName || '书籍'}`;
+  }
+
+  shelfFullTextCacheDisplayText(text: string, additionalText: string, ongoing: boolean): string {
+    if (!ongoing || !additionalText || text.includes(additionalText)) {
+      return text;
+    }
+    return `${text} · ${additionalText}`;
+  }
+
+  shelfFullTextCacheNormalContent(task: ShelfFullTextCacheTask, text: string, additionalText: string,
+    ongoing: boolean): notificationManager.NotificationBasicContent {
+    const normalContent: notificationManager.NotificationBasicContent = {
+      title: this.shelfFullTextCacheNotificationTitle(task),
+      text: this.shelfFullTextCacheDisplayText(text, additionalText, ongoing),
+      additionalText: additionalText
+    };
+    if (task.coverPixelMap) {
+      normalContent.lockscreenPicture = task.coverPixelMap;
+    }
+    return normalContent;
+  }
+
+  applyShelfFullTextCacheCoverToRequest(task: ShelfFullTextCacheTask,
+    request: notificationManager.NotificationRequest): void {
+    if (!task.coverPixelMap) {
+      return;
+    }
+    request.smallIcon = task.coverPixelMap;
+    request.largeIcon = task.coverPixelMap;
+  }
+
+  async publishShelfFullTextCacheProgress(task: ShelfFullTextCacheTask, force: boolean): Promise<void> {
+    const now = Date.now();
+    if (!force && now - task.notificationLastAt < 1200) {
+      return;
+    }
+    task.notificationLastAt = now;
+    await this.publishShelfFullTextCacheNotification(task, task.status || '全文缓存后台进行中',
+      this.shelfFullTextCacheProgressText(task), true);
+  }
+
+  async publishShelfFullTextCacheNotification(task: ShelfFullTextCacheTask, text: string, additionalText: string,
+    ongoing: boolean): Promise<void> {
+    try {
+      const request: notificationManager.NotificationRequest = {
+        id: this.fullTextCacheNotificationId(task.bookUrl),
+        notificationSlotType: notificationManager.SlotType.SERVICE_INFORMATION,
+        isOngoing: ongoing,
+        tapDismissed: false,
+        isAlertOnce: true,
+        deliveryTime: task.createdAt,
+        showDeliveryTime: false,
+        wantAgent: await this.getShelfFullTextCacheOpenWantAgent(task),
+        content: {
+          notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+          normal: this.shelfFullTextCacheNormalContent(task, text, additionalText, ongoing)
+        }
+      };
+      if (!ongoing) {
+        request.autoDeletedTime = Date.now() + 5000;
+      }
+      request.label = this.fullTextCacheNotificationLabel(task.bookUrl);
+      this.applyShelfFullTextCacheCoverToRequest(task, request);
+      if (ongoing) {
+        request.actionButtons = [{
+          title: '停止缓存',
+          wantAgent: await this.getShelfFullTextCacheCancelWantAgent(task)
+        }];
+      }
+      await notificationManager.publish(request);
+    } catch (error) {
+      console.warn('发布书架全文缓存通知失败:', error);
+      try {
+        await this.publishBasicShelfFullTextCacheNotification(task, text, additionalText, ongoing);
+      } catch (fallbackError) {
+        console.warn('发布书架全文缓存基础通知失败:', fallbackError);
+        try {
+          await this.publishMinimalShelfFullTextCacheNotification(task, text, additionalText, ongoing);
+        } catch (minimalError) {
+          console.warn('发布书架全文缓存最小通知失败:', minimalError);
+          this.showShelfFullTextCacheNotificationFailureHint(task, minimalError);
+        }
+      }
+    }
+  }
+
+  async publishBasicShelfFullTextCacheNotification(task: ShelfFullTextCacheTask, text: string, additionalText: string,
+    ongoing: boolean): Promise<void> {
+    const request: notificationManager.NotificationRequest = {
+      id: this.fullTextCacheNotificationId(task.bookUrl),
+      notificationSlotType: notificationManager.SlotType.SERVICE_INFORMATION,
+      isOngoing: ongoing,
+      tapDismissed: false,
+      isAlertOnce: true,
+      deliveryTime: task.createdAt,
+      showDeliveryTime: false,
+      wantAgent: await this.getShelfFullTextCacheOpenWantAgent(task),
+      content: {
+        notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+        normal: this.shelfFullTextCacheNormalContent(task, text, additionalText, ongoing)
+      }
+    };
+    if (!ongoing) {
+      request.autoDeletedTime = Date.now() + 5000;
+    }
+    request.label = this.fullTextCacheNotificationLabel(task.bookUrl);
+    if (ongoing) {
+      request.actionButtons = [{
+        title: '停止缓存',
+        wantAgent: await this.getShelfFullTextCacheCancelWantAgent(task)
+      }];
+    }
+    this.applyShelfFullTextCacheCoverToRequest(task, request);
+    await notificationManager.publish(request);
+  }
+
+  async publishMinimalShelfFullTextCacheNotification(task: ShelfFullTextCacheTask, text: string, additionalText: string,
+    ongoing: boolean): Promise<void> {
+    const request: notificationManager.NotificationRequest = {
+      id: this.fullTextCacheNotificationId(task.bookUrl),
+      notificationSlotType: notificationManager.SlotType.SERVICE_INFORMATION,
+      isOngoing: ongoing,
+      tapDismissed: false,
+      isAlertOnce: true,
+      deliveryTime: task.createdAt,
+      showDeliveryTime: false,
+      wantAgent: await this.getShelfFullTextCacheOpenWantAgent(task),
+      content: {
+        notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+        normal: this.shelfFullTextCacheNormalContent(task, text, additionalText, ongoing)
+      }
+    };
+    if (!ongoing) {
+      request.autoDeletedTime = Date.now() + 5000;
+    }
+    request.label = this.fullTextCacheNotificationLabel(task.bookUrl);
+    this.applyShelfFullTextCacheCoverToRequest(task, request);
+    await notificationManager.publish(request);
+  }
+
+  async refreshFullTextCacheCover(book: Book, task: ShelfFullTextCacheTask): Promise<void> {
+    this.releaseFullTextCacheCover(task);
+    const raw = this.getShelfCover(book);
+    if (!raw) {
+      return;
+    }
+    try {
+      const coverPath = await BookCoverCache.prepareCoverFile(getContext(this), raw);
+      if (!coverPath) {
+        return;
+      }
+      task.coverPixelMap = await this.createFullTextCacheCoverPixelMap(coverPath);
+    } catch (error) {
+      console.warn('解析缓存通知封面失败:', error);
+    }
+  }
+
+  async createFullTextCacheCoverPixelMap(path: string): Promise<image.PixelMap | null> {
+    let file: fs.File | null = null;
+    let source: image.ImageSource | null = null;
+    try {
+      file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      source = image.createImageSource(file.fd);
+      return await source.createPixelMap({
+        desiredSize: {
+          width: 128,
+          height: 128
+        }
+      });
+    } catch (error) {
+      console.warn('创建缓存通知封面 PixelMap 失败:', error);
+      return null;
+    } finally {
+      if (source) {
+        try {
+          await source.release();
+        } catch (e) {
+        }
+      }
+      if (file) {
+        try {
+          fs.closeSync(file);
+        } catch (e) {
+        }
+      }
+    }
+  }
+
+  releaseFullTextCacheCover(task: ShelfFullTextCacheTask): void {
+    if (!task.coverPixelMap) {
+      return;
+    }
+    try {
+      task.coverPixelMap.release().catch((e: Error) => {
+        console.warn('释放缓存通知封面失败:', e);
+      });
+    } catch (e) {
+      console.warn('释放缓存通知封面失败:', e);
+    }
+    task.coverPixelMap = null;
+  }
+
+  async prepareShelfFullTextCacheNotification(): Promise<boolean> {
+    try {
+      if (!await notificationManager.isNotificationEnabled()) {
+        try {
+          await notificationManager.requestEnableNotification(getContext(this) as common.UIAbilityContext);
+        } catch (error) {
+          console.warn('请求通知权限失败:', error);
+          promptAction.showToast({ message: '通知权限未开启，缓存仍会继续' });
+          return false;
+        }
+      }
+      if (!await notificationManager.isNotificationEnabled()) {
+        promptAction.showToast({ message: '通知权限未开启，缓存仍会继续' });
+        return false;
+      }
+      if (!this.fullTextCacheNotificationSlotReady) {
+        await notificationManager.addSlot(notificationManager.SlotType.SERVICE_INFORMATION);
+        this.fullTextCacheNotificationSlotReady = true;
+      }
+      return true;
+    } catch (error) {
+      console.warn('准备书架缓存通知失败:', error);
+      this.showShelfFullTextCacheNotificationFailureHint(null, error);
+      return false;
+    }
+  }
+
+  showShelfFullTextCacheNotificationFailureHint(task: ShelfFullTextCacheTask | null, error: Object): void {
+    if (task) {
+      if (task.notificationFailureHintShown) {
+        return;
+      }
+      task.notificationFailureHintShown = true;
+    } else if (this.fullTextCacheNotificationFailureHintShown) {
+      return;
+    } else {
+      this.fullTextCacheNotificationFailureHintShown = true;
+    }
+    console.warn('书架缓存通知不可用:', error);
+    promptAction.showToast({ message: this.shelfFullTextCacheNotificationFailureMessage(error) });
+  }
+
+  shelfFullTextCacheNotificationFailureMessage(error: Object): string {
+    const code = this.notificationErrorCode(error);
+    if (code === 1600004 || code === 1600020) {
+      return '通知权限未开启，缓存仍会继续';
+    }
+    if (code === 1600005) {
+      return '通知类别已关闭，请检查应用通知设置';
+    }
+    if (code === 1600009) {
+      return '通知发送过快，缓存仍会继续';
+    }
+    return code > 0 ? `通知发布失败(${code})` : '通知发布失败，请检查应用通知权限';
+  }
+
+  notificationErrorCode(error: Object): number {
+    const record = error as Record<string, Object>;
+    const code = record['code'];
+    return typeof code === 'number' ? code as number : 0;
+  }
+
+  async getShelfFullTextCacheCancelWantAgent(task: ShelfFullTextCacheTask): Promise<WantAgent> {
+    if (task.cancelAgent) {
+      return task.cancelAgent;
+    }
+    const context = getContext(this) as common.UIAbilityContext;
+    task.cancelAgent = await wantAgent.getWantAgent({
+      wants: [{
+        action: SHELF_FULL_TEXT_CACHE_CANCEL_EVENT,
+        parameters: {
+          cacheAction: 'cancelFullTextCache',
+          cacheTaskId: task.taskId,
+          cacheTaskKey: task.taskKey,
+          bookUrl: task.bookUrl
+        }
+      }],
+      actionType: wantAgent.OperationType.SEND_COMMON_EVENT,
+      requestCode: this.fullTextCacheCancelRequestCode(task.bookUrl),
+      actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
+    });
+    return task.cancelAgent;
+  }
+
+  async getShelfFullTextCacheOpenWantAgent(task: ShelfFullTextCacheTask): Promise<WantAgent> {
+    const context = getContext(this) as common.UIAbilityContext;
+    return await wantAgent.getWantAgent({
+      wants: [{
+        bundleName: context.abilityInfo.bundleName,
+        abilityName: 'EntryAbility',
+        parameters: {
+          bookUrl: task.bookUrl
+        }
+      }],
+      actionType: wantAgent.OperationType.START_ABILITY,
+      requestCode: this.fullTextCacheOpenRequestCode(task.bookUrl),
+      actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
+    });
+  }
+
+  async startShelfFullTextCacheBackgroundRunning(book: Book): Promise<void> {
+    if (this.fullTextCacheBackgroundRunning) {
+      return;
+    }
+    this.fullTextCacheBackgroundRunning = false;
+  }
+
+  async stopShelfFullTextCacheBackgroundRunning(): Promise<void> {
+    if (!this.fullTextCacheBackgroundRunning) {
+      return;
+    }
+    this.fullTextCacheBackgroundRunning = false;
+    try {
+      await backgroundTaskManager.stopBackgroundRunning(getContext(this));
+    } catch (error) {
+      console.warn('停止书架全文缓存后台任务失败:', error);
+    }
+  }
+
+  async createShelfFullTextCacheOpenWantAgent(book: Book): Promise<WantAgent> {
+    const context = getContext(this) as common.UIAbilityContext;
+    return await wantAgent.getWantAgent({
+      wants: [{
+        bundleName: context.abilityInfo.bundleName,
+        abilityName: 'EntryAbility',
+        parameters: {
+          bookUrl: book.bookUrl || ''
+        }
+      }],
+      actionType: wantAgent.OperationType.START_ABILITY,
+      requestCode: this.fullTextCacheOpenRequestCode(book.bookUrl || ''),
+      actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
+    });
+  }
+
+  buildFullTextCacheTaskKey(book: Book, taskId: number): string {
+    return `${this.fullTextCacheHash(book.bookUrl || book.name || 'book')}_${taskId}`;
+  }
+
+  fullTextCacheNotificationId(bookUrl: string): number {
+    return 260100 + (this.fullTextCacheHash(bookUrl || this.fullTextCacheBookName || 'book') % 100000);
+  }
+
+  currentFullTextCacheNotificationId(ongoing: boolean): number {
+    if (ongoing && this.fullTextCacheContinuousNotificationId > 0) {
+      return this.fullTextCacheContinuousNotificationId;
+    }
+    return this.fullTextCacheNotificationId(this.fullTextCacheBookUrl);
+  }
+
+  currentFullTextCacheNotificationSlotType(ongoing: boolean): notificationManager.SlotType {
+    if (ongoing && this.fullTextCacheContinuousNotificationId > 0) {
+      return this.fullTextCacheContinuousSlotType;
+    }
+    return notificationManager.SlotType.SERVICE_INFORMATION;
+  }
+
+  fullTextCacheCancelRequestCode(bookUrl: string): number {
+    return 360100 + (this.fullTextCacheHash(bookUrl || this.fullTextCacheBookName || 'book') % 100000);
+  }
+
+  fullTextCacheOpenRequestCode(bookUrl: string): number {
+    return 460100 + (this.fullTextCacheHash(bookUrl || this.fullTextCacheBookName || 'book') % 100000);
+  }
+
+  fullTextCacheNotificationLabel(bookUrl: string): string {
+    return `full_text_cache_${this.fullTextCacheHash(bookUrl || this.fullTextCacheBookName || 'book')}`;
+  }
+
+  fullTextCacheHash(value: string): number {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+      hash = ((hash << 5) - hash) + value.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash);
+  }
+
+  sleep(ms: number): Promise<void> {
+    return new Promise((resolve: () => void) => {
+      setTimeout(resolve, ms);
+    });
+  }
+
   async cacheSingleChapter(index: number): Promise<void> {
-    if (!this.cacheTargetBook || this.isCaching) {
+    if (!this.cacheTargetBook || this.isCacheTargetBookCaching()) {
+      return;
+    }
+    if (this.isCaching) {
+      promptAction.showToast({ message: '其他书籍正在缓存，请稍后再试' });
       return;
     }
     if (this.cacheTargetBook.origin === 'local') {
       promptAction.showToast({ message: '本地书籍无需缓存' });
       return;
     }
+    this.activeCacheBookUrl = this.cacheTargetBook.bookUrl || '';
     this.isCaching = true;
     try {
       const engine = ReadBookEngine.get();
@@ -1551,7 +2338,48 @@ struct BookshelfPage {
       this.cacheStatus = '章节缓存失败';
       promptAction.showToast({ message: '章节缓存失败' });
     } finally {
+      if (this.activeCacheBookUrl === (this.cacheTargetBook?.bookUrl || '')) {
+        this.activeCacheBookUrl = '';
+      }
       this.isCaching = false;
+    }
+  }
+
+  async clearCachedChapters(): Promise<void> {
+    if (!this.cacheTargetBook) {
+      return;
+    }
+    if (this.isCacheTargetBookCaching()) {
+      promptAction.showToast({ message: '缓存进行中，稍后再清除' });
+      return;
+    }
+    const book = this.cacheTargetBook;
+    if (!book.bookUrl) {
+      promptAction.showToast({ message: '书籍地址为空' });
+      return;
+    }
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      await db.deleteBookCachedContent(book.bookUrl);
+      const engine = ReadBookEngine.get();
+      if (engine.book?.bookUrl === book.bookUrl) {
+        engine.clearCurrentBookMemoryCache();
+        await engine.syncChapterCacheDates();
+        this.cacheChapters = [...engine.chapters];
+      } else {
+        for (const chapter of this.cacheChapters) {
+          chapter.cacheDate = 0;
+        }
+        this.cacheChapters = [...this.cacheChapters];
+      }
+      this.cacheStatus = '已清除缓存章节';
+      promptAction.showToast({ message: '已清除缓存章节' });
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+    } catch (e) {
+      console.error('清除缓存章节失败:', e);
+      this.cacheStatus = '清除缓存失败';
+      promptAction.showToast({ message: '清除缓存失败' });
     }
   }
 

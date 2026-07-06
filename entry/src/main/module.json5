@@ -29,7 +29,8 @@
         "startWindowIcon": "$media:ic_startup_blank",
         "startWindowBackground": "$color:start_window_background",
         "backgroundModes": [
-          "audioPlayback"
+          "audioPlayback",
+          "dataTransfer"
         ],
         "exported": true,
         "metadata": [

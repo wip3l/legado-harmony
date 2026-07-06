@@ -25,6 +25,10 @@ export class ReadBookEngine {
     return ReadBookEngine.inst;
   }
 
+  static createBackgroundWorker(): ReadBookEngine {
+    return new ReadBookEngine();
+  }
+
   async openBook(book: Book): Promise<void> {
     console.log('[RE] openBook:', book.name, 'origin:', book.origin);
     this.book = book;
@@ -246,6 +250,15 @@ export class ReadBookEngine {
     for (const chapter of this.chapters) {
       chapter.cacheDate = cacheDates.get(chapter.index) || 0;
     }
+  }
+
+  clearCurrentBookMemoryCache(): void {
+    this.chapterCache.clear();
+    this.chapterLoading.clear();
+    for (const chapter of this.chapters) {
+      chapter.cacheDate = 0;
+    }
+    this.content = '';
   }
 
   preloadAround(idx: number, forwardCount: number = 2, backwardCount: number = 1): void {

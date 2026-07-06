@@ -34,6 +34,8 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('readerPageTurnMode', 1);
     PersistentStorage.persistProp('readerPreloadEnabled', true);
     PersistentStorage.persistProp('readerPreloadChapterCount', 1);
+    PersistentStorage.persistProp('fullTextCacheCancelNonce', 0);
+    PersistentStorage.persistProp('fullTextCacheCancelSignal', '');
     PersistentStorage.persistProp('readerBodyFontMode', 'global');
     PersistentStorage.persistProp('readerBodyFontFamily', '');
     PersistentStorage.persistProp('readerTitleFontMode', 'global');
@@ -223,6 +225,16 @@ export default class EntryAbility extends UIAbility {
 
   private handleLaunchWant(want: Want): void {
     const params = this.getLaunchParams(want);
+    if (params['cacheAction'] === 'cancelFullTextCache') {
+      const nonce = Date.now();
+      AppStorage.setOrCreate('fullTextCacheCancelSignal', JSON.stringify({
+        nonce: nonce,
+        taskKey: params['cacheTaskKey'] || '',
+        bookUrl: params['bookUrl'] || ''
+      }));
+      AppStorage.setOrCreate('fullTextCacheCancelNonce', nonce);
+      return;
+    }
     const action = params['shortcutAction'];
     if (action === RECENT_READ_SHORTCUT_ACTION) {
       RecentReadShortcut.request();
@@ -251,6 +263,14 @@ export default class EntryAbility extends UIAbility {
     if (typeof bookUrl === 'string') {
       result['bookUrl'] = bookUrl;
     }
+    const cacheAction = parameters['cacheAction'];
+    if (typeof cacheAction === 'string') {
+      result['cacheAction'] = cacheAction;
+    }
+    const cacheTaskKey = parameters['cacheTaskKey'];
+    if (typeof cacheTaskKey === 'string') {
+      result['cacheTaskKey'] = cacheTaskKey;
+    }
 
     const cardParams = parameters['params'];
     if (typeof cardParams === 'string') {
@@ -263,6 +283,14 @@ export default class EntryAbility extends UIAbility {
         const parsedBookUrl = parsed['bookUrl'];
         if (typeof parsedBookUrl === 'string') {
           result['bookUrl'] = parsedBookUrl;
+        }
+        const parsedCacheAction = parsed['cacheAction'];
+        if (typeof parsedCacheAction === 'string') {
+          result['cacheAction'] = parsedCacheAction;
+        }
+        const parsedCacheTaskKey = parsed['cacheTaskKey'];
+        if (typeof parsedCacheTaskKey === 'string') {
+          result['cacheTaskKey'] = parsedCacheTaskKey;
         }
       } catch (e) {
         hilog.warn(0x0000, 'testTag', 'Parse card params failed: %{public}s', JSON.stringify(e));

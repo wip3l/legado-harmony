@@ -2,6 +2,7 @@ import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
+import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { ColorCodePicker } from '../components/ColorCodePicker';
 
 class ReaderCustomFontItem {
@@ -760,7 +761,7 @@ struct ReaderFontSettingsPage {
         .width('100%')
       Text('这是一段阅读正文预览，文字会跟随当前正文字体设置显示。')
         .fontSize(this.readerFontSize)
-        .fontFamily(this.previewFontFamily(this.readerBodyFontMode, this.readerBodyFontFamily))
+        .fontFamily(this.bodyPreviewFontFamily())
         .fontColor(this.primaryTextColor())
         .width('100%')
         .maxLines(2)
@@ -793,17 +794,25 @@ struct ReaderFontSettingsPage {
 
   previewFontFamily(mode: string, family: string): string {
     if (mode === 'system') {
-      return this.readerSystemFontFamily || '';
+      return this.systemPreviewFontFamily();
     }
     if (mode === 'custom' && family) {
       return this.resolveCustomFontFamily(family);
     }
-    return this.readerFontFamily || this.readerSystemFontFamily || '';
+    return this.readerFontFamily || this.systemPreviewFontFamily();
+  }
+
+  bodyPreviewFontFamily(): string {
+    return this.previewFontFamily(this.readerBodyFontMode, this.readerBodyFontFamily);
+  }
+
+  systemPreviewFontFamily(): string {
+    return this.readerSystemFontFamily || ReaderSystemFontHelper.currentFromStorage(this.getUIContext()) || '';
   }
 
   titlePreviewFontFamily(): string {
     if (this.readerTitleFontMode === 'global' && !this.readerTitleFontFamily) {
-      return this.readerSystemFontFamily || '';
+      return this.systemPreviewFontFamily();
     }
     return this.previewFontFamily(this.readerTitleFontMode, this.readerTitleFontFamily);
   }

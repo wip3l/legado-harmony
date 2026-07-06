@@ -42,6 +42,8 @@ struct SettingsPage {
   @StorageLink('readerCustomFontsRaw') readerCustomFontsRaw: string = '';
   @StorageLink('readerActiveFontFamily') readerActiveFontFamily: string = '';
   @StorageLink('readerFontRegistered') readerFontRegistered: boolean = false;
+  @StorageLink('readerBodyFontMode') readerBodyFontMode: string = 'global';
+  @StorageLink('readerBodyFontFamily') readerBodyFontFamily: string = '';
   @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
   @StorageLink('readerPageTurnAnimationType') readerPageTurnAnimationType: number = ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE;
   @StorageLink('readerVolumeTurnPage') readerVolumeTurnPage: boolean = false;
@@ -148,8 +150,9 @@ struct SettingsPage {
               this.previewReaderText()
             }
 
-            Text(`当前字体：${this.readerFontSourceName || '系统默认'} · 当前翻页：${this.pageTurnModeText()}`)
+            Text(`当前字体：${this.previewBodyFontName()} · 当前翻页：${this.pageTurnModeText()}`)
               .fontSize(12)
+              .fontFamily(this.getPreviewBodyFontFamily())
               .fontColor(this.previewSubTextColor())
               .width('100%')
               .margin({ top: 10 })
@@ -375,6 +378,49 @@ struct SettingsPage {
     return this.readerFontFamily || this.readerSystemFontFamily || ReaderSystemFontHelper.currentFromStorage(this.getUIContext());
   }
 
+  getPreviewBodyFontFamily(): string {
+    return this.resolvePreviewStyledFontFamily(this.readerBodyFontMode, this.readerBodyFontFamily);
+  }
+
+  resolvePreviewStyledFontFamily(mode: string, family: string): string {
+    if (mode === 'system') {
+      return this.readerSystemFontFamily || ReaderSystemFontHelper.currentFromStorage(this.getUIContext());
+    }
+    if (mode === 'custom' && family) {
+      return this.resolvePreviewCustomFontFamily(family);
+    }
+    return this.getPreviewFontFamily();
+  }
+
+  resolvePreviewCustomFontFamily(family: string): string {
+    if (!family) {
+      return '';
+    }
+    for (const item of this.customFonts) {
+      const stableFamily = item.filePath ? ReaderFontHelper.normalizeFontFamily(item.filePath) : item.familyName;
+      if (item.familyName === family || stableFamily === family) {
+        return this.registerCustomFont(item) || stableFamily || family;
+      }
+    }
+    return family;
+  }
+
+  previewBodyFontName(): string {
+    if (this.readerBodyFontMode === 'system') {
+      return '系统默认';
+    }
+    if (this.readerBodyFontMode === 'custom' && this.readerBodyFontFamily) {
+      for (const item of this.customFonts) {
+        const stableFamily = item.filePath ? ReaderFontHelper.normalizeFontFamily(item.filePath) : item.familyName;
+        if (item.familyName === this.readerBodyFontFamily || stableFamily === this.readerBodyFontFamily) {
+          return item.sourceName || item.familyName || '自定义字体';
+        }
+      }
+      return this.readerBodyFontFamily;
+    }
+    return this.readerFontSourceName || '系统默认';
+  }
+
   applyLoadedReaderSettings(settings: ReaderSettings): void {
     this.readerFontSize = settings.fontSize;
     this.readerLineHeight = settings.lineHeight;
@@ -398,6 +444,8 @@ struct SettingsPage {
     this.readerFontMode = settings.fontMode || (settings.fontFilePath ? 'custom' : 'system');
     this.readerSystemFontFamily = settings.systemFontFamily || '';
     this.readerCustomFontsRaw = settings.customFontsRaw || '';
+    this.readerBodyFontMode = settings.bodyFontMode || 'global';
+    this.readerBodyFontFamily = settings.bodyFontFamily || '';
   }
 
   registerSelectedReaderFont(settings?: ReaderSettings): boolean {
@@ -480,14 +528,14 @@ struct SettingsPage {
   previewReaderText() {
     Text('窗外的风掠过树梢，纸页在指尖轻轻翻动。夜色渐深，故事也在这一刻慢慢展开。')
       .fontSize(this.readerFontSize)
-      .fontFamily(this.getPreviewFontFamily())
+      .fontFamily(this.getPreviewBodyFontFamily())
       .fontColor(this.previewTextColor())
       .lineHeight(this.getPreviewReaderLineHeight())
       .padding({ bottom: this.readerParagraphSpacing })
 
     Text('他停在灯下，听见远处传来的脚步声，像是某个被遗忘的约定终于抵达。')
       .fontSize(this.readerFontSize)
-      .fontFamily(this.getPreviewFontFamily())
+      .fontFamily(this.getPreviewBodyFontFamily())
       .fontColor(this.previewTextColor())
       .lineHeight(this.getPreviewReaderLineHeight())
   }
