@@ -19,6 +19,8 @@ export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onCreate');
     AppStorage.setOrCreate('startupT0', Date.now());
+    AppStorage.setOrCreate('appCacheDir', this.context.cacheDir);
+    AppStorage.setOrCreate('appFilesDir', this.context.filesDir);
     hilog.info(0x0000, 'testTag', 'StartupTrace onCreate %{public}d', Date.now());
     PersistentStorage.persistProp('appThemeMode', 'system');
     AppThemeModeStore.load(this.context).then((mode: string) => {
@@ -61,6 +63,8 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('ttsLanguage', 'zh-CN');
     PersistentStorage.persistProp('ttsSpeed', 1);
     PersistentStorage.persistProp('ttsInstalledVoiceKeys', '');
+    PersistentStorage.persistProp('ttsCustomVoiceId', '');
+    PersistentStorage.persistProp('ttsCustomVoices', '');
     PersistentStorage.persistProp('ttsOfflineSdkModeMigrated', false);
     if (!AppStorage.get<boolean>('ttsOfflineSdkModeMigrated')) {
       if (AppStorage.get<number>('ttsOnline') === 0 &&

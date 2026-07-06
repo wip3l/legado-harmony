@@ -8,6 +8,8 @@ export class TtsSettings {
   language: string = 'zh-CN';
   speed: number = 1;
   installedVoiceKeys: string = '';
+  customVoiceId: string = '';
+  customVoices: string = '';
 }
 
 export class TtsSettingsStore {
@@ -17,6 +19,8 @@ export class TtsSettingsStore {
   static readonly KEY_LANGUAGE: string = 'ttsLanguage';
   static readonly KEY_SPEED: string = 'ttsSpeed';
   static readonly KEY_INSTALLED_VOICE_KEYS: string = 'ttsInstalledVoiceKeys';
+  static readonly KEY_CUSTOM_VOICE_ID: string = 'ttsCustomVoiceId';
+  static readonly KEY_CUSTOM_VOICES: string = 'ttsCustomVoices';
   private static readonly STORE_NAME: string = 'tts_settings';
   private static cachedSettings: TtsSettings | null = null;
 
@@ -38,6 +42,10 @@ export class TtsSettingsStore {
       store, TtsSettingsStore.KEY_SPEED, storageSettings.speed, 'speed');
     settings.installedVoiceKeys = await TtsSettingsStore.getString(
       store, TtsSettingsStore.KEY_INSTALLED_VOICE_KEYS, storageSettings.installedVoiceKeys);
+    settings.customVoiceId = await TtsSettingsStore.getString(
+      store, TtsSettingsStore.KEY_CUSTOM_VOICE_ID, storageSettings.customVoiceId);
+    settings.customVoices = await TtsSettingsStore.getString(
+      store, TtsSettingsStore.KEY_CUSTOM_VOICES, storageSettings.customVoices);
     TtsSettingsStore.cachedSettings = TtsSettingsStore.clone(settings);
     return settings;
   }
@@ -53,6 +61,8 @@ export class TtsSettingsStore {
     await store.put(TtsSettingsStore.KEY_LANGUAGE, normalized.language);
     await store.put(TtsSettingsStore.KEY_SPEED, normalized.speed);
     await store.put(TtsSettingsStore.KEY_INSTALLED_VOICE_KEYS, normalized.installedVoiceKeys);
+    await store.put(TtsSettingsStore.KEY_CUSTOM_VOICE_ID, normalized.customVoiceId);
+    await store.put(TtsSettingsStore.KEY_CUSTOM_VOICES, normalized.customVoices);
     await store.flush();
   }
 
@@ -65,6 +75,8 @@ export class TtsSettingsStore {
     AppStorage.setOrCreate(TtsSettingsStore.KEY_LANGUAGE, normalized.language);
     AppStorage.setOrCreate(TtsSettingsStore.KEY_SPEED, normalized.speed);
     AppStorage.setOrCreate(TtsSettingsStore.KEY_INSTALLED_VOICE_KEYS, normalized.installedVoiceKeys);
+    AppStorage.setOrCreate(TtsSettingsStore.KEY_CUSTOM_VOICE_ID, normalized.customVoiceId);
+    AppStorage.setOrCreate(TtsSettingsStore.KEY_CUSTOM_VOICES, normalized.customVoices);
   }
 
   static fromStorage(): TtsSettings {
@@ -75,6 +87,8 @@ export class TtsSettingsStore {
     settings.language = AppStorage.get<string>(TtsSettingsStore.KEY_LANGUAGE) || 'zh-CN';
     settings.speed = AppStorage.get<number>(TtsSettingsStore.KEY_SPEED) ?? 1;
     settings.installedVoiceKeys = AppStorage.get<string>(TtsSettingsStore.KEY_INSTALLED_VOICE_KEYS) || '';
+    settings.customVoiceId = AppStorage.get<string>(TtsSettingsStore.KEY_CUSTOM_VOICE_ID) || '';
+    settings.customVoices = AppStorage.get<string>(TtsSettingsStore.KEY_CUSTOM_VOICES) || '';
     return TtsSettingsStore.clone(settings);
   }
 
@@ -144,6 +158,8 @@ export class TtsSettingsStore {
     settings.language = TtsSettingsStore.normalizeLanguage(source.language || 'zh-CN');
     settings.speed = TtsSettingsStore.normalizeNumber(source.speed, 'speed', 1);
     settings.installedVoiceKeys = source.installedVoiceKeys || '';
+    settings.customVoiceId = source.customVoiceId || '';
+    settings.customVoices = source.customVoices || '';
     return settings;
   }
 }

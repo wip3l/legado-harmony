@@ -7,7 +7,7 @@ import { notificationManager } from '@kit.NotificationKit';
 import image from '@ohos.multimedia.image';
 import fs from '@ohos.file.fs';
 import graphicsText from '@ohos.graphics.text';
-import { Book, BookChapter, SearchBook } from '../model/data/Book';
+import { Book, BookChapter, SearchBook, HttpTTS } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
 import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
@@ -35,6 +35,7 @@ interface ReadTextSlice {
   end: number;
   highlighted: boolean;
   ruleIndex: number;
+  ttsHighlighted?: boolean;
   key: string;
 }
 
@@ -121,6 +122,7 @@ struct ReadBookPage {
   @State ttsDisplayText: string = '';
   @State ttsHighlightStart: number = -1;
   @State ttsHighlightEnd: number = -1;
+  @State ttsHighlightRenderVersion: number = 0;
   private pendingRestorePageIndex: number = -1;
   private tocScroller: Scroller = new Scroller();
   private ttsReader: SystemTtsReader = new SystemTtsReader();
@@ -235,9 +237,12 @@ struct ReadBookPage {
   @StorageLink('ttsLanguage') ttsLanguage: string = 'zh-CN';
   @StorageLink('ttsSpeed') ttsSpeed: number = 1;
   @StorageLink('ttsInstalledVoiceKeys') ttsInstalledVoiceKeys: string = '';
+  @StorageLink('ttsCustomVoiceId') ttsCustomVoiceId: string = '';
+  @StorageLink('ttsCustomVoices') @Watch('onTtsCustomVoicesChanged') ttsCustomVoices: string = '';
   @StorageLink('launchShortcutNonce') @Watch('onLaunchShortcutChanged') launchShortcutNonce: number = 0;
   @StorageLink('fullTextCacheCancelNonce') @Watch('onFullTextCacheCancelNonceChanged') fullTextCacheCancelNonce: number = 0;
   @State ttsVoices: TtsVoiceOption[] = [ReadBookPage.defaultTtsVoice()];
+  @State ttsCustomVoiceOptions: HttpTTS[] = [];
   @State ttsSelectedVoiceKey: string = '';
   @State ttsVoicesLoading: boolean = false;
   @State fullTextCaching: boolean = false;
@@ -287,9 +292,8 @@ struct ReadBookPage {
   }
 
   aboutToDisappear() {
-    if (!this.isTtsSpeaking && !this.ttsReader.isSpeaking()) {
-      this.ttsReader.shutdown();
-    }
+    this.stopTtsReading();
+    this.ttsReader.shutdown();
     this.saveReadingProgress();
     this.unregisterVolumeKeyTurn();
     this.exitReaderImmersive();
@@ -864,15 +868,19 @@ struct ReadBookPage {
             Stack() {
               if (this.chapterJumpRenderGeneration % 2 === 0) {
                 if (this.isPageTurnAnimationEnabled()) {
-                  this.readerSlidingPageTurnSurface(this.currentPageText, this.pageRenderVersion)
+                  this.readerSlidingPageTurnSurface(this.currentPageText, this.pageRenderVersion,
+                    this.ttsHighlightRenderVersion)
                 } else {
-                  this.readerCurrentPageSurface(this.pageRenderVersion, this.currentPageText)
+                  this.readerCurrentPageSurface(this.pageRenderVersion, this.currentPageText,
+                    this.ttsHighlightRenderVersion)
                 }
               } else {
                 if (this.isPageTurnAnimationEnabled()) {
-                  this.readerSlidingPageTurnSurfaceAlternate(this.currentPageText, this.pageRenderVersion)
+                  this.readerSlidingPageTurnSurfaceAlternate(this.currentPageText, this.pageRenderVersion,
+                    this.ttsHighlightRenderVersion)
                 } else {
-                  this.readerCurrentPageSurfaceAlternate(this.pageRenderVersion, this.currentPageText)
+                  this.readerCurrentPageSurfaceAlternate(this.pageRenderVersion, this.currentPageText,
+                    this.ttsHighlightRenderVersion)
                 }
               }
             }
@@ -1792,6 +1800,14 @@ struct ReadBookPage {
     this.ttsLanguage = settings.language;
     this.ttsSpeed = settings.speed;
     this.ttsInstalledVoiceKeys = settings.installedVoiceKeys;
+    this.ttsCustomVoiceId = settings.customVoiceId;
+    this.ttsCustomVoices = settings.customVoices;
+    this.ttsCustomVoiceOptions = SystemTtsReader.parseCustomVoices(settings.customVoices);
+  }
+
+  onTtsCustomVoicesChanged(): void {
+    this.ttsCustomVoiceOptions = SystemTtsReader.parseCustomVoices(this.ttsCustomVoices);
+    this.ttsSelectedVoiceKey = this.currentTtsVoiceKey();
   }
 
   normalizeDefaultTtsVoice(): void {
@@ -1810,6 +1826,8 @@ struct ReadBookPage {
     settings.language = this.ttsLanguage;
     settings.speed = this.ttsSpeed;
     settings.installedVoiceKeys = this.ttsInstalledVoiceKeys;
+    settings.customVoiceId = this.ttsCustomVoiceId;
+    settings.customVoices = this.ttsCustomVoices;
     return settings;
   }
 
@@ -1829,6 +1847,11 @@ struct ReadBookPage {
     try {
       const voices = await SystemTtsReader.listAvailableVoices();
       this.ttsVoices = this.applyInstalledTtsVoiceOverrides(this.mergeWithDefaultTtsVoice(voices));
+      const currentCustomVoice = this.findCurrentCustomTtsVoice();
+      if (currentCustomVoice) {
+        this.ttsSelectedVoiceKey = this.ttsCustomVoiceKey(currentCustomVoice);
+        return;
+      }
       const currentVoice = this.findCurrentTtsVoice();
       if (currentVoice && currentVoice.available) {
         this.ttsSelectedVoiceKey = this.ttsVoiceKey(currentVoice);
@@ -1841,6 +1864,7 @@ struct ReadBookPage {
       this.ttsOnline = 1;
       this.ttsStyle = '';
       this.ttsLanguage = 'zh-CN';
+      this.ttsCustomVoiceId = '';
       this.saveTtsSettings();
       this.ttsSelectedVoiceKey = this.currentTtsVoiceKey();
       console.warn('加载朗读音色失败:', e);
@@ -1951,6 +1975,7 @@ struct ReadBookPage {
     this.ttsOnline = voice.online;
     this.ttsStyle = voice.style;
     this.ttsLanguage = voice.language;
+    this.ttsCustomVoiceId = '';
     this.ttsSelectedVoiceKey = this.ttsVoiceKey(voice);
     this.saveTtsSettings();
     if (shouldResume) {
@@ -1971,6 +1996,10 @@ struct ReadBookPage {
   }
 
   currentTtsVoiceKey(): string {
+    const customVoice = this.findCurrentCustomTtsVoice();
+    if (customVoice) {
+      return this.ttsCustomVoiceKey(customVoice);
+    }
     const matched = this.findCurrentTtsVoice();
     return matched ? this.ttsVoiceKey(matched) :
       `${this.ttsPerson}_${this.ttsOnline}_${this.ttsLanguage || 'zh-CN'}_${this.ttsStyle || ''}_`;
@@ -1981,9 +2010,52 @@ struct ReadBookPage {
   }
 
   isCurrentTtsVoice(voice: TtsVoiceOption): boolean {
+    if (this.ttsCustomVoiceId) {
+      return false;
+    }
     return voice.id === this.ttsPerson && voice.online === this.ttsOnline &&
       (voice.style || '') === (this.ttsStyle || '') &&
       this.sameTtsLanguage(voice.language || 'zh-CN', this.ttsLanguage || 'zh-CN');
+  }
+
+  applyCustomTtsVoice(voice: HttpTTS, restartSpeaking: boolean): void {
+    if (voice.enabled === false) {
+      promptAction.showToast({ message: '该自定义音色已禁用' });
+      return;
+    }
+    const shouldResume = restartSpeaking && (this.isTtsSpeaking || this.ttsReader.isSpeaking());
+    if (shouldResume) {
+      this.stopTtsReading();
+    }
+    this.ttsCustomVoiceId = String(voice.id);
+    this.ttsSelectedVoiceKey = this.ttsCustomVoiceKey(voice);
+    this.saveTtsSettings();
+    if (shouldResume) {
+      this.startTtsReadingFromCurrentPosition(false).catch((e: Error) => {
+        console.warn('切换自定义朗读音色后恢复朗读失败:', e);
+      });
+    }
+  }
+
+  findCurrentCustomTtsVoice(): HttpTTS | undefined {
+    const selectedId = (this.ttsCustomVoiceId || '').trim();
+    if (!selectedId) {
+      return undefined;
+    }
+    return this.ttsCustomVoiceOptions.find((voice: HttpTTS) => String(voice.id) === selectedId);
+  }
+
+  ttsCustomVoiceKey(voice: HttpTTS): string {
+    return `custom_${voice.id}_${voice.name || ''}`;
+  }
+
+  isCurrentCustomTtsVoice(voice: HttpTTS): boolean {
+    return (this.ttsCustomVoiceId || '') === String(voice.id);
+  }
+
+  ttsCustomVoiceTitle(voice: HttpTTS): string {
+    const state = voice.enabled === false ? ' · 已禁用' : '';
+    return `${voice.name || '未命名音色'} · 自定义${state}`;
   }
 
   ttsVoiceKey(voice: TtsVoiceOption): string {
@@ -3453,6 +3525,9 @@ struct ReadBookPage {
       .width('100%')
 
       Column({ space: 8 }) {
+        ForEach(this.ttsCustomVoiceOptions, (voice: HttpTTS) => {
+          this.ttsCustomVoiceRow(voice)
+        }, (voice: HttpTTS) => this.ttsCustomVoiceKey(voice))
         ForEach(this.ttsVoices, (voice: TtsVoiceOption) => {
           this.ttsVoiceRow(voice)
         }, (voice: TtsVoiceOption) => this.ttsVoiceKey(voice))
@@ -3510,6 +3585,32 @@ struct ReadBookPage {
       (this.isReaderThemeDark() ? '#202329' : '#F6F7F9'))
     .onClick(() => {
       this.applyTtsVoice(voice, true);
+    })
+  }
+
+  @Builder
+  ttsCustomVoiceRow(voice: HttpTTS) {
+    Row() {
+      Text(this.ttsCustomVoiceTitle(voice))
+        .fontSize(14)
+        .fontColor(this.getTextColor())
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+      Text(this.isCurrentCustomTtsVoice(voice) ? '✓' : '')
+        .fontSize(18)
+        .fontColor(this.accentColor())
+        .width(44)
+        .textAlign(TextAlign.Center)
+    }
+    .width('100%')
+    .padding({ left: 12, right: 12, top: 11, bottom: 11 })
+    .borderRadius(8)
+    .backgroundColor(this.isCurrentCustomTtsVoice(voice) ? this.tocSelectedBackgroundColor() :
+      (this.isReaderThemeDark() ? '#202329' : '#F6F7F9'))
+    .onClick(() => {
+      this.applyCustomTtsVoice(voice, true);
     })
   }
 
@@ -4517,6 +4618,9 @@ struct ReadBookPage {
     this.ttsHighlightStart = -1;
     this.ttsHighlightEnd = -1;
     this.ttsTextStartOffset = 0;
+    this.ttsHighlightRenderVersion++;
+    this.chapterJumpRenderGeneration++;
+    this.pageRenderVersion++;
   }
 
   getTtsReadingText(): string {
@@ -4885,6 +4989,15 @@ struct ReadBookPage {
   }
 
   followTtsChunk(chunk: TtsChunk): void {
+    setTimeout(() => {
+      if (!this.isTtsSpeaking || !this.ttsAutoContinue) {
+        return;
+      }
+      this.applyTtsChunkFocus(chunk);
+    }, 0);
+  }
+
+  applyTtsChunkFocus(chunk: TtsChunk): void {
     const pageIndex = this.resolveTtsChunkPageIndex(chunk);
     this.ttsLastFocusChunk = chunk;
     this.ttsLastFocusPageIndex = pageIndex;
@@ -4943,8 +5056,13 @@ struct ReadBookPage {
     const pageEnd = this.getPageEndOffset(pageIndex);
     const pageText = this.getPageText(pageIndex);
     this.ttsDisplayText = pageText;
+    if (pageIndex === this.currentPageIndex) {
+      this.setCurrentPageText(pageText);
+    }
     this.ttsHighlightStart = Math.max(0, Math.min(absoluteStart - pageStart, pageText.length));
     this.ttsHighlightEnd = Math.max(this.ttsHighlightStart, Math.min(absoluteEnd, pageEnd) - pageStart);
+    this.ttsHighlightRenderVersion++;
+    this.chapterJumpRenderGeneration++;
     this.pageRenderVersion++;
   }
 
@@ -5062,13 +5180,13 @@ struct ReadBookPage {
   }
 
   @Builder
-  readerSlidingPageTurnSurface(currentText: string, currentRenderVersion: number) {
+  readerSlidingPageTurnSurface(currentText: string, currentRenderVersion: number, ttsRenderVersion: number) {
     Stack() {
       if (this.shouldRenderSlidingPageTurn()) {
         this.readerIncomingPageSurface(this.pageTurnIncomingRenderVersion, this.getVisiblePageTurnIncomingText())
-        this.readerCurrentPageSurface(currentRenderVersion, currentText)
+        this.readerCurrentPageSurface(currentRenderVersion, currentText, ttsRenderVersion)
       } else {
-        this.readerCurrentPageSurface(currentRenderVersion, currentText)
+        this.readerCurrentPageSurface(currentRenderVersion, currentText, ttsRenderVersion)
       }
     }
     .width('100%')
@@ -5078,13 +5196,13 @@ struct ReadBookPage {
   }
 
   @Builder
-  readerSlidingPageTurnSurfaceAlternate(currentText: string, currentRenderVersion: number) {
+  readerSlidingPageTurnSurfaceAlternate(currentText: string, currentRenderVersion: number, ttsRenderVersion: number) {
     Stack() {
       if (this.shouldRenderSlidingPageTurn()) {
         this.readerIncomingPageSurface(this.pageTurnIncomingRenderVersion, this.getVisiblePageTurnIncomingText())
-        this.readerCurrentPageSurfaceAlternate(currentRenderVersion, currentText)
+        this.readerCurrentPageSurfaceAlternate(currentRenderVersion, currentText, ttsRenderVersion)
       } else {
-        this.readerCurrentPageSurfaceAlternate(currentRenderVersion, currentText)
+        this.readerCurrentPageSurfaceAlternate(currentRenderVersion, currentText, ttsRenderVersion)
       }
     }
     .width('100%')
@@ -5094,26 +5212,26 @@ struct ReadBookPage {
   }
 
   @Builder
-  readerCurrentPageSurface(renderVersion: number, text: string) {
+  readerCurrentPageSurface(renderVersion: number, text: string, ttsRenderVersion: number) {
     Column() {
-      this.readerCurrentPageLayer(renderVersion, text)
+      this.readerCurrentPageLayer(renderVersion, text, ttsRenderVersion)
     }
     .width('100%')
     .height('100%')
-    .id(`reader_current_${this.currentChapterIndex}_${this.currentPageIndex}_${renderVersion}`)
+    .id(`reader_current_${this.currentChapterIndex}_${this.currentPageIndex}_${renderVersion}_${ttsRenderVersion}`)
     .backgroundColor(this.getBackgroundColor())
     .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() })
     .opacity(this.getCurrentPageTurnOpacity())
   }
 
   @Builder
-  readerCurrentPageSurfaceAlternate(renderVersion: number, text: string) {
+  readerCurrentPageSurfaceAlternate(renderVersion: number, text: string, ttsRenderVersion: number) {
     Column() {
-      this.readerCurrentPageLayer(renderVersion, text)
+      this.readerCurrentPageLayer(renderVersion, text, ttsRenderVersion)
     }
     .width('100%')
     .height('100%')
-    .id(`reader_current_alt_${this.currentChapterIndex}_${this.currentPageIndex}_${renderVersion}`)
+    .id(`reader_current_alt_${this.currentChapterIndex}_${this.currentPageIndex}_${renderVersion}_${ttsRenderVersion}`)
     .backgroundColor(this.getBackgroundColor())
     .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() })
     .opacity(this.getCurrentPageTurnOpacity())
@@ -5133,14 +5251,14 @@ struct ReadBookPage {
   }
 
   @Builder
-  readerCurrentPageLayer(renderVersion: number, text: string) {
+  readerCurrentPageLayer(renderVersion: number, text: string, ttsRenderVersion: number) {
     Column() {
-      if (this.hasActiveTtsHighlight(text)) {
-        this.readingText(text, 18 + this.getReaderContentBottomReserve())
-      } else if (renderVersion % 2 === 0) {
-        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve())
+      if (renderVersion % 2 === 0) {
+        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve(), this.currentChapterIndex,
+          ttsRenderVersion)
       } else {
-        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve())
+        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve(), this.currentChapterIndex,
+          ttsRenderVersion)
       }
     }
     .width('100%')
@@ -5148,17 +5266,16 @@ struct ReadBookPage {
     .justifyContent(FlexAlign.Start)
     .alignItems(HorizontalAlign.Start)
     .backgroundColor(this.getBackgroundColor())
+    .id(`reader_layer_${this.currentChapterIndex}_${this.currentPageIndex}_${renderVersion}_${ttsRenderVersion}`)
   }
 
   @Builder
   readerIncomingPageLayer(renderVersion: number, text: string) {
     Column() {
-      if (this.hasActiveTtsHighlight(text)) {
-        this.readingText(text, 18 + this.getReaderContentBottomReserve())
-      } else if (renderVersion % 2 === 0) {
-        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve(), this.pageTurnIncomingChapterIndex)
+      if (renderVersion % 2 === 0) {
+        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve(), this.pageTurnIncomingChapterIndex, 0)
       } else {
-        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve(), this.pageTurnIncomingChapterIndex)
+        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve(), this.pageTurnIncomingChapterIndex, 0)
       }
     }
     .width('100%')
@@ -5166,6 +5283,7 @@ struct ReadBookPage {
     .justifyContent(FlexAlign.Start)
     .alignItems(HorizontalAlign.Start)
     .backgroundColor(this.getBackgroundColor())
+    .id(`reader_incoming_layer_${this.pageTurnIncomingChapterIndex}_${this.pageTurnIncomingPageIndex}_${renderVersion}`)
   }
 
   @Builder
@@ -5203,48 +5321,70 @@ struct ReadBookPage {
   }
 
   @Builder
-  styledReaderText(text: string, bottomPadding: number, chapterIndex: number = this.currentChapterIndex) {
+  styledReaderText(text: string, bottomPadding: number, chapterIndex: number = this.currentChapterIndex,
+    ttsRenderVersion: number = this.ttsHighlightRenderVersion) {
     Column() {
       ForEach(this.getReaderTextParagraphs(text), (paragraph: ReaderTextParagraph) => {
-        this.styledReaderParagraph(paragraph, chapterIndex)
+        this.styledReaderParagraph(paragraph, chapterIndex, this.hasActiveTtsHighlight(text), ttsRenderVersion)
         this.readerParagraphGap(paragraph)
-      }, (paragraph: ReaderTextParagraph) => paragraph.key)
+      }, (paragraph: ReaderTextParagraph) => `${paragraph.key}_${ttsRenderVersion}`)
     }
     .width('100%')
     .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
   }
 
   @Builder
-  styledReaderParagraph(paragraph: ReaderTextParagraph, chapterIndex: number = this.currentChapterIndex) {
+  styledReaderParagraph(paragraph: ReaderTextParagraph, chapterIndex: number = this.currentChapterIndex,
+    ttsHighlightActive: boolean = true, ttsRenderVersion: number = this.ttsHighlightRenderVersion) {
     if (this.shouldUseTitleStyle(paragraph.text, chapterIndex)) {
       Text() {
-        Span(this.getChapterTitle(chapterIndex))
-          .fontSize(this.readerTitleFontSize)
-          .fontFamily(this.getTitleReaderFontFamily())
-          .fontColor(this.getTextColor())
-        ForEach(this.getRegexTextSlices(paragraph.text.substring(this.getChapterTitle(chapterIndex).length)), (slice: ReadTextSlice) => {
+        ForEach(this.getTitleTextSlices(paragraph, chapterIndex, ttsHighlightActive), (slice: ReadTextSlice) => {
+          Span(slice.text)
+            .fontSize(this.readerTitleFontSize)
+            .fontFamily(this.getTitleReaderFontFamily())
+            .fontColor(slice.ttsHighlighted ? this.getTtsHighlightTextColor() : this.getTextColor())
+            .textBackgroundStyle(slice.ttsHighlighted ? {
+              color: this.getTtsHighlightColor(),
+              radius: 4
+            } : {})
+        }, (slice: ReadTextSlice) => `title_${paragraph.key}_${slice.key}_${ttsRenderVersion}`)
+        ForEach(this.getTitleBodyTextSlices(paragraph, chapterIndex, ttsHighlightActive), (slice: ReadTextSlice) => {
           Span(slice.text)
             .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
             .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
-            .fontColor(slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? this.getRegexHighlightTextColor() : this.getTextColor())
-            .textBackgroundStyle(slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? {
+            .fontColor(this.getStyledSliceFontColor(slice))
+            .textBackgroundStyle(slice.ttsHighlighted ? {
+              color: this.getTtsHighlightColor(),
+              radius: 4
+            } : (slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? {
               color: this.readerRegexHighlightColor(this.getRegexRuleBySlice(slice)),
               radius: 4
-            } : {})
-        }, (slice: ReadTextSlice) => `title_body_${slice.key}`)
+            } : {}))
+        }, (slice: ReadTextSlice) => `title_body_${paragraph.key}_${slice.key}_${ttsRenderVersion}`)
       }
       .lineHeight(this.getEffectiveReaderLineHeight())
       .fontColor(this.getTextColor())
       .width('100%')
+      .id(`reader_title_${paragraph.key}_${ttsRenderVersion}`)
     } else if (this.shouldUseRegexStyle(paragraph.text)) {
-      this.regexReaderText(paragraph)
+      this.regexReaderText(paragraph, ttsHighlightActive, ttsRenderVersion)
     } else {
-      Text(paragraph.text)
-        .fontSize(this.readerFontSize)
-        .fontFamily(this.getBodyReaderFontFamily())
+      Text() {
+        ForEach(this.getStyledParagraphTextSlices(paragraph, ttsHighlightActive), (slice: ReadTextSlice) => {
+          Span(slice.text)
+            .fontSize(this.readerFontSize)
+            .fontFamily(this.getBodyReaderFontFamily())
+            .fontColor(this.getStyledSliceFontColor(slice))
+            .textBackgroundStyle(slice.ttsHighlighted ? {
+              color: this.getTtsHighlightColor(),
+              radius: 4
+            } : {})
+        }, (slice: ReadTextSlice) => `${paragraph.key}_${slice.key}_${ttsRenderVersion}`)
+      }
         .lineHeight(this.getEffectiveReaderLineHeight())
         .fontColor(this.getTextColor())
         .width('100%')
+        .id(`reader_plain_${paragraph.key}_${ttsRenderVersion}`)
     }
   }
 
@@ -5258,22 +5398,114 @@ struct ReadBookPage {
   }
 
   @Builder
-  regexReaderText(paragraph: ReaderTextParagraph) {
+  regexReaderText(paragraph: ReaderTextParagraph, ttsHighlightActive: boolean = true,
+    ttsRenderVersion: number = this.ttsHighlightRenderVersion) {
     Text() {
-      ForEach(this.getRegexTextSlices(paragraph.text), (slice: ReadTextSlice) => {
+      ForEach(this.getStyledParagraphTextSlices(paragraph, ttsHighlightActive), (slice: ReadTextSlice) => {
         Span(slice.text)
           .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
           .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
-          .fontColor(slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? this.getRegexHighlightTextColor() : this.getTextColor())
-          .textBackgroundStyle(slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? {
+          .fontColor(this.getStyledSliceFontColor(slice))
+          .textBackgroundStyle(slice.ttsHighlighted ? {
+            color: this.getTtsHighlightColor(),
+            radius: 4
+          } : (slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? {
             color: this.readerRegexHighlightColor(this.getRegexRuleBySlice(slice)),
             radius: 4
-          } : {})
-      }, (slice: ReadTextSlice) => slice.key)
+          } : {}))
+      }, (slice: ReadTextSlice) => `${paragraph.key}_${slice.key}_${ttsRenderVersion}`)
     }
     .lineHeight(this.getEffectiveReaderLineHeight())
     .fontColor(this.getTextColor())
     .width('100%')
+    .id(`reader_regex_${paragraph.key}_${ttsRenderVersion}`)
+  }
+
+  getTitleTextSlices(paragraph: ReaderTextParagraph, chapterIndex: number,
+    ttsHighlightActive: boolean = true): ReadTextSlice[] {
+    const title = this.getChapterTitle(chapterIndex);
+    const titleText = paragraph.text.substring(0, Math.min(title.length, paragraph.text.length));
+    return this.splitSliceByTtsHighlight({
+      text: titleText,
+      start: 0,
+      end: titleText.length,
+      highlighted: false,
+      ruleIndex: -1,
+      key: `title_plain_${this.buildTextSliceKey(titleText)}`
+    }, paragraph.start, 0, ttsHighlightActive);
+  }
+
+  getTitleBodyTextSlices(paragraph: ReaderTextParagraph, chapterIndex: number,
+    ttsHighlightActive: boolean = true): ReadTextSlice[] {
+    const titleLength = Math.min(this.getChapterTitle(chapterIndex).length, paragraph.text.length);
+    const bodyText = paragraph.text.substring(titleLength);
+    return this.splitSlicesByTtsHighlight(this.getRegexTextSlices(bodyText), paragraph.start, titleLength,
+      ttsHighlightActive);
+  }
+
+  getStyledParagraphTextSlices(paragraph: ReaderTextParagraph, ttsHighlightActive: boolean = true): ReadTextSlice[] {
+    return this.splitSlicesByTtsHighlight(this.getRegexTextSlices(paragraph.text), paragraph.start, 0,
+      ttsHighlightActive);
+  }
+
+  splitSlicesByTtsHighlight(slices: ReadTextSlice[], paragraphStart: number, segmentOffset: number,
+    ttsHighlightActive: boolean = true): ReadTextSlice[] {
+    const result: ReadTextSlice[] = [];
+    for (const slice of slices) {
+      result.push(...this.splitSliceByTtsHighlight(slice, paragraphStart, segmentOffset, ttsHighlightActive));
+    }
+    return result;
+  }
+
+  splitSliceByTtsHighlight(slice: ReadTextSlice, paragraphStart: number, segmentOffset: number,
+    ttsHighlightActive: boolean = true): ReadTextSlice[] {
+    const sliceStart = segmentOffset + slice.start;
+    const sliceEnd = segmentOffset + slice.end;
+    const localHighlightStart = this.ttsHighlightStart - paragraphStart;
+    const localHighlightEnd = this.ttsHighlightEnd - paragraphStart;
+    if (!ttsHighlightActive || !this.isTtsSpeaking || this.ttsHighlightStart < 0 ||
+      this.ttsHighlightEnd <= this.ttsHighlightStart || localHighlightEnd <= sliceStart ||
+      localHighlightStart >= sliceEnd) {
+      return [this.cloneStyledSlice(slice, sliceStart, sliceEnd, slice.text, false, 'plain')];
+    }
+
+    const overlapStart = Math.max(sliceStart, localHighlightStart);
+    const overlapEnd = Math.min(sliceEnd, localHighlightEnd);
+    const result: ReadTextSlice[] = [];
+    if (overlapStart > sliceStart) {
+      const beforeText = slice.text.substring(0, overlapStart - sliceStart);
+      result.push(this.cloneStyledSlice(slice, sliceStart, overlapStart, beforeText, false, 'before_tts'));
+    }
+    const highlightText = slice.text.substring(overlapStart - sliceStart, overlapEnd - sliceStart);
+    result.push(this.cloneStyledSlice(slice, overlapStart, overlapEnd, highlightText, true, 'tts'));
+    if (overlapEnd < sliceEnd) {
+      const afterText = slice.text.substring(overlapEnd - sliceStart);
+      result.push(this.cloneStyledSlice(slice, overlapEnd, sliceEnd, afterText, false, 'after_tts'));
+    }
+    return result;
+  }
+
+  cloneStyledSlice(source: ReadTextSlice, start: number, end: number, text: string, ttsHighlighted: boolean,
+    keyPrefix: string): ReadTextSlice {
+    return {
+      text: text,
+      start: start,
+      end: end,
+      highlighted: source.highlighted,
+      ruleIndex: source.ruleIndex,
+      ttsHighlighted: ttsHighlighted,
+      key: `${keyPrefix}_${start}_${end}_${source.ruleIndex}_${this.buildTextSliceKey(text)}`
+    };
+  }
+
+  getStyledSliceFontColor(slice: ReadTextSlice): string {
+    if (slice.ttsHighlighted) {
+      return this.getTtsHighlightTextColor();
+    }
+    if (slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice))) {
+      return this.getRegexHighlightTextColor();
+    }
+    return this.getTextColor();
   }
 
   shouldUseTitleStyle(text: string, chapterIndex: number = this.currentChapterIndex): boolean {

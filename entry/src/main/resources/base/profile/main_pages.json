@@ -10,6 +10,7 @@
     "pages/Settings",
     "pages/CustomFontManager",
     "pages/TtsSettings",
+    "pages/CustomTtsVoiceManager",
     "pages/BookshelfSettings",
     "pages/SearchExploreSettings",
     "pages/ExploreSourceSort",

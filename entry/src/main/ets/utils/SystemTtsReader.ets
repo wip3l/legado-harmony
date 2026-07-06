@@ -1,4 +1,6 @@
 import { textToSpeech } from '@kit.CoreSpeechKit';
+import { HttpTTS } from '../model/data/Book';
+import { HttpTtsAudio, HttpTtsReader } from './HttpTtsReader';
 import { TtsPcmAudioPlayer } from './TtsPcmAudioPlayer';
 
 export interface TtsChunk {
@@ -24,6 +26,18 @@ export interface TtsVoiceDownloadCallbacks {
   onProgress?: (progress: string) => void;
 }
 
+interface CustomTtsAudioResult {
+  audio?: HttpTtsAudio;
+  error?: Error;
+}
+
+interface CustomTtsAudioJob {
+  index: number;
+  chunk: TtsChunk;
+  text: string;
+  promise: Promise<CustomTtsAudioResult>;
+}
+
 export class TtsVoiceOption {
   id: number = 0;
   name: string = '默认音色';
@@ -41,8 +55,10 @@ export class TtsVoiceOption {
 export class SystemTtsReader {
   private static readonly LEGACY_ONLINE_MODE: number = 0;
   private static readonly OFFLINE_MODE: number = 1;
+  private static readonly CUSTOM_TTS_PREFETCH_WINDOW: number = 3;
   private engine: textToSpeech.TextToSpeechEngine | null = null;
   private pcmPlayer: TtsPcmAudioPlayer = new TtsPcmAudioPlayer();
+  private httpReader: HttpTtsReader = new HttpTtsReader();
   private chunks: TtsChunk[] = [];
   private chunkIndex: number = 0;
   private active: boolean = false;
@@ -203,7 +219,7 @@ export class SystemTtsReader {
   }
 
   audioDebugState(): string {
-    return this.pcmPlayer.debugState();
+    return this.getCurrentCustomVoice() ? this.httpReader.debugState() : this.pcmPlayer.debugState();
   }
 
   private static createVoiceDownloadVariants(voice: TtsVoiceOption): textToSpeech.VoiceDownload[] {
@@ -309,6 +325,18 @@ export class SystemTtsReader {
     this.chunks = this.splitText(cleanText, 64);
     this.chunkIndex = 0;
     this.active = true;
+    const customVoice = this.getCurrentCustomVoice();
+    if (customVoice) {
+      if (this.engine) {
+        try {
+          this.engine.shutdown();
+        } catch (_) {
+        }
+        this.engine = null;
+      }
+      this.speakCustomNext(generation, customVoice);
+      return;
+    }
     let engine: textToSpeech.TextToSpeechEngine;
     try {
       engine = await this.ensureEngine();
@@ -383,12 +411,12 @@ export class SystemTtsReader {
           const focusIndex = this.currentFocusChunkIndex;
           const focusDuration = this.currentFocusDuration;
           this.currentFocusQueued = true;
+          this.queueChunkFocus(generation, focusChunk, focusIndex, focusDuration);
           this.pcmPlayer.write(audioData, this.currentAudioSampleRate)
             .then(() => {
               this.clearSpeakWatchdog();
               this.currentFocusAudioWritten = true;
               this.notifyAudioStarted();
-              this.queueChunkFocus(generation, focusChunk, focusIndex, focusDuration);
             })
             .catch((error: Error) => {
               console.warn(`[TTS] write synthesis data failed: sequence=${response ? response.sequence : -1}`, error);
@@ -435,6 +463,7 @@ export class SystemTtsReader {
     this.ttsPcmPlayType = 0;
     this.clearSpeakWatchdog();
     this.chunkFocusChain = Promise.resolve();
+    this.httpReader.stop();
     this.pcmPlayer.stop();
     try {
       this.engine?.stop();
@@ -449,6 +478,7 @@ export class SystemTtsReader {
     } catch (_) {
     }
     this.pcmPlayer.release();
+    this.httpReader.release();
     this.engine = null;
   }
 
@@ -584,6 +614,107 @@ export class SystemTtsReader {
     if (notify && this.onFinished) this.onFinished();
   }
 
+  private speakCustomNext(generation: number, voice: HttpTTS): void {
+    this.playCustomQueue(generation, voice).catch((error: Error) => {
+      this.handleCustomVoiceError(generation, voice, error);
+    });
+  }
+
+  private async playCustomQueue(generation: number, voice: HttpTTS): Promise<void> {
+    const jobs: CustomTtsAudioJob[] = [];
+    this.fillCustomAudioJobs(generation, voice, jobs);
+    while (this.readGeneration === generation && this.active) {
+      if (jobs.length === 0) {
+        await this.httpReader.drain();
+        if (this.readGeneration === generation && this.active) {
+          this.finish(true);
+        }
+        return;
+      }
+      const job = jobs.shift() as CustomTtsAudioJob;
+      this.currentRequestId = this.createRequestId();
+      this.currentSpeakStartedAt = Date.now();
+      this.currentSpeakMinDuration = this.estimateSpeakDuration(job.text);
+      this.completionPending = false;
+      this.currentFocusChunk = job.chunk;
+      this.currentFocusChunkIndex = job.index;
+      this.currentFocusDuration = this.currentSpeakMinDuration;
+      this.currentFocusQueued = false;
+      this.currentFocusAudioReceived = false;
+      this.currentFocusAudioWritten = false;
+      const result = await job.promise;
+      if (this.readGeneration !== generation || !this.active) {
+        return;
+      }
+      if (result.error || !result.audio) {
+        throw result.error || new Error('自定义音色合成失败');
+      }
+      this.fillCustomAudioJobs(generation, voice, jobs);
+      this.currentFocusAudioReceived = true;
+      this.queueCurrentChunkFocusOnAudio(generation);
+      await this.httpReader.writeAudio(result.audio);
+      if (this.readGeneration !== generation || !this.active) {
+        return;
+      }
+      this.currentFocusAudioWritten = true;
+      this.notifyAudioStarted();
+      this.currentRequestId = '';
+      this.currentSpeakStartedAt = 0;
+      this.currentSpeakMinDuration = 0;
+      this.completionPending = false;
+      this.currentFocusChunk = null;
+      this.currentFocusChunkIndex = -1;
+      this.currentFocusDuration = 0;
+      this.currentFocusQueued = false;
+      this.currentFocusAudioReceived = false;
+      this.currentFocusAudioWritten = false;
+    }
+  }
+
+  private fillCustomAudioJobs(generation: number, voice: HttpTTS, jobs: CustomTtsAudioJob[]): void {
+    while (this.readGeneration === generation && this.active &&
+      jobs.length < SystemTtsReader.CUSTOM_TTS_PREFETCH_WINDOW && this.chunkIndex < this.chunks.length) {
+      const index = this.chunkIndex;
+      const chunk = this.chunks[this.chunkIndex++];
+      const speakText = this.normalizeChunkForSpeech(chunk.text);
+      if (!speakText) {
+        continue;
+      }
+      jobs.push(this.createCustomAudioJob(generation, voice, chunk, index, speakText));
+    }
+  }
+
+  private createCustomAudioJob(generation: number, voice: HttpTTS, chunk: TtsChunk, index: number,
+    speakText: string): CustomTtsAudioJob {
+    const promise = this.httpReader.synthesize(voice, speakText, this.getTtsSpeed())
+      .then((audio: HttpTtsAudio): CustomTtsAudioResult => {
+        if (this.readGeneration !== generation || !this.active) {
+          return { error: new Error('自定义音色合成已停止') };
+        }
+        return { audio };
+      })
+      .catch((error: Error): CustomTtsAudioResult => {
+        return { error };
+      });
+    return {
+      index,
+      chunk,
+      text: speakText,
+      promise
+    };
+  }
+
+  private handleCustomVoiceError(generation: number, voice: HttpTTS, error: Error): void {
+    if (this.readGeneration !== generation || !this.active) {
+      return;
+    }
+    this.currentRequestId = '';
+    this.active = false;
+    const message = `自定义音色朗读失败：${voice.name || '未命名音色'} ${this.formatError(error)}`;
+    console.error('[TTS] custom voice failed:', message);
+    if (this.onError) this.onError(message);
+  }
+
   private retryWithoutPcmData(generation: number): boolean {
     if (this.ttsPcmPlayType !== 0 || this.currentFocusChunkIndex < 0) {
       return false;
@@ -625,12 +756,17 @@ export class SystemTtsReader {
     const elapsed = Date.now() - this.currentSpeakStartedAt;
     const waitMs = Math.max(0, this.currentSpeakMinDuration - elapsed);
     if (this.chunkIndex < this.chunks.length) {
-      this.currentRequestId = '';
-      this.currentSpeakStartedAt = 0;
-      this.currentSpeakMinDuration = 0;
-      this.completionPending = false;
       this.clearSpeakWatchdog();
-      this.speakNext(generation);
+      setTimeout(() => {
+        if (this.readGeneration !== generation || !this.active) {
+          return;
+        }
+        this.currentRequestId = '';
+        this.currentSpeakStartedAt = 0;
+        this.currentSpeakMinDuration = 0;
+        this.completionPending = false;
+        this.speakNext(generation);
+      }, waitMs);
       return;
     }
     this.pcmPlayer.drain()
@@ -814,9 +950,81 @@ export class SystemTtsReader {
   }
 
   private currentVoiceLabel(): string {
+    const customVoice = this.getCurrentCustomVoice();
+    if (customVoice) {
+      return `自定义音色 ${customVoice.name || customVoice.id}`;
+    }
     const mode = this.getTtsOnline() === SystemTtsReader.LEGACY_ONLINE_MODE ? '在线' : '离线';
     const style = this.getTtsStyle();
     return `person=${this.getTtsPerson()} ${mode} language=${this.getTtsLanguage()}${style ? ` style=${style}` : ''}`;
+  }
+
+  private getCurrentCustomVoice(): HttpTTS | null {
+    const selectedId = (AppStorage.get<string>('ttsCustomVoiceId') || '').trim();
+    if (!selectedId) {
+      return null;
+    }
+    const voices = SystemTtsReader.parseCustomVoices(AppStorage.get<string>('ttsCustomVoices') || '');
+    return voices.find((voice: HttpTTS) => String(voice.id) === selectedId && voice.enabled !== false) || null;
+  }
+
+  static parseCustomVoices(raw: string): HttpTTS[] {
+    const value = (raw || '').trim();
+    if (!value) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(value) as Object;
+      const items = Array.isArray(parsed) ? parsed as Object[] : [parsed];
+      const result: HttpTTS[] = [];
+      for (const item of items) {
+        const voice = SystemTtsReader.parseCustomVoice(item as Record<string, Object>);
+        if (voice.name && voice.url) {
+          result.push(voice);
+        }
+      }
+      return result;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static serializeCustomVoices(voices: HttpTTS[]): string {
+    return JSON.stringify(voices);
+  }
+
+  private static parseCustomVoice(item: Record<string, Object>): HttpTTS {
+    const voice = new HttpTTS();
+    voice.id = SystemTtsReader.parseCustomVoiceNumber(item['id'], Date.now());
+    voice.name = SystemTtsReader.parseCustomVoiceString(item['name']);
+    voice.url = SystemTtsReader.parseCustomVoiceString(item['url']);
+    voice.contentType = SystemTtsReader.parseCustomVoiceString(item['contentType']);
+    voice.concurrentRate = SystemTtsReader.parseCustomVoiceString(item['concurrentRate']);
+    voice.loginUrl = SystemTtsReader.parseCustomVoiceString(item['loginUrl']);
+    voice.loginUi = SystemTtsReader.parseCustomVoiceString(item['loginUi']);
+    voice.loginCheckJs = SystemTtsReader.parseCustomVoiceString(item['loginCheckJs']);
+    voice.header = SystemTtsReader.parseCustomVoiceString(item['header']);
+    voice.jsLib = SystemTtsReader.parseCustomVoiceString(item['jsLib']);
+    voice.jsEngine = SystemTtsReader.parseCustomVoiceString(item['jsEngine']) || voice.jsLib;
+    const enabledCookieJar = item['enabledCookieJar'];
+    voice.enabledCookieJar = enabledCookieJar === true || String(enabledCookieJar) === 'true';
+    voice.customOrder = SystemTtsReader.parseCustomVoiceNumber(item['customOrder'], 0);
+    voice.lastUpdateTime = SystemTtsReader.parseCustomVoiceNumber(item['lastUpdateTime'], 0);
+    const enabled = item['enabled'];
+    voice.enabled = enabled === undefined || enabled === null ? true : enabled !== false && String(enabled) !== 'false';
+    return voice;
+  }
+
+  private static parseCustomVoiceString(value: Object | undefined): string {
+    return value === undefined || value === null ? '' : String(value);
+  }
+
+  private static parseCustomVoiceNumber(value: Object | undefined, fallback: number): number {
+    if (typeof value === 'number') {
+      return Math.round(value);
+    }
+    const parsed = Number(value === undefined || value === null ? '' : String(value));
+    return Number.isNaN(parsed) ? fallback : Math.round(parsed);
   }
 
   private static alternateOnlineMode(online: number): number {

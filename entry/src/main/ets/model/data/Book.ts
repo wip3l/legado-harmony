@@ -448,13 +448,17 @@ export class HttpTTS {
   id: number = 0;
   name: string = '';
   url: string = '';
+  contentType: string = '';
   concurrentRate: string = '';
   loginUrl: string = '';
   loginUi: string = '';
   loginCheckJs: string = '';
   header: string = '';
+  jsLib: string = '';
   jsEngine: string = '';
+  enabledCookieJar: boolean = false;
   customOrder: number = 0;
+  lastUpdateTime: number = 0;
   enabled: boolean = true;
 }
 
