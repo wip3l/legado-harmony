@@ -38,7 +38,7 @@ struct TtsSettingsPage {
   @State downloadingVoiceKey: string = '';
   @State downloadProgressText: string = '';
   @State customVoices: HttpTTS[] = [];
-  @State customVoiceImportUrl: string = 'https://legado.aoaostar.com/sources/19db2f5e.json';
+  @State customVoiceImportUrl: string = '';
   @State isImportingCustomVoices: boolean = false;
 
   aboutToAppear(): void {

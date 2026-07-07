@@ -36,7 +36,7 @@ struct CustomTtsVoiceManagerPage {
   @State showAddDialog: boolean = false;
   @State showImportUrlDialog: boolean = false;
   @State showEditDialog: boolean = false;
-  @State importUrl: string = 'https://legado.aoaostar.com/sources/19db2f5e.json';
+  @State importUrl: string = '';
   @State isImporting: boolean = false;
   @State isBatchOperating: boolean = false;
   @State editingVoiceId: string = '';
@@ -709,6 +709,7 @@ struct CustomTtsVoiceManagerPage {
           .backgroundColor(this.buttonColor())
           .fontColor('#FFFFFF')
           .onClick(() => {
+            this.importUrl = '';
             this.showImportUrlDialog = true;
           })
         Button('从文件导入')
