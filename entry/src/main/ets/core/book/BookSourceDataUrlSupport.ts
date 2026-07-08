@@ -233,7 +233,9 @@ export class BookSourceDataUrlSupport {
       const source = EncodedSourceUrl.str(rec['source']) || meta.source;
       const tab = EncodedSourceUrl.str(rec['tab']) || meta.tab;
       const chapter = new BookChapter();
-      chapter.title = EncodedSourceUrl.str(rec['title']) || `第${chapters.length + 1}章`;
+      chapter.title = BookSourceDataUrlSupport.cleanChapterTitle(
+        EncodedSourceUrl.str(rec['title']) || `第${chapters.length + 1}章`
+      );
       chapter.url = EncodedSourceUrl.buildContentUrl({
         book_id: meta.bookId,
         item_id: itemId,
@@ -355,7 +357,7 @@ export class BookSourceDataUrlSupport {
       const cid = EncodedSourceUrl.str(rec['cid']);
       const itemUrl = EncodedSourceUrl.str(rec['url']);
       const chapter = new BookChapter();
-      chapter.title = title;
+      chapter.title = BookSourceDataUrlSupport.cleanChapterTitle(title);
       chapter.url = EncodedSourceUrl.encode({
         cid: cid,
         url: itemUrl,
@@ -496,7 +498,9 @@ export class BookSourceDataUrlSupport {
       const chapterId = EncodedSourceUrl.str(rec['chapterid']);
       if (!chapterId) continue;
       const chapter = new BookChapter();
-      chapter.title = EncodedSourceUrl.str(rec['chaptername']) || `第${chapters.length + 1}章`;
+      chapter.title = BookSourceDataUrlSupport.cleanChapterTitle(
+        EncodedSourceUrl.str(rec['chaptername']) || `第${chapters.length + 1}章`
+      );
       chapter.url = EncodedSourceUrl.encodeRaw(`${articleId}/${chapterId}`, 'mybxc', host);
       chapter.bookUrl = book.bookUrl;
       chapter.index = chapters.length;
@@ -576,7 +580,9 @@ export class BookSourceDataUrlSupport {
       if (seen.includes(key)) continue;
       seen.push(key);
       const chapter = new BookChapter();
-      chapter.title = BookSourceDataUrlSupport.cleanContentText(match[4]) || `第${chapters.length + 1}章`;
+      chapter.title = BookSourceDataUrlSupport.cleanChapterTitle(
+        BookSourceDataUrlSupport.cleanContentText(match[4]) || `第${chapters.length + 1}章`
+      );
       chapter.url = EncodedSourceUrl.encodeRaw(key, 'mybxc', backendHost);
       chapter.bookUrl = book.bookUrl;
       chapter.index = chapters.length;
@@ -1501,6 +1507,15 @@ export class BookSourceDataUrlSupport {
       .replace(/\r\n?/g, '\n')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
+  }
+
+  private static cleanChapterTitle(value: string): string {
+    const original = BookSourceDataUrlSupport.cleanContentText(value || '').replace(/\s+/g, ' ').trim();
+    const cleaned = original
+      .replace(/[\s·|｜/／-]*上次(?:阅读|閱讀)(?:[\s:：，,。]*.*)?$/g, '')
+      .replace(/^上次(?:阅读|閱讀)[\s:：，,。]*/g, '')
+      .trim();
+    return cleaned || original;
   }
 
   private static decodeHtmlEntities(value: string): string {

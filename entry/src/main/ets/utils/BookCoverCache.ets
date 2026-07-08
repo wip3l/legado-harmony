@@ -29,6 +29,10 @@ export class BookCoverCache {
     if (localPath && BookCoverCache.exists(localPath)) {
       return raw.startsWith('file://') ? raw : fileUri.getUriFromPath(localPath);
     }
+    const copiedPath = await BookCoverCache.copyCoverUriToCache(context, raw);
+    if (copiedPath) {
+      return fileUri.getUriFromPath(copiedPath);
+    }
     return raw;
   }
 
@@ -44,7 +48,10 @@ export class BookCoverCache {
       return await BookCoverCache.downloadCover(context, raw);
     }
     const localPath = BookCoverCache.localPathFromUri(raw);
-    return localPath && BookCoverCache.exists(localPath) ? localPath : '';
+    if (localPath && BookCoverCache.exists(localPath)) {
+      return localPath;
+    }
+    return await BookCoverCache.copyCoverUriToCache(context, raw);
   }
 
   static deleteCachedCover(context: Context, raw: string): void {
@@ -55,6 +62,7 @@ export class BookCoverCache {
       BookCoverCache.deletePath(BookCoverCache.cachedCoverPath(context, raw));
       return;
     }
+    BookCoverCache.deletePath(BookCoverCache.cachedCoverPath(context, raw));
     const localPath = BookCoverCache.localPathFromUri(raw);
     if (!localPath || !BookCoverCache.isAppOwnedPath(context, localPath)) {
       return;
@@ -102,6 +110,27 @@ export class BookCoverCache {
       }
     }
     return '';
+  }
+
+  private static async copyCoverUriToCache(context: Context, raw: string): Promise<string> {
+    if (!raw || raw.startsWith('http://') || raw.startsWith('https://')) {
+      return '';
+    }
+    const dir = `${context.cacheDir}/book_covers`;
+    BookCoverCache.ensureDir(dir);
+    const path = BookCoverCache.cachedCoverPath(context, raw);
+    if (BookCoverCache.exists(path)) {
+      return path;
+    }
+    try {
+      const source = raw.startsWith('/') ? fileUri.getUriFromPath(raw) : raw;
+      await fs.copy(source, fileUri.getUriFromPath(path));
+      return BookCoverCache.exists(path) ? path : '';
+    } catch (e) {
+      console.warn('复制书籍封面到缓存失败:', e);
+      BookCoverCache.deletePath(path);
+      return '';
+    }
   }
 
   private static localPathFromUri(raw: string): string {

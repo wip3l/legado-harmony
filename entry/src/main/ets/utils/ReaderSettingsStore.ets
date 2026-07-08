@@ -43,7 +43,6 @@ export class ReaderSettings {
 export class ReaderSettingsStore {
   static readonly PAGE_TURN_ANIMATION_NONE: number = 0;
   static readonly PAGE_TURN_ANIMATION_SLIDE: number = 1;
-  static readonly PAGE_TURN_ANIMATION_COVER: number = 2;
   static readonly PAGE_TURN_ANIMATION_FADE: number = 3;
   static readonly PAGE_TURN_ANIMATION_STACK: number = 4;
   static readonly PAGE_TURN_ANIMATION_VERTICAL: number = 5;
@@ -175,7 +174,7 @@ export class ReaderSettingsStore {
       ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION,
       AppStorage.get<boolean>(ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION) ?? true
     );
-    settings.pageTurnAnimationType = await ReaderSettingsStore.getNumber(
+    const storedPageTurnAnimationType = await ReaderSettingsStore.getNumber(
       store,
       ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION_TYPE,
       legacyPageTurnAnimation ?
@@ -183,6 +182,9 @@ export class ReaderSettingsStore {
         ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE,
       'pageTurnAnimationType'
     );
+    settings.pageTurnAnimationType = legacyPageTurnAnimation ?
+      storedPageTurnAnimationType :
+      ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE;
     settings.volumeTurnPage = await ReaderSettingsStore.getBoolean(
       store,
       ReaderSettingsStore.KEY_VOLUME_TURN_PAGE,
@@ -636,13 +638,13 @@ export class ReaderSettingsStore {
 
   private static normalizePageTurnAnimationType(type: number): number {
     const value = Math.round(type);
-    if (value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE ||
-      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER ||
+    if (value === ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE ||
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE ||
       value === ReaderSettingsStore.PAGE_TURN_ANIMATION_FADE ||
       value === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK) {
       return value;
     }
-    return ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER;
+    return ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE;
   }
 
   private static normalizePreloadChapterCount(count: number): number {
@@ -751,12 +753,15 @@ export class ReaderSettingsStore {
       AppStorage.get<number>(ReaderSettingsStore.KEY_PAGE_TURN_MODE) ?? 1
     );
     const legacyPageTurnAnimation = AppStorage.get<boolean>(ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION) ?? true;
-    settings.pageTurnAnimationType = ReaderSettingsStore.normalizePageTurnAnimationType(
+    const storagePageTurnAnimationType = ReaderSettingsStore.normalizePageTurnAnimationType(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION_TYPE) ??
         (legacyPageTurnAnimation ?
           ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE :
           ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE)
     );
+    settings.pageTurnAnimationType = legacyPageTurnAnimation ?
+      storagePageTurnAnimationType :
+      ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE;
     settings.volumeTurnPage = AppStorage.get<boolean>(ReaderSettingsStore.KEY_VOLUME_TURN_PAGE) ?? false;
     settings.keepScreenOn = AppStorage.get<boolean>(ReaderSettingsStore.KEY_KEEP_SCREEN_ON) ?? true;
     settings.extendToStatusBar = AppStorage.get<boolean>(ReaderSettingsStore.KEY_EXTEND_TO_STATUS_BAR) ?? false;

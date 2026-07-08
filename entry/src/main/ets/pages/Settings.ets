@@ -739,7 +739,7 @@ struct SettingsPage {
 
   pageTurnAnimationTypes(): number[] {
     return [
-      ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER,
+      ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE,
       ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE,
       ReaderSettingsStore.PAGE_TURN_ANIMATION_FADE,
       ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK
@@ -837,7 +837,7 @@ struct SettingsPage {
 
   setReaderPageTurnAnimationType(index: number): void {
     const types = this.pageTurnAnimationTypes();
-    const type = index >= 0 && index < types.length ? types[index] : ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER;
+    const type = index >= 0 && index < types.length ? types[index] : ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE;
     this.readerPageTurnAnimationType = this.normalizePageTurnAnimationType(type);
     ReaderSettingsStore.savePageTurnAnimationType(getContext(this), this.readerPageTurnAnimationType).catch((e: Error) => {
       console.error('保存翻页动画失败:', e);
@@ -846,13 +846,13 @@ struct SettingsPage {
 
   normalizePageTurnAnimationType(type: number): number {
     const value = Math.round(type);
-    if (value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE ||
-      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER ||
+    if (value === ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE ||
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE ||
       value === ReaderSettingsStore.PAGE_TURN_ANIMATION_FADE ||
       value === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK) {
       return value;
     }
-    return ReaderSettingsStore.PAGE_TURN_ANIMATION_COVER;
+    return ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE;
   }
 
   saveReaderInteractionSettings(): void {

@@ -191,7 +191,7 @@ export class WebBookService {
       const ir = new AnalyzeRule(items[i], baseUrl, ctx);
       this.seedSourceVariables(ctx, source);
       const chap = new BookChapter();
-      chap.title = ir.getString(tocRule.chapterName) || `第${i + 1}章`;
+      chap.title = this.cleanChapterTitle(ir.getString(tocRule.chapterName) || `第${i + 1}章`);
       let rawUrl = ir.getString(tocRule.chapterUrl);
 
       // 如果规则引擎没有完整处理 URL，再从 item/TOC 数据兜底修复。
@@ -385,7 +385,7 @@ export class WebBookService {
     if (!this.isChaoxingSource(source, book.bookUrl || baseUrl) || !body || !book.bookUrl.includes('/detail_')) return [];
     if (!this.looksLikeChaoxingDetailPage(body)) return [];
     const chapter = new BookChapter();
-    chapter.title = book.latestChapterTitle || book.name || '详情';
+    chapter.title = this.cleanChapterTitle(book.latestChapterTitle || book.name || '详情');
     chapter.url = this.normalizeChaoxingUrl(source, book.bookUrl);
     chapter.bookUrl = book.bookUrl;
     chapter.index = 0;
@@ -474,7 +474,7 @@ export class WebBookService {
     const chapters: BookChapter[] = [];
     for (const link of links) {
       const chapter = new BookChapter();
-      chapter.title = link['title'] || `第${chapters.length + 1}章`;
+      chapter.title = this.cleanChapterTitle(link['title'] || `第${chapters.length + 1}章`);
       chapter.url = link['url'] || '';
       chapter.bookUrl = book.bookUrl;
       chapter.index = chapters.length;
@@ -620,11 +620,22 @@ export class WebBookService {
   private isNavigationTitle(title: string): boolean {
     const compact = (title || '').replace(/\s+/g, '');
     return !compact || compact === '開始閱讀' || compact === '开始阅读' || compact === '最近閱讀' ||
+      compact === '最近阅读' || compact === '上次閱讀' || compact === '上次阅读' ||
       compact === '阅读记录' || compact === '書頁/目錄' || compact === '书页/目录' ||
       compact === '上一章' || compact === '下一章' || compact === '上一頁' || compact === '下一頁' ||
       compact === '上一页' || compact === '下一页' || compact === '首頁' || compact === '首页' ||
       compact === '返回目录' || compact === '返回目錄' || compact === '書庫' || compact === '书库' ||
       compact === '作者' || compact === '目录' || compact === '目錄' || compact === '首页';
+  }
+
+  private cleanChapterTitle(title: string): string {
+    const original = this.cleanInlineText(title || '');
+    const cleaned = original
+      .replace(/\s+/g, ' ')
+      .replace(/[\s·|｜/／-]*上次(?:阅读|閱讀)(?:[\s:：，,。]*.*)?$/g, '')
+      .replace(/^上次(?:阅读|閱讀)[\s:：，,。]*/g, '')
+      .trim();
+    return cleaned || original;
   }
 
   private extractGenericBookKey(url: string): string {
@@ -929,7 +940,7 @@ export class WebBookService {
           const itemId = String(rec['item_id'] || rec['id'] || '');
           if (!itemId) continue;
           const chapter = new BookChapter();
-          chapter.title = String(rec['title'] || `第${chapters.length + 1}章`);
+          chapter.title = this.cleanChapterTitle(String(rec['title'] || `第${chapters.length + 1}章`));
           chapter.url = `data:;base64,${this.base64Encode(itemId)},{"type":"pyfqc"}`;
           chapter.bookUrl = book.bookUrl;
           chapter.index = chapters.length;
@@ -960,7 +971,7 @@ export class WebBookService {
           const itemId = String(rec['itemId'] || rec['item_id'] || rec['id'] || '');
           if (!itemId) continue;
           const chapter = new BookChapter();
-          chapter.title = String(rec['title'] || `第${chapters.length + 1}章`);
+          chapter.title = this.cleanChapterTitle(String(rec['title'] || `第${chapters.length + 1}章`));
           chapter.url = `${base}/content?item_id=${encodeURIComponent(itemId)}`;
           chapter.bookUrl = book.bookUrl;
           chapter.index = chapters.length;
