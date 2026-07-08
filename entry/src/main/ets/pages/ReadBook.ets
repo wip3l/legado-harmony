@@ -99,6 +99,7 @@ struct ReadBookPage {
   @State showMenu: boolean = false;
   @State showToc: boolean = false;
   @State showSettings: boolean = false;
+  @State showTapZoneSettings: boolean = false;
   @State settingsPanelTab: number = 0;
   @State loadStatus: string = '';
   @State verificationUrl: string = '';
@@ -147,6 +148,8 @@ struct ReadBookPage {
   private ttsBackgroundLastLogAt: number = 0;
   private ttsAvSession: avSession.AVSession | null = null;
   private ttsAvSessionRequesting: boolean = false;
+  private ttsSpeedSaveTimerId: number = -1;
+  private ttsSpeedAvSessionTimerId: number = -1;
   private ttsMediaImageRefreshSerial: number = 0;
   private ttsMediaImageRaw: string = '';
   private ttsMediaPixelMap: image.PixelMap | null = null;
@@ -197,6 +200,7 @@ struct ReadBookPage {
   @StorageLink('readerDarkCustomThemeTextColor') @Watch('onReaderThemeChanged') readerDarkCustomThemeTextColor: string = ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR;
   @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
   @StorageLink('readerPageTurnAnimationType') @Watch('onReaderPageTurnAnimationChanged') readerPageTurnAnimationType: number = ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE;
+  @StorageLink('readerTapZoneActions') readerTapZoneActions: string = '3,3,3,3,1,2,2,2,2';
   @StorageLink('readerVolumeTurnPage') @Watch('onReaderVolumeTurnPageChanged') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
   @StorageLink('readerExtendToStatusBar') @Watch('onReaderExtendToStatusBarChanged') readerExtendToStatusBar: boolean = false;
@@ -296,6 +300,7 @@ struct ReadBookPage {
   }
 
   aboutToDisappear() {
+    this.flushPendingTtsSpeedSettings();
     this.stopTtsReading();
     this.ttsReader.shutdown();
     this.saveReadingProgress();
@@ -1202,6 +1207,10 @@ struct ReadBookPage {
         this.settingsPanel()
       }
 
+      if (this.showTapZoneSettings) {
+        this.tapZoneSettingsDialog()
+      }
+
       if (this.showChangeSourceDialog) {
         this.changeSourceDialog()
       }
@@ -1702,6 +1711,7 @@ struct ReadBookPage {
     this.readerDarkCustomThemeTextColor = settings.darkCustomThemeTextColor;
     this.readerPageTurnMode = settings.pageTurnMode;
     this.readerPageTurnAnimationType = settings.pageTurnAnimationType;
+    this.readerTapZoneActions = settings.tapZoneActions;
     this.readerVolumeTurnPage = settings.volumeTurnPage;
     this.readerKeepScreenOn = settings.keepScreenOn;
     this.readerExtendToStatusBar = settings.extendToStatusBar;
@@ -2031,12 +2041,50 @@ struct ReadBookPage {
   }
 
   applyTtsSpeed(value: number): void {
-    this.ttsSpeed = Math.max(0.5, Math.min(2, Math.round(value * 10) / 10));
-    this.saveTtsSettings();
+    const nextSpeed = Math.max(0.5, Math.min(2, Math.round(value * 10) / 10));
+    if (Math.abs(this.ttsSpeed - nextSpeed) < 0.01) {
+      return;
+    }
+    this.ttsSpeed = nextSpeed;
+    this.scheduleTtsSpeedSettingsSave();
     if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
-      this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY).catch((e: Error) => {
-        console.warn('更新朗读倍速媒体状态失败:', e);
-      });
+      this.scheduleTtsSpeedAvSessionUpdate();
+    }
+  }
+
+  scheduleTtsSpeedSettingsSave(): void {
+    if (this.ttsSpeedSaveTimerId >= 0) {
+      clearTimeout(this.ttsSpeedSaveTimerId);
+    }
+    this.ttsSpeedSaveTimerId = setTimeout(() => {
+      this.ttsSpeedSaveTimerId = -1;
+      this.saveTtsSettings();
+    }, 300);
+  }
+
+  scheduleTtsSpeedAvSessionUpdate(): void {
+    if (this.ttsSpeedAvSessionTimerId >= 0) {
+      clearTimeout(this.ttsSpeedAvSessionTimerId);
+    }
+    this.ttsSpeedAvSessionTimerId = setTimeout(() => {
+      this.ttsSpeedAvSessionTimerId = -1;
+      if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
+        this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY).catch((e: Error) => {
+          console.warn('更新朗读倍速媒体状态失败:', e);
+        });
+      }
+    }, 300);
+  }
+
+  flushPendingTtsSpeedSettings(): void {
+    if (this.ttsSpeedSaveTimerId >= 0) {
+      clearTimeout(this.ttsSpeedSaveTimerId);
+      this.ttsSpeedSaveTimerId = -1;
+      this.saveTtsSettings();
+    }
+    if (this.ttsSpeedAvSessionTimerId >= 0) {
+      clearTimeout(this.ttsSpeedAvSessionTimerId);
+      this.ttsSpeedAvSessionTimerId = -1;
     }
   }
 
@@ -2977,7 +3025,48 @@ struct ReadBookPage {
 
   @Builder
   readerTapLayer() {
-    if (this.readerPageTurnMode === 0 || this.readerPageTurnMode === 2) {
+    if (this.readerPageTurnMode === 2) {
+      Column() {
+        ForEach([0, 1, 2], (row: number) => {
+          Row() {
+            ForEach([0, 1, 2], (column: number) => {
+              Blank()
+                .height('100%')
+                .layoutWeight(1)
+                .onClick(() => {
+                  if (this.consumeSuppressedReaderTapClick()) {
+                    return;
+                  }
+                  this.commitReaderTapZone(row * 3 + column);
+                })
+            }, (column: number) => `${row}_${column}`)
+          }
+          .width('100%')
+          .layoutWeight(1)
+        }, (row: number) => `${row}`)
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(Color.Transparent)
+      .onTouch((event: TouchEvent) => {
+        this.handleReaderTouch(event);
+      })
+      .parallelGesture(
+        PanGesture({ direction: PanDirection.Horizontal, distance: 1 })
+          .onActionStart((event: GestureEvent) => {
+            this.handleReaderPanStart(event);
+          })
+          .onActionUpdate((event: GestureEvent) => {
+            this.handleReaderPanUpdate(event);
+          })
+          .onActionEnd((event: GestureEvent) => {
+            this.handleReaderPanEnd(event);
+          })
+          .onActionCancel(() => {
+            this.handleReaderPanCancel();
+          })
+      )
+    } else if (this.readerPageTurnMode === 0) {
       Column() {
         Blank()
           .width('100%')
@@ -3231,6 +3320,9 @@ struct ReadBookPage {
     }
     const width = Math.max(1, this.pageViewWidth || this.getPageTurnWidth());
     const height = Math.max(1, this.pageViewHeight || this.getPageTurnHeight());
+    if (this.readerPageTurnMode === 2) {
+      return this.commitReaderTapZone(this.getTapZoneIndex(x, y, width, height));
+    }
     if (y < height * 0.3) {
       this.turnPrev();
       return true;
@@ -3249,6 +3341,123 @@ struct ReadBookPage {
     }
     this.showMenu = true;
     return true;
+  }
+
+  getTapZoneIndex(x: number, y: number, width: number, height: number): number {
+    const column = Math.max(0, Math.min(2, Math.floor(Math.max(0, x) / Math.max(1, width / 3))));
+    const row = Math.max(0, Math.min(2, Math.floor(Math.max(0, y) / Math.max(1, height / 3))));
+    return row * 3 + column;
+  }
+
+  commitReaderTapZone(index: number): boolean {
+    return this.commitReaderTapAction(this.readerTapZoneActionAt(index));
+  }
+
+  commitReaderTapAction(action: number): boolean {
+    switch (action) {
+      case 1:
+        this.showMenu = true;
+        return true;
+      case 2:
+        this.turnNext();
+        return true;
+      case 3:
+        this.turnPrev();
+        return true;
+      case 0:
+      default:
+        return true;
+    }
+  }
+
+  readerTapZoneActionsList(): number[] {
+    const fallback = [3, 3, 3, 3, 1, 2, 2, 2, 2];
+    const parts = (this.readerTapZoneActions || '').split(',');
+    const result: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      const parsed = Number(parts[i]);
+      result.push(Number.isFinite(parsed) && parsed >= 0 && parsed <= 3 ? Math.round(parsed) : fallback[i]);
+    }
+    return result;
+  }
+
+  readerTapZoneActionAt(index: number): number {
+    const actions = this.readerTapZoneActionsList();
+    const safeIndex = Math.max(0, Math.min(8, Math.round(index)));
+    return actions[safeIndex];
+  }
+
+  cycleTapZoneAction(index: number): void {
+    const actions = this.readerTapZoneActionsList();
+    const safeIndex = Math.max(0, Math.min(8, Math.round(index)));
+    actions[safeIndex] = (actions[safeIndex] + 1) % 4;
+    this.setTapZoneActions(actions.join(','));
+  }
+
+  setTapZoneActions(actions: string): void {
+    const normalized = this.normalizeTapZoneActions(actions);
+    this.readerTapZoneActions = normalized;
+    ReaderSettingsStore.saveTapZoneActions(getContext(this), normalized).catch((e: Error) => {
+      console.error('保存点击区域动作失败:', e);
+    });
+  }
+
+  normalizeTapZoneActions(actions: string): string {
+    const fallback = [3, 3, 3, 3, 1, 2, 2, 2, 2];
+    const parts = (actions || '').split(',');
+    const result: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      const parsed = Number(parts[i]);
+      result.push(Number.isFinite(parsed) && parsed >= 0 && parsed <= 3 ? Math.round(parsed) : fallback[i]);
+    }
+    return result.join(',');
+  }
+
+  tapActionLabel(action: number): string {
+    switch (action) {
+      case 1:
+        return '菜单';
+      case 2:
+        return '下一页';
+      case 3:
+        return '上一页';
+      case 0:
+      default:
+        return '无动作';
+    }
+  }
+
+  tapZoneCellColor(action: number): string {
+    if (action === 1) {
+      return '#332A6FCC';
+    }
+    if (action === 2) {
+      return '#2239A86B';
+    }
+    if (action === 3) {
+      return '#22A85C39';
+    }
+    return '#14000000';
+  }
+
+  tapZoneSummaryText(): string {
+    const actions = this.readerTapZoneActionsList();
+    let menuCount = 0;
+    let nextCount = 0;
+    let prevCount = 0;
+    let noneCount = 0;
+    for (const action of actions) {
+      if (action === 1) {
+        menuCount++;
+      } else if (action === 2) {
+        nextCount++;
+      } else if (action === 3) {
+        prevCount++;
+      } else {
+        noneCount++;
+      }
+    }
+    return `菜单${menuCount} · 下一页${nextCount} · 上一页${prevCount} · 无动作${noneCount}`;
   }
 
   isReaderTouchMoved(offsetX: number, offsetY: number): boolean {
@@ -3479,6 +3688,10 @@ struct ReadBookPage {
         this.pageTurnModeButton('点击', 2)
       }
       .width('100%')
+
+      if (this.readerPageTurnMode === 2) {
+        this.readerTapZoneSettingItem()
+      }
 
       this.readerSelectSettingItem('翻页动画', '选择滑动或点击翻页时使用的页面切换效果',
         this.pageTurnAnimationOptions(), this.pageTurnAnimationSelectedIndex(), (index: number) => {
@@ -3752,6 +3965,131 @@ struct ReadBookPage {
     const index = this.pageTurnAnimationSelectedIndex();
     const option = options[index];
     return option && typeof option.value === 'string' ? option.value : '无动画';
+  }
+
+  @Builder
+  readerTapZoneSettingItem() {
+    Row() {
+      Column() {
+        Text('点击区域动作')
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+        Text(this.tapZoneSummaryText())
+          .fontSize(12)
+          .fontColor(this.getSubTextColor())
+          .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Button('配置')
+        .height(34)
+        .fontSize(13)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .margin({ left: 12 })
+        .onClick(() => {
+          this.showTapZoneSettings = true;
+        })
+    }
+    .width('100%')
+    .constraintSize({ minHeight: 56 })
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  tapZoneSettingsDialog() {
+    Column() {
+      Column({ space: 14 }) {
+        Row() {
+          Text('点击区域动作')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+            .layoutWeight(1)
+
+          Button('×')
+            .fontSize(26)
+            .fontColor('#FFFFFF')
+            .width(48)
+            .height(48)
+            .backgroundColor('#00000000')
+            .padding(0)
+            .onClick(() => {
+              this.showTapZoneSettings = false;
+            })
+        }
+        .width('calc(100% - 40vp)')
+        .height(52)
+        .alignItems(VerticalAlign.Center)
+
+        Column() {
+          ForEach([0, 1, 2], (row: number) => {
+            Row() {
+              ForEach([0, 1, 2], (column: number) => {
+                this.tapZoneCell(row * 3 + column)
+              }, (column: number) => `${row}_${column}`)
+            }
+            .width('100%')
+            .layoutWeight(1)
+            .clip(true)
+          }, (row: number) => `${row}`)
+        }
+        .width('calc(100% - 40vp)')
+        .layoutWeight(1)
+        .border({ width: 1, color: '#33FFFFFF' })
+        .clip(true)
+
+        Row({ space: 12 }) {
+          Button('重置默认')
+            .layoutWeight(1)
+            .height(40)
+            .fontSize(14)
+            .backgroundColor('#33383E')
+            .fontColor('#FFFFFF')
+            .onClick(() => {
+              this.setTapZoneActions('3,3,3,3,1,2,2,2,2');
+            })
+
+          Button('完成')
+            .layoutWeight(1)
+            .height(40)
+            .fontSize(14)
+            .backgroundColor(this.accentColor())
+            .fontColor('#FFFFFF')
+            .onClick(() => {
+              this.showTapZoneSettings = false;
+            })
+        }
+        .width('calc(100% - 40vp)')
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ top: 18, bottom: 22 })
+      .alignItems(HorizontalAlign.Center)
+      .backgroundColor('#D9000000')
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#99000000')
+  }
+
+  @Builder
+  tapZoneCell(index: number) {
+    Text(this.tapActionLabel(this.readerTapZoneActionAt(index)))
+      .fontSize(18)
+      .fontWeight(FontWeight.Medium)
+      .fontColor('#FFFFFF')
+      .textAlign(TextAlign.Center)
+      .width('100%')
+      .height('100%')
+      .layoutWeight(1)
+      .backgroundColor(this.tapZoneCellColor(this.readerTapZoneActionAt(index)))
+      .border({ width: 0.5, color: '#33FFFFFF' })
+      .clip(true)
+      .onClick(() => {
+        this.cycleTapZoneAction(index);
+      })
   }
 
   @Builder

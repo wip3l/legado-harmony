@@ -40,6 +40,7 @@ struct TtsSettingsPage {
   @State customVoices: HttpTTS[] = [];
   @State customVoiceImportUrl: string = '';
   @State isImportingCustomVoices: boolean = false;
+  private speedSaveTimerId: number = -1;
 
   aboutToAppear(): void {
     this.syncBars();
@@ -52,6 +53,7 @@ struct TtsSettingsPage {
   }
 
   aboutToDisappear(): void {
+    this.flushPendingSpeedSettings();
     this.previewReader.shutdown();
     this.isPreviewing = false;
   }
@@ -952,8 +954,30 @@ struct TtsSettingsPage {
   }
 
   applySpeed(value: number): void {
-    this.ttsSpeed = Math.max(0.5, Math.min(2, Math.round(value * 10) / 10));
-    this.saveSettings();
+    const nextSpeed = Math.max(0.5, Math.min(2, Math.round(value * 10) / 10));
+    if (Math.abs(this.ttsSpeed - nextSpeed) < 0.01) {
+      return;
+    }
+    this.ttsSpeed = nextSpeed;
+    this.scheduleSpeedSettingsSave();
+  }
+
+  scheduleSpeedSettingsSave(): void {
+    if (this.speedSaveTimerId >= 0) {
+      clearTimeout(this.speedSaveTimerId);
+    }
+    this.speedSaveTimerId = setTimeout(() => {
+      this.speedSaveTimerId = -1;
+      this.saveSettings();
+    }, 300);
+  }
+
+  flushPendingSpeedSettings(): void {
+    if (this.speedSaveTimerId >= 0) {
+      clearTimeout(this.speedSaveTimerId);
+      this.speedSaveTimerId = -1;
+      this.saveSettings();
+    }
   }
 
   voiceTrailingText(voice: TtsVoiceOption): string {

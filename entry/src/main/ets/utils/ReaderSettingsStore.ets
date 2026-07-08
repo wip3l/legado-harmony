@@ -15,6 +15,7 @@ export class ReaderSettings {
   darkCustomThemeTextColor: string = ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR;
   pageTurnMode: number = 1;
   pageTurnAnimationType: number = 1;
+  tapZoneActions: string = '3,3,3,3,1,2,2,2,2';
   volumeTurnPage: boolean = false;
   keepScreenOn: boolean = true;
   extendToStatusBar: boolean = false;
@@ -60,6 +61,7 @@ export class ReaderSettingsStore {
   static readonly KEY_PAGE_TURN_MODE: string = 'readerPageTurnMode';
   static readonly KEY_PAGE_TURN_ANIMATION: string = 'readerPageTurnAnimation';
   static readonly KEY_PAGE_TURN_ANIMATION_TYPE: string = 'readerPageTurnAnimationType';
+  static readonly KEY_TAP_ZONE_ACTIONS: string = 'readerTapZoneActions';
   static readonly KEY_VOLUME_TURN_PAGE: string = 'readerVolumeTurnPage';
   static readonly KEY_KEEP_SCREEN_ON: string = 'readerKeepScreenOn';
   static readonly KEY_EXTEND_TO_STATUS_BAR: string = 'readerExtendToStatusBar';
@@ -185,6 +187,13 @@ export class ReaderSettingsStore {
     settings.pageTurnAnimationType = legacyPageTurnAnimation ?
       storedPageTurnAnimationType :
       ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE;
+    settings.tapZoneActions = ReaderSettingsStore.normalizeTapZoneActions(
+      await ReaderSettingsStore.getString(
+        store,
+        ReaderSettingsStore.KEY_TAP_ZONE_ACTIONS,
+        AppStorage.get<string>(ReaderSettingsStore.KEY_TAP_ZONE_ACTIONS) || '3,3,3,3,1,2,2,2,2'
+      )
+    );
     settings.volumeTurnPage = await ReaderSettingsStore.getBoolean(
       store,
       ReaderSettingsStore.KEY_VOLUME_TURN_PAGE,
@@ -332,6 +341,16 @@ export class ReaderSettingsStore {
     await store.flush();
   }
 
+  static async saveTapZoneActions(context: Context, actions: string): Promise<void> {
+    const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
+    settings.tapZoneActions = ReaderSettingsStore.normalizeTapZoneActions(actions);
+    ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_TAP_ZONE_ACTIONS, settings.tapZoneActions);
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    await store.put(ReaderSettingsStore.KEY_TAP_ZONE_ACTIONS, settings.tapZoneActions);
+    await store.flush();
+  }
+
   static async savePreloadEnabled(context: Context, enabled: boolean): Promise<void> {
     const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
     settings.preloadEnabled = enabled;
@@ -441,6 +460,7 @@ export class ReaderSettingsStore {
       ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION,
       normalized.pageTurnAnimationType !== ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE
     );
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_TAP_ZONE_ACTIONS, normalized.tapZoneActions);
     ReaderSettingsStore.applyInteractionToStorage(normalized);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_ENABLED, normalized.preloadEnabled);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_CHAPTER_COUNT, normalized.preloadChapterCount);
@@ -652,6 +672,17 @@ export class ReaderSettingsStore {
     return Math.max(1, Math.min(value, 10));
   }
 
+  private static normalizeTapZoneActions(actions: string): string {
+    const fallback = [3, 3, 3, 3, 1, 2, 2, 2, 2];
+    const parts = (actions || '').split(',');
+    const result: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      const parsed = Number(parts[i]);
+      result.push(Number.isFinite(parsed) && parsed >= 0 && parsed <= 3 ? Math.round(parsed) : fallback[i]);
+    }
+    return result.join(',');
+  }
+
   private static normalizeFontMode(mode: string): string {
     if (mode === 'system' || mode === 'custom') {
       return mode;
@@ -685,6 +716,7 @@ export class ReaderSettingsStore {
     );
     settings.pageTurnMode = ReaderSettingsStore.normalizePageTurnMode(source.pageTurnMode);
     settings.pageTurnAnimationType = ReaderSettingsStore.normalizePageTurnAnimationType(source.pageTurnAnimationType);
+    settings.tapZoneActions = ReaderSettingsStore.normalizeTapZoneActions(source.tapZoneActions);
     settings.volumeTurnPage = source.volumeTurnPage;
     settings.keepScreenOn = source.keepScreenOn;
     settings.extendToStatusBar = source.extendToStatusBar;
@@ -762,6 +794,9 @@ export class ReaderSettingsStore {
     settings.pageTurnAnimationType = legacyPageTurnAnimation ?
       storagePageTurnAnimationType :
       ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE;
+    settings.tapZoneActions = ReaderSettingsStore.normalizeTapZoneActions(
+      AppStorage.get<string>(ReaderSettingsStore.KEY_TAP_ZONE_ACTIONS) || ''
+    );
     settings.volumeTurnPage = AppStorage.get<boolean>(ReaderSettingsStore.KEY_VOLUME_TURN_PAGE) ?? false;
     settings.keepScreenOn = AppStorage.get<boolean>(ReaderSettingsStore.KEY_KEEP_SCREEN_ON) ?? true;
     settings.extendToStatusBar = AppStorage.get<boolean>(ReaderSettingsStore.KEY_EXTEND_TO_STATUS_BAR) ?? false;
