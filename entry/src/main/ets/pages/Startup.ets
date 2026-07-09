@@ -21,25 +21,42 @@ struct StartupPage {
     this.jumpTimer = setTimeout(() => {
       this.jumpTimer = -1;
       hilog.info(0x0000, 'testTag', 'StartupTrace replace Index %{public}d', Date.now());
-      this.openStartupTarget();
+      this.openStartupTarget().catch((e: Error) => {
+        console.error('打开启动目标失败:', e);
+      });
     }, 650);
+  }
+
+  aboutToDisappear(): void {
+    if (this.jumpTimer >= 0) {
+      clearTimeout(this.jumpTimer);
+      this.jumpTimer = -1;
+    }
   }
 
   async openStartupTarget(): Promise<void> {
     if (!RecentReadShortcut.isPending()) {
-      router.replaceUrl({ url: 'pages/Index' });
+      await this.replaceToIndex();
       return;
     }
     try {
       const opened = await RecentReadShortcut.openPending(getContext(this), true);
       RecentReadShortcut.consume();
       if (!opened) {
-        router.replaceUrl({ url: 'pages/Index' });
+        await this.replaceToIndex();
       }
     } catch (e) {
       RecentReadShortcut.consume();
       console.error('打开最近阅读快捷项失败:', e);
-      router.replaceUrl({ url: 'pages/Index' });
+      await this.replaceToIndex();
+    }
+  }
+
+  async replaceToIndex(): Promise<void> {
+    try {
+      await router.replaceUrl({ url: 'pages/Index' });
+    } catch (e) {
+      console.error('跳转首页失败:', e);
     }
   }
 

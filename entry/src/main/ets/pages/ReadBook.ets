@@ -303,7 +303,9 @@ struct ReadBookPage {
     this.flushPendingTtsSpeedSettings();
     this.stopTtsReading();
     this.ttsReader.shutdown();
-    this.saveReadingProgress();
+    this.saveReadingProgress().catch((error: Error) => {
+      console.error('离开阅读页保存进度失败:', error);
+    });
     this.unregisterVolumeKeyTurn();
     this.exitReaderImmersive();
   }

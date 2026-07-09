@@ -1,5 +1,5 @@
-import { bundleManager } from '@kit.AbilityKit';
-import { router } from '@kit.ArkUI';
+import { bundleManager, common } from '@kit.AbilityKit';
+import { promptAction, router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 
 @Entry
@@ -75,6 +75,8 @@ struct AboutPage {
           this.infoCard('使用提醒',
             '导入书源前，请自行确认书源来源、目标站点协议、内容授权和所在地法律法规要求。项目仅按用户配置的规则发起访问和解析，不以破解付费内容、绕过访问控制、规避反爬机制或批量抓取受保护内容为目标。')
 
+          this.feedbackCard()
+
           this.infoCard('开源许可',
             '本项目采用 GPL-3.0 许可证。使用、修改和分发时请遵守对应开源协议。')
 
@@ -125,6 +127,49 @@ struct AboutPage {
     .alignItems(HorizontalAlign.Start)
   }
 
+  @Builder
+  feedbackCard() {
+    Column() {
+      Text('问题反馈')
+        .fontSize(16)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+
+      this.feedbackRow('邮箱', 'i@icynol.com', () => {
+        this.openUri('mailto:i@icynol.com', '未找到可用的邮件应用');
+      })
+
+      this.feedbackRow('QQ群', '345769197', () => {
+        this.openUri('mqqapi://card/show_pslcard?src_type=internal&version=1&uin=345769197&card_type=group&source=qrcode',
+          '未找到 QQ 或无法打开群资料');
+      })
+    }
+    .width('100%')
+    .padding(16)
+    .backgroundColor(this.cardColor())
+    .borderRadius(10)
+    .margin({ left: 16, right: 16, bottom: 12 })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  feedbackRow(label: string, value: string, action: () => void) {
+    Row() {
+      Text(`${label}：`)
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+        .width(76)
+      Text(value)
+        .fontSize(14)
+        .fontColor(this.accentColor())
+    }
+    .width('100%')
+    .padding({ top: 12, bottom: 2 })
+    .justifyContent(FlexAlign.Start)
+    .onClick(action)
+  }
+
   pageColor(): string {
     return this.appDarkMode ? '#101113' : '#F5F5F5';
   }
@@ -143,6 +188,29 @@ struct AboutPage {
 
   subTextColor(): string {
     return this.appDarkMode ? '#8A8F98' : '#888888';
+  }
+
+  accentColor(): string {
+    return this.appDarkMode ? '#4E9BFF' : '#007DFF';
+  }
+
+  openUri(uri: string, fallbackMessage: string): void {
+    const context = getContext(this) as common.UIAbilityContext;
+    context.startAbility({
+      action: 'ohos.want.action.viewData',
+      uri: uri
+    }).catch((error: Error) => {
+      console.error('打开外部应用失败:', error);
+      this.showToastSafely(fallbackMessage);
+    });
+  }
+
+  showToastSafely(message: string): void {
+    try {
+      promptAction.showToast({ message: message });
+    } catch (error) {
+      console.error('显示关于页提示失败:', error);
+    }
   }
 
   syncBars(): void {

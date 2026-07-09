@@ -40,7 +40,9 @@ struct VerifyWebPage {
     if (VerificationSupport.isBookSourceLoginUrl(initialUrl)) {
       this.url = 'about:blank';
       this.currentUrl = '';
-      this.resolveBookSourceLoginUrl(initialUrl);
+      this.resolveBookSourceLoginUrl(initialUrl).catch((e: Error) => {
+        console.error('解析书源登录地址失败:', e);
+      });
       return;
     }
     this.url = initialUrl;
@@ -156,10 +158,10 @@ struct VerifyWebPage {
       AppStorage.setOrCreate('pendingVerificationSourceUrl', '');
       AppStorage.setOrCreate('pendingVerificationLoginUrl', '');
       AppStorage.setOrCreate('verificationCompletedAt', Date.now());
-      promptAction.showToast({ message: '验证信息已保存，请重试搜索或刷新目录' });
-      router.back();
+      this.showToastSafely('验证信息已保存，请重试搜索或刷新目录');
+      this.backSafely();
     } else {
-      promptAction.showToast({ message: '未检测到登录态，请登录后再点完成' });
+      this.showToastSafely('未检测到登录态，请登录后再点完成');
     }
   }
 
@@ -177,12 +179,7 @@ struct VerifyWebPage {
       await db.initWithContext(getContext(this));
       const source = await db.getBookSource(bookSourceUrl);
       if (source && this.isShushanSource(source)) {
-        router.replaceUrl({
-          url: 'pages/BookSourceEdit',
-          params: {
-            bookSourceUrl: bookSourceUrl
-          }
-        });
+        await this.replaceToBookSourceEdit(bookSourceUrl);
         return;
       }
       const loginUrl = source ? VerificationSupport.resolveBookSourceLoginUrl(source) : '';
@@ -197,12 +194,36 @@ struct VerifyWebPage {
     } catch (e) {
       console.error('解析书源登录地址失败:', e);
     }
-    router.replaceUrl({
-      url: 'pages/BookSourceEdit',
-      params: {
-        bookSourceUrl: bookSourceUrl
-      }
-    });
+    await this.replaceToBookSourceEdit(bookSourceUrl);
+  }
+
+  backSafely(): void {
+    try {
+      router.back();
+    } catch (e) {
+      console.error('退出网页验证页失败:', e);
+    }
+  }
+
+  showToastSafely(message: string): void {
+    try {
+      promptAction.showToast({ message: message });
+    } catch (e) {
+      console.error('显示网页验证提示失败:', e);
+    }
+  }
+
+  async replaceToBookSourceEdit(bookSourceUrl: string): Promise<void> {
+    try {
+      await router.replaceUrl({
+        url: 'pages/BookSourceEdit',
+        params: {
+          bookSourceUrl: bookSourceUrl
+        }
+      });
+    } catch (e) {
+      console.error('跳转书源编辑页失败:', e);
+    }
   }
 
   isShushanSource(source: BookSource): boolean {

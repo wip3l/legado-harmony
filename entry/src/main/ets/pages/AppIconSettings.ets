@@ -109,7 +109,7 @@ struct AppIconSettingsPage {
       return;
     }
     if (this.appIconId === option.id) {
-      promptAction.showToast({ message: `当前已是${option.title}` });
+      this.showToastSafely(`当前已是${option.title}`);
       return;
     }
     this.applyingIconId = option.id;
@@ -119,14 +119,30 @@ struct AppIconSettingsPage {
       settings.iconId = option.id;
       AppIconSettingsStore.applyToStorage(settings);
       await AppIconSettingsStore.save(getContext(this), settings);
-      promptAction.showToast({ message: `已切换为${option.title}` });
+      this.showToastSafely(`已切换为${option.title}`);
     } catch (e) {
       hilog.warn(0x0000, 'appIcon', 'Switch app icon failed option=%{public}s err=%{public}s',
         option.id, JSON.stringify(e));
-      promptAction.showToast({ message: this.switchErrorMessage(e) });
+      this.showToastSafely(this.switchErrorMessage(e));
       this.refreshDynamicIcons();
     } finally {
       this.applyingIconId = '';
+    }
+  }
+
+  showToastSafely(message: string): void {
+    try {
+      promptAction.showToast({ message: message });
+    } catch (e) {
+      hilog.warn(0x0000, 'appIcon', 'Show app icon toast failed err=%{public}s', JSON.stringify(e));
+    }
+  }
+
+  backSafely(): void {
+    try {
+      router.back();
+    } catch (e) {
+      hilog.warn(0x0000, 'appIcon', 'Back from app icon settings failed err=%{public}s', JSON.stringify(e));
     }
   }
 
@@ -140,7 +156,7 @@ struct AppIconSettingsPage {
         .height(56)
         .textAlign(TextAlign.Center)
         .onClick(() => {
-          router.back();
+          this.backSafely();
         })
       Text('图标设置')
         .fontSize(20)
