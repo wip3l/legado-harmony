@@ -65,6 +65,11 @@ interface ReaderPaginationResult {
   ends: number[];
 }
 
+interface ReaderParagraphMeasureFallback {
+  fontSize: number;
+  fontFamily: string;
+}
+
 class ReaderCustomFontItem {
   familyName: string = '';
   filePath: string = '';
@@ -881,39 +886,41 @@ struct ReadBookPage {
         if (!this.shouldRenderPrimaryReaderContent()) {
           this.readerLoadingPanel()
         } else {
-          Column() {
-            Stack() {
-              ForEach(this.currentReaderSurfaceKeys(), (_surfaceKey: string) => {
-                if (this.currentReaderSurfaceIndex() === 0) {
-                  if (this.isPageTurnAnimationEnabled()) {
-                    this.readerSlidingPageTurnSurface(this.visibleCurrentPageText(), this.pageRenderVersion,
-                      this.ttsHighlightRenderVersion)
-                  } else {
-                    this.readerCurrentPageSurface(this.pageRenderVersion, this.visibleCurrentPageText(),
-                      this.ttsHighlightRenderVersion)
-                  }
+          Stack() {
+            ForEach(this.currentReaderSurfaceKeys(), (_surfaceKey: string) => {
+              if (this.currentReaderSurfaceIndex() === 0) {
+                if (this.isPageTurnAnimationEnabled()) {
+                  this.readerSlidingPageTurnSurface(this.visibleCurrentPageText(), this.pageRenderVersion,
+                    this.ttsHighlightRenderVersion)
                 } else {
-                  if (this.isPageTurnAnimationEnabled()) {
-                    this.readerSlidingPageTurnSurfaceAlternate(this.visibleCurrentPageText(), this.pageRenderVersion,
-                      this.ttsHighlightRenderVersion)
-                  } else {
-                    this.readerCurrentPageSurfaceAlternate(this.pageRenderVersion, this.visibleCurrentPageText(),
-                      this.ttsHighlightRenderVersion)
-                  }
+                  this.readerCurrentPageSurface(this.pageRenderVersion, this.visibleCurrentPageText(),
+                    this.ttsHighlightRenderVersion)
                 }
-              }, (surfaceKey: string) => surfaceKey)
+              } else {
+                if (this.isPageTurnAnimationEnabled()) {
+                  this.readerSlidingPageTurnSurfaceAlternate(this.visibleCurrentPageText(), this.pageRenderVersion,
+                    this.ttsHighlightRenderVersion)
+                } else {
+                  this.readerCurrentPageSurfaceAlternate(this.pageRenderVersion, this.visibleCurrentPageText(),
+                    this.ttsHighlightRenderVersion)
+                }
+              }
+            }, (surfaceKey: string) => surfaceKey)
+            Column() {
+              Blank()
+                .layoutWeight(1)
+              this.readerBottomInfoBar()
             }
             .width('100%')
-            .layoutWeight(1)
-            .clip(true)
-            .onAreaChange((oldValue: Area, newValue: Area) => {
-              this.updatePagedReaderArea(newValue);
-            })
-
-            this.readerBottomInfoBar()
+            .height('100%')
+            .hitTestBehavior(HitTestMode.None)
           }
           .width('100%')
           .height('100%')
+          .clip(true)
+          .onAreaChange((oldValue: Area, newValue: Area) => {
+            this.updatePagedReaderArea(newValue);
+          })
         }
       }
       .width('100%')
@@ -2303,6 +2310,15 @@ struct ReadBookPage {
     return 0;
   }
 
+  getReaderBottomInfoBarHeight(): number {
+    return 24;
+  }
+
+  getReaderContentBottomPadding(): number {
+    const bottomPadding = this.readerMarginBottom + this.getReaderContentBottomReserve();
+    return Math.max(0, bottomPadding - 14);
+  }
+
   getEffectiveReaderLineHeight(): number {
     return this.readerFontSize + Math.max(0, this.readerLineHeight);
   }
@@ -2928,10 +2944,10 @@ struct ReadBookPage {
         .margin({ left: 12 })
     }
     .width('100%')
-    .height(44)
-    .padding({ left: 18, right: 18, top: 4, bottom: 0 })
-    .alignItems(VerticalAlign.Center)
-    .backgroundColor(this.getBackgroundColor())
+    .height(this.getReaderBottomInfoBarHeight())
+    .padding({ left: 18, right: 18, top: 0, bottom: 0 })
+    .alignItems(VerticalAlign.Top)
+    .backgroundColor(Color.Transparent)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -5195,10 +5211,10 @@ struct ReadBookPage {
   }
 
   normalizeReaderText(text: string): string {
-    return (text || '')
+    return this.trimReaderContentText((text || '')
       .replace(/\r\n/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+      .replace(/\u00A0/g, ' ')
+      .replace(/\n{3,}/g, '\n\n'));
   }
 
   getPagedSourceText(): string {
@@ -5216,10 +5232,10 @@ struct ReadBookPage {
   }
 
   normalizeChapterBody(text: string): string {
-    return this.mergeSoftWrappedChapterLines((text || '')
+    return this.mergeSoftWrappedChapterLines(this.trimReaderContentText((text || '')
       .replace(/\r\n/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim());
+      .replace(/\u00A0/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')));
   }
 
   mergeSoftWrappedChapterLines(text: string): string {
@@ -5309,11 +5325,30 @@ struct ReadBookPage {
     if (firstLine !== title) {
       return body;
     }
-    return lines.slice(1).join('\n').replace(/^\n+/, '').trim();
+    return this.trimReaderContentText(lines.slice(1).join('\n').replace(/^\n+/, ''));
   }
 
   isReaderTrimChar(value: string): boolean {
-    return value === ' ' || value === '\t' || value === '\n' || value === '\r';
+    return value === ' ' || value === '\t' || value === '\n' || value === '\r' ||
+      value === '\u00A0' || value === '\uFEFF' || value === '\u200B' ||
+      value === '\u200C' || value === '\u200D' || value === '\u2060';
+  }
+
+  isReaderEdgeTrimChar(value: string): boolean {
+    return this.isReaderTrimChar(value) || value === '\u3000';
+  }
+
+  trimReaderContentText(text: string): string {
+    const source = text || '';
+    let start = 0;
+    let end = source.length;
+    while (start < end && this.isReaderEdgeTrimChar(source.charAt(start))) {
+      start++;
+    }
+    while (end > start && this.isReaderEdgeTrimChar(source.charAt(end - 1))) {
+      end--;
+    }
+    return source.substring(start, end);
   }
 
   pushReaderPage(source: string, rawStart: number, rawEnd: number, pages: string[], starts: number[], ends: number[]): void {
@@ -5334,7 +5369,8 @@ struct ReadBookPage {
     ends.push(pageEnd);
   }
 
-  findMeasuredPageEnd(source: string, start: number, availableWidth: number, availableHeight: number): number {
+  findMeasuredPageEnd(source: string, start: number, availableWidth: number, availableHeight: number,
+    chapterIndex: number = this.currentChapterIndex): number {
     let safeStart = Math.max(0, Math.min(start, source.length));
     while (safeStart < source.length && this.isReaderTrimChar(source.charAt(safeStart))) {
       safeStart++;
@@ -5343,9 +5379,11 @@ struct ReadBookPage {
       return source.length;
     }
 
-    const paragraphEnd = this.findParagraphLayoutPageEnd(source, safeStart, availableWidth, availableHeight);
+    const paragraphEnd = this.findParagraphLayoutPageEnd(source, safeStart, availableWidth, availableHeight,
+      chapterIndex);
     if (paragraphEnd > safeStart) {
-      return paragraphEnd;
+      return this.refineMeasuredPageEnd(source, safeStart, paragraphEnd, availableWidth, availableHeight,
+        chapterIndex);
     }
 
     let low = safeStart + 1;
@@ -5354,7 +5392,7 @@ struct ReadBookPage {
     while (low <= high) {
       const mid = Math.floor((low + high) / 2);
       const candidate = source.substring(safeStart, mid);
-      if (this.measureReaderTextHeight(candidate, availableWidth) <= availableHeight) {
+      if (this.measureReaderTextHeight(candidate, availableWidth, chapterIndex) <= availableHeight) {
         best = mid;
         low = mid + 1;
       } else {
@@ -5366,7 +5404,54 @@ struct ReadBookPage {
     return Math.max(safeStart + 1, end);
   }
 
-  findParagraphLayoutPageEnd(source: string, start: number, availableWidth: number, availableHeight: number): number {
+  refineMeasuredPageEnd(source: string, start: number, initialEnd: number, availableWidth: number,
+    availableHeight: number, chapterIndex: number = this.currentChapterIndex): number {
+    let best = Math.max(start + 1, Math.min(initialEnd, source.length));
+    if (best >= source.length) {
+      return source.length;
+    }
+    if (!this.doesMeasuredReaderPageFit(source, start, best, availableWidth, availableHeight, chapterIndex)) {
+      return best;
+    }
+
+    let step = Math.max(16, Math.min(512, best - start));
+    let upper = Math.min(source.length, best + step);
+    while (upper < source.length &&
+      this.doesMeasuredReaderPageFit(source, start, upper, availableWidth, availableHeight, chapterIndex)) {
+      best = upper;
+      step = Math.min(step * 2, 4096);
+      upper = Math.min(source.length, best + step);
+    }
+    if (upper === source.length &&
+      this.doesMeasuredReaderPageFit(source, start, upper, availableWidth, availableHeight, chapterIndex)) {
+      return source.length;
+    }
+
+    let low = best + 1;
+    let high = Math.max(low, upper - 1);
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      if (this.doesMeasuredReaderPageFit(source, start, mid, availableWidth, availableHeight, chapterIndex)) {
+        best = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    const end = this.chooseReaderPageBreak(source, start, best);
+    return Math.max(start + 1, end);
+  }
+
+  doesMeasuredReaderPageFit(source: string, start: number, end: number, availableWidth: number,
+    availableHeight: number, chapterIndex: number = this.currentChapterIndex): boolean {
+    const safeEnd = Math.max(start + 1, Math.min(end, source.length));
+    return this.measureReaderTextHeight(source.substring(start, safeEnd), availableWidth, chapterIndex) <=
+      availableHeight;
+  }
+
+  findParagraphLayoutPageEnd(source: string, start: number, availableWidth: number, availableHeight: number,
+    chapterIndex: number = this.currentChapterIndex): number {
     const windowEnd = Math.min(source.length, start + this.getReaderLayoutWindowSize(availableWidth, availableHeight));
     const layoutText = source.substring(start, windowEnd);
     if (!layoutText) {
@@ -5377,43 +5462,18 @@ struct ReadBookPage {
     }
 
     try {
-      const fontSizePx = this.toMeasurePx(this.readerFontSize);
-      const lineHeightPx = this.toMeasurePx(this.getEffectiveReaderLineHeight());
-      const textStyle: graphicsText.TextStyle = {
-        fontSize: fontSizePx,
-        fontFamilies: [this.getBodyReaderFontFamily()],
-        fontWeight: graphicsText.FontWeight.W400,
-        lineHeightMinimum: lineHeightPx,
-        lineHeightMaximum: lineHeightPx,
-        halfLeading: true,
-        heightOnly: false,
-        locale: 'zh-Hans'
-      };
-      const paragraphStyle: graphicsText.ParagraphStyle = {
-        textStyle: textStyle,
-        align: graphicsText.TextAlign.JUSTIFY,
-        textDirection: graphicsText.TextDirection.LTR,
-        wordBreak: graphicsText.WordBreak.BREAK_ALL,
-        breakStrategy: graphicsText.BreakStrategy.GREEDY,
-        trailingSpaceOptimized: true,
-        includeFontPadding: false
-      };
-      const builder = new graphicsText.ParagraphBuilder(paragraphStyle, graphicsText.FontCollection.getGlobalInstance());
-      builder.pushStyle(textStyle);
-      builder.addText(layoutText);
-      builder.popStyle();
-      const paragraph = builder.build();
-      paragraph.layoutSync(this.toMeasurePx(availableWidth));
+      const paragraph = this.buildMeasuredReaderParagraph(layoutText, availableWidth, chapterIndex);
       const metrics = paragraph.getLineMetrics();
       if (metrics.length === 0) {
         return -1;
       }
 
       const safeHeight = Math.max(1, availableHeight - 1);
+      const lineHeightPx = this.toMeasurePx(this.getEffectiveReaderLineHeight());
       let end = -1;
       for (let i = 0; i < metrics.length; i++) {
         const metric = metrics[i];
-        if (metric.topHeight + metric.height > safeHeight) {
+        if ((i + 1) * lineHeightPx > safeHeight) {
           break;
         }
         end = Math.max(end, metric.endIndex);
@@ -5437,6 +5497,11 @@ struct ReadBookPage {
     const charsPerLine = Math.max(8, Math.floor(availableWidth / Math.max(1, this.readerFontSize * 0.95)));
     const visibleLines = Math.max(1, Math.ceil(availableHeight / this.getEffectiveReaderLineHeight()));
     return Math.min(12000, Math.max(800, charsPerLine * (visibleLines + 6) * 2));
+  }
+
+  getReaderPaginationHeightTolerancePx(): number {
+    const bottomInsetPx = this.toMeasurePx(this.getReaderContentBottomPadding());
+    return Math.max(1, bottomInsetPx);
   }
 
   getReaderTextParagraphs(text: string): ReaderTextParagraph[] {
@@ -5494,7 +5559,8 @@ struct ReadBookPage {
     return paragraphs;
   }
 
-  measureReaderTextHeight(text: string, availableWidth: number): number {
+  measureReaderTextHeight(text: string, availableWidth: number,
+    chapterIndex: number = this.currentChapterIndex): number {
     if (!text) {
       return 0;
     }
@@ -5502,52 +5568,26 @@ struct ReadBookPage {
     if (paragraphs.length > 1) {
       let totalHeight = 0;
       for (const paragraph of paragraphs) {
-        totalHeight += this.measureReaderSingleParagraphHeight(paragraph.text, availableWidth);
+        totalHeight += this.measureReaderSingleParagraphHeight(paragraph.text, availableWidth, chapterIndex);
         if (!paragraph.isLast) {
           totalHeight += this.toMeasurePx(this.readerParagraphSpacing);
         }
       }
       return totalHeight;
     }
-    return this.measureReaderSingleParagraphHeight(text, availableWidth);
+    return this.measureReaderSingleParagraphHeight(text, availableWidth, chapterIndex);
   }
 
-  measureReaderSingleParagraphHeight(text: string, availableWidth: number): number {
+  measureReaderSingleParagraphHeight(text: string, availableWidth: number,
+    chapterIndex: number = this.currentChapterIndex): number {
     if (!text) {
       return 0;
     }
     try {
-      const fontSizePx = this.toMeasurePx(this.readerFontSize);
-      const lineHeightPx = this.toMeasurePx(this.getEffectiveReaderLineHeight());
-      const textStyle: graphicsText.TextStyle = {
-        fontSize: fontSizePx,
-        fontFamilies: [this.getBodyReaderFontFamily()],
-        fontWeight: graphicsText.FontWeight.W400,
-        lineHeightMinimum: lineHeightPx,
-        lineHeightMaximum: lineHeightPx,
-        halfLeading: true,
-        heightOnly: false,
-        locale: 'zh-Hans'
-      };
-      const paragraphStyle: graphicsText.ParagraphStyle = {
-        textStyle: textStyle,
-        align: graphicsText.TextAlign.JUSTIFY,
-        textDirection: graphicsText.TextDirection.LTR,
-        wordBreak: graphicsText.WordBreak.BREAK_ALL,
-        breakStrategy: graphicsText.BreakStrategy.GREEDY,
-        trailingSpaceOptimized: true,
-        includeFontPadding: false
-      };
-      const builder = new graphicsText.ParagraphBuilder(paragraphStyle, graphicsText.FontCollection.getGlobalInstance());
-      builder.pushStyle(textStyle);
-      builder.addText(text);
-      builder.popStyle();
-      const paragraph = builder.build();
-      paragraph.layoutSync(this.toMeasurePx(availableWidth));
+      const paragraph = this.buildMeasuredReaderParagraph(text, availableWidth, chapterIndex);
       const metrics = paragraph.getLineMetrics();
       if (metrics.length > 0) {
-        const lastMetric = metrics[metrics.length - 1];
-        const height = Number(lastMetric.topHeight + lastMetric.height);
+        const height = this.toMeasurePx(metrics.length * this.getEffectiveReaderLineHeight());
         if (height > 0) {
           return height;
         }
@@ -5555,11 +5595,12 @@ struct ReadBookPage {
     } catch (error) {
       console.error('官方段落布局测量阅读文本高度失败，回退到组件测量:', error);
     }
+    const fallbackStyle = this.getParagraphFallbackMeasureStyle(text, chapterIndex);
     const options: MeasureOptions = {
         textContent: text,
         constraintWidth: Math.max(1, availableWidth),
-        fontSize: this.readerFontSize,
-        fontFamily: this.getBodyReaderFontFamily(),
+        fontSize: fallbackStyle.fontSize,
+        fontFamily: fallbackStyle.fontFamily,
         lineHeight: this.getEffectiveReaderLineHeight(),
       fontWeight: FontWeight.Normal,
       textAlign: TextAlign.JUSTIFY,
@@ -5577,6 +5618,100 @@ struct ReadBookPage {
     const charsPerLine = Math.max(8, Math.floor(availableWidth / Math.max(1, this.readerFontSize * 1.08)));
     const lines = Math.max(1, Math.ceil(text.length / charsPerLine));
     return this.toMeasurePx(lines * this.getEffectiveReaderLineHeight());
+  }
+
+  buildReaderMeasureTextStyle(fontSize: number, fontFamily: string): graphicsText.TextStyle {
+    const lineHeightPx = this.toMeasurePx(this.getEffectiveReaderLineHeight());
+    return {
+      fontSize: this.toMeasurePx(fontSize),
+      fontFamilies: [fontFamily || this.getBodyReaderFontFamily()],
+      fontWeight: graphicsText.FontWeight.W400,
+      lineHeightMinimum: lineHeightPx,
+      lineHeightMaximum: lineHeightPx,
+      halfLeading: true,
+      heightOnly: false,
+      locale: 'zh-Hans'
+    };
+  }
+
+  buildMeasuredReaderParagraph(text: string, availableWidth: number,
+    chapterIndex: number = this.currentChapterIndex): graphicsText.Paragraph {
+    const bodyStyle = this.buildReaderMeasureTextStyle(this.readerFontSize, this.getBodyReaderFontFamily());
+    const paragraphStyle: graphicsText.ParagraphStyle = {
+      textStyle: bodyStyle,
+      align: graphicsText.TextAlign.JUSTIFY,
+      textDirection: graphicsText.TextDirection.LTR,
+      wordBreak: graphicsText.WordBreak.BREAK_ALL,
+      breakStrategy: graphicsText.BreakStrategy.GREEDY,
+      trailingSpaceOptimized: true,
+      includeFontPadding: false
+    };
+    const builder = new graphicsText.ParagraphBuilder(paragraphStyle, graphicsText.FontCollection.getGlobalInstance());
+    this.addMeasuredReaderText(builder, text || '', chapterIndex, bodyStyle);
+    const paragraph = builder.build();
+    paragraph.layoutSync(this.toMeasurePx(availableWidth));
+    return paragraph;
+  }
+
+  addMeasuredReaderText(builder: graphicsText.ParagraphBuilder, text: string, chapterIndex: number,
+    bodyStyle: graphicsText.TextStyle): void {
+    if (this.shouldUseTitleStyle(text, chapterIndex)) {
+      const title = this.getChapterTitle(chapterIndex).trim();
+      const titleLength = Math.min(title.length, text.length);
+      const titleStyle = this.buildReaderMeasureTextStyle(this.readerTitleFontSize, this.getTitleReaderFontFamily());
+      builder.pushStyle(titleStyle);
+      builder.addText(text.substring(0, titleLength));
+      builder.popStyle();
+      const rest = text.substring(titleLength);
+      if (rest) {
+        this.addMeasuredRegexReaderText(builder, rest, bodyStyle);
+      }
+      return;
+    }
+    this.addMeasuredRegexReaderText(builder, text, bodyStyle);
+  }
+
+  addMeasuredRegexReaderText(builder: graphicsText.ParagraphBuilder, text: string,
+    bodyStyle: graphicsText.TextStyle): void {
+    if (!this.readerRegexFontEnabled) {
+      builder.pushStyle(bodyStyle);
+      builder.addText(text);
+      builder.popStyle();
+      return;
+    }
+    const slices = this.getRegexTextSlices(text);
+    for (const slice of slices) {
+      const style = slice.highlighted ?
+        this.buildReaderMeasureTextStyle(this.getRegexSliceFontSize(slice), this.getRegexSliceFontFamily(slice)) :
+        bodyStyle;
+      builder.pushStyle(style);
+      builder.addText(slice.text);
+      builder.popStyle();
+    }
+  }
+
+  getParagraphFallbackMeasureStyle(text: string, chapterIndex: number): ReaderParagraphMeasureFallback {
+    if (this.shouldUseTitleStyle(text, chapterIndex)) {
+      return {
+        fontSize: this.readerTitleFontSize,
+        fontFamily: this.getTitleReaderFontFamily()
+      };
+    }
+    if (this.readerRegexFontEnabled) {
+      const slices = this.getRegexTextSlices(text);
+      for (const slice of slices) {
+        if (slice.highlighted) {
+          return {
+            fontSize: this.getRegexSliceFontSize(slice),
+            fontFamily: this.getRegexSliceFontFamily(slice)
+          };
+        }
+      }
+    }
+    return {
+      fontSize: this.readerFontSize,
+      fontFamily: this.getBodyReaderFontFamily()
+    };
   }
 
   toMeasurePx(value: number): number {
@@ -5838,7 +5973,7 @@ struct ReadBookPage {
     .width('100%')
     .height('100%')
     .id(`reader_current_${this.currentChapterIndex}_${this.currentPageIndex}_${this.displayPageRenderKey}_${renderVersion}_${ttsRenderVersion}`)
-    .backgroundColor(this.getBackgroundColor())
+    .backgroundColor(Color.Transparent)
     .backgroundImage(this.getBackgroundImage(), ImageRepeat.NoRepeat)
     .backgroundImageSize(this.getBackgroundImageSize())
     .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() })
@@ -5879,11 +6014,11 @@ struct ReadBookPage {
   readerCurrentPageLayer(renderVersion: number, text: string, ttsRenderVersion: number) {
     Column() {
       if (renderVersion % 2 === 0) {
-        this.styledCurrentReaderText(text, this.readerMarginBottom + this.getReaderContentBottomReserve(),
+        this.styledCurrentReaderText(text, this.getReaderContentBottomPadding(),
           this.currentChapterIndex,
           ttsRenderVersion, renderVersion, this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion))
       } else {
-        this.styledCurrentReaderText(text, this.readerMarginBottom + this.getReaderContentBottomReserve(),
+        this.styledCurrentReaderText(text, this.getReaderContentBottomPadding(),
           this.currentChapterIndex,
           ttsRenderVersion, renderVersion, this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion))
       }
@@ -5900,11 +6035,11 @@ struct ReadBookPage {
   readerIncomingPageLayer(renderVersion: number, text: string) {
     Column() {
       if (renderVersion % 2 === 0) {
-        this.styledReaderText(text, this.readerMarginBottom + this.getReaderContentBottomReserve(),
+        this.styledReaderText(text, this.getReaderContentBottomPadding(),
           this.pageTurnIncomingChapterIndex, 0,
           renderVersion, this.incomingReaderPageRenderIdentity(renderVersion, text))
       } else {
-        this.styledReaderText(text, this.readerMarginBottom + this.getReaderContentBottomReserve(),
+        this.styledReaderText(text, this.getReaderContentBottomPadding(),
           this.pageTurnIncomingChapterIndex, 0,
           renderVersion, this.incomingReaderPageRenderIdentity(renderVersion, text))
       }
@@ -6667,7 +6802,7 @@ struct ReadBookPage {
     router.back();
   }
 
-  paginateReaderSourceText(source: string): ReaderPaginationResult {
+  paginateReaderSourceText(source: string, chapterIndex: number = this.currentChapterIndex): ReaderPaginationResult {
     const text = source || '';
     if (!text || this.pageViewWidth <= 0 || this.pageViewHeight <= 0) {
       return {
@@ -6679,17 +6814,18 @@ struct ReadBookPage {
     }
 
     const horizontalPadding = this.readerMarginLeft + this.readerMarginRight;
-    const verticalPadding = this.readerMarginTop + this.readerMarginBottom + this.getReaderContentBottomReserve();
+    const verticalPadding = this.readerMarginTop + this.getReaderContentBottomPadding() +
+      this.getReaderBottomInfoBarHeight();
     const availableWidth = Math.max(1, this.pageViewWidth - horizontalPadding);
     const availableHeight = Math.max(1, this.pageViewHeight - verticalPadding);
-    const measuredAvailableHeight = this.toMeasurePx(availableHeight);
+    const measuredAvailableHeight = this.toMeasurePx(availableHeight) + this.getReaderPaginationHeightTolerancePx();
     const pages: string[] = [];
     const starts: number[] = [];
     const ends: number[] = [];
     let cursor = 0;
 
     while (cursor < text.length) {
-      const end = this.findMeasuredPageEnd(text, cursor, availableWidth, measuredAvailableHeight);
+      const end = this.findMeasuredPageEnd(text, cursor, availableWidth, measuredAvailableHeight, chapterIndex);
       if (end <= cursor) {
         break;
       }
@@ -6706,7 +6842,7 @@ struct ReadBookPage {
   }
 
   buildReaderPaginationCacheKey(chapterIndex: number, source: string): string {
-    return `${chapterIndex}_${this.pageViewWidth}_${this.pageViewHeight}_${this.readerTypographyCacheIdentity()}_` +
+    return `reader_page_v5_${chapterIndex}_${this.pageViewWidth}_${this.pageViewHeight}_${this.readerTypographyCacheIdentity()}_` +
       `${source.length}_${this.hashText(source)}`;
   }
 
@@ -6732,7 +6868,7 @@ struct ReadBookPage {
     if (cached) {
       return cached;
     }
-    const result = this.paginateReaderSourceText(source);
+    const result = this.paginateReaderSourceText(source, chapterIndex);
     this.readerPaginationCache.set(key, result);
     while (this.readerPaginationCache.size > 6) {
       const oldestKey = this.readerPaginationCache.keys().next().value as string | undefined;

@@ -4411,7 +4411,9 @@ struct SettingsPage {
           })
         }
         .width('100%')
+        .height('100%')
         .padding({ bottom: 96 })
+        .justifyContent(FlexAlign.Start)
       }
       .width('100%')
       .layoutWeight(1)
