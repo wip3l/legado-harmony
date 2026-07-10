@@ -2,6 +2,8 @@ import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { AppThemeSettings, AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 import { ColorCodePicker } from '../components/ColorCodePicker';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ThemeIds } from '../theme/ThemeModels';
 
 @Component
 struct ThemeColorOption {
@@ -55,10 +57,11 @@ struct ThemeColorOption {
 @Component
 struct ThemeColorSettingsPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
-  @StorageLink('appLightAccentColor') lightAccentColor: string = '#007DFF';
-  @StorageLink('appDarkAccentColor') darkAccentColor: string = '#4E9BFF';
-  @StorageLink('appLightButtonColor') lightButtonColor: string = '#007DFF';
-  @StorageLink('appDarkButtonColor') darkButtonColor: string = '#3F8CFF';
+  @StorageLink('appCustomLightAccentColor') lightAccentColor: string = '#007DFF';
+  @StorageLink('appCustomDarkAccentColor') darkAccentColor: string = '#4E9BFF';
+  @StorageLink('appCustomLightButtonColor') lightButtonColor: string = '#007DFF';
+  @StorageLink('appCustomDarkButtonColor') darkButtonColor: string = '#3F8CFF';
+  @StorageLink('appCustomBaseThemeId') customBaseThemeId: string = AppThemeSettingsStore.DEFAULT_THEME_ID;
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State selectedMode: string = 'light';
@@ -79,7 +82,7 @@ struct ThemeColorSettingsPage {
 
       Scroll() {
         Column() {
-          this.sectionTitle('主题色设置')
+          this.sectionTitle('修改任一颜色后会自动启用自定义主题')
           this.modeOptions()
           this.colorOptions()
           this.previewPanel()
@@ -100,25 +103,34 @@ struct ThemeColorSettingsPage {
     try {
       const settings = await AppThemeSettingsStore.load(getContext(this));
       AppThemeSettingsStore.applyToStorage(settings);
-      this.lightAccentColor = settings.lightAccentColor;
-      this.darkAccentColor = settings.darkAccentColor;
-      this.lightButtonColor = settings.lightButtonColor;
-      this.darkButtonColor = settings.darkButtonColor;
+      this.customBaseThemeId = settings.customBaseThemeId;
+      this.lightAccentColor = settings.customLightAccentColor;
+      this.darkAccentColor = settings.customDarkAccentColor;
+      this.lightButtonColor = settings.customLightButtonColor;
+      this.darkButtonColor = settings.customDarkButtonColor;
     } catch (e) {
       console.warn('读取主题色设置失败:', e);
     }
   }
 
-  onSettingChanged(): void {
-    const settings = new AppThemeSettings();
-    settings.lightAccentColor = this.lightAccentColor;
-    settings.darkAccentColor = this.darkAccentColor;
-    settings.lightButtonColor = this.lightButtonColor;
-    settings.darkButtonColor = this.darkButtonColor;
-    AppThemeSettingsStore.applyToStorage(settings);
-    AppThemeSettingsStore.save(getContext(this), settings).catch((e: Error) => {
+  async onSettingChanged(): Promise<void> {
+    try {
+      const settings: AppThemeSettings = await AppThemeSettingsStore.load(getContext(this));
+      settings.themeId = ThemeIds.CUSTOM;
+      settings.customBaseThemeId = this.customBaseThemeId;
+      settings.lightAccentColor = this.lightAccentColor;
+      settings.darkAccentColor = this.darkAccentColor;
+      settings.lightButtonColor = this.lightButtonColor;
+      settings.darkButtonColor = this.darkButtonColor;
+      settings.customLightAccentColor = this.lightAccentColor;
+      settings.customDarkAccentColor = this.darkAccentColor;
+      settings.customLightButtonColor = this.lightButtonColor;
+      settings.customDarkButtonColor = this.darkButtonColor;
+      AppThemeSettingsStore.applyToStorage(settings);
+      await AppThemeSettingsStore.save(getContext(this), settings);
+    } catch (e) {
       console.warn('保存主题色设置失败:', e);
-    });
+    }
   }
 
   setCurrentAccentColor(color: string): void {
@@ -150,23 +162,23 @@ struct ThemeColorSettingsPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   inputColor(): string {
-    return this.appDarkMode ? '#24272D' : '#F0F2F5';
+    return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#888';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   syncBars(): void {
@@ -185,7 +197,7 @@ struct ThemeColorSettingsPage {
         .onClick(() => {
           router.back();
         })
-      Text('主题色设置')
+      Text('自定义主题')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
         .fontColor(this.primaryTextColor())
@@ -219,10 +231,11 @@ struct ThemeColorSettingsPage {
 
   @Builder
   modeButton(title: string, mode: string) {
-    Text(title)
-      .fontSize(14)
-      .fontColor(this.selectedMode === mode ? '#FFFFFF' : this.primaryTextColor())
-      .textAlign(TextAlign.Center)
+    Stack({ alignContent: Alignment.Center }) {
+      Text(title)
+        .fontSize(14)
+        .fontColor(this.selectedMode === mode ? '#FFFFFF' : this.primaryTextColor())
+    }
       .layoutWeight(1)
       .height(38)
       .borderRadius(19)
@@ -310,4 +323,5 @@ struct ThemeColorSettingsPage {
     .backgroundColor(this.cardColor())
     .margin({ top: 12 })
   }
+
 }

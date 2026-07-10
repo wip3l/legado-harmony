@@ -7,6 +7,7 @@ import { HttpClient } from '../core/http/HttpClient';
 import { syncSystemBars } from '../utils/SystemBars';
 import { SystemTtsReader } from '../utils/SystemTtsReader';
 import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 const CUSTOM_TTS_IMPORT_FILE_LIMIT_BYTES: number = 2 * 1024 * 1024;
 
@@ -469,31 +470,31 @@ struct CustomTtsVoiceManagerPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   inputColor(): string {
-    return this.appDarkMode ? '#202329' : '#F6F7F9';
+    return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#888888';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   accentColor(): string {
-    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+    return ThemeRuntime.accentColor(this.appDarkMode);
   }
 
   buttonColor(): string {
-    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+    return ThemeRuntime.buttonColor(this.appDarkMode);
   }
 
   @Builder

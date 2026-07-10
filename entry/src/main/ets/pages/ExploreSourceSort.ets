@@ -3,6 +3,7 @@ import { BookSource } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { SearchExploreSettings, SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import { syncSystemBars } from '../utils/SystemBars';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 @Entry
 @Component
@@ -241,23 +242,23 @@ struct ExploreSourceSortPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   inputColor(): string {
-    return this.appDarkMode ? '#24272D' : '#F0F2F5';
+    return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#888';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   disabledTextColor(): string {
@@ -269,7 +270,7 @@ struct ExploreSourceSortPage {
   }
 
   buttonColor(): string {
-    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+    return ThemeRuntime.buttonColor(this.appDarkMode);
   }
 
   syncBars(): void {

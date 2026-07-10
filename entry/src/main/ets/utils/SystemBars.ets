@@ -1,9 +1,10 @@
 import { window } from '@kit.ArkUI';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 let safeAreaListenerRegistered = false;
 
 export function syncSystemBars(context: Context, darkMode: boolean, backgroundColor?: string): void {
-  const bg = backgroundColor || (darkMode ? '#101113' : '#F5F5F5');
+  const bg = backgroundColor || ThemeRuntime.pageColor(darkMode);
   window.getLastWindow(context).then((mainWindow: window.Window) => {
     mainWindow.setWindowBackgroundColor(bg);
     mainWindow.setWindowLayoutFullScreen(true);
@@ -12,10 +13,10 @@ export function syncSystemBars(context: Context, darkMode: boolean, backgroundCo
     mainWindow.setWindowSystemBarProperties({
       statusBarColor: '#00000000',
       isStatusBarLightIcon: darkMode,
-      statusBarContentColor: darkMode ? '#FFFFFF' : '#1F1F1F',
+      statusBarContentColor: ThemeRuntime.primaryTextColor(darkMode),
       navigationBarColor: '#00000000',
       isNavigationBarLightIcon: darkMode,
-      navigationBarContentColor: darkMode ? '#FFFFFF' : '#1F1F1F'
+      navigationBarContentColor: ThemeRuntime.primaryTextColor(darkMode)
     });
   }).catch((err: Error) => {
     console.error('同步系统栏颜色失败:', err);

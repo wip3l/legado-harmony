@@ -4,6 +4,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ReaderFontHelper, ReaderFontItem } from './ReaderFontHelper';
 import { ReaderSettings, ReaderSettingsStore } from './ReaderSettingsStore';
 import { ReaderSystemFontHelper } from './ReaderSystemFontHelper';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 export class ReaderFontBootstrap {
   static async registerFromSettings(context: Context, uiContext: UIContext | null, source: string): Promise<boolean> {
@@ -25,10 +26,11 @@ export class ReaderFontBootstrap {
   ): boolean {
     if (!settings.fontFilePath) {
       const systemFontFamily = ReaderSystemFontHelper.applyToStorage(uiContext);
+      const applicationFontFamily = ThemeRuntime.fontFamily() || systemFontFamily;
       AppStorage.setOrCreate('readerActiveFontFamily', '');
       AppStorage.setOrCreate('readerFontRegistered', false);
       try {
-        context.getApplicationContext().setFont(systemFontFamily);
+        context.getApplicationContext().setFont(applicationFontFamily);
       } catch (err) {
         hilog.warn(0x0000, 'testTag', 'Reader font bootstrap reset default failed source=%{public}s err=%{public}s',
           source, JSON.stringify(err));
@@ -60,6 +62,13 @@ export class ReaderFontBootstrap {
     if (!result.registered) {
       AppStorage.setOrCreate('readerActiveFontFamily', '');
       AppStorage.setOrCreate('readerFontRegistered', false);
+      try {
+        context.getApplicationContext().setFont(ThemeRuntime.fontFamily());
+      } catch (fallbackError) {
+        hilog.warn(0x0000, 'testTag',
+          'Reader font bootstrap theme fallback failed source=%{public}s err=%{public}s',
+          source, JSON.stringify(fallbackError));
+      }
       hilog.warn(0x0000, 'testTag',
         'Reader font bootstrap failed source=%{public}s path=%{public}s family=%{public}s ark=%{public}s legacy=%{public}s graphics=%{public}s errors=%{public}s',
         source, result.filePath || settings.fontFilePath, result.familyName, String(result.arkUiRegistered),

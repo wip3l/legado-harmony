@@ -34,6 +34,7 @@ export interface SearchOptions {
   exactMatch?: boolean;
   exactMatchAuthor?: boolean;
   sourceGroups?: string[];
+  onSourceComplete?: (source: BookSource, books: SearchBook[]) => Promise<void>;
 }
 
 interface ScoredSearchBook {
@@ -122,6 +123,13 @@ export class SearchCoordinator {
         AppStorage.setOrCreate('searchLastSourceIndex', sourceIndex + 1);
         const books = await this.searchOne(sources[sourceIndex], keyword, options);
         if (this.cancelled) break;
+        if (options.onSourceComplete) {
+          try {
+            await options.onSourceComplete(sources[sourceIndex], books);
+          } catch (e) {
+            console.error('[SC] source completion callback failed:', e);
+          }
+        }
         const displayBooks = this.filterSearchResults(books, keyword, options);
 
         done++;

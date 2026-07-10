@@ -7,6 +7,7 @@ import { HttpClient } from '../core/http/HttpClient';
 import { syncSystemBars } from '../utils/SystemBars';
 import { SystemTtsReader, TtsVoiceOption } from '../utils/SystemTtsReader';
 import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 const TTS_CUSTOM_VOICE_IMPORT_LIMIT_BYTES: number = 2 * 1024 * 1024;
 
@@ -181,31 +182,31 @@ struct TtsSettingsPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#888';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   inputColor(): string {
-    return this.appDarkMode ? '#202329' : '#F6F7F9';
+    return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
   accentColor(): string {
-    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+    return ThemeRuntime.accentColor(this.appDarkMode);
   }
 
   buttonColor(): string {
-    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+    return ThemeRuntime.buttonColor(this.appDarkMode);
   }
 
   syncBars(): void {
@@ -865,25 +866,25 @@ struct TtsSettingsPage {
 
   voiceRowColor(voice: TtsVoiceOption): string {
     if (this.isVoiceDownloading(voice)) {
-      return this.appDarkMode ? '#12304D' : '#E8F2FF';
+      return ThemeRuntime.accentSurfaceColor(this.appDarkMode);
     }
     if (!voice.available) {
-      return this.appDarkMode ? '#1B1D22' : '#F1F2F4';
+      return this.inputColor();
     }
-    return this.isVoiceSelected(voice) ? (this.appDarkMode ? '#12304D' : '#E8F2FF') :
-      (this.appDarkMode ? '#202329' : '#F6F7F9');
+    return this.isVoiceSelected(voice) ? ThemeRuntime.accentSurfaceColor(this.appDarkMode) : this.inputColor();
   }
 
   @Builder
   speedChip(value: number) {
-    Text(`${value.toFixed(1)}x`)
-      .fontSize(13)
-      .fontColor(Math.abs(this.ttsSpeed - value) < 0.01 ? '#FFFFFF' : this.primaryTextColor())
-      .textAlign(TextAlign.Center)
+    Stack({ alignContent: Alignment.Center }) {
+      Text(`${value.toFixed(1)}x`)
+        .fontSize(13)
+        .fontColor(Math.abs(this.ttsSpeed - value) < 0.01 ? '#FFFFFF' : this.primaryTextColor())
+    }
       .layoutWeight(1)
       .height(32)
       .borderRadius(16)
-      .backgroundColor(Math.abs(this.ttsSpeed - value) < 0.01 ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+      .backgroundColor(Math.abs(this.ttsSpeed - value) < 0.01 ? this.accentColor() : this.inputColor())
       .onClick(() => {
         this.applySpeed(value);
       })
@@ -923,8 +924,8 @@ struct TtsSettingsPage {
     .width('100%')
     .padding({ left: 12, right: 12, top: 12, bottom: 12 })
     .borderRadius(8)
-    .backgroundColor(this.isCustomVoiceSelected(voice) ? (this.appDarkMode ? '#12304D' : '#E8F2FF') :
-      (this.appDarkMode ? '#202329' : '#F6F7F9'))
+    .backgroundColor(this.isCustomVoiceSelected(voice) ? ThemeRuntime.accentSurfaceColor(this.appDarkMode) :
+      this.inputColor())
   }
 
   @Builder
@@ -946,8 +947,8 @@ struct TtsSettingsPage {
     .width('100%')
     .padding({ left: 12, right: 12, top: 12, bottom: 12 })
     .borderRadius(8)
-    .backgroundColor(this.isCustomVoiceSelected(voice) ? (this.appDarkMode ? '#12304D' : '#E8F2FF') :
-      (this.appDarkMode ? '#202329' : '#F6F7F9'))
+    .backgroundColor(this.isCustomVoiceSelected(voice) ? ThemeRuntime.accentSurfaceColor(this.appDarkMode) :
+      this.inputColor())
     .onClick(() => {
       this.applyCustomVoice(voice);
     })

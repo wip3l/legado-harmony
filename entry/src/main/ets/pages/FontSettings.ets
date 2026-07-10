@@ -4,6 +4,7 @@ import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import fs from '@ohos.file.fs';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -200,12 +201,12 @@ struct FontSettingsPage {
     this.readerFontMode = 'system';
     this.readerFontFamily = '';
     this.readerFontFilePath = '';
-    this.readerFontSourceName = '系统默认';
+    this.readerFontSourceName = '跟随主题';
     this.readerActiveFontFamily = '';
     this.readerFontRegistered = false;
-    this.applyApplicationFont(systemFontFamily);
+    this.applyApplicationFont(ThemeRuntime.fontFamily() || systemFontFamily);
     this.saveFontSettings();
-    promptAction.showToast({ message: '已恢复系统默认字体' });
+    promptAction.showToast({ message: '已恢复主题默认字体' });
   }
 
   selectCustomFont(item: ReaderCustomFontItem): void {
@@ -268,7 +269,7 @@ struct FontSettingsPage {
   }
 
   readerFontOptions(): SelectOption[] {
-    const options: SelectOption[] = [{ value: '系统默认' }];
+    const options: SelectOption[] = [{ value: '跟随主题' }];
     for (const item of this.customFonts) {
       options.push({ value: item.sourceName || item.familyName });
     }
@@ -290,14 +291,14 @@ struct FontSettingsPage {
   readerFontValue(): string {
     const index = this.readerFontSelectedIndex();
     if (index <= 0) {
-      return '系统默认';
+      return '跟随主题';
     }
     const customIndex = index - 1;
     if (customIndex >= 0 && customIndex < this.customFonts.length) {
       const item = this.customFonts[customIndex];
       return item.sourceName || item.familyName || '自定义字体';
     }
-    return '系统默认';
+    return '跟随主题';
   }
 
   selectReaderFontByIndex(index: number): void {
@@ -412,27 +413,27 @@ struct FontSettingsPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   inputColor(): string {
-    return this.appDarkMode ? '#24272D' : '#F0F2F5';
+    return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#888';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   accentColor(): string {
-    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+    return ThemeRuntime.accentColor(this.appDarkMode);
   }
 
   syncBars(): void {

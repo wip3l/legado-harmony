@@ -28,6 +28,16 @@ import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore'
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
 import { BookCoverCache } from '../utils/BookCoverCache';
 import { CoverGallerySettings } from '../utils/CoverGallerySettings';
+import {
+  ReaderRegexBubbleStyleResolver,
+  ReaderRegexEmphasisContext,
+  ReaderRegexFontCodec,
+  ReaderRegexFontRule,
+  ReaderRegexLegacySettings,
+  ReaderResolvedRegexEmphasis
+} from '../model/reader/ReaderRegexFontRule';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
 
 interface ReadTextSlice {
   text: string;
@@ -53,22 +63,6 @@ interface ReaderPaginationResult {
   pages: string[];
   starts: number[];
   ends: number[];
-}
-
-class ReaderRegexFontRule {
-  id: string = '';
-  name: string = '';
-  pattern: string = '';
-  fontMode: string = 'global';
-  fontFamily: string = '';
-  fontSize: number = 20;
-  highlightColorEnabled: boolean = false;
-  shadowColor: string = '';
-  expanded: boolean = true;
-}
-
-class ReaderRegexFontRulesData {
-  rules: ReaderRegexFontRule[] = [];
 }
 
 class ReaderCustomFontItem {
@@ -101,6 +95,7 @@ struct ReadBookPage {
   @State showSettings: boolean = false;
   @State showTapZoneSettings: boolean = false;
   @State settingsPanelTab: number = 0;
+  @State quickTypographySettingIndex: number = 0;
   @State loadStatus: string = '';
   @State verificationUrl: string = '';
   @State verificationTitle: string = '网页验证';
@@ -157,6 +152,8 @@ struct ReadBookPage {
   private contentPageEnds: number[] = [];
   private pagedContentText: string = '';
   private readerPaginationCache: Map<string, ReaderPaginationResult> = new Map();
+  private cachedRegexRulesKey: string = '';
+  private cachedRegexRules: ReaderRegexFontRule[] = [];
   private adjacentPaginationPreloadSerial: number = 0;
   private pageTurnPreviewKey: string = '';
   private pageTurnPreviewLoadingKey: string = '';
@@ -192,6 +189,10 @@ struct ReadBookPage {
   @StorageLink('readerFontSize') @Watch('onReadLayoutChanged') readerFontSize: number = 20;
   @StorageLink('readerLineHeight') @Watch('onReadLayoutChanged') readerLineHeight: number = 12;
   @StorageLink('readerParagraphSpacing') @Watch('onReadLayoutChanged') readerParagraphSpacing: number = 10;
+  @StorageLink('readerMarginLeft') @Watch('onReadLayoutChanged') readerMarginLeft: number = 18;
+  @StorageLink('readerMarginRight') @Watch('onReadLayoutChanged') readerMarginRight: number = 18;
+  @StorageLink('readerMarginTop') @Watch('onReadLayoutChanged') readerMarginTop: number = 18;
+  @StorageLink('readerMarginBottom') @Watch('onReadLayoutChanged') readerMarginBottom: number = 18;
   @StorageLink('readerLightThemeIndex') @Watch('onReaderThemeChanged') readerLightThemeIndex: number = 0;
   @StorageLink('readerDarkThemeIndex') @Watch('onReaderThemeChanged') readerDarkThemeIndex: number = 0;
   @StorageLink('readerLightCustomThemeBackgroundColor') @Watch('onReaderThemeChanged') readerLightCustomThemeBackgroundColor: string = ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR;
@@ -227,6 +228,7 @@ struct ReadBookPage {
   @State readerFontRegistered: boolean = false;
   @State readerFontRenderReady: boolean = false;
   @StorageLink('appDarkMode') @Watch('onReaderThemeChanged') appDarkMode: boolean = false;
+  @StorageLink('themeRevision') @Watch('onReaderThemeChanged') themeRevision: number = 0;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
@@ -1411,6 +1413,33 @@ struct ReadBookPage {
     return this.currentReaderTheme().backgroundColor;
   }
 
+  getBackgroundAssetId(): string {
+    return this.currentReaderTheme().backgroundAssetId || '';
+  }
+
+  getBackgroundImage(): ResourceStr {
+    return ThemeAssetRegistry.readerBackground(this.getBackgroundAssetId());
+  }
+
+  getBackgroundImageSize(): ImageSize {
+    const fit = this.currentReaderTheme().backgroundImageFit;
+    if (fit === 'contain') {
+      return ImageSize.Contain;
+    }
+    if (fit === 'fill') {
+      return ImageSize.FILL;
+    }
+    return ImageSize.Cover;
+  }
+
+  hasBackgroundImage(): boolean {
+    return !!this.getBackgroundAssetId();
+  }
+
+  readerContentLayerColor(): string {
+    return this.hasBackgroundImage() ? '#00000000' : this.getBackgroundColor();
+  }
+
   getTextColor(): string {
     return this.currentReaderTheme().textColor;
   }
@@ -1456,6 +1485,10 @@ struct ReadBookPage {
   }
 
   isReaderThemeDark(): boolean {
+    const tone = this.currentReaderTheme().contentTone;
+    if (tone === 'dark' || tone === 'light') {
+      return tone === 'dark';
+    }
     return this.isDarkHexColor(this.getBackgroundColor());
   }
 
@@ -1485,7 +1518,7 @@ struct ReadBookPage {
 
   getTitleReaderFontFamily(): string {
     if (this.readerTitleFontMode === 'global' && !this.readerTitleFontFamily) {
-      return this.getSystemReaderFontFamily();
+      return this.getReaderFontFamily();
     }
     return this.resolveStyledReaderFontFamily(this.readerTitleFontMode, this.readerTitleFontFamily);
   }
@@ -1586,7 +1619,7 @@ struct ReadBookPage {
     if (this.readerActiveFontFamily) {
       return this.readerActiveFontFamily;
     }
-    return this.readerFontFamily || this.getSystemReaderFontFamily();
+    return this.readerFontFamily || ThemeRuntime.fontFamily() || this.getSystemReaderFontFamily();
   }
 
   getSystemReaderFontFamily(): string {
@@ -1705,6 +1738,10 @@ struct ReadBookPage {
     this.readerFontSize = settings.fontSize;
     this.readerLineHeight = settings.lineHeight;
     this.readerParagraphSpacing = settings.paragraphSpacing;
+    this.readerMarginLeft = settings.marginLeft;
+    this.readerMarginRight = settings.marginRight;
+    this.readerMarginTop = settings.marginTop;
+    this.readerMarginBottom = settings.marginBottom;
     this.readerLightThemeIndex = settings.lightThemeIndex;
     this.readerDarkThemeIndex = settings.darkThemeIndex;
     this.readerLightCustomThemeBackgroundColor = settings.lightCustomThemeBackgroundColor;
@@ -1742,6 +1779,10 @@ struct ReadBookPage {
   }
 
   onReaderFontStyleChanged(): void {
+    this.cachedRegexRulesKey = '';
+    this.cachedRegexRules = [];
+    this.readerPaginationCache.clear();
+    this.pageTurnPreviewKey = '';
     this.registerStyledCustomReaderFonts();
     this.refreshReaderTextRender();
     this.paginateContent(this.content);
@@ -2219,11 +2260,11 @@ struct ReadBookPage {
   }
 
   accentColor(): string {
-    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+    return ThemeRuntime.accentColor(this.appDarkMode);
   }
 
   buttonColor(): string {
-    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+    return ThemeRuntime.buttonColor(this.appDarkMode);
   }
 
   tocSelectedBackgroundColor(): string {
@@ -2318,6 +2359,7 @@ struct ReadBookPage {
 
   onReaderThemeChanged(): void {
     this.enterReaderImmersive();
+    this.refreshReaderTextRender();
     this.paginateContent(this.content);
     this.saveReadingProgress();
     this.onTtsCoverSettingsChanged();
@@ -3593,103 +3635,59 @@ struct ReadBookPage {
   }
 
   @Builder
+  readerQuickTypographyStepper() {
+    Row({ space: 8 }) {
+      Select(this.quickTypographySettingOptions())
+        .selected(this.quickTypographySettingIndex)
+        .value(this.quickTypographySettingTitle())
+        .font({ size: 14 })
+        .fontColor(this.getTextColor())
+        .backgroundColor(this.isReaderThemeDark() ? '#24272D' : '#EEF0F3')
+        .borderRadius(8)
+        .constraintSize({ minWidth: 126, maxWidth: 160 })
+        .onSelect((index: number) => {
+          this.quickTypographySettingIndex = Math.max(0,
+            Math.min(index, this.quickTypographySettingOptions().length - 1));
+        })
+      Blank()
+        .layoutWeight(1)
+      Button('-')
+        .width(44)
+        .height(36)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .onClick(() => {
+          this.adjustQuickTypographySetting(-1);
+        })
+      Text(`${this.currentQuickTypographySettingValue()}`)
+        .fontSize(15)
+        .fontColor(this.getTextColor())
+        .width(42)
+        .textAlign(TextAlign.Center)
+      Button('+')
+        .width(44)
+        .height(36)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .onClick(() => {
+          this.adjustQuickTypographySetting(1);
+        })
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
   readerQuickSettingsPanel() {
     Column({ space: 14 }) {
-      Row() {
-        Text('字号')
-          .fontSize(15)
-          .fontColor(this.getTextColor())
-          .layoutWeight(1)
-        Button('-')
-          .width(44)
-          .height(36)
-          .backgroundColor(this.buttonColor())
-          .fontColor('#FFFFFF')
-          .onClick(() => {
-            this.applyReaderFontSize(this.readerFontSize - 1);
-          })
-        Text(`${this.readerFontSize}`)
-          .fontSize(15)
-          .fontColor(this.getTextColor())
-          .width(48)
-          .textAlign(TextAlign.Center)
-        Button('+')
-          .width(44)
-          .height(36)
-          .backgroundColor(this.buttonColor())
-          .fontColor('#FFFFFF')
-          .onClick(() => {
-            this.applyReaderFontSize(this.readerFontSize + 1);
-          })
-      }
-      .width('100%')
-
-      Row() {
-        Text('行距')
-          .fontSize(15)
-          .fontColor(this.getTextColor())
-          .layoutWeight(1)
-        Button('-')
-          .width(44)
-          .height(36)
-          .backgroundColor(this.buttonColor())
-          .fontColor('#FFFFFF')
-          .onClick(() => {
-            this.applyReaderLineHeight(this.readerLineHeight - 1);
-          })
-        Text(`${this.readerLineHeight}`)
-          .fontSize(15)
-          .fontColor(this.getTextColor())
-          .width(48)
-          .textAlign(TextAlign.Center)
-        Button('+')
-          .width(44)
-          .height(36)
-          .backgroundColor(this.buttonColor())
-          .fontColor('#FFFFFF')
-          .onClick(() => {
-            this.applyReaderLineHeight(this.readerLineHeight + 1);
-          })
-      }
-      .width('100%')
-
-      Row() {
-        Text('段落间距')
-          .fontSize(15)
-          .fontColor(this.getTextColor())
-          .layoutWeight(1)
-        Button('-')
-          .width(44)
-          .height(36)
-          .backgroundColor(this.buttonColor())
-          .fontColor('#FFFFFF')
-          .onClick(() => {
-            this.applyReaderParagraphSpacing(this.readerParagraphSpacing - 1);
-          })
-        Text(`${this.readerParagraphSpacing}`)
-          .fontSize(15)
-          .fontColor(this.getTextColor())
-          .width(48)
-          .textAlign(TextAlign.Center)
-        Button('+')
-          .width(44)
-          .height(36)
-          .backgroundColor(this.buttonColor())
-          .fontColor('#FFFFFF')
-          .onClick(() => {
-            this.applyReaderParagraphSpacing(this.readerParagraphSpacing + 1);
-          })
-      }
-      .width('100%')
+      this.readerQuickTypographyStepper()
 
       this.readerFontEntryItem()
 
-      Row({ space: 8 }) {
-        this.pageTurnModeButton('滚动', 0)
-        this.pageTurnModeButton('滑动', 1)
-        this.pageTurnModeButton('点击', 2)
-      }
-      .width('100%')
+      this.readerSelectSettingItem('翻页方式', '选择滚动、滑动或点击翻页',
+        this.pageTurnModeOptions(), this.pageTurnModeSelectedIndex(), (index: number) => {
+          this.switchPageTurnMode(index);
+        })
 
       if (this.readerPageTurnMode === 2) {
         this.readerTapZoneSettingItem()
@@ -3707,7 +3705,8 @@ struct ReadBookPage {
 
       Row({ space: 10 }) {
         ForEach(this.currentReaderThemes(), (theme: ReaderThemeItem, index: number) => {
-          Text(index === ReaderThemeHelper.CUSTOM_THEME_INDEX ? '自' : '')
+          Text(index === ReaderThemeHelper.CUSTOM_THEME_INDEX ? '自' :
+            (index === ReaderThemeHelper.APP_THEME_INDEX ? '主' : ''))
             .width(42)
             .height(42)
             .borderRadius(21)
@@ -3918,19 +3917,16 @@ struct ReadBookPage {
     })
   }
 
-  @Builder
-  pageTurnModeButton(title: string, mode: number) {
-    Text(title)
-      .fontSize(13)
-      .fontColor(this.readerPageTurnMode === mode ? '#FFFFFF' : '#333333')
-      .textAlign(TextAlign.Center)
-      .layoutWeight(1)
-      .height(36)
-      .borderRadius(18)
-      .backgroundColor(this.readerPageTurnMode === mode ? this.accentColor() : '#EEF0F3')
-      .onClick(() => {
-        this.switchPageTurnMode(mode);
-      })
+  pageTurnModeOptions(): SelectOption[] {
+    return [
+      { value: '滚动阅读' },
+      { value: '滑动翻页' },
+      { value: '点击翻页' }
+    ];
+  }
+
+  pageTurnModeSelectedIndex(): number {
+    return this.readerPageTurnMode >= 0 && this.readerPageTurnMode <= 2 ? this.readerPageTurnMode : 0;
   }
 
   pageTurnAnimationOptions(): SelectOption[] {
@@ -4112,7 +4108,7 @@ struct ReadBookPage {
 
       Select(options)
         .selected(selected)
-        .value(this.pageTurnAnimationValue())
+        .value(this.readerSelectOptionValue(options, selected))
         .font({ size: 13 })
         .fontColor(this.getTextColor())
         .backgroundColor(this.isReaderThemeDark() ? '#202329' : '#EEF0F3')
@@ -4126,6 +4122,13 @@ struct ReadBookPage {
     .width('100%')
     .constraintSize({ minHeight: 56 })
     .alignItems(VerticalAlign.Center)
+  }
+
+  readerSelectOptionValue(options: SelectOption[], index: number): ResourceStr {
+    if (index >= 0 && index < options.length) {
+      return options[index].value;
+    }
+    return options.length > 0 ? options[0].value : '';
   }
 
   @Builder
@@ -4252,10 +4255,93 @@ struct ReadBookPage {
       getContext(this),
       this.readerFontSize,
       this.readerLineHeight,
-      this.readerParagraphSpacing
+      this.readerParagraphSpacing,
+      this.readerMarginLeft,
+      this.readerMarginRight,
+      this.readerMarginTop,
+      this.readerMarginBottom
     ).catch((e: Error) => {
       console.warn('保存阅读排版设置失败:', e);
     });
+  }
+
+  quickTypographySettingOptions(): SelectOption[] {
+    return [
+      { value: '字号' },
+      { value: '行距' },
+      { value: '段落间距' },
+      { value: '左边距' },
+      { value: '右边距' },
+      { value: '上边距' },
+      { value: '下边距' }
+    ];
+  }
+
+  quickTypographySettingTitle(): string {
+    const titles: string[] = ['字号', '行距', '段落间距', '左边距', '右边距', '上边距', '下边距'];
+    const index = Math.max(0, Math.min(this.quickTypographySettingIndex, titles.length - 1));
+    return titles[index];
+  }
+
+  currentQuickTypographySettingValue(): number {
+    switch (this.quickTypographySettingIndex) {
+      case 1:
+        return this.readerLineHeight;
+      case 2:
+        return this.readerParagraphSpacing;
+      case 3:
+        return this.readerMarginLeft;
+      case 4:
+        return this.readerMarginRight;
+      case 5:
+        return this.readerMarginTop;
+      case 6:
+        return this.readerMarginBottom;
+      default:
+        return this.readerFontSize;
+    }
+  }
+
+  adjustQuickTypographySetting(delta: number): void {
+    const next = this.currentQuickTypographySettingValue() + delta;
+    switch (this.quickTypographySettingIndex) {
+      case 1:
+        this.applyReaderLineHeight(next);
+        return;
+      case 2:
+        this.applyReaderParagraphSpacing(next);
+        return;
+      case 3:
+      case 4:
+      case 5:
+      case 6:
+        this.applyReaderMargin(this.quickTypographySettingIndex, next);
+        return;
+      default:
+        this.applyReaderFontSize(next);
+    }
+  }
+
+  applyReaderMargin(settingIndex: number, margin: number): void {
+    const next = Math.max(0, Math.min(Math.round(margin), 64));
+    if ((settingIndex === 3 && next === this.readerMarginLeft) ||
+      (settingIndex === 4 && next === this.readerMarginRight) ||
+      (settingIndex === 5 && next === this.readerMarginTop) ||
+      (settingIndex === 6 && next === this.readerMarginBottom)) {
+      return;
+    }
+    if (settingIndex === 3) {
+      this.readerMarginLeft = next;
+    } else if (settingIndex === 4) {
+      this.readerMarginRight = next;
+    } else if (settingIndex === 5) {
+      this.readerMarginTop = next;
+    } else {
+      this.readerMarginBottom = next;
+    }
+    this.onReadLayoutChanged();
+    this.saveReaderLayoutSettings();
+    this.saveReadConfig();
   }
 
   applyReaderFontSize(fontSize: number): void {
@@ -5295,7 +5381,7 @@ struct ReadBookPage {
       const lineHeightPx = this.toMeasurePx(this.getEffectiveReaderLineHeight());
       const textStyle: graphicsText.TextStyle = {
         fontSize: fontSizePx,
-        fontFamilies: [this.getReaderFontFamily()],
+        fontFamilies: [this.getBodyReaderFontFamily()],
         fontWeight: graphicsText.FontWeight.W400,
         lineHeightMinimum: lineHeightPx,
         lineHeightMaximum: lineHeightPx,
@@ -5305,7 +5391,7 @@ struct ReadBookPage {
       };
       const paragraphStyle: graphicsText.ParagraphStyle = {
         textStyle: textStyle,
-        align: graphicsText.TextAlign.START,
+        align: graphicsText.TextAlign.JUSTIFY,
         textDirection: graphicsText.TextDirection.LTR,
         wordBreak: graphicsText.WordBreak.BREAK_ALL,
         breakStrategy: graphicsText.BreakStrategy.GREEDY,
@@ -5435,7 +5521,7 @@ struct ReadBookPage {
       const lineHeightPx = this.toMeasurePx(this.getEffectiveReaderLineHeight());
       const textStyle: graphicsText.TextStyle = {
         fontSize: fontSizePx,
-        fontFamilies: [this.getReaderFontFamily()],
+        fontFamilies: [this.getBodyReaderFontFamily()],
         fontWeight: graphicsText.FontWeight.W400,
         lineHeightMinimum: lineHeightPx,
         lineHeightMaximum: lineHeightPx,
@@ -5445,7 +5531,7 @@ struct ReadBookPage {
       };
       const paragraphStyle: graphicsText.ParagraphStyle = {
         textStyle: textStyle,
-        align: graphicsText.TextAlign.START,
+        align: graphicsText.TextAlign.JUSTIFY,
         textDirection: graphicsText.TextDirection.LTR,
         wordBreak: graphicsText.WordBreak.BREAK_ALL,
         breakStrategy: graphicsText.BreakStrategy.GREEDY,
@@ -5473,10 +5559,10 @@ struct ReadBookPage {
         textContent: text,
         constraintWidth: Math.max(1, availableWidth),
         fontSize: this.readerFontSize,
-        fontFamily: this.getReaderFontFamily(),
+        fontFamily: this.getBodyReaderFontFamily(),
         lineHeight: this.getEffectiveReaderLineHeight(),
       fontWeight: FontWeight.Normal,
-      textAlign: TextAlign.Start,
+      textAlign: TextAlign.JUSTIFY,
       wordBreak: WordBreak.BREAK_ALL
     };
     try {
@@ -5505,22 +5591,17 @@ struct ReadBookPage {
     if (best >= source.length) {
       return source.length;
     }
-    const minBreak = start + Math.max(24, Math.floor((best - start) * 0.96));
-    let newline = source.lastIndexOf('\n', best);
-    if (newline >= minBreak) {
-      return newline + 1;
+    const safeBest = Math.max(start + 1, Math.min(best, source.length));
+    if (safeBest > start && safeBest < source.length) {
+      const previousCode = source.charCodeAt(safeBest - 1);
+      const nextCode = source.charCodeAt(safeBest);
+      const splitsSurrogatePair = previousCode >= 0xD800 && previousCode <= 0xDBFF &&
+        nextCode >= 0xDC00 && nextCode <= 0xDFFF;
+      if (splitsSurrogatePair && safeBest - 1 > start) {
+        return safeBest - 1;
+      }
     }
-    let sentence = Math.max(
-      source.lastIndexOf('。', best),
-      source.lastIndexOf('！', best),
-      source.lastIndexOf('？', best),
-      source.lastIndexOf('；', best),
-      source.lastIndexOf(';', best)
-    );
-    if (sentence >= minBreak) {
-      return sentence + 1;
-    }
-    return best;
+    return safeBest;
   }
 
   followTtsChunk(chunk: TtsChunk): void {
@@ -5758,6 +5839,8 @@ struct ReadBookPage {
     .height('100%')
     .id(`reader_current_${this.currentChapterIndex}_${this.currentPageIndex}_${this.displayPageRenderKey}_${renderVersion}_${ttsRenderVersion}`)
     .backgroundColor(this.getBackgroundColor())
+    .backgroundImage(this.getBackgroundImage(), ImageRepeat.NoRepeat)
+    .backgroundImageSize(this.getBackgroundImageSize())
     .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() })
     .opacity(this.getCurrentPageTurnOpacity())
   }
@@ -5771,6 +5854,8 @@ struct ReadBookPage {
     .height('100%')
     .id(`reader_current_alt_${this.currentChapterIndex}_${this.currentPageIndex}_${this.displayPageRenderKey}_${renderVersion}_${ttsRenderVersion}`)
     .backgroundColor(this.getBackgroundColor())
+    .backgroundImage(this.getBackgroundImage(), ImageRepeat.NoRepeat)
+    .backgroundImageSize(this.getBackgroundImageSize())
     .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() })
     .opacity(this.getCurrentPageTurnOpacity())
   }
@@ -5784,6 +5869,8 @@ struct ReadBookPage {
     .height('100%')
     .id(`reader_incoming_${this.pageTurnIncomingChapterIndex}_${this.pageTurnIncomingPageIndex}_${renderVersion}`)
     .backgroundColor(this.getBackgroundColor())
+    .backgroundImage(this.getBackgroundImage(), ImageRepeat.NoRepeat)
+    .backgroundImageSize(this.getBackgroundImageSize())
     .translate({ x: this.getIncomingSlideX(), y: this.getIncomingSlideY() })
     .opacity(this.getVisiblePageTurnIncomingOpacity())
   }
@@ -5792,10 +5879,12 @@ struct ReadBookPage {
   readerCurrentPageLayer(renderVersion: number, text: string, ttsRenderVersion: number) {
     Column() {
       if (renderVersion % 2 === 0) {
-        this.styledCurrentReaderText(text, 18 + this.getReaderContentBottomReserve(), this.currentChapterIndex,
+        this.styledCurrentReaderText(text, this.readerMarginBottom + this.getReaderContentBottomReserve(),
+          this.currentChapterIndex,
           ttsRenderVersion, renderVersion, this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion))
       } else {
-        this.styledCurrentReaderText(text, 18 + this.getReaderContentBottomReserve(), this.currentChapterIndex,
+        this.styledCurrentReaderText(text, this.readerMarginBottom + this.getReaderContentBottomReserve(),
+          this.currentChapterIndex,
           ttsRenderVersion, renderVersion, this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion))
       }
     }
@@ -5803,7 +5892,7 @@ struct ReadBookPage {
     .height('100%')
     .justifyContent(FlexAlign.Start)
     .alignItems(HorizontalAlign.Start)
-    .backgroundColor(this.getBackgroundColor())
+    .backgroundColor(this.readerContentLayerColor())
     .id(`reader_layer_${this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion)}`)
   }
 
@@ -5811,10 +5900,12 @@ struct ReadBookPage {
   readerIncomingPageLayer(renderVersion: number, text: string) {
     Column() {
       if (renderVersion % 2 === 0) {
-        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve(), this.pageTurnIncomingChapterIndex, 0,
+        this.styledReaderText(text, this.readerMarginBottom + this.getReaderContentBottomReserve(),
+          this.pageTurnIncomingChapterIndex, 0,
           renderVersion, this.incomingReaderPageRenderIdentity(renderVersion, text))
       } else {
-        this.styledReaderText(text, 18 + this.getReaderContentBottomReserve(), this.pageTurnIncomingChapterIndex, 0,
+        this.styledReaderText(text, this.readerMarginBottom + this.getReaderContentBottomReserve(),
+          this.pageTurnIncomingChapterIndex, 0,
           renderVersion, this.incomingReaderPageRenderIdentity(renderVersion, text))
       }
     }
@@ -5822,7 +5913,7 @@ struct ReadBookPage {
     .height('100%')
     .justifyContent(FlexAlign.Start)
     .alignItems(HorizontalAlign.Start)
-    .backgroundColor(this.getBackgroundColor())
+    .backgroundColor(this.readerContentLayerColor())
     .id(`reader_incoming_layer_${this.incomingReaderPageRenderIdentity(renderVersion, text)}`)
   }
 
@@ -5892,6 +5983,8 @@ struct ReadBookPage {
           .fontFamily(this.getBodyReaderFontFamily())
           .lineHeight(this.getEffectiveReaderLineHeight())
           .fontColor(this.getTextColor())
+          .textAlign(TextAlign.JUSTIFY)
+          .wordBreak(WordBreak.BREAK_ALL)
           .width('100%')
         } else {
           this.styledReaderParagraph(paragraph, this.currentChapterIndex)
@@ -5900,7 +5993,12 @@ struct ReadBookPage {
       }, (paragraph: ReaderTextParagraph) => paragraph.key)
     }
     .width('100%')
-    .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
+    .padding({
+      left: this.readerMarginLeft,
+      right: this.readerMarginRight,
+      top: this.readerMarginTop,
+      bottom: bottomPadding
+    })
   }
 
   @Builder
@@ -5917,7 +6015,12 @@ struct ReadBookPage {
     }
     .width('100%')
     .id(`reader_text_${pageRenderIdentity}`)
-    .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
+    .padding({
+      left: this.readerMarginLeft,
+      right: this.readerMarginRight,
+      top: this.readerMarginTop,
+      bottom: bottomPadding
+    })
   }
 
   @Builder
@@ -5934,7 +6037,12 @@ struct ReadBookPage {
     }
     .width('100%')
     .id(`reader_text_${pageRenderIdentity}`)
-    .padding({ left: 18, right: 18, top: 18, bottom: bottomPadding })
+    .padding({
+      left: this.readerMarginLeft,
+      right: this.readerMarginRight,
+      top: this.readerMarginTop,
+      bottom: bottomPadding
+    })
   }
 
   @Builder
@@ -5960,13 +6068,8 @@ struct ReadBookPage {
             .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
             .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
             .fontColor(this.getStyledSliceFontColor(slice))
-            .textBackgroundStyle(slice.ttsHighlighted ? {
-              color: this.getTtsHighlightColor(),
-              radius: 4
-            } : (slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? {
-              color: this.readerRegexHighlightColor(this.getRegexRuleBySlice(slice)),
-              radius: 4
-            } : {}))
+            .textBackgroundStyle(this.getStyledSliceBackgroundStyle(slice))
+            .textShadow(this.getStyledSliceTextShadow(slice))
         }, (slice: ReadTextSlice) =>
           `title_body_${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, chapterIndex, contentRenderVersion,
             ttsRenderVersion, paragraph.text)}_${paragraph.key}_${slice.key}`)
@@ -5987,16 +6090,16 @@ struct ReadBookPage {
             .fontSize(this.readerFontSize)
             .fontFamily(this.getBodyReaderFontFamily())
             .fontColor(this.getStyledSliceFontColor(slice))
-            .textBackgroundStyle(slice.ttsHighlighted ? {
-              color: this.getTtsHighlightColor(),
-              radius: 4
-            } : {})
+            .textBackgroundStyle(this.getStyledSliceBackgroundStyle(slice))
+            .textShadow(this.getStyledSliceTextShadow(slice))
         }, (slice: ReadTextSlice) =>
           `${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, chapterIndex, contentRenderVersion,
             ttsRenderVersion, paragraph.text)}_${paragraph.key}_${slice.key}`)
       }
         .lineHeight(this.getEffectiveReaderLineHeight())
         .fontColor(this.getTextColor())
+        .textAlign(TextAlign.JUSTIFY)
+        .wordBreak(WordBreak.BREAK_ALL)
         .width('100%')
         .id(`reader_plain_${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, chapterIndex,
           contentRenderVersion, ttsRenderVersion, paragraph.text)}_${paragraph.key}`)
@@ -6022,19 +6125,16 @@ struct ReadBookPage {
           .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
           .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
           .fontColor(this.getStyledSliceFontColor(slice))
-          .textBackgroundStyle(slice.ttsHighlighted ? {
-            color: this.getTtsHighlightColor(),
-            radius: 4
-          } : (slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice)) ? {
-            color: this.readerRegexHighlightColor(this.getRegexRuleBySlice(slice)),
-            radius: 4
-          } : {}))
+          .textBackgroundStyle(this.getStyledSliceBackgroundStyle(slice))
+          .textShadow(this.getStyledSliceTextShadow(slice))
       }, (slice: ReadTextSlice) =>
         `${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, this.currentChapterIndex, contentRenderVersion,
           ttsRenderVersion, paragraph.text)}_${paragraph.key}_${slice.key}`)
     }
     .lineHeight(this.getEffectiveReaderLineHeight())
     .fontColor(this.getTextColor())
+    .textAlign(TextAlign.JUSTIFY)
+    .wordBreak(WordBreak.BREAK_ALL)
     .width('100%')
     .id(`reader_regex_${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, this.currentChapterIndex,
       contentRenderVersion, ttsRenderVersion, paragraph.text)}_${paragraph.key}`)
@@ -6121,10 +6221,45 @@ struct ReadBookPage {
     if (slice.ttsHighlighted) {
       return this.getTtsHighlightTextColor();
     }
-    if (slice.highlighted && this.shouldUseRegexHighlight(this.getRegexRuleBySlice(slice))) {
-      return this.getRegexHighlightTextColor();
+    if (slice.highlighted) {
+      return this.resolvedRegexEmphasis(this.getRegexRuleBySlice(slice)).textColor;
     }
     return this.getTextColor();
+  }
+
+  getStyledSliceBackgroundStyle(slice: ReadTextSlice): TextBackgroundStyle {
+    if (slice.ttsHighlighted) {
+      return { color: this.getTtsHighlightColor(), radius: 4 };
+    }
+    if (!slice.highlighted) {
+      return {};
+    }
+    const style = this.resolvedRegexEmphasis(this.getRegexRuleBySlice(slice));
+    if (!style.backgroundEnabled) {
+      return {};
+    }
+    return {
+      color: style.backgroundColor,
+      radius: {
+        topLeft: style.radiusTopLeft,
+        topRight: style.radiusTopRight,
+        bottomLeft: style.radiusBottomLeft,
+        bottomRight: style.radiusBottomRight
+      }
+    };
+  }
+
+  getStyledSliceTextShadow(slice: ReadTextSlice): ShadowOptions {
+    if (slice.ttsHighlighted || !slice.highlighted) {
+      return { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 };
+    }
+    const style = this.resolvedRegexEmphasis(this.getRegexRuleBySlice(slice));
+    return {
+      radius: style.textShadowRadius,
+      color: style.textShadowColor,
+      offsetX: style.textShadowOffsetX,
+      offsetY: style.textShadowOffsetY
+    };
   }
 
   shouldUseTitleStyle(text: string, chapterIndex: number = this.currentChapterIndex): boolean {
@@ -6156,57 +6291,49 @@ struct ReadBookPage {
   }
 
   getRegexRules(): ReaderRegexFontRule[] {
-    const raw = (this.readerRegexFontRulesRaw || '').trim();
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as ReaderRegexFontRulesData | ReaderRegexFontRule[];
-        const source = Array.isArray(parsed) ? parsed as ReaderRegexFontRule[] : ((parsed as ReaderRegexFontRulesData).rules || []);
-        const result: ReaderRegexFontRule[] = [];
-        for (const item of source) {
-          if (!item) {
-            continue;
-          }
-          const rule = new ReaderRegexFontRule();
-          rule.id = item.id || '';
-          rule.name = item.name || '';
-          rule.pattern = item.pattern || '';
-          rule.fontMode = item.fontMode || 'global';
-          rule.fontFamily = item.fontFamily || '';
-          rule.fontSize = Math.max(14, Math.min(Math.round(item.fontSize || 20), 30));
-          rule.highlightColorEnabled = item.highlightColorEnabled === true;
-          rule.shadowColor = item.shadowColor || '';
-          rule.expanded = item.expanded !== false;
-          result.push(rule);
-        }
-        return result;
-      } catch (e) {
-      }
+    const key = `${this.readerRegexFontRulesRaw}\n${this.readerRegexFontPattern}\n${this.readerRegexFontMode}\n` +
+      `${this.readerRegexFontFamily}\n${this.readerRegexFontSize}\n${this.readerRegexShadowColor}`;
+    if (key === this.cachedRegexRulesKey) {
+      return this.cachedRegexRules;
     }
-    if ((this.readerRegexFontPattern || '').trim()) {
-      const rule = new ReaderRegexFontRule();
-      rule.pattern = this.readerRegexFontPattern;
-      rule.fontMode = this.readerRegexFontMode;
-      rule.fontFamily = this.readerRegexFontFamily;
-      rule.fontSize = this.readerRegexFontSize;
-      rule.highlightColorEnabled = !!this.readerRegexShadowColor;
-      rule.shadowColor = this.readerRegexShadowColor;
-      rule.expanded = true;
-      return [rule];
-    }
-    return [];
+    const legacy = new ReaderRegexLegacySettings();
+    legacy.pattern = this.readerRegexFontPattern;
+    legacy.fontMode = this.readerRegexFontMode;
+    legacy.fontFamily = this.readerRegexFontFamily;
+    legacy.fontSize = this.readerRegexFontSize;
+    legacy.shadowColor = this.readerRegexShadowColor;
+    this.cachedRegexRules = ReaderRegexFontCodec.decode(this.readerRegexFontRulesRaw, legacy);
+    this.cachedRegexRulesKey = key;
+    return this.cachedRegexRules;
   }
 
-  readerRegexHighlightColor(rule: ReaderRegexFontRule | null): string {
-    return rule ? (rule.highlightColorEnabled ? ((rule.shadowColor || '').trim() || this.accentColor()) : this.accentColor()) :
-      (this.readerRegexShadowColor.trim() || this.accentColor());
+  themeRegexEmphasisMode(): string {
+    return ThemeRuntime.regexEmphasisMode();
   }
 
-  shouldUseRegexHighlight(rule: ReaderRegexFontRule | null): boolean {
-    return rule ? rule.highlightColorEnabled : !!this.readerRegexShadowColor.trim();
+  themeRegexBubbleStyleId(): string {
+    return ThemeRuntime.regexBubbleStyle();
   }
 
-  getRegexHighlightTextColor(): string {
-    return this.getTtsHighlightTextColor();
+  themeRegexEmphasisColor(): string {
+    return ThemeRuntime.regexEmphasisColor(this.appDarkMode);
+  }
+
+  readerRegexEmphasisContext(): ReaderRegexEmphasisContext {
+    const context = new ReaderRegexEmphasisContext();
+    context.inheritedMode = this.themeRegexEmphasisMode();
+    context.inheritedBubbleStyleId = this.themeRegexBubbleStyleId();
+    context.inheritedColor = this.themeRegexEmphasisColor();
+    context.inheritedTextColor = ThemeRuntime.regexEmphasisTextColor(this.appDarkMode);
+    context.accentColor = this.accentColor();
+    context.surfaceColor = this.getBackgroundColor();
+    context.normalTextColor = this.getTextColor();
+    context.darkMode = this.isReaderThemeDark();
+    return context;
+  }
+
+  resolvedRegexEmphasis(rule: ReaderRegexFontRule | null): ReaderResolvedRegexEmphasis {
+    return ReaderRegexBubbleStyleResolver.resolve(rule, this.readerRegexEmphasisContext());
   }
 
   getRegexTextSlices(text: string): ReadTextSlice[] {
@@ -6240,7 +6367,10 @@ struct ReadBookPage {
           const start = Math.max(0, match.index);
           const end = Math.max(start, Math.min(displayText.length, match.index + (match[0] || '').length));
           if (end <= start) {
-            regex.lastIndex = Math.min(displayText.length, Math.max(regex.lastIndex + 1, start + 1));
+            if (start >= displayText.length || regex.lastIndex >= displayText.length) {
+              break;
+            }
+            regex.lastIndex = Math.max(regex.lastIndex + 1, start + 1);
             match = regex.exec(displayText);
             continue;
           }
@@ -6548,8 +6678,8 @@ struct ReadBookPage {
       };
     }
 
-    const horizontalPadding = 36;
-    const verticalPadding = 36 + this.getReaderContentBottomReserve();
+    const horizontalPadding = this.readerMarginLeft + this.readerMarginRight;
+    const verticalPadding = this.readerMarginTop + this.readerMarginBottom + this.getReaderContentBottomReserve();
     const availableWidth = Math.max(1, this.pageViewWidth - horizontalPadding);
     const availableHeight = Math.max(1, this.pageViewHeight - verticalPadding);
     const measuredAvailableHeight = this.toMeasurePx(availableHeight);
@@ -6576,8 +6706,19 @@ struct ReadBookPage {
   }
 
   buildReaderPaginationCacheKey(chapterIndex: number, source: string): string {
-    return `${chapterIndex}_${this.pageViewWidth}_${this.pageViewHeight}_${this.readerFontSize}_` +
-      `${this.readerLineHeight}_${this.getReaderFontFamily()}_${source.length}_${this.hashText(source)}`;
+    return `${chapterIndex}_${this.pageViewWidth}_${this.pageViewHeight}_${this.readerTypographyCacheIdentity()}_` +
+      `${source.length}_${this.hashText(source)}`;
+  }
+
+  readerTypographyCacheIdentity(): string {
+    const regexIdentity = `${this.readerRegexFontEnabled}_${this.readerRegexFontRulesRaw}_` +
+      `${this.readerRegexFontPattern}_${this.readerRegexFontMode}_${this.readerRegexFontFamily}_` +
+      `${this.readerRegexFontSize}_${this.readerRegexShadowColor}`;
+    return `${this.readerFontSize}_${this.readerLineHeight}_${this.readerParagraphSpacing}_` +
+      `${this.readerMarginLeft}_${this.readerMarginRight}_${this.readerMarginTop}_${this.readerMarginBottom}_` +
+      `${this.readerBodyFontMode}_${this.readerBodyFontFamily}_${this.getBodyReaderFontFamily()}_` +
+      `${this.readerTitleFontSize}_${this.readerTitleFontMode}_${this.readerTitleFontFamily}_` +
+      `${this.getTitleReaderFontFamily()}_${this.getReaderFontFamily()}_${this.hashText(regexIdentity)}`;
   }
 
   getCachedReaderPagination(chapterIndex: number, source: string): ReaderPaginationResult | null {
@@ -7059,8 +7200,8 @@ struct ReadBookPage {
   }
 
   buildPageTurnPreviewKey(direction: number, chapterIndex: number): string {
-    return `${direction}_${chapterIndex}_${this.pageViewWidth}_${this.pageViewHeight}_${this.readerFontSize}_` +
-      `${this.readerLineHeight}_${this.readerParagraphSpacing}_${this.getReaderFontFamily()}`;
+    return `${direction}_${chapterIndex}_${this.pageViewWidth}_${this.pageViewHeight}_` +
+      `${this.readerTypographyCacheIdentity()}`;
   }
 
   buildCachedAdjacentPageTurnPreview(direction: number, chapterIndex: number): PageTurnPreview {

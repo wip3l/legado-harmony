@@ -12,9 +12,11 @@ import { AppIconSettingsStore } from '../utils/AppIconSettingsStore';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { TtsSettingsStore } from '../utils/TtsSettingsStore';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 export default class EntryAbility extends UIAbility {
   private appliedColorMode: number = -1;
+  private themeBootstrapPromise: Promise<void> = Promise.resolve();
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onCreate');
@@ -138,7 +140,7 @@ export default class EntryAbility extends UIAbility {
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Sync reader settings failed: %{public}s', JSON.stringify(e));
     });
-    AppThemeSettingsStore.load(this.context).then((settings) => {
+    this.themeBootstrapPromise = AppThemeSettingsStore.load(this.context).then((settings) => {
       AppThemeSettingsStore.applyToStorage(settings);
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Sync app theme settings failed: %{public}s', JSON.stringify(e));
@@ -159,7 +161,9 @@ export default class EntryAbility extends UIAbility {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
     hilog.info(0x0000, 'testTag', 'StartupTrace onWindowStageCreate %{public}d', Date.now());
 
-    ReaderFontBootstrap.registerFromSettings(this.context, null, 'ability-onWindowStageCreate').finally(() => {
+    this.themeBootstrapPromise.then(() => {
+      return ReaderFontBootstrap.registerFromSettings(this.context, null, 'ability-onWindowStageCreate');
+    }).finally(() => {
       this.loadStartupContent(windowStage);
     });
   }
@@ -307,17 +311,17 @@ export default class EntryAbility extends UIAbility {
     setTimeout(() => {
       windowStage.getMainWindow().then((mainWindow) => {
         const darkMode = AppStorage.get<boolean>('appDarkMode') || false;
-        const bg = darkMode ? '#101113' : '#F5F5F5';
+        const bg = ThemeRuntime.pageColor(darkMode);
         mainWindow.setWindowBackgroundColor(bg);
         mainWindow.setWindowLayoutFullScreen(true);
         mainWindow.setWindowSystemBarEnable(['navigation', 'status']);
         mainWindow.setWindowSystemBarProperties({
           statusBarColor: '#00000000',
           isStatusBarLightIcon: darkMode,
-          statusBarContentColor: darkMode ? '#FFFFFF' : '#1F1F1F',
+          statusBarContentColor: ThemeRuntime.primaryTextColor(darkMode),
           navigationBarColor: bg,
           isNavigationBarLightIcon: darkMode,
-          navigationBarContentColor: darkMode ? '#FFFFFF' : '#1F1F1F'
+          navigationBarContentColor: ThemeRuntime.primaryTextColor(darkMode)
         });
       }).catch((err: Error) => {
         hilog.warn(0x0000, 'testTag', 'Startup window sync failed: %{public}s', JSON.stringify(err));

@@ -1,10 +1,12 @@
 import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 @Entry
 @Component
 struct OtherSettingsPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
@@ -25,8 +27,8 @@ struct OtherSettingsPage {
       Scroll() {
         Column() {
           this.sectionTitle('外观')
-          this.menuItem('主题色设置', '按钮色 / 强调色', () => {
-            router.pushUrl({ url: 'pages/ThemeColorSettings' });
+          this.menuItem('主题与外观', '内置主题 / 阅读背景 / 气泡 / 导航图标', () => {
+            router.pushUrl({ url: 'pages/ThemeSettings' });
           })
           this.menuItem('字体设置', '全局字体 / 自定义字体', () => {
             router.pushUrl({ url: 'pages/FontSettings' });
@@ -48,19 +50,19 @@ struct OtherSettingsPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#888';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   syncBars(): void {

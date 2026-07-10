@@ -4,6 +4,15 @@ import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStor
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { ColorCodePicker } from '../components/ColorCodePicker';
+import {
+  ReaderRegexBubbleStyleResolver,
+  ReaderRegexEmphasisContext,
+  ReaderRegexFontCodec,
+  ReaderRegexFontRule,
+  ReaderRegexLegacySettings,
+  ReaderResolvedRegexEmphasis
+} from '../model/reader/ReaderRegexFontRule';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -13,22 +22,6 @@ class ReaderCustomFontItem {
 
 class ReaderCustomFontData {
   fonts: ReaderCustomFontItem[] = [];
-}
-
-class ReaderRegexFontRule {
-  id: string = '';
-  name: string = '';
-  pattern: string = '';
-  fontMode: string = 'global';
-  fontFamily: string = '';
-  fontSize: number = 20;
-  highlightColorEnabled: boolean = false;
-  shadowColor: string = '';
-  expanded: boolean = true;
-}
-
-class ReaderRegexFontRulesData {
-  rules: ReaderRegexFontRule[] = [];
 }
 
 class ReaderRegexPreviewSlice {
@@ -43,6 +36,7 @@ struct ReaderFontSettingsPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
+  @StorageLink('themeRevision') themeRevision: number = 0;
   @State readerFontSize: number = 20;
   @State readerBodyFontMode: string = 'global';
   @State readerBodyFontFamily: string = '';
@@ -177,60 +171,25 @@ struct ReaderFontSettingsPage {
   }
 
   parseRegexRules(settings: ReaderSettings): ReaderRegexFontRule[] {
-    const raw = (settings.regexFontRulesRaw || this.readerRegexFontRulesRaw || '').trim();
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as ReaderRegexFontRulesData | ReaderRegexFontRule[];
-        const source = Array.isArray(parsed) ? parsed as ReaderRegexFontRule[] : ((parsed as ReaderRegexFontRulesData).rules || []);
-        return this.cleanRegexRules(source);
-      } catch (e) {
-      }
-    }
-    if ((settings.regexFontPattern || '').trim()) {
-      const rule = new ReaderRegexFontRule();
-      rule.id = this.newRuleId();
-      rule.name = '正则规则';
-      rule.pattern = settings.regexFontPattern;
-      rule.fontMode = settings.regexFontMode;
-      rule.fontFamily = settings.regexFontFamily;
-      rule.fontSize = settings.regexFontSize;
-      rule.highlightColorEnabled = !!settings.regexShadowColor;
-      rule.shadowColor = settings.regexShadowColor;
-      rule.expanded = true;
-      return [rule];
-    }
-    return [];
+    const legacy = new ReaderRegexLegacySettings();
+    legacy.pattern = settings.regexFontPattern;
+    legacy.fontMode = settings.regexFontMode;
+    legacy.fontFamily = settings.regexFontFamily;
+    legacy.fontSize = settings.regexFontSize;
+    legacy.shadowColor = settings.regexShadowColor;
+    return ReaderRegexFontCodec.decode(settings.regexFontRulesRaw || this.readerRegexFontRulesRaw, legacy);
   }
 
   cleanRegexRules(source: ReaderRegexFontRule[]): ReaderRegexFontRule[] {
-    const result: ReaderRegexFontRule[] = [];
-    for (const item of source) {
-      if (!item) {
-        continue;
-      }
-      const rule = new ReaderRegexFontRule();
-      rule.id = item.id || this.newRuleId();
-      rule.name = (item.name || '正则规则').trim();
-      rule.pattern = (item.pattern || '').trim();
-      rule.fontMode = this.normalizeFontMode(item.fontMode);
-      rule.fontFamily = item.fontFamily || '';
-      rule.fontSize = Math.max(14, Math.min(Math.round(item.fontSize || 20), 30));
-      rule.highlightColorEnabled = item.highlightColorEnabled === true;
-      rule.shadowColor = (item.shadowColor || '').trim();
-      rule.expanded = item.expanded !== false;
-      result.push(rule);
-    }
-    return result;
+    return ReaderRegexFontCodec.cleanRules(source);
   }
 
   encodeRegexRules(rules: ReaderRegexFontRule[]): string {
-    const data = new ReaderRegexFontRulesData();
-    data.rules = this.cleanRegexRules(rules);
-    return JSON.stringify(data);
+    return ReaderRegexFontCodec.encode(rules);
   }
 
   newRuleId(): string {
-    return `rule_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+    return ReaderRegexFontCodec.newRuleId();
   }
 
   addRegexRule(name: string, pattern: string): void {
@@ -240,6 +199,9 @@ struct ReaderFontSettingsPage {
     rule.pattern = pattern;
     rule.fontMode = 'global';
     rule.fontSize = this.readerRegexFontSize || this.readerFontSize;
+    rule.emphasisMode = 'inherit';
+    rule.bubbleStyleId = 'inherit';
+    rule.emphasisColor = '';
     rule.highlightColorEnabled = false;
     rule.shadowColor = '';
     rule.expanded = true;
@@ -253,17 +215,8 @@ struct ReaderFontSettingsPage {
     if (index < 0 || index >= next.length) {
       return;
     }
-    const rule = new ReaderRegexFontRule();
     const source = next[index];
-    rule.id = source.id;
-    rule.name = source.name;
-    rule.pattern = source.pattern;
-    rule.fontMode = source.fontMode;
-    rule.fontFamily = source.fontFamily;
-    rule.fontSize = source.fontSize;
-    rule.highlightColorEnabled = source.highlightColorEnabled;
-    rule.shadowColor = source.shadowColor;
-    rule.expanded = source.expanded;
+    const rule = ReaderRegexFontCodec.cloneRule(source);
     updater(rule);
     next[index] = rule;
     this.regexRules = next;
@@ -419,27 +372,27 @@ struct ReaderFontSettingsPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   inputColor(): string {
-    return this.appDarkMode ? '#24272D' : '#F0F2F5';
+    return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#888';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   accentColor(): string {
-    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+    return ThemeRuntime.accentColor(this.appDarkMode);
   }
 
   syncBars(): void {
@@ -716,39 +669,13 @@ struct ReaderFontSettingsPage {
         })
         this.regexFontSizeSlider(index, refreshKey)
 
-        this.regexHighlightColorPicker(index, refreshKey)
+        this.regexEmphasisSettings(index, refreshKey)
 
         this.regexRulePreviewItem(index, refreshKey)
       }
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(this.cardColor())
-  }
-
-  @Builder
-  previewItem(title: string, sample: string, mode: string, family: string, fontSize: number, shadowColor: string) {
-    Column({ space: 8 }) {
-      Text(title)
-        .fontSize(13)
-        .fontColor(this.subTextColor())
-        .width('100%')
-      Text() {
-        Span(sample)
-          .fontSize(fontSize)
-          .fontFamily(this.previewFontFamily(mode, family))
-          .fontColor(shadowColor ? this.highlightPreviewTextColor() : this.primaryTextColor())
-          .textBackgroundStyle(shadowColor ? {
-            color: this.effectiveHighlightColor(shadowColor),
-            radius: 4
-          } : {})
-      }
-        .width('100%')
-        .maxLines(2)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     .backgroundColor(this.cardColor())
   }
 
@@ -799,7 +726,7 @@ struct ReaderFontSettingsPage {
     if (mode === 'custom' && family) {
       return this.resolveCustomFontFamily(family);
     }
-    return this.readerFontFamily || this.systemPreviewFontFamily();
+    return this.readerFontFamily || ThemeRuntime.fontFamily() || this.systemPreviewFontFamily();
   }
 
   bodyPreviewFontFamily(): string {
@@ -812,7 +739,7 @@ struct ReaderFontSettingsPage {
 
   titlePreviewFontFamily(): string {
     if (this.readerTitleFontMode === 'global' && !this.readerTitleFontFamily) {
-      return this.systemPreviewFontFamily();
+      return this.previewFontFamily('global', '');
     }
     return this.previewFontFamily(this.readerTitleFontMode, this.readerTitleFontFamily);
   }
@@ -826,14 +753,6 @@ struct ReaderFontSettingsPage {
       return `#${value}`.toUpperCase();
     }
     return fallback;
-  }
-
-  effectiveHighlightColor(color: string): string {
-    return (color || '').trim() || this.accentColor();
-  }
-
-  ruleHighlightColor(rule: ReaderRegexFontRule): string {
-    return rule.highlightColorEnabled ? rule.shadowColor : '';
   }
 
   regexRuleAt(index: number): ReaderRegexFontRule {
@@ -891,7 +810,10 @@ struct ReaderFontSettingsPage {
         const start = Math.max(cursor, match.index);
         const end = Math.max(start, Math.min(text.length, match.index + (match[0] || '').length));
         if (end <= start) {
-          regex.lastIndex = Math.min(text.length, Math.max(regex.lastIndex + 1, start + 1));
+          if (start >= text.length || regex.lastIndex >= text.length) {
+            break;
+          }
+          regex.lastIndex = Math.max(regex.lastIndex + 1, start + 1);
           match = regex.exec(text);
           continue;
         }
@@ -924,52 +846,66 @@ struct ReaderFontSettingsPage {
     return slice;
   }
 
-  ruleHighlightColorByIndex(index: number, refreshKey: number): string {
-    const key = refreshKey >= 0 ? '' : '';
-    const rule = this.regexRuleAt(index);
-    return (rule.highlightColorEnabled ? rule.shadowColor : '') + key;
+  themeRegexEmphasisMode(): string {
+    return ThemeRuntime.regexEmphasisMode();
   }
 
-  regexHighlightColorMode(index: number, refreshKey: number): string {
-    const suffix = refreshKey >= 0 ? '' : '';
-    const rule = this.regexRuleAt(index);
-    if (!rule.highlightColorEnabled) {
-      return `off${suffix}`;
+  themeRegexBubbleStyleId(): string {
+    return ThemeRuntime.regexBubbleStyle();
+  }
+
+  themeRegexEmphasisColor(): string {
+    return ThemeRuntime.regexEmphasisColor(this.appDarkMode);
+  }
+
+  regexEmphasisContext(): ReaderRegexEmphasisContext {
+    const context = new ReaderRegexEmphasisContext();
+    context.inheritedMode = this.themeRegexEmphasisMode();
+    context.inheritedBubbleStyleId = this.themeRegexBubbleStyleId();
+    context.inheritedColor = this.themeRegexEmphasisColor();
+    context.inheritedTextColor = ThemeRuntime.regexEmphasisTextColor(this.appDarkMode);
+    context.accentColor = this.accentColor();
+    context.surfaceColor = this.cardColor();
+    context.normalTextColor = this.primaryTextColor();
+    context.darkMode = this.appDarkMode;
+    return context;
+  }
+
+  resolvedRegexEmphasis(index: number): ReaderResolvedRegexEmphasis {
+    return ReaderRegexBubbleStyleResolver.resolve(this.regexRuleAt(index), this.regexEmphasisContext());
+  }
+
+  regexPreviewTextColor(highlighted: boolean, index: number): string {
+    return highlighted ? this.resolvedRegexEmphasis(index).textColor : this.primaryTextColor();
+  }
+
+  regexPreviewBackgroundStyle(highlighted: boolean, index: number): TextBackgroundStyle {
+    const style = this.resolvedRegexEmphasis(index);
+    if (!highlighted || !style.backgroundEnabled) {
+      return {};
     }
-    return rule.shadowColor.trim() ? `custom${suffix}` : `accent${suffix}`;
-  }
-
-  shouldPreviewHighlight(color: string): boolean {
-    return !!(color || '').trim();
-  }
-
-  highlightPreviewTextColor(): string {
-    return this.appDarkMode ? '#FFF4BF' : '#2F261D';
-  }
-
-  @Builder
-  compactPreviewItem(title: string, sample: string, mode: string, family: string, fontSize: number, shadowColor: string) {
-    Column({ space: 6 }) {
-      Text(title)
-        .fontSize(13)
-        .fontColor(this.subTextColor())
-        .width('100%')
-      Text() {
-        Span(sample)
-          .fontSize(fontSize)
-          .fontFamily(this.previewFontFamily(mode, family))
-          .fontColor(this.shouldPreviewHighlight(shadowColor) ? this.highlightPreviewTextColor() : this.primaryTextColor())
-          .textBackgroundStyle(this.shouldPreviewHighlight(shadowColor) ? {
-            color: this.effectiveHighlightColor(shadowColor),
-            radius: 4
-          } : {})
+    return {
+      color: style.backgroundColor,
+      radius: {
+        topLeft: style.radiusTopLeft,
+        topRight: style.radiusTopRight,
+        bottomLeft: style.radiusBottomLeft,
+        bottomRight: style.radiusBottomRight
       }
-        .width('100%')
-        .maxLines(2)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    };
+  }
+
+  regexPreviewTextShadow(highlighted: boolean, index: number): ShadowOptions {
+    const style = this.resolvedRegexEmphasis(index);
+    if (!highlighted) {
+      return { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 };
     }
-    .width('100%')
-    .padding({ top: 4, bottom: 2 })
+    return {
+      radius: style.textShadowRadius,
+      color: style.textShadowColor,
+      offsetX: style.textShadowOffsetX,
+      offsetY: style.textShadowOffsetY
+    };
   }
 
   @Builder
@@ -985,11 +921,9 @@ struct ReaderFontSettingsPage {
             .fontSize(slice.highlighted ? this.regexRuleAt(index).fontSize : this.readerFontSize)
             .fontFamily(slice.highlighted ? this.previewFontFamily(this.regexRuleAt(index).fontMode, this.regexRuleAt(index).fontFamily) :
               this.previewFontFamily(this.readerBodyFontMode, this.readerBodyFontFamily))
-            .fontColor(slice.highlighted && this.regexRuleAt(index).highlightColorEnabled ? this.highlightPreviewTextColor() : this.primaryTextColor())
-            .textBackgroundStyle(slice.highlighted && this.regexRuleAt(index).highlightColorEnabled ? {
-              color: this.effectiveHighlightColor(this.regexRuleAt(index).shadowColor),
-              radius: 4
-            } : {})
+            .fontColor(this.regexPreviewTextColor(slice.highlighted, index))
+            .textBackgroundStyle(this.regexPreviewBackgroundStyle(slice.highlighted, index))
+            .textShadow(this.regexPreviewTextShadow(slice.highlighted, index))
         }, (slice: ReaderRegexPreviewSlice) => slice.key)
       }
       .width('100%')
@@ -1000,28 +934,205 @@ struct ReaderFontSettingsPage {
     .padding({ top: 4, bottom: 2 })
   }
 
+  emphasisModeOptions(): SelectOption[] {
+    return [
+      { value: '跟随主题' },
+      { value: '无强调' },
+      { value: '仅文字色' },
+      { value: '高亮色块' },
+      { value: '强调气泡' }
+    ];
+  }
+
+  emphasisModeIndex(mode: string): number {
+    if (mode === 'none') {
+      return 1;
+    }
+    if (mode === 'text') {
+      return 2;
+    }
+    if (mode === 'highlight') {
+      return 3;
+    }
+    if (mode === 'bubble') {
+      return 4;
+    }
+    return 0;
+  }
+
+  emphasisModeByIndex(index: number): string {
+    if (index === 1) {
+      return 'none';
+    }
+    if (index === 2) {
+      return 'text';
+    }
+    if (index === 3) {
+      return 'highlight';
+    }
+    if (index === 4) {
+      return 'bubble';
+    }
+    return 'inherit';
+  }
+
+  emphasisModeLabel(mode: string): string {
+    const options = this.emphasisModeOptions();
+    return String(options[this.emphasisModeIndex(mode)].value);
+  }
+
+  bubbleStyleOptions(): SelectOption[] {
+    return [
+      { value: '跟随主题' },
+      { value: '柔和' },
+      { value: '实色' },
+      { value: '圆角胶囊' },
+      { value: '纸笺' },
+      { value: '霓虹' }
+    ];
+  }
+
+  bubbleStyleIndex(styleId: string): number {
+    if (styleId === 'qq-soft') {
+      return 1;
+    }
+    if (styleId === 'qq-solid') {
+      return 2;
+    }
+    if (styleId === 'capsule') {
+      return 3;
+    }
+    if (styleId === 'paper') {
+      return 4;
+    }
+    if (styleId === 'neon') {
+      return 5;
+    }
+    return 0;
+  }
+
+  bubbleStyleByIndex(index: number): string {
+    if (index === 1) {
+      return 'qq-soft';
+    }
+    if (index === 2) {
+      return 'qq-solid';
+    }
+    if (index === 3) {
+      return 'capsule';
+    }
+    if (index === 4) {
+      return 'paper';
+    }
+    if (index === 5) {
+      return 'neon';
+    }
+    return 'inherit';
+  }
+
+  bubbleStyleLabel(styleId: string): string {
+    const options = this.bubbleStyleOptions();
+    return String(options[this.bubbleStyleIndex(styleId)].value);
+  }
+
+  shouldShowBubbleStyle(index: number): boolean {
+    const mode = this.regexRuleAt(index).emphasisMode;
+    return mode === 'inherit' || mode === 'bubble';
+  }
+
   @Builder
-  regexHighlightColorPicker(index: number, refreshKey: number) {
-    ColorCodePicker({
-      value: this.regexRuleAt(index).shadowColor,
-      placeholder: this.accentColor(),
-      appDarkMode: this.appDarkMode,
-      accentColor: this.accentColor(),
-      colorMode: this.regexHighlightColorMode(index, refreshKey),
-      onColorModeChange: (mode: string) => {
-        this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-          target.highlightColorEnabled = mode !== 'off';
-          if (mode === 'accent') {
-            target.shadowColor = '';
-          }
-        });
-      },
-      onColorChange: (value: string) => {
-        this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-          target.shadowColor = this.normalizeColorInput(value, target.shadowColor);
-        });
+  regexEmphasisSettings(index: number, refreshKey: number) {
+    Column({ space: 8 }) {
+      Row() {
+        Text('强调效果')
+          .fontSize(15)
+          .fontColor(this.primaryTextColor())
+          .layoutWeight(1)
+        Select(this.emphasisModeOptions())
+          .selected(this.emphasisModeIndex(this.regexRuleAt(index).emphasisMode))
+          .value(this.emphasisModeLabel(this.regexRuleAt(index).emphasisMode))
+          .font({ size: 13 })
+          .fontColor(this.primaryTextColor())
+          .backgroundColor(this.inputColor())
+          .borderRadius(8)
+          .constraintSize({ minWidth: 126, maxWidth: 160 })
+          .opacity(refreshKey >= 0 ? 1 : 1)
+          .onSelect((selectedIndex: number) => {
+            this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+              target.emphasisMode = this.emphasisModeByIndex(selectedIndex);
+            });
+          })
       }
-    })
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.shouldShowBubbleStyle(index)) {
+        Row() {
+          Text('气泡风格')
+            .fontSize(15)
+            .fontColor(this.primaryTextColor())
+            .layoutWeight(1)
+          Select(this.bubbleStyleOptions())
+            .selected(this.bubbleStyleIndex(this.regexRuleAt(index).bubbleStyleId))
+            .value(this.bubbleStyleLabel(this.regexRuleAt(index).bubbleStyleId))
+            .font({ size: 13 })
+            .fontColor(this.primaryTextColor())
+            .backgroundColor(this.inputColor())
+            .borderRadius(8)
+            .constraintSize({ minWidth: 126, maxWidth: 160 })
+            .onSelect((selectedIndex: number) => {
+              this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+                target.bubbleStyleId = this.bubbleStyleByIndex(selectedIndex);
+              });
+            })
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+      }
+
+      if (this.regexRuleAt(index).emphasisMode !== 'none') {
+        Row() {
+          Text('强调颜色')
+            .fontSize(15)
+            .fontColor(this.primaryTextColor())
+            .layoutWeight(1)
+          Select([{ value: '跟随主题' }, { value: '自定义' }])
+            .selected(this.regexRuleAt(index).emphasisColor.trim() ? 1 : 0)
+            .value(this.regexRuleAt(index).emphasisColor.trim() ? '自定义' : '跟随主题')
+            .font({ size: 13 })
+            .fontColor(this.primaryTextColor())
+            .backgroundColor(this.inputColor())
+            .borderRadius(8)
+            .constraintSize({ minWidth: 126, maxWidth: 160 })
+            .onSelect((selectedIndex: number) => {
+              this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+                target.emphasisColor = selectedIndex === 0 ? '' :
+                  (target.emphasisColor.trim() || this.accentColor());
+                target.shadowColor = target.emphasisColor;
+              });
+            })
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        if (this.regexRuleAt(index).emphasisColor.trim()) {
+          ColorCodePicker({
+            value: this.regexRuleAt(index).emphasisColor,
+            placeholder: this.accentColor(),
+            appDarkMode: this.appDarkMode,
+            accentColor: this.accentColor(),
+            optionTitle: '自定义强调色',
+            onColorChange: (value: string) => {
+              this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+                target.emphasisColor = this.normalizeColorInput(value, target.emphasisColor);
+                target.shadowColor = target.emphasisColor;
+              });
+            }
+          })
+        }
+      }
+    }
+    .width('100%')
   }
   @Builder
   compactFontModeItem(title: string, mode: string, family: string, onChange: (mode: string, family: string) => void) {

@@ -6,6 +6,10 @@ export class ReaderSettings {
   fontSize: number = 20;
   lineHeight: number = 12;
   paragraphSpacing: number = 10;
+  marginLeft: number = 18;
+  marginRight: number = 18;
+  marginTop: number = 18;
+  marginBottom: number = 18;
   themeIndex: number = 0;
   lightThemeIndex: number = 0;
   darkThemeIndex: number = 0;
@@ -51,6 +55,10 @@ export class ReaderSettingsStore {
   static readonly KEY_LINE_HEIGHT: string = 'readerLineHeight';
   static readonly KEY_LINE_HEIGHT_MODE: string = 'readerLineHeightMode';
   static readonly KEY_PARAGRAPH_SPACING: string = 'readerParagraphSpacing';
+  static readonly KEY_MARGIN_LEFT: string = 'readerMarginLeft';
+  static readonly KEY_MARGIN_RIGHT: string = 'readerMarginRight';
+  static readonly KEY_MARGIN_TOP: string = 'readerMarginTop';
+  static readonly KEY_MARGIN_BOTTOM: string = 'readerMarginBottom';
   static readonly KEY_THEME_INDEX: string = 'readerThemeIndex';
   static readonly KEY_LIGHT_THEME_INDEX: string = 'readerLightThemeIndex';
   static readonly KEY_DARK_THEME_INDEX: string = 'readerDarkThemeIndex';
@@ -114,6 +122,14 @@ export class ReaderSettingsStore {
       10,
       'paragraphSpacing'
     );
+    settings.marginLeft = await ReaderSettingsStore.getNumber(
+      store, ReaderSettingsStore.KEY_MARGIN_LEFT, 18, 'margin');
+    settings.marginRight = await ReaderSettingsStore.getNumber(
+      store, ReaderSettingsStore.KEY_MARGIN_RIGHT, 18, 'margin');
+    settings.marginTop = await ReaderSettingsStore.getNumber(
+      store, ReaderSettingsStore.KEY_MARGIN_TOP, 18, 'margin');
+    settings.marginBottom = await ReaderSettingsStore.getNumber(
+      store, ReaderSettingsStore.KEY_MARGIN_BOTTOM, 18, 'margin');
     const legacyThemeIndex = await ReaderSettingsStore.getNumber(
       store,
       ReaderSettingsStore.KEY_THEME_INDEX,
@@ -248,12 +264,19 @@ export class ReaderSettingsStore {
     fontSize: number,
     lineHeight: number,
     paragraphSpacing: number,
-    _themeIndex?: number
+    marginLeft: number = 18,
+    marginRight: number = 18,
+    marginTop: number = 18,
+    marginBottom: number = 18
   ): Promise<void> {
     const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
     settings.fontSize = ReaderSettingsStore.normalizeFontSize(fontSize);
     settings.lineHeight = ReaderSettingsStore.normalizeLineHeight(lineHeight);
     settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(paragraphSpacing);
+    settings.marginLeft = ReaderSettingsStore.normalizeMargin(marginLeft);
+    settings.marginRight = ReaderSettingsStore.normalizeMargin(marginRight);
+    settings.marginTop = ReaderSettingsStore.normalizeMargin(marginTop);
+    settings.marginBottom = ReaderSettingsStore.normalizeMargin(marginBottom);
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
     ReaderSettingsStore.applyLayoutToStorage(settings);
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
@@ -261,6 +284,10 @@ export class ReaderSettingsStore {
     await store.put(ReaderSettingsStore.KEY_LINE_HEIGHT, settings.lineHeight);
     await store.put(ReaderSettingsStore.KEY_LINE_HEIGHT_MODE, 'spacing');
     await store.put(ReaderSettingsStore.KEY_PARAGRAPH_SPACING, settings.paragraphSpacing);
+    await store.put(ReaderSettingsStore.KEY_MARGIN_LEFT, settings.marginLeft);
+    await store.put(ReaderSettingsStore.KEY_MARGIN_RIGHT, settings.marginRight);
+    await store.put(ReaderSettingsStore.KEY_MARGIN_TOP, settings.marginTop);
+    await store.put(ReaderSettingsStore.KEY_MARGIN_BOTTOM, settings.marginBottom);
     await store.flush();
   }
 
@@ -499,6 +526,10 @@ export class ReaderSettingsStore {
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_LINE_HEIGHT, settings.lineHeight);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_LINE_HEIGHT_MODE, 'spacing');
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PARAGRAPH_SPACING, settings.paragraphSpacing);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_MARGIN_LEFT, settings.marginLeft);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_MARGIN_RIGHT, settings.marginRight);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_MARGIN_TOP, settings.marginTop);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_MARGIN_BOTTOM, settings.marginBottom);
   }
 
   private static applyThemeToStorage(settings: ReaderSettings): void {
@@ -598,6 +629,9 @@ export class ReaderSettingsStore {
     if (type === 'paragraphSpacing') {
       return ReaderSettingsStore.normalizeParagraphSpacing(value);
     }
+    if (type === 'margin') {
+      return ReaderSettingsStore.normalizeMargin(value);
+    }
     if (type === 'themeIndex') {
       return ReaderSettingsStore.normalizeThemeIndex(value);
     }
@@ -638,6 +672,11 @@ export class ReaderSettingsStore {
 
   private static normalizeThemeIndex(themeIndex: number): number {
     return ReaderThemeHelper.normalizeIndex(themeIndex);
+  }
+
+  private static normalizeMargin(margin: number): number {
+    const value = Math.round(margin);
+    return Math.max(0, Math.min(value, 64));
   }
 
   private static normalizeColor(color: string, fallback: string): string {
@@ -695,6 +734,10 @@ export class ReaderSettingsStore {
     settings.fontSize = ReaderSettingsStore.normalizeFontSize(source.fontSize);
     settings.lineHeight = ReaderSettingsStore.normalizeLineHeight(source.lineHeight);
     settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(source.paragraphSpacing);
+    settings.marginLeft = ReaderSettingsStore.normalizeMargin(source.marginLeft);
+    settings.marginRight = ReaderSettingsStore.normalizeMargin(source.marginRight);
+    settings.marginTop = ReaderSettingsStore.normalizeMargin(source.marginTop);
+    settings.marginBottom = ReaderSettingsStore.normalizeMargin(source.marginBottom);
     settings.themeIndex = ReaderSettingsStore.normalizeThemeIndex(source.themeIndex);
     settings.lightThemeIndex = ReaderSettingsStore.normalizeThemeIndex(source.lightThemeIndex);
     settings.darkThemeIndex = ReaderSettingsStore.normalizeThemeIndex(source.darkThemeIndex);
@@ -755,6 +798,14 @@ export class ReaderSettingsStore {
     settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PARAGRAPH_SPACING) ?? 10
     );
+    settings.marginLeft = ReaderSettingsStore.normalizeMargin(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_MARGIN_LEFT) ?? 18);
+    settings.marginRight = ReaderSettingsStore.normalizeMargin(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_MARGIN_RIGHT) ?? 18);
+    settings.marginTop = ReaderSettingsStore.normalizeMargin(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_MARGIN_TOP) ?? 18);
+    settings.marginBottom = ReaderSettingsStore.normalizeMargin(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_MARGIN_BOTTOM) ?? 18);
     const legacyThemeIndex = ReaderSettingsStore.normalizeThemeIndex(
       AppStorage.get<number>(ReaderSettingsStore.KEY_THEME_INDEX) ?? 0
     );

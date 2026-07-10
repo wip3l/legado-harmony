@@ -17,6 +17,7 @@
     "pages/OtherSettings",
     "pages/AppIconSettings",
     "pages/ThemeColorSettings",
+    "pages/ThemeSettings",
     "pages/FontSettings",
     "pages/ReaderFontSettings",
     "pages/CoverGalleryManager",

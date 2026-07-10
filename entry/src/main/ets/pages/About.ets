@@ -1,6 +1,7 @@
 import { bundleManager, common } from '@kit.AbilityKit';
 import { promptAction, router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 @Entry
 @Component
@@ -171,27 +172,27 @@ struct AboutPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   secondaryTextColor(): string {
-    return this.appDarkMode ? '#B8BDC7' : '#666666';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#888888';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   accentColor(): string {
-    return this.appDarkMode ? '#4E9BFF' : '#007DFF';
+    return ThemeRuntime.accentColor(this.appDarkMode);
   }
 
   openUri(uri: string, fallbackMessage: string): void {

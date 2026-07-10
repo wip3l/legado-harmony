@@ -52,6 +52,41 @@ export class AppIconManager {
       '轻快像素书本',
       'pixel_retro',
       $r('app.media.ic_app_pixel_retro')
+    ),
+    AppIconManager.option(
+      'theme_classic_blue',
+      '经典蓝·书页',
+      '经典蓝主题专属图标',
+      'theme_classic_blue',
+      $r('app.media.ic_app_theme_classic_blue')
+    ),
+    AppIconManager.option(
+      'theme_warm_paper',
+      '暖纸·书笺',
+      '暖纸主题专属图标',
+      'theme_warm_paper',
+      $r('app.media.ic_app_theme_warm_paper')
+    ),
+    AppIconManager.option(
+      'theme_forest_mist',
+      '林雾·叶语',
+      '林雾主题专属图标',
+      'theme_forest_mist',
+      $r('app.media.ic_app_theme_forest_mist')
+    ),
+    AppIconManager.option(
+      'theme_ink_wash',
+      '水墨·书山',
+      '水墨主题专属图标',
+      'theme_ink_wash',
+      $r('app.media.ic_app_theme_ink_wash')
+    ),
+    AppIconManager.option(
+      'theme_neon_night',
+      '霓虹·夜读',
+      '霓虹主题专属图标',
+      'theme_neon_night',
+      $r('app.media.ic_app_theme_neon_night')
     )
   ];
 

@@ -1,0 +1,22 @@
+<svg width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1080" height="1920" fill="#0C1120"/>
+  <path fill="#20D7EA" fill-opacity="0.055" d="M0 0h370L171 261 0 186V0Z"/>
+  <path fill="#FF4FC8" fill-opacity="0.05" d="M1080 0H799l154 235 127-56V0Z"/>
+  <path fill="#8C68FF" fill-opacity="0.05" d="M0 1920v-226l176-114 192 340H0Z"/>
+  <path fill="#26CBE0" fill-opacity="0.05" d="M1080 1920v-249l-169-104-204 353h373Z"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="#31E5F4" stroke-opacity="0.18" stroke-width="3" d="M0 311h92l47-47h110M0 1003h76l42-42M1080 734h-79l-46-46h-91"/>
+    <path stroke="#FF5DCD" stroke-opacity="0.16" stroke-width="3" d="M1080 347h-91l-42-42h-105M1080 1208h-69l-51 51M0 1492h83l47 47h94"/>
+    <path stroke="#9B7BFF" stroke-opacity="0.11" stroke-width="2" d="M63 554h95M922 972h95M42 1215h76M939 1510h93"/>
+  </g>
+  <g fill="none" stroke-width="2">
+    <circle cx="83" cy="311" r="10" stroke="#31E5F4" stroke-opacity="0.19"/>
+    <circle cx="998" cy="347" r="10" stroke="#FF5DCD" stroke-opacity="0.17"/>
+    <circle cx="82" cy="1492" r="9" stroke="#FF5DCD" stroke-opacity="0.15"/>
+    <circle cx="1010" cy="1208" r="9" stroke="#31E5F4" stroke-opacity="0.17"/>
+  </g>
+  <g fill="#A58CFF" fill-opacity="0.16">
+    <circle cx="46" cy="724" r="3"/><circle cx="1028" cy="902" r="3"/>
+    <circle cx="55" cy="1328" r="3"/><circle cx="1021" cy="1438" r="3"/>
+  </g>
+</svg>

@@ -8,6 +8,7 @@ import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore'
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const BOOK_SOURCE_IMPORT_TIMEOUT_MS = 20000;
@@ -40,6 +41,7 @@ struct BookSourcePage {
   @State isBatchOperating: boolean = false;
   @State batchOperationText: string = '正在操作书源...';
   @State showCheckDialog: boolean = false;
+  @State showCheckOptionsDialog: boolean = false;
   @State isCheckingSources: boolean = false;
   @State checkDone: number = 0;
   @State checkTotal: number = 0;
@@ -47,6 +49,8 @@ struct BookSourcePage {
   @State checkBadUrls: string[] = [];
   @State checkBadNames: string[] = [];
   @State checkStatus: string = '';
+  @State checkInvalidAction: string = 'none';
+  @State checkAutoHandledCount: number = 0;
   private hasShownOnce: boolean = false;
 
   aboutToAppear() {
@@ -130,7 +134,7 @@ struct BookSourcePage {
               .height(56)
               .textAlign(TextAlign.Center)
               .onClick(() => {
-                this.startCheckEnabledSources();
+                this.openCheckOptions();
               })
 
             Text('+')
@@ -734,6 +738,10 @@ struct BookSourcePage {
         })
       }
 
+      if (this.showCheckOptionsDialog) {
+        this.checkOptionsDialog()
+      }
+
       if (this.showCheckDialog) {
         Column() {
           Column() {
@@ -806,31 +814,33 @@ struct BookSourcePage {
               }
 
               Row() {
-                Button('一键禁用')
-                  .layoutWeight(1)
-                  .height(44)
-                  .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
-                  .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#E53935' : this.inputColor())
-                  .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
-                  .onClick(() => {
-                    this.disableFailedCheckedSources();
-                  })
+                if (this.checkInvalidAction === 'none') {
+                  Button('一键禁用')
+                    .layoutWeight(1)
+                    .height(44)
+                    .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
+                    .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#E53935' : this.inputColor())
+                    .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
+                    .onClick(() => {
+                      this.disableFailedCheckedSources();
+                    })
 
-                Button('一键删除')
-                  .layoutWeight(1)
-                  .height(44)
-                  .margin({ left: 8 })
-                  .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
-                  .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#B71C1C' : this.inputColor())
-                  .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
-                  .onClick(() => {
-                    this.deleteFailedCheckedSources();
-                  })
+                  Button('一键删除')
+                    .layoutWeight(1)
+                    .height(44)
+                    .margin({ left: 8 })
+                    .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
+                    .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#B71C1C' : this.inputColor())
+                    .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
+                    .onClick(() => {
+                      this.deleteFailedCheckedSources();
+                    })
+                }
 
-                Button('取消')
+                Button(this.checkInvalidAction === 'none' ? '取消' : '关闭')
                   .layoutWeight(1)
                   .height(44)
-                  .margin({ left: 8 })
+                  .margin({ left: this.checkInvalidAction === 'none' ? 8 : 0 })
                   .backgroundColor(this.inputColor())
                   .fontColor(this.primaryTextColor())
                   .onClick(() => {
@@ -933,16 +943,108 @@ struct BookSourcePage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
+  @Builder
+  checkOptionsDialog() {
+    Column() {
+      Column({ space: 12 }) {
+        Text('校验设置')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .width('100%')
+
+        Text('选择发现无效书源时的处理方式。禁用或删除会在每个书源校验结束后立即执行。')
+          .fontSize(13)
+          .fontColor(this.secondaryTextColor())
+          .width('100%')
+
+        this.checkActionOption('仅校验', '记录无效书源，校验完成后再手动处理', 'none')
+        this.checkActionOption('自动禁用', '边校验边禁用无效书源，可稍后重新启用', 'disable')
+        this.checkActionOption('自动删除', '边校验边永久删除无效书源，此操作不可恢复', 'delete', true)
+
+        Row({ space: 10 }) {
+          Button('取消')
+            .layoutWeight(1)
+            .height(42)
+            .backgroundColor(this.inputColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => {
+              this.showCheckOptionsDialog = false;
+            })
+
+          Button('开始校验')
+            .layoutWeight(1)
+            .height(42)
+            .backgroundColor(this.checkInvalidAction === 'delete' ? '#B71C1C' : this.buttonColor())
+            .fontColor('#FFFFFF')
+            .onClick(() => {
+              this.startCheckEnabledSources(this.checkInvalidAction);
+            })
+        }
+        .width('100%')
+        .margin({ top: 4 })
+      }
+      .width('88%')
+      .padding(22)
+      .backgroundColor(this.cardColor())
+      .borderRadius(14)
+      .onClick(() => {
+      })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#80000000')
+    .justifyContent(FlexAlign.Center)
+    .onClick(() => {
+      this.showCheckOptionsDialog = false;
+    })
+  }
+
+  @Builder
+  checkActionOption(title: string, description: string, action: string, danger: boolean = false) {
+    Row() {
+      Text(this.checkInvalidAction === action ? '●' : '○')
+        .fontSize(20)
+        .fontColor(this.checkInvalidAction === action ?
+          (danger ? '#B71C1C' : this.accentColor()) : this.subTextColor())
+        .width(28)
+
+      Column() {
+        Text(title)
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(danger ? '#B71C1C' : this.primaryTextColor())
+        Text(description)
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+          .margin({ top: 3 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+    .borderRadius(9)
+    .backgroundColor(this.checkInvalidAction === action ? this.inputColor() : this.cardColor())
+    .border({
+      width: this.checkInvalidAction === action ? 1 : 0.5,
+      color: this.checkInvalidAction === action ? (danger ? '#B71C1C' : this.accentColor()) : this.glassBorderColor()
+    })
+    .onClick(() => {
+      this.checkInvalidAction = action;
+    })
+  }
+
   syncBars(): void {
     syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   glassCardColor(): string {
@@ -950,7 +1052,7 @@ struct BookSourcePage {
   }
 
   inputColor(): string {
-    return this.appDarkMode ? '#24272D' : '#F5F5F5';
+    return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
   glassInputColor(): string {
@@ -966,27 +1068,27 @@ struct BookSourcePage {
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   secondaryTextColor(): string {
-    return this.appDarkMode ? '#B8BDC7' : '#666666';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#999999';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   placeholderTextColor(): string {
-    return this.appDarkMode ? '#6F7480' : '#999999';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   accentColor(): string {
-    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+    return ThemeRuntime.accentColor(this.appDarkMode);
   }
 
   buttonColor(): string {
-    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+    return ThemeRuntime.buttonColor(this.appDarkMode);
   }
 
   async searchSources() {
@@ -1237,7 +1339,7 @@ struct BookSourcePage {
     }
   }
 
-  async startCheckEnabledSources(): Promise<void> {
+  openCheckOptions(): void {
     if (this.selectionMode) {
       return;
     }
@@ -1245,6 +1347,20 @@ struct BookSourcePage {
       promptAction.showToast({ message: '正在校验中' });
       return;
     }
+    this.showCheckOptionsDialog = true;
+  }
+
+  async startCheckEnabledSources(action: string = 'none'): Promise<void> {
+    if (this.selectionMode) {
+      return;
+    }
+    if (this.isCheckingSources) {
+      promptAction.showToast({ message: '正在校验中' });
+      return;
+    }
+
+    this.checkInvalidAction = action === 'disable' || action === 'delete' ? action : 'none';
+    this.showCheckOptionsDialog = false;
 
     const db = AppDatabase.getInstance();
     const enabledSources = await db.getEnabledBookSources();
@@ -1260,6 +1376,7 @@ struct BookSourcePage {
     this.checkOkCount = 0;
     this.checkBadUrls = [];
     this.checkBadNames = [];
+    this.checkAutoHandledCount = 0;
     this.checkStatus = `准备校验 ${enabledSources.length} 个启用书源`;
 
     try {
@@ -1268,6 +1385,10 @@ struct BookSourcePage {
         this.checkDone = progress.done;
         this.checkTotal = progress.total;
         this.checkStatus = this.formatCheckProgressStatus(progress);
+      }, {
+        onSourceComplete: async (source: BookSource, books: SearchBook[]) => {
+          await this.handleCheckedSourceCompletion(source, books.length > 0);
+        }
       });
 
       const okUrls = this.uniqueResultOrigins(results);
@@ -1284,6 +1405,40 @@ struct BookSourcePage {
       promptAction.showToast({ message: '校验失败' });
     } finally {
       this.isCheckingSources = false;
+      if (this.checkInvalidAction !== 'none') {
+        await this.loadSources();
+      }
+    }
+  }
+
+  async handleCheckedSourceCompletion(source: BookSource, available: boolean): Promise<void> {
+    if (available) {
+      this.checkOkCount++;
+      return;
+    }
+    if (!this.checkBadUrls.includes(source.bookSourceUrl)) {
+      this.checkBadUrls = [...this.checkBadUrls, source.bookSourceUrl];
+      this.checkBadNames = [...this.checkBadNames, source.bookSourceName || source.bookSourceUrl];
+    }
+    if (this.checkInvalidAction === 'none') {
+      return;
+    }
+
+    try {
+      const db = AppDatabase.getInstance();
+      if (this.checkInvalidAction === 'disable') {
+        source.enabled = false;
+        source.lastUpdateTime = Date.now();
+        await db.updateBookSource(source);
+        this.sources = this.sources.map((item: BookSource) =>
+          item.bookSourceUrl === source.bookSourceUrl ? source : item);
+      } else if (this.checkInvalidAction === 'delete') {
+        await db.deleteBookSource(source.bookSourceUrl);
+        this.sources = this.sources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
+      }
+      this.checkAutoHandledCount++;
+    } catch (e) {
+      console.error(`自动${this.checkInvalidAction === 'delete' ? '删除' : '禁用'}无效书源失败:`, e);
     }
   }
 
@@ -1299,12 +1454,22 @@ struct BookSourcePage {
   }
 
   checkSummaryText(): string {
-    return `已校验 ${this.checkTotal} 个启用书源`;
+    return `已校验 ${this.checkTotal} 个启用书源${this.checkAutoActionSummary()}`;
   }
 
   formatCheckProgressStatus(progress: SearchProgress): string {
     const verifyText = progress.needVerification ? '；有书源需要网页验证' : '';
-    return `已校验 ${progress.done}/${progress.total}${verifyText}`;
+    return `已校验 ${progress.done}/${progress.total}${this.checkAutoActionSummary()}${verifyText}`;
+  }
+
+  checkAutoActionSummary(): string {
+    if (this.checkInvalidAction === 'disable') {
+      return `，已自动禁用 ${this.checkAutoHandledCount} 个`;
+    }
+    if (this.checkInvalidAction === 'delete') {
+      return `，已自动删除 ${this.checkAutoHandledCount} 个`;
+    }
+    return '';
   }
 
   checkResultText(): string {
@@ -1314,7 +1479,7 @@ struct BookSourcePage {
     if (this.checkBadUrls.length === 0) {
       return `全部可用，共 ${this.checkOkCount} 个书源通过校验`;
     }
-    return `可用 ${this.checkOkCount} 个，异常 ${this.checkBadUrls.length} 个`;
+    return `可用 ${this.checkOkCount} 个，异常 ${this.checkBadUrls.length} 个${this.checkAutoActionSummary()}`;
   }
 
   async disableFailedCheckedSources(): Promise<void> {

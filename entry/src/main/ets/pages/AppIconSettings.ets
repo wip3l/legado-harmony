@@ -3,6 +3,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { syncSystemBars } from '../utils/SystemBars';
 import { AppIconManager, AppIconOption } from '../utils/AppIconManager';
 import { AppIconSettings, AppIconSettingsStore } from '../utils/AppIconSettingsStore';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 @Entry
 @Component
@@ -61,26 +62,26 @@ struct AppIconSettingsPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#888888';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   optionBorderColor(selected: boolean): string {
     if (selected) {
-      return this.appDarkMode ? '#4E9BFF' : '#007DFF';
+      return ThemeRuntime.accentColor(this.appDarkMode);
     }
-    return this.appDarkMode ? '#2A2D33' : '#E6E8EB';
+    return ThemeRuntime.dividerColor(this.appDarkMode);
   }
 
   syncBars(): void {
@@ -187,7 +188,7 @@ struct AppIconSettingsPage {
             .width(22)
             .height(22)
             .textAlign(TextAlign.Center)
-            .backgroundColor(this.appDarkMode ? '#4E9BFF' : '#007DFF')
+            .backgroundColor(ThemeRuntime.accentColor(this.appDarkMode))
             .borderRadius(11)
             .margin({ top: -4, right: -4 })
         }

@@ -9,6 +9,7 @@ import { syncSystemBars } from '../utils/SystemBars';
 import { SearchBookShelfHelper } from '../utils/SearchBookShelfHelper';
 import { SearchExploreSettings, SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 @Entry
 @Component
@@ -842,15 +843,15 @@ struct SearchPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   glassCardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return this.cardColor();
   }
 
   glassBorderColor(): string {
@@ -862,19 +863,19 @@ struct SearchPage {
   }
 
   inputColor(): string {
-    return this.appDarkMode ? '#24272D' : '#F5F5F5';
+    return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   secondaryTextColor(): string {
-    return this.appDarkMode ? '#C6CBD2' : '#666666';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#999999';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   statusMessageColor(): string {
@@ -882,7 +883,7 @@ struct SearchPage {
   }
 
   buttonColor(): string {
-    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+    return ThemeRuntime.buttonColor(this.appDarkMode);
   }
 
   buttonBackgroundColor(): string {

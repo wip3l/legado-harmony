@@ -7,6 +7,7 @@ import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { ColorCodePicker } from '../components/ColorCodePicker';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 import fs from '@ohos.file.fs';
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -28,6 +29,11 @@ struct SettingsPage {
   @StorageLink('readerFontSize') readerFontSize: number = 20;
   @StorageLink('readerLineHeight') readerLineHeight: number = 12;
   @StorageLink('readerParagraphSpacing') readerParagraphSpacing: number = 10;
+  @StorageLink('readerMarginLeft') readerMarginLeft: number = 18;
+  @StorageLink('readerMarginRight') readerMarginRight: number = 18;
+  @StorageLink('readerMarginTop') readerMarginTop: number = 18;
+  @StorageLink('readerMarginBottom') readerMarginBottom: number = 18;
+  @State typographySettingIndex: number = 0;
   @StorageLink('readerLightThemeIndex') readerLightThemeIndex: number = 0;
   @StorageLink('readerDarkThemeIndex') readerDarkThemeIndex: number = 0;
   @StorageLink('readerLightCustomThemeBackgroundColor') readerLightCustomThemeBackgroundColor: string = ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR;
@@ -46,6 +52,7 @@ struct SettingsPage {
   @StorageLink('readerBodyFontFamily') readerBodyFontFamily: string = '';
   @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
   @StorageLink('readerPageTurnAnimationType') readerPageTurnAnimationType: number = ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE;
+  @StorageLink('readerTapZoneActions') readerTapZoneActions: string = '3,3,3,3,1,2,2,2,2';
   @StorageLink('readerVolumeTurnPage') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
   @StorageLink('readerExtendToStatusBar') readerExtendToStatusBar: boolean = false;
@@ -58,6 +65,7 @@ struct SettingsPage {
 
   @State customFonts: ReaderCustomFontItem[] = [];
   @State previewFontRenderVersion: number = 0;
+  @State showTapZoneSettings: boolean = false;
 
   aboutToAppear() {
     this.loadThemeMode();
@@ -101,7 +109,8 @@ struct SettingsPage {
   }
 
   build() {
-    Column() {
+    Stack() {
+      Column() {
       this.titleBar()
 
       Scroll() {
@@ -110,16 +119,19 @@ struct SettingsPage {
           this.appThemeOptions()
 
           this.sectionTitle('排版')
-          this.fontSizeSlider()
-          this.lineHeightSlider()
-          this.paragraphSpacingSlider()
+          this.typographyStepper()
           this.readerFontEntryItem()
 
           this.sectionTitle('阅读背景')
           this.readerThemePanel()
 
-          this.sectionTitle('翻页方式')
-          this.pageTurnOptions()
+          this.selectItem('翻页方式', '选择滚动、滑动或点击翻页',
+            this.pageTurnModeOptions(), this.pageTurnModeSelectedIndex(), (index: number) => {
+              this.setReaderPageTurnMode(index);
+            })
+          if (this.readerPageTurnMode === 2) {
+            this.tapZoneSettingItem()
+          }
           this.selectItem('翻页动画', '选择滑动或点击翻页时使用的页面切换效果',
             this.pageTurnAnimationOptions(), this.pageTurnAnimationSelectedIndex(), (index: number) => {
               this.setReaderPageTurnAnimationType(index);
@@ -158,7 +170,12 @@ struct SettingsPage {
               .margin({ top: 10 })
           }
           .width('100%')
-          .padding(18)
+          .padding({
+            left: this.readerMarginLeft,
+            right: this.readerMarginRight,
+            top: this.readerMarginTop,
+            bottom: this.readerMarginBottom
+          })
           .backgroundColor(this.previewBackgroundColor())
           .borderRadius(10)
           .margin({ left: 16, right: 16, top: 12, bottom: 32 })
@@ -166,12 +183,19 @@ struct SettingsPage {
         .width('100%')
       }
       .layoutWeight(1)
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
+      .backgroundColor(this.pageColor())
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+
+      if (this.showTapZoneSettings) {
+        this.tapZoneSettingsDialog()
+      }
     }
     .width('100%')
     .height('100%')
-    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
-    .backgroundColor(this.pageColor())
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   applyThemeMode(mode: string, persist: boolean = true) {
@@ -375,7 +399,8 @@ struct SettingsPage {
     if (this.readerFontFilePath) {
       return this.readerSystemFontFamily || ReaderSystemFontHelper.currentFromStorage(this.getUIContext());
     }
-    return this.readerFontFamily || this.readerSystemFontFamily || ReaderSystemFontHelper.currentFromStorage(this.getUIContext());
+    return this.readerFontFamily || ThemeRuntime.fontFamily() || this.readerSystemFontFamily ||
+      ReaderSystemFontHelper.currentFromStorage(this.getUIContext());
   }
 
   getPreviewBodyFontFamily(): string {
@@ -425,6 +450,10 @@ struct SettingsPage {
     this.readerFontSize = settings.fontSize;
     this.readerLineHeight = settings.lineHeight;
     this.readerParagraphSpacing = settings.paragraphSpacing;
+    this.readerMarginLeft = settings.marginLeft;
+    this.readerMarginRight = settings.marginRight;
+    this.readerMarginTop = settings.marginTop;
+    this.readerMarginBottom = settings.marginBottom;
     this.readerLightThemeIndex = settings.lightThemeIndex;
     this.readerDarkThemeIndex = settings.darkThemeIndex;
     this.readerLightCustomThemeBackgroundColor = settings.lightCustomThemeBackgroundColor;
@@ -433,6 +462,7 @@ struct SettingsPage {
     this.readerDarkCustomThemeTextColor = settings.darkCustomThemeTextColor;
     this.readerPageTurnMode = settings.pageTurnMode;
     this.readerPageTurnAnimationType = settings.pageTurnAnimationType;
+    this.readerTapZoneActions = settings.tapZoneActions;
     this.readerVolumeTurnPage = settings.volumeTurnPage;
     this.readerKeepScreenOn = settings.keepScreenOn;
     this.readerExtendToStatusBar = settings.extendToStatusBar;
@@ -482,13 +512,13 @@ struct SettingsPage {
     this.readerFontMode = 'system';
     this.readerFontFamily = '';
     this.readerFontFilePath = '';
-    this.readerFontSourceName = '系统默认';
+    this.readerFontSourceName = '跟随主题';
     this.readerActiveFontFamily = '';
     this.readerFontRegistered = false;
     this.previewFontRenderVersion++;
-    this.applyApplicationFont(systemFontFamily);
+    this.applyApplicationFont(ThemeRuntime.fontFamily() || systemFontFamily);
     this.saveFontSettings();
-    promptAction.showToast({ message: '已恢复系统默认字体' });
+    promptAction.showToast({ message: '已恢复主题默认字体' });
   }
 
   rememberCurrentSystemFont(): void {
@@ -678,7 +708,7 @@ struct SettingsPage {
   }
 
   readerFontOptions(): SelectOption[] {
-    const options: SelectOption[] = [{ value: '系统默认' }];
+    const options: SelectOption[] = [{ value: '跟随主题' }];
     for (const item of this.customFonts) {
       options.push({ value: item.sourceName || item.familyName });
     }
@@ -701,14 +731,14 @@ struct SettingsPage {
   readerFontValue(): string {
     const index = this.readerFontSelectedIndex();
     if (index <= 0) {
-      return '系统默认';
+      return '跟随主题';
     }
     const customIndex = index - 1;
     if (customIndex >= 0 && customIndex < this.customFonts.length) {
       const item = this.customFonts[customIndex];
       return item.sourceName || item.familyName || '自定义字体';
     }
-    return '系统默认';
+    return '跟随主题';
   }
 
   selectReaderFontByIndex(index: number): void {
@@ -726,6 +756,82 @@ struct SettingsPage {
     if (this.readerPageTurnMode === 1) return '滑动翻页';
     if (this.readerPageTurnMode === 2) return '点击翻页';
     return '滚动阅读';
+  }
+
+  pageTurnModeOptions(): SelectOption[] {
+    return [
+      { value: '滚动阅读' },
+      { value: '滑动翻页' },
+      { value: '点击翻页' }
+    ];
+  }
+
+  pageTurnModeSelectedIndex(): number {
+    return this.readerPageTurnMode >= 0 && this.readerPageTurnMode <= 2 ? this.readerPageTurnMode : 0;
+  }
+
+  readerTapZoneActionsList(): number[] {
+    const fallback = [3, 3, 3, 3, 1, 2, 2, 2, 2];
+    const parts = (this.readerTapZoneActions || '').split(',');
+    const result: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      const parsed = Number(parts[i]);
+      result.push(Number.isFinite(parsed) && parsed >= 0 && parsed <= 3 ? Math.round(parsed) : fallback[i]);
+    }
+    return result;
+  }
+
+  readerTapZoneActionAt(index: number): number {
+    const actions = this.readerTapZoneActionsList();
+    return actions[Math.max(0, Math.min(8, Math.round(index)))];
+  }
+
+  cycleTapZoneAction(index: number): void {
+    const actions = this.readerTapZoneActionsList();
+    const safeIndex = Math.max(0, Math.min(8, Math.round(index)));
+    actions[safeIndex] = (actions[safeIndex] + 1) % 4;
+    this.setTapZoneActions(actions.join(','));
+  }
+
+  setTapZoneActions(actions: string): void {
+    const normalized = this.normalizeTapZoneActions(actions);
+    this.readerTapZoneActions = normalized;
+    ReaderSettingsStore.saveTapZoneActions(getContext(this), normalized).catch((e: Error) => {
+      console.error('保存点击区域动作失败:', e);
+    });
+  }
+
+  normalizeTapZoneActions(actions: string): string {
+    const fallback = [3, 3, 3, 3, 1, 2, 2, 2, 2];
+    const parts = (actions || '').split(',');
+    const result: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      const parsed = Number(parts[i]);
+      result.push(Number.isFinite(parsed) && parsed >= 0 && parsed <= 3 ? Math.round(parsed) : fallback[i]);
+    }
+    return result.join(',');
+  }
+
+  tapActionLabel(action: number): string {
+    if (action === 1) return '菜单';
+    if (action === 2) return '下一页';
+    if (action === 3) return '上一页';
+    return '无动作';
+  }
+
+  tapZoneCellColor(action: number): string {
+    if (action === 1) return '#332A6FCC';
+    if (action === 2) return '#2239A86B';
+    if (action === 3) return '#22A85C39';
+    return '#14000000';
+  }
+
+  tapZoneSummaryText(): string {
+    const counts = [0, 0, 0, 0];
+    for (const action of this.readerTapZoneActionsList()) {
+      counts[action]++;
+    }
+    return `菜单${counts[1]} · 下一页${counts[2]} · 上一页${counts[3]} · 无动作${counts[0]}`;
   }
 
   pageTurnAnimationOptions(): SelectOption[] {
@@ -762,7 +868,11 @@ struct SettingsPage {
       getContext(this),
       this.readerFontSize,
       this.readerLineHeight,
-      this.readerParagraphSpacing
+      this.readerParagraphSpacing,
+      this.readerMarginLeft,
+      this.readerMarginRight,
+      this.readerMarginTop,
+      this.readerMarginBottom
     ).catch((e: Error) => {
       console.warn('保存阅读排版设置失败:', e);
     });
@@ -791,6 +901,93 @@ struct SettingsPage {
       this.readerLightThemeIndex = nextIndex;
     }
     this.saveReaderThemeSettings();
+  }
+
+  setReaderMarginLeft(value: number): void {
+    this.readerMarginLeft = this.normalizeReaderMargin(value);
+    this.saveReaderLayoutSettings();
+  }
+
+  setReaderMarginRight(value: number): void {
+    this.readerMarginRight = this.normalizeReaderMargin(value);
+    this.saveReaderLayoutSettings();
+  }
+
+  setReaderMarginTop(value: number): void {
+    this.readerMarginTop = this.normalizeReaderMargin(value);
+    this.saveReaderLayoutSettings();
+  }
+
+  setReaderMarginBottom(value: number): void {
+    this.readerMarginBottom = this.normalizeReaderMargin(value);
+    this.saveReaderLayoutSettings();
+  }
+
+  normalizeReaderMargin(value: number): number {
+    return Math.max(0, Math.min(Math.round(value), 64));
+  }
+
+  typographySettingOptions(): SelectOption[] {
+    return [
+      { value: '字号' },
+      { value: '行距' },
+      { value: '段落间距' },
+      { value: '左边距' },
+      { value: '右边距' },
+      { value: '上边距' },
+      { value: '下边距' }
+    ];
+  }
+
+  typographySettingTitle(): string {
+    const titles: string[] = ['字号', '行距', '段落间距', '左边距', '右边距', '上边距', '下边距'];
+    const index = Math.max(0, Math.min(this.typographySettingIndex, titles.length - 1));
+    return titles[index];
+  }
+
+  currentTypographySettingValue(): number {
+    switch (this.typographySettingIndex) {
+      case 1:
+        return this.readerLineHeight;
+      case 2:
+        return this.readerParagraphSpacing;
+      case 3:
+        return this.readerMarginLeft;
+      case 4:
+        return this.readerMarginRight;
+      case 5:
+        return this.readerMarginTop;
+      case 6:
+        return this.readerMarginBottom;
+      default:
+        return this.readerFontSize;
+    }
+  }
+
+  adjustCurrentTypographySetting(delta: number): void {
+    const next = this.currentTypographySettingValue() + delta;
+    switch (this.typographySettingIndex) {
+      case 1:
+        this.setReaderLineHeight(next);
+        return;
+      case 2:
+        this.setReaderParagraphSpacing(next);
+        return;
+      case 3:
+        this.setReaderMarginLeft(next);
+        return;
+      case 4:
+        this.setReaderMarginRight(next);
+        return;
+      case 5:
+        this.setReaderMarginTop(next);
+        return;
+      case 6:
+        this.setReaderMarginBottom(next);
+        return;
+      default:
+        this.setReaderFontSize(next);
+    }
   }
 
   setCurrentThemeBackgroundColor(color: string): void {
@@ -897,27 +1094,31 @@ struct SettingsPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
+  }
+
+  inputColor(): string {
+    return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#888';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   accentColor(): string {
-    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+    return ThemeRuntime.accentColor(this.appDarkMode);
   }
 
   buttonColor(): string {
-    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+    return ThemeRuntime.buttonColor(this.appDarkMode);
   }
 
   previewBackgroundColor(): string {
@@ -1038,7 +1239,7 @@ struct SettingsPage {
         .value(this.readerFontValue())
         .font({ size: 14 })
         .fontColor(this.primaryTextColor())
-        .backgroundColor(this.appDarkMode ? '#24272D' : '#F0F2F5')
+        .backgroundColor(this.inputColor())
         .borderRadius(8)
         .constraintSize({ minWidth: 156, maxWidth: 220 })
         .margin({ left: 12 })
@@ -1106,36 +1307,39 @@ struct SettingsPage {
   @Builder
   appThemeOptions() {
     Row({ space: 8 }) {
-      Text('跟随系统')
-        .fontSize(14)
-        .fontColor(this.appThemeMode === 'system' ? '#FFFFFF' : this.primaryTextColor())
-        .textAlign(TextAlign.Center)
+      Stack({ alignContent: Alignment.Center }) {
+        Text('跟随系统')
+          .fontSize(14)
+          .fontColor(this.appThemeMode === 'system' ? '#FFFFFF' : this.primaryTextColor())
+      }
         .layoutWeight(1)
         .height(38)
         .borderRadius(19)
-        .backgroundColor(this.appThemeMode === 'system' ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+        .backgroundColor(this.appThemeMode === 'system' ? this.accentColor() : this.inputColor())
         .onClick(() => {
           this.applyThemeMode('system');
         })
-      Text('浅色')
-        .fontSize(14)
-        .fontColor(this.appThemeMode === 'light' ? '#FFFFFF' : this.primaryTextColor())
-        .textAlign(TextAlign.Center)
+      Stack({ alignContent: Alignment.Center }) {
+        Text('浅色')
+          .fontSize(14)
+          .fontColor(this.appThemeMode === 'light' ? '#FFFFFF' : this.primaryTextColor())
+      }
         .layoutWeight(1)
         .height(38)
         .borderRadius(19)
-        .backgroundColor(this.appThemeMode === 'light' ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+        .backgroundColor(this.appThemeMode === 'light' ? this.accentColor() : this.inputColor())
         .onClick(() => {
           this.applyThemeMode('light');
         })
-      Text('深色')
-        .fontSize(14)
-        .fontColor(this.appThemeMode === 'dark' ? '#FFFFFF' : this.primaryTextColor())
-        .textAlign(TextAlign.Center)
+      Stack({ alignContent: Alignment.Center }) {
+        Text('深色')
+          .fontSize(14)
+          .fontColor(this.appThemeMode === 'dark' ? '#FFFFFF' : this.primaryTextColor())
+      }
         .layoutWeight(1)
         .height(38)
         .borderRadius(19)
-        .backgroundColor(this.appThemeMode === 'dark' ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+        .backgroundColor(this.appThemeMode === 'dark' ? this.accentColor() : this.inputColor())
         .onClick(() => {
           this.applyThemeMode('dark');
         })
@@ -1146,54 +1350,143 @@ struct SettingsPage {
   }
 
   @Builder
-  pageTurnOptions() {
-    Row({ space: 8 }) {
-      Text('滚动阅读')
+  tapZoneSettingItem() {
+    Row() {
+      Column() {
+        Text('点击区域动作')
+          .fontSize(16)
+          .fontColor(this.primaryTextColor())
+        Text(this.tapZoneSummaryText())
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+          .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Button('配置')
+        .height(36)
         .fontSize(14)
-        .fontColor(this.readerPageTurnMode === 0 ? '#FFFFFF' : this.primaryTextColor())
-        .textAlign(TextAlign.Center)
-        .layoutWeight(1)
-        .height(38)
-        .borderRadius(19)
-        .backgroundColor(this.readerPageTurnMode === 0 ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .margin({ left: 12 })
         .onClick(() => {
-          this.setReaderPageTurnMode(0);
-        })
-      Text('滑动翻页')
-        .fontSize(14)
-        .fontColor(this.readerPageTurnMode === 1 ? '#FFFFFF' : this.primaryTextColor())
-        .textAlign(TextAlign.Center)
-        .layoutWeight(1)
-        .height(38)
-        .borderRadius(19)
-        .backgroundColor(this.readerPageTurnMode === 1 ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
-        .onClick(() => {
-          this.setReaderPageTurnMode(1);
-        })
-      Text('点击翻页 ')
-        .fontSize(14)
-        .fontColor(this.readerPageTurnMode === 2 ? '#FFFFFF' : this.primaryTextColor())
-        .textAlign(TextAlign.Center)
-        .layoutWeight(1)
-        .height(38)
-        .borderRadius(19)
-        .backgroundColor(this.readerPageTurnMode === 2 ? this.accentColor() : (this.appDarkMode ? '#24272D' : '#F0F2F5'))
-        .onClick(() => {
-          this.setReaderPageTurnMode(2);
+          this.showTapZoneSettings = true;
         })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .constraintSize({ minHeight: 64 })
+    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
     .backgroundColor(this.cardColor())
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  tapZoneSettingsDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column({ space: 14 }) {
+        Row() {
+          Text('点击区域动作')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
+            .layoutWeight(1)
+
+          Button('×')
+            .fontSize(24)
+            .fontColor(this.primaryTextColor())
+            .width(44)
+            .height(44)
+            .backgroundColor(Color.Transparent)
+            .padding(0)
+            .onClick(() => {
+              this.showTapZoneSettings = false;
+            })
+        }
+        .width('100%')
+        .height(48)
+        .alignItems(VerticalAlign.Center)
+
+        Text('点击九宫格可循环设置：无动作、菜单、下一页、上一页')
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+          .width('100%')
+
+        Column() {
+          ForEach([0, 1, 2], (row: number) => {
+            Row() {
+              ForEach([0, 1, 2], (column: number) => {
+                this.tapZoneCell(row * 3 + column)
+              }, (column: number) => `${row}_${column}`)
+            }
+            .width('100%')
+            .layoutWeight(1)
+          }, (row: number) => `${row}`)
+        }
+        .width('100%')
+        .height(280)
+        .border({ width: 1, color: this.appDarkMode ? '#44FFFFFF' : '#22000000' })
+        .clip(true)
+
+        Row({ space: 12 }) {
+          Button('重置默认')
+            .layoutWeight(1)
+            .height(40)
+            .fontSize(14)
+            .backgroundColor(this.inputColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => {
+              this.setTapZoneActions('3,3,3,3,1,2,2,2,2');
+            })
+
+          Button('完成')
+            .layoutWeight(1)
+            .height(40)
+            .fontSize(14)
+            .backgroundColor(this.buttonColor())
+            .fontColor('#FFFFFF')
+            .onClick(() => {
+              this.showTapZoneSettings = false;
+            })
+        }
+        .width('100%')
+      }
+      .width('calc(100% - 40vp)')
+      .padding(18)
+      .borderRadius(16)
+      .backgroundColor(this.cardColor())
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
+    .backgroundColor('#66000000')
+  }
+
+  @Builder
+  tapZoneCell(index: number) {
+    Text(this.tapActionLabel(this.readerTapZoneActionAt(index)))
+      .fontSize(16)
+      .fontWeight(FontWeight.Medium)
+      .fontColor(this.primaryTextColor())
+      .textAlign(TextAlign.Center)
+      .width('100%')
+      .height('100%')
+      .layoutWeight(1)
+      .backgroundColor(this.tapZoneCellColor(this.readerTapZoneActionAt(index)))
+      .border({ width: 0.5, color: this.appDarkMode ? '#33FFFFFF' : '#22000000' })
+      .onClick(() => {
+        this.cycleTapZoneAction(index);
+      })
   }
 
   @Builder
   readerThemePanel() {
     Column({ space: 14 }) {
-      Row({ space: 10 }) {
+      Row({ space: 4 }) {
         ForEach(this.currentReaderThemes(), (theme: ReaderThemeItem, index: number) => {
           Column({ space: 6 }) {
-            Text(index === ReaderThemeHelper.CUSTOM_THEME_INDEX ? '自' : '')
+            Text(index === ReaderThemeHelper.CUSTOM_THEME_INDEX ? '自' :
+              (index === ReaderThemeHelper.APP_THEME_INDEX ? '主' : ''))
               .fontSize(14)
               .fontColor(theme.textColor)
               .textAlign(TextAlign.Center)
@@ -1209,11 +1502,12 @@ struct SettingsPage {
               .fontSize(12)
               .fontColor(this.subTextColor())
           }
-          .margin({ right: 18 })
+          .layoutWeight(1)
           .onClick(() => {
             this.setReaderThemeIndex(index);
           })
-        }, (theme: ReaderThemeItem) => `${theme.name}_${theme.backgroundColor}_${theme.textColor}`)
+        }, (theme: ReaderThemeItem) =>
+          `${theme.name}_${theme.backgroundColor}_${theme.textColor}_${theme.backgroundAssetId}_${theme.backgroundImageFit}`)
       }
       .width('100%')
 
@@ -1249,11 +1543,20 @@ struct SettingsPage {
   }
 
   @Builder
-  fontSizeSlider() {
-    Row() {
-      Text('字号')
-        .fontSize(15)
+  typographyStepper() {
+    Row({ space: 8 }) {
+      Select(this.typographySettingOptions())
+        .selected(this.typographySettingIndex)
+        .value(this.typographySettingTitle())
+        .font({ size: 15 })
         .fontColor(this.primaryTextColor())
+        .backgroundColor(this.inputColor())
+        .borderRadius(8)
+        .constraintSize({ minWidth: 130, maxWidth: 170 })
+        .onSelect((index: number) => {
+          this.typographySettingIndex = Math.max(0, Math.min(index, this.typographySettingOptions().length - 1));
+        })
+      Blank()
         .layoutWeight(1)
       Button('-')
         .width(44)
@@ -1261,12 +1564,12 @@ struct SettingsPage {
         .backgroundColor(this.buttonColor())
         .fontColor('#FFFFFF')
         .onClick(() => {
-          this.setReaderFontSize(this.readerFontSize - 1);
+          this.adjustCurrentTypographySetting(-1);
         })
-      Text(`${this.readerFontSize}`)
+      Text(`${this.currentTypographySettingValue()}`)
         .fontSize(15)
         .fontColor(this.primaryTextColor())
-        .width(48)
+        .width(42)
         .textAlign(TextAlign.Center)
       Button('+')
         .width(44)
@@ -1274,80 +1577,13 @@ struct SettingsPage {
         .backgroundColor(this.buttonColor())
         .fontColor('#FFFFFF')
         .onClick(() => {
-          this.setReaderFontSize(this.readerFontSize + 1);
+          this.adjustCurrentTypographySetting(1);
         })
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     .backgroundColor(this.cardColor())
-  }
-
-  @Builder
-  lineHeightSlider() {
-    Row() {
-      Text('行距')
-        .fontSize(15)
-        .fontColor(this.primaryTextColor())
-        .layoutWeight(1)
-      Button('-')
-        .width(44)
-        .height(36)
-        .backgroundColor(this.buttonColor())
-        .fontColor('#FFFFFF')
-        .onClick(() => {
-          this.setReaderLineHeight(this.readerLineHeight - 1);
-        })
-      Text(`${this.readerLineHeight}`)
-        .fontSize(15)
-        .fontColor(this.primaryTextColor())
-        .width(48)
-        .textAlign(TextAlign.Center)
-      Button('+')
-        .width(44)
-        .height(36)
-        .backgroundColor(this.buttonColor())
-        .fontColor('#FFFFFF')
-        .onClick(() => {
-          this.setReaderLineHeight(this.readerLineHeight + 1);
-        })
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor(this.cardColor())
-  }
-
-  @Builder
-  paragraphSpacingSlider() {
-    Row() {
-      Text('段落间距')
-        .fontSize(15)
-        .fontColor(this.primaryTextColor())
-        .layoutWeight(1)
-      Button('-')
-        .width(44)
-        .height(36)
-        .backgroundColor(this.buttonColor())
-        .fontColor('#FFFFFF')
-        .onClick(() => {
-          this.setReaderParagraphSpacing(this.readerParagraphSpacing - 1);
-        })
-      Text(`${this.readerParagraphSpacing}`)
-        .fontSize(15)
-        .fontColor(this.primaryTextColor())
-        .width(48)
-        .textAlign(TextAlign.Center)
-      Button('+')
-        .width(44)
-        .height(36)
-        .backgroundColor(this.buttonColor())
-        .fontColor('#FFFFFF')
-        .onClick(() => {
-          this.setReaderParagraphSpacing(this.readerParagraphSpacing + 1);
-        })
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor(this.cardColor())
+    .alignItems(VerticalAlign.Center)
   }
 
   @Builder
@@ -1422,7 +1658,7 @@ struct SettingsPage {
         .value(this.optionValue(options, selected))
         .font({ size: 14 })
         .fontColor(this.primaryTextColor())
-        .backgroundColor(this.appDarkMode ? '#24272D' : '#F0F2F5')
+        .backgroundColor(this.inputColor())
         .borderRadius(8)
         .constraintSize({ minWidth: 136, maxWidth: 180 })
         .margin({ left: 12 })

@@ -26,6 +26,8 @@ import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 import { BookshelfSortHelper } from '../utils/BookshelfSortHelper';
 import { SearchExploreSettings, SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
+import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 const SHELF_FULL_TEXT_CACHE_CANCEL_EVENT: string = 'com.legado.harmony.action.SHELF_FULL_TEXT_CACHE_CANCEL';
 
@@ -56,6 +58,7 @@ interface ShelfFullTextCacheTask {
 @Component
 struct Index {
   @State currentIndex: number = 0;
+  @StorageLink('themeRevision') @Watch('onThemeRevisionChanged') themeRevision: number = 0;
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageLink('appDarkMode') @Watch('onAppDarkModeChanged') appDarkMode: boolean = false;
@@ -80,6 +83,10 @@ struct Index {
 
   onLaunchShortcutChanged(): void {
     this.openPendingShortcut();
+  }
+
+  onThemeRevisionChanged(): void {
+    this.syncHomeSystemBars();
   }
 
   async openPendingShortcut(): Promise<void> {
@@ -119,7 +126,7 @@ struct Index {
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.bottomTabBar($r('app.media.ic_tab_bookshelf'), '书架'))
+      .tabBar(this.bottomTabBar(this.navigationIcon('bookshelf'), '书架'))
 
       TabContent() {
         if (this.currentIndex === 1) {
@@ -134,7 +141,7 @@ struct Index {
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.bottomTabBar($r('app.media.ic_tab_explore'), '发现'))
+      .tabBar(this.bottomTabBar(this.navigationIcon('explore'), '发现'))
 
       TabContent() {
         if (this.currentIndex === 2) {
@@ -149,7 +156,7 @@ struct Index {
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.bottomTabBar($r('app.media.ic_tab_search'), '搜索'))
+      .tabBar(this.bottomTabBar(this.navigationIcon('search'), '搜索'))
 
       TabContent() {
         if (this.currentIndex === 3) {
@@ -160,7 +167,7 @@ struct Index {
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.bottomTabBar($r('app.media.ic_tab_mine'), '我的'))
+      .tabBar(this.bottomTabBar(this.navigationIcon('mine'), '我的'))
     }
     .barMode(BarMode.Fixed)
     .barOverlap(true)
@@ -185,7 +192,7 @@ struct Index {
     })
     .width('100%')
     .height('100%')
-    .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
+    .backgroundColor(ThemeRuntime.pageColor(this.appDarkMode))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -201,7 +208,7 @@ struct Index {
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.compatTabBar($r('app.media.ic_tab_bookshelf'), '书架', 0))
+      .tabBar(this.compatTabBar(this.navigationIcon('bookshelf'), '书架', 0))
 
       TabContent() {
         if (this.currentIndex === 1) {
@@ -216,7 +223,7 @@ struct Index {
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.compatTabBar($r('app.media.ic_tab_explore'), '发现', 1))
+      .tabBar(this.compatTabBar(this.navigationIcon('explore'), '发现', 1))
 
       TabContent() {
         if (this.currentIndex === 2) {
@@ -231,7 +238,7 @@ struct Index {
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.compatTabBar($r('app.media.ic_tab_search'), '搜索', 2))
+      .tabBar(this.compatTabBar(this.navigationIcon('search'), '搜索', 2))
 
       TabContent() {
         if (this.currentIndex === 3) {
@@ -242,11 +249,11 @@ struct Index {
       }
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.compatTabBar($r('app.media.ic_tab_mine'), '我的', 3))
+      .tabBar(this.compatTabBar(this.navigationIcon('mine'), '我的', 3))
     }
     .barMode(BarMode.Fixed)
     .barHeight(56 + this.compatTabSafeHeight())
-    .barBackgroundColor(this.appDarkMode ? '#191B1F' : '#FFFFFF')
+    .barBackgroundColor(ThemeRuntime.cardColor(this.appDarkMode))
     .scrollable(false)
     .onChange((index: number) => {
       this.currentIndex = index;
@@ -254,7 +261,7 @@ struct Index {
     })
     .width('100%')
     .height('100%')
-    .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
+    .backgroundColor(ThemeRuntime.pageColor(this.appDarkMode))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -309,7 +316,7 @@ struct Index {
 
   syncHomeSystemBars(): void {
     window.getLastWindow(getContext(this)).then((mainWindow: window.Window) => {
-      const bg = this.appDarkMode ? '#101113' : '#F5F5F5';
+      const bg = ThemeRuntime.pageColor(this.appDarkMode);
       mainWindow.setWindowBackgroundColor(bg);
       mainWindow.setWindowLayoutFullScreen(true);
       mainWindow.setWindowSystemBarEnable(['navigation', 'status']);
@@ -317,10 +324,10 @@ struct Index {
       mainWindow.setWindowSystemBarProperties({
         statusBarColor: '#00000000',
         isStatusBarLightIcon: this.appDarkMode,
-        statusBarContentColor: this.appDarkMode ? '#FFFFFF' : '#1F1F1F',
+        statusBarContentColor: ThemeRuntime.primaryTextColor(this.appDarkMode),
         navigationBarColor: '#00000000',
         isNavigationBarLightIcon: this.appDarkMode,
-        navigationBarContentColor: this.appDarkMode ? '#FFFFFF' : '#1F1F1F'
+        navigationBarContentColor: ThemeRuntime.primaryTextColor(this.appDarkMode)
       });
     }).catch((err: Error) => {
       console.error('同步首页系统栏颜色失败:', err);
@@ -328,11 +335,15 @@ struct Index {
   }
 
   tabBarActiveColor(): string {
-    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+    return ThemeRuntime.accentColor(this.appDarkMode);
   }
 
   tabBarTextColor(): string {
-    return this.appDarkMode ? '#E7E9ED' : '#5F6670';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
+  }
+
+  navigationIcon(tabId: string): Resource {
+    return ThemeAssetRegistry.navigationIcon(ThemeRuntime.iconPackId(), tabId);
   }
 
   floatingBarBottomMargin(): number {
@@ -349,6 +360,7 @@ struct Index {
 struct FastBookshelfShell {
   @Prop statusBarHeight: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('themeRevision') themeRevision: number = 0;
 
   build() {
     Column() {
@@ -417,23 +429,24 @@ struct FastBookshelfShell {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 }
 
 @Component
 struct BlankTabPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('themeRevision') themeRevision: number = 0;
 
   build() {
     Column()
       .width('100%')
       .height('100%')
-      .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
+      .backgroundColor(ThemeRuntime.pageColor(this.appDarkMode))
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 }
@@ -465,6 +478,7 @@ struct BookshelfPage {
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('bookshelfSortMode') sortMode: string = 'recentRead';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('bookshelfShowTags') bookshelfShowTags: boolean = true;
   @StorageLink('bookshelfShowSource') bookshelfShowSource: boolean = true;
   @StorageLink('bookshelfShowIntro') bookshelfShowIntro: boolean = true;
@@ -2712,19 +2726,19 @@ struct BookshelfPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   inputColor(): string {
-    return this.appDarkMode ? '#24272D' : '#F2F2F2';
+    return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
   glassCardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   glassBorderColor(): string {
@@ -2744,23 +2758,23 @@ struct BookshelfPage {
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   secondaryTextColor(): string {
-    return this.appDarkMode ? '#C6CBD2' : '#666';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#999';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   accentColor(): string {
-    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+    return ThemeRuntime.accentColor(this.appDarkMode);
   }
 
   buttonColor(): string {
-    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+    return ThemeRuntime.buttonColor(this.appDarkMode);
   }
 }
 
@@ -2787,6 +2801,7 @@ struct ExplorePage {
   @StorageLink('exploreSourceUrl') selectedSourceUrl: string = '';
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
   @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = false;
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
@@ -3474,15 +3489,15 @@ struct ExplorePage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   glassCardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   glassBorderColor(): string {
@@ -3494,23 +3509,23 @@ struct ExplorePage {
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   secondaryTextColor(): string {
-    return this.appDarkMode ? '#C6CBD2' : '#666';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#999';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   accentColor(): string {
-    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
+    return ThemeRuntime.accentColor(this.appDarkMode);
   }
 
   buttonColor(): string {
-    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+    return ThemeRuntime.buttonColor(this.appDarkMode);
   }
 
   exploreSelectedBackgroundColor(): string {
@@ -3540,6 +3555,7 @@ struct SearchPage {
   @State sourceGroups: string[] = [];
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
+  @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
   @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = false;
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
@@ -4294,11 +4310,11 @@ struct SearchPage {
   }
 
   pageColor(): string {
-    return this.appDarkMode ? '#101113' : '#F5F5F5';
+    return ThemeRuntime.pageColor(this.appDarkMode);
   }
 
   cardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
   glassCardColor(): string {
@@ -4314,15 +4330,15 @@ struct SearchPage {
   }
 
   primaryTextColor(): string {
-    return this.appDarkMode ? '#F2F3F5' : '#1F1F1F';
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   secondaryTextColor(): string {
-    return this.appDarkMode ? '#C6CBD2' : '#666';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
-    return this.appDarkMode ? '#8A8F98' : '#999';
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   statusMessageColor(): string {
@@ -4330,7 +4346,7 @@ struct SearchPage {
   }
 
   buttonColor(): string {
-    return this.appDarkMode ? this.appDarkButtonColor : this.appLightButtonColor;
+    return ThemeRuntime.buttonColor(this.appDarkMode);
   }
 
   buttonBackgroundColor(): string {
@@ -4353,8 +4369,7 @@ struct SettingsPage {
   @Prop statusBarHeight: number = 0;
   @Prop navBarHeight: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
-  @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
-  @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
+  @StorageLink('themeRevision') themeRevision: number = 0;
 
   build() {
     Column() {
@@ -4362,224 +4377,93 @@ struct SettingsPage {
         Text('我的')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
-          .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
+          .fontColor(this.primaryTextColor())
           .layoutWeight(1)
       }
       .width('100%')
       .height(56)
       .padding({ left: 16 })
       .alignItems(VerticalAlign.Center)
+      .backgroundColor(this.glassCardColor())
 
-      List({ space: 1 }) {
-        ListItem() {
-          Row() {
-            Column() {
-              Text('书源管理')
-                .fontSize(16)
-                .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
-              Text('导入、编辑、启用和调试书源')
-                .fontSize(12)
-                .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
-                .margin({ top: 4 })
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            Text('>')
-              .fontSize(16)
-              .fontColor(this.appDarkMode ? '#777D87' : '#999')
-          }
-          .width('100%')
-          .height(64)
-          .padding({ left: 16, right: 16 })
-          .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
-          .onClick(() => {
+      Scroll() {
+        Column() {
+          this.menuItem('书源管理', '导入、编辑、启用和调试书源', () => {
             router.pushUrl({ url: 'pages/BookSource' });
           })
-        }
-
-        ListItem() {
-          Row() {
-            Column() {
-              Text('阅读设置')
-                .fontSize(16)
-                .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
-              Text('字号、行距、背景与阅读偏好')
-                .fontSize(12)
-                .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
-                .margin({ top: 4 })
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            Text('>')
-              .fontSize(16)
-              .fontColor(this.appDarkMode ? '#777D87' : '#999')
-          }
-          .width('100%')
-          .height(64)
-          .padding({ left: 16, right: 16 })
-          .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
-          .onClick(() => {
+          this.menuItem('阅读设置', '字号、行距、背景与阅读偏好', () => {
             router.pushUrl({ url: 'pages/Settings' });
           })
-        }
-
-        ListItem() {
-          Row() {
-            Column() {
-              Text('朗读设置')
-                .fontSize(16)
-                .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
-              Text('音色与朗读倍速')
-                .fontSize(12)
-                .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
-                .margin({ top: 4 })
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            Text('>')
-              .fontSize(16)
-              .fontColor(this.appDarkMode ? '#777D87' : '#999')
-          }
-          .width('100%')
-          .height(64)
-          .padding({ left: 16, right: 16 })
-          .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
-          .onClick(() => {
+          this.menuItem('朗读设置', '音色与朗读倍速', () => {
             router.pushUrl({ url: 'pages/TtsSettings' });
           })
-        }
-
-        ListItem() {
-          Row() {
-            Column() {
-              Text('书架设置')
-                .fontSize(16)
-                .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
-              Text('标签、简介与封面图集')
-                .fontSize(12)
-                .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
-                .margin({ top: 4 })
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            Text('>')
-              .fontSize(16)
-              .fontColor(this.appDarkMode ? '#777D87' : '#999')
-          }
-          .width('100%')
-          .height(64)
-          .padding({ left: 16, right: 16 })
-          .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
-          .onClick(() => {
+          this.menuItem('书架设置', '标签、简介与封面图集', () => {
             router.pushUrl({ url: 'pages/BookshelfSettings' });
           })
-        }
-
-        ListItem() {
-          Row() {
-            Column() {
-              Text('搜索/发现配置')
-                .fontSize(16)
-                .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
-              Text('封面、标签与阅读后加入书架提示')
-                .fontSize(12)
-                .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
-                .margin({ top: 4 })
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            Text('>')
-              .fontSize(16)
-              .fontColor(this.appDarkMode ? '#777D87' : '#999')
-          }
-          .width('100%')
-          .height(64)
-          .padding({ left: 16, right: 16 })
-          .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
-          .onClick(() => {
+          this.menuItem('搜索/发现配置', '封面、标签与阅读后加入书架提示', () => {
             router.pushUrl({ url: 'pages/SearchExploreSettings' });
           })
-        }
-
-        ListItem() {
-          Row() {
-            Column() {
-              Text('其他设置')
-                .fontSize(16)
-                .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
-              Text('主题色、按钮色与通用偏好')
-                .fontSize(12)
-                .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
-                .margin({ top: 4 })
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            Text('>')
-              .fontSize(16)
-              .fontColor(this.accentColor())
-          }
-          .width('100%')
-          .height(64)
-          .padding({ left: 16, right: 16 })
-          .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
-          .onClick(() => {
+          this.menuItem('其他设置', '主题色、按钮色与通用偏好', () => {
             router.pushUrl({ url: 'pages/OtherSettings' });
           })
-        }
-
-        ListItem() {
-          Row() {
-            Column() {
-              Text('关于')
-                .fontSize(16)
-                .fontColor(this.appDarkMode ? '#F2F3F5' : '#1F1F1F')
-              Text('版本、说明、开源许可与致谢')
-                .fontSize(12)
-                .fontColor(this.appDarkMode ? '#8A8F98' : '#999')
-                .margin({ top: 4 })
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            Text('>')
-              .fontSize(16)
-              .fontColor(this.appDarkMode ? '#777D87' : '#999')
-          }
-          .width('100%')
-          .height(64)
-          .padding({ left: 16, right: 16 })
-          .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
-          .onClick(() => {
+          this.menuItem('关于', '版本、说明、开源许可与致谢', () => {
             router.pushUrl({ url: 'pages/About' });
           })
         }
+        .width('100%')
+        .padding({ bottom: 96 })
       }
       .width('100%')
       .layoutWeight(1)
-      .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
-      .padding({ bottom: 96 })
+      .backgroundColor(this.pageColor())
     }
     .width('100%')
     .height('100%')
     .padding({ top: this.statusBarHeight })
-    .backgroundColor(this.appDarkMode ? '#101113' : '#F5F5F5')
+    .backgroundColor(this.pageColor())
+  }
+
+  @Builder
+  menuItem(title: string, desc: string, onClick: () => void) {
+    Row() {
+      Column() {
+        Text(title)
+          .fontSize(16)
+          .fontColor(this.primaryTextColor())
+        Text(desc)
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+          .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Text('>')
+        .fontSize(18)
+        .fontColor(this.subTextColor())
+    }
+    .width('100%')
+    .height(64)
+    .padding({ left: 16, right: 16 })
+    .backgroundColor(this.glassCardColor())
+    .alignItems(VerticalAlign.Center)
+    .onClick(onClick)
+  }
+
+  pageColor(): string {
+    return ThemeRuntime.pageColor(this.appDarkMode);
+  }
+
+  primaryTextColor(): string {
+    return ThemeRuntime.primaryTextColor(this.appDarkMode);
+  }
+
+  subTextColor(): string {
+    return ThemeRuntime.subTextColor(this.appDarkMode);
   }
 
   glassCardColor(): string {
-    return this.appDarkMode ? '#191B1F' : '#FFFFFF';
+    return ThemeRuntime.cardColor(this.appDarkMode);
   }
 
-  glassBorderColor(): string {
-    return this.appDarkMode ? '#262A31' : '#FFFFFF';
-  }
-
-  accentColor(): string {
-    return this.appDarkMode ? this.appDarkAccentColor : this.appLightAccentColor;
-  }
 }

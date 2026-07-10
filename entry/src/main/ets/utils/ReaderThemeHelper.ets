@@ -1,12 +1,18 @@
+import { ThemeRuntime } from '../theme/ThemeRuntime';
+
 export class ReaderThemeItem {
   name: string = '';
   backgroundColor: string = '';
   textColor: string = '';
   subTextColor: string = '';
+  backgroundAssetId: string = '';
+  backgroundImageFit: string = 'cover';
+  contentTone: string = 'light';
 }
 
 export class ReaderThemeHelper {
   static readonly CUSTOM_THEME_INDEX: number = 3;
+  static readonly APP_THEME_INDEX: number = 4;
   static readonly LIGHT_CUSTOM_BACKGROUND_COLOR: string = '#F5F5F5';
   static readonly LIGHT_CUSTOM_TEXT_COLOR: string = '#333333';
   static readonly DARK_CUSTOM_BACKGROUND_COLOR: string = '#1F2329';
@@ -14,7 +20,7 @@ export class ReaderThemeHelper {
 
   static normalizeIndex(index: number): number {
     const value = Math.round(index);
-    return value >= 0 && value <= ReaderThemeHelper.CUSTOM_THEME_INDEX ? value : 0;
+    return value >= 0 && value <= ReaderThemeHelper.APP_THEME_INDEX ? value : 0;
   }
 
   static lightThemes(customBackgroundColor: string, customTextColor: string): ReaderThemeItem[] {
@@ -24,7 +30,8 @@ export class ReaderThemeHelper {
       ReaderThemeHelper.theme('青绿', '#E9F3E5', '#26352A', '#657769'),
       ReaderThemeHelper.theme('自定义', customBackgroundColor || ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR,
         customTextColor || ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR,
-        ReaderThemeHelper.derivedSubTextColor(false, customTextColor))
+        ReaderThemeHelper.derivedSubTextColor(false, customTextColor)),
+      ReaderThemeHelper.applicationTheme(false)
     ];
   }
 
@@ -35,7 +42,8 @@ export class ReaderThemeHelper {
       ReaderThemeHelper.theme('深蓝', '#101826', '#D5DFEA', '#8FA2B8'),
       ReaderThemeHelper.theme('自定义', customBackgroundColor || ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR,
         customTextColor || ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR,
-        ReaderThemeHelper.derivedSubTextColor(true, customTextColor))
+        ReaderThemeHelper.derivedSubTextColor(true, customTextColor)),
+      ReaderThemeHelper.applicationTheme(true)
     ];
   }
 
@@ -50,13 +58,40 @@ export class ReaderThemeHelper {
     return items[ReaderThemeHelper.normalizeIndex(index)] || items[0];
   }
 
-  private static theme(name: string, backgroundColor: string, textColor: string, subTextColor: string): ReaderThemeItem {
+  private static applicationTheme(darkMode: boolean): ReaderThemeItem {
+    return ReaderThemeHelper.theme(
+      '应用主题',
+      ThemeRuntime.readerBackgroundColor(darkMode),
+      ThemeRuntime.readerTextColor(darkMode),
+      ThemeRuntime.readerSubTextColor(darkMode),
+      ThemeRuntime.readerBackgroundAssetId(darkMode),
+      ThemeRuntime.readerContentTone(darkMode),
+      ThemeRuntime.readerBackgroundImageFit(darkMode)
+    );
+  }
+
+  private static theme(name: string, backgroundColor: string, textColor: string, subTextColor: string,
+    backgroundAssetId: string = '', contentTone: string = '', backgroundImageFit: string = 'cover'): ReaderThemeItem {
     const item = new ReaderThemeItem();
     item.name = name;
     item.backgroundColor = backgroundColor;
     item.textColor = textColor;
     item.subTextColor = subTextColor;
+    item.backgroundAssetId = backgroundAssetId;
+    item.backgroundImageFit = backgroundImageFit;
+    item.contentTone = contentTone || (ReaderThemeHelper.isDarkColor(backgroundColor) ? 'dark' : 'light');
     return item;
+  }
+
+  private static isDarkColor(color: string): boolean {
+    const value = (color || '').trim();
+    if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
+      return false;
+    }
+    const red = parseInt(value.substring(1, 3), 16);
+    const green = parseInt(value.substring(3, 5), 16);
+    const blue = parseInt(value.substring(5, 7), 16);
+    return red * 0.299 + green * 0.587 + blue * 0.114 < 128;
   }
 
   private static derivedSubTextColor(darkMode: boolean, textColor: string): string {
