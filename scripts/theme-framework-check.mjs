@@ -96,7 +96,7 @@ for (const styleId of bubbleStyles) {
   assert(regexModel.includes(`'${styleId}'`), `Bubble resolver/codec is missing style: ${styleId}`);
   assert(regexSettings.includes(`'${styleId}'`), `Reader font settings cannot select style: ${styleId}`);
 }
-assert(regexModel.includes('schemaVersion: number = 2'), 'Regex rule schema must be version 2');
+assert(regexModel.includes('schemaVersion: number = 3'), 'Regex rule schema must be version 3');
 assert(regexSettings.includes('ReaderRegexFontCodec.decode'), 'Settings page must use the shared regex codec');
 assert(reader.includes('ReaderRegexFontCodec.decode'), 'Reader page must use the shared regex codec');
 assert(reader.includes('if (slice.ttsHighlighted)'), 'TTS highlight precedence is missing');
@@ -108,9 +108,8 @@ assert(regexSettings.includes('start >= text.length || regex.lastIndex >= text.l
 assert(readerThemes.includes('APP_THEME_INDEX: number = 4'), 'Reader app-theme compatibility index is missing');
 assert(runtime.includes("KEY_THEME_REVISION"), 'Theme runtime revision broadcast is missing');
 assert(reader.includes('ThemeAssetRegistry.readerBackground'), 'Reader background asset resolver is not connected');
-assert(reader.includes('.backgroundImage(this.getBackgroundImage()'), 'Reader page surfaces do not draw theme images');
-assert((reader.match(/\.backgroundImage\(this\.getBackgroundImage\(\)/g) || []).length >= 3,
-  'Current, alternate and incoming reader surfaces must all draw the theme background');
+assert(reader.includes('Image(this.getBackgroundImage())') && reader.includes('.objectFit(this.getBackgroundImageFit())'),
+  'Reader root surface does not draw the theme background image');
 assert(indexPage.includes('ThemeRuntime.iconPackId()'), 'Floating tab bar does not resolve the active icon pack');
 for (const tabId of ['bookshelf', 'explore', 'search', 'mine']) {
   assert(indexPage.includes(`this.navigationIcon('${tabId}')`), `Floating tab icon is not themed: ${tabId}`);
@@ -180,7 +179,8 @@ assert(readerSettingsPage.includes('this.typographyStepper()') &&
   readerSettingsPage.includes('adjustCurrentTypographySetting'),
   'Reader typography dropdown/stepper does not expose all four margins');
 assert(reader.includes('this.readerMarginLeft + this.readerMarginRight') &&
-  reader.includes('this.readerMarginTop + this.readerMarginBottom'),
+  reader.includes('this.readerMarginTop + this.getReaderContentBottomPadding()') &&
+  reader.includes('this.readerMarginBottom + this.getReaderContentBottomReserve()'),
   'Reader pagination does not account for configured margins');
 assert(reader.includes('.textAlign(TextAlign.JUSTIFY)') &&
   reader.includes('align: graphicsText.TextAlign.JUSTIFY'),
@@ -188,7 +188,7 @@ assert(reader.includes('.textAlign(TextAlign.JUSTIFY)') &&
 assert(reader.includes('const safeBest = Math.max(start + 1, Math.min(best, source.length))') &&
   !reader.includes('Math.floor((best - start) * 0.96)'),
   'Reader pagination must not roll back a full line merely to prefer sentence boundaries');
-assert((reader.match(/fontFamilies: \[this\.getBodyReaderFontFamily\(\)\]/g) || []).length >= 2 &&
+assert(reader.includes('buildReaderMeasureTextStyle(this.readerFontSize, this.getBodyReaderFontFamily())') &&
   reader.includes('fontFamily: this.getBodyReaderFontFamily()'),
   'Reader pagination measurement must use the same body font as rendering');
 assert(reader.includes('this.readerQuickTypographyStepper()') &&
@@ -212,6 +212,13 @@ assert(bookSourcePage.includes('checkOptionsDialog()') &&
   bookSourcePage.includes('handleCheckedSourceCompletion') &&
   searchCoordinator.includes('await options.onSourceComplete'),
   'Book source validation must support immediate disable/delete actions per completed source');
+assert(indexPage.includes("TextInput({ placeholder: '输入书源关键词'") &&
+  indexPage.includes("Button('搜索')") &&
+  indexPage.includes('this.exploreSourceDropdown()') &&
+  !indexPage.includes('builder: this.exploreSourcePopup') &&
+  indexPage.includes('applyExploreSourceFilter') &&
+  indexPage.includes('getFilteredExploreSourceOptions()'),
+  'Explore source dropdown must support keyword filtering from an explicit search button');
 assert(!themePage.includes("'衬线字体'") && !themePage.includes("'清晰字体'") &&
   !themePage.includes("'水墨图标'") && !themePage.includes("'主题图标'") &&
   !themePage.includes('themeFeatureChips') && !themePage.includes('featureChip(') &&

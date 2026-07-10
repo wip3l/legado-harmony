@@ -17,8 +17,10 @@ export class ReaderSettings {
   lightCustomThemeTextColor: string = ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR;
   darkCustomThemeBackgroundColor: string = ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR;
   darkCustomThemeTextColor: string = ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR;
+  customThemesRaw: string = '';
   pageTurnMode: number = 1;
   pageTurnAnimationType: number = 1;
+  landscapeDoublePage: boolean = false;
   tapZoneActions: string = '3,3,3,3,1,2,2,2,2';
   volumeTurnPage: boolean = false;
   keepScreenOn: boolean = true;
@@ -66,9 +68,11 @@ export class ReaderSettingsStore {
   static readonly KEY_LIGHT_CUSTOM_THEME_TEXT_COLOR: string = 'readerLightCustomThemeTextColor';
   static readonly KEY_DARK_CUSTOM_THEME_BACKGROUND_COLOR: string = 'readerDarkCustomThemeBackgroundColor';
   static readonly KEY_DARK_CUSTOM_THEME_TEXT_COLOR: string = 'readerDarkCustomThemeTextColor';
+  static readonly KEY_CUSTOM_THEMES_RAW: string = 'readerCustomThemesRaw';
   static readonly KEY_PAGE_TURN_MODE: string = 'readerPageTurnMode';
   static readonly KEY_PAGE_TURN_ANIMATION: string = 'readerPageTurnAnimation';
   static readonly KEY_PAGE_TURN_ANIMATION_TYPE: string = 'readerPageTurnAnimationType';
+  static readonly KEY_LANDSCAPE_DOUBLE_PAGE: string = 'readerLandscapeDoublePage';
   static readonly KEY_TAP_ZONE_ACTIONS: string = 'readerTapZoneActions';
   static readonly KEY_VOLUME_TURN_PAGE: string = 'readerVolumeTurnPage';
   static readonly KEY_KEEP_SCREEN_ON: string = 'readerKeepScreenOn';
@@ -94,13 +98,23 @@ export class ReaderSettingsStore {
   static readonly KEY_REGEX_SHADOW_COLOR: string = 'readerRegexShadowColor';
   static readonly KEY_REGEX_FONT_RULES_RAW: string = 'readerRegexFontRulesRaw';
   private static readonly STORE_NAME: string = 'reader_settings';
+  private static readonly THEME_PROFILE_PREFIX: string = 'readerThemeProfileV1_';
   private static cachedSettings: ReaderSettings | null = null;
+  private static cachedThemeId: string = '';
+  private static readerFontStyleSaveQueue: Promise<void> = Promise.resolve();
 
   static async load(context: Context): Promise<ReaderSettings> {
-    if (ReaderSettingsStore.cachedSettings) {
+    const activeThemeId = ReaderSettingsStore.activeThemeId();
+    if (ReaderSettingsStore.cachedSettings && ReaderSettingsStore.cachedThemeId === activeThemeId) {
       return ReaderSettingsStore.clone(ReaderSettingsStore.cachedSettings);
     }
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    const profile = await ReaderSettingsStore.loadThemeProfile(store, activeThemeId);
+    if (profile) {
+      ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(profile);
+      ReaderSettingsStore.cachedThemeId = activeThemeId;
+      return ReaderSettingsStore.clone(profile);
+    }
     const settings = new ReaderSettings();
     settings.fontSize = await ReaderSettingsStore.getNumber(
       store,
@@ -181,6 +195,11 @@ export class ReaderSettingsStore {
       ),
       ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR
     );
+    settings.customThemesRaw = await ReaderSettingsStore.getString(
+      store,
+      ReaderSettingsStore.KEY_CUSTOM_THEMES_RAW,
+      ''
+    );
     settings.pageTurnMode = await ReaderSettingsStore.getNumber(
       store,
       ReaderSettingsStore.KEY_PAGE_TURN_MODE,
@@ -203,6 +222,11 @@ export class ReaderSettingsStore {
     settings.pageTurnAnimationType = legacyPageTurnAnimation ?
       storedPageTurnAnimationType :
       ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE;
+    settings.landscapeDoublePage = await ReaderSettingsStore.getBoolean(
+      store,
+      ReaderSettingsStore.KEY_LANDSCAPE_DOUBLE_PAGE,
+      AppStorage.get<boolean>(ReaderSettingsStore.KEY_LANDSCAPE_DOUBLE_PAGE) ?? false
+    );
     settings.tapZoneActions = ReaderSettingsStore.normalizeTapZoneActions(
       await ReaderSettingsStore.getString(
         store,
@@ -256,7 +280,34 @@ export class ReaderSettingsStore {
     settings.regexFontRulesRaw = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_REGEX_FONT_RULES_RAW, '');
     ReaderSettingsStore.mergeStorageFontSettings(settings);
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
+    ReaderSettingsStore.cachedThemeId = activeThemeId;
+    await ReaderSettingsStore.persistThemeProfile(store, activeThemeId, settings);
+    await store.flush();
     return settings;
+  }
+
+  static async switchThemeProfile(context: Context, previousThemeId: string,
+    nextThemeId: string): Promise<ReaderSettings> {
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    const previousId = ReaderSettingsStore.normalizeThemeProfileId(previousThemeId);
+    const nextId = ReaderSettingsStore.normalizeThemeProfileId(nextThemeId);
+    const current = ReaderSettingsStore.cachedSettings && ReaderSettingsStore.cachedThemeId === previousId ?
+      ReaderSettingsStore.clone(ReaderSettingsStore.cachedSettings) : ReaderSettingsStore.fromStorage();
+    await ReaderSettingsStore.persistThemeProfile(store, previousId, current);
+
+    let next = await ReaderSettingsStore.loadThemeProfile(store, nextId);
+    if (!next) {
+      next = ReaderSettingsStore.clone(current);
+      next.lightThemeIndex = ReaderThemeHelper.APP_THEME_INDEX;
+      next.darkThemeIndex = ReaderThemeHelper.APP_THEME_INDEX;
+      next.themeIndex = ReaderThemeHelper.APP_THEME_INDEX;
+      await ReaderSettingsStore.persistThemeProfile(store, nextId, next);
+    }
+    ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(next);
+    ReaderSettingsStore.cachedThemeId = nextId;
+    ReaderSettingsStore.applyToStorage(next);
+    await store.flush();
+    return ReaderSettingsStore.clone(next);
   }
 
   static async saveLayoutSettings(
@@ -288,6 +339,7 @@ export class ReaderSettingsStore {
     await store.put(ReaderSettingsStore.KEY_MARGIN_RIGHT, settings.marginRight);
     await store.put(ReaderSettingsStore.KEY_MARGIN_TOP, settings.marginTop);
     await store.put(ReaderSettingsStore.KEY_MARGIN_BOTTOM, settings.marginBottom);
+    await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
     await store.flush();
   }
 
@@ -299,7 +351,8 @@ export class ReaderSettingsStore {
     lightCustomThemeTextColor: string,
     darkCustomThemeBackgroundColor: string,
     darkCustomThemeTextColor: string,
-    currentDarkMode: boolean
+    currentDarkMode: boolean,
+    customThemesRaw: string = ''
   ): Promise<void> {
     const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
     settings.lightThemeIndex = ReaderSettingsStore.normalizeThemeIndex(lightThemeIndex);
@@ -320,6 +373,7 @@ export class ReaderSettingsStore {
       darkCustomThemeTextColor,
       ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR
     );
+    settings.customThemesRaw = customThemesRaw || settings.customThemesRaw || '';
     settings.themeIndex = currentDarkMode ? settings.darkThemeIndex : settings.lightThemeIndex;
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
     ReaderSettingsStore.applyThemeToStorage(settings);
@@ -337,6 +391,8 @@ export class ReaderSettingsStore {
       settings.darkCustomThemeBackgroundColor
     );
     await store.put(ReaderSettingsStore.KEY_DARK_CUSTOM_THEME_TEXT_COLOR, settings.darkCustomThemeTextColor);
+    await store.put(ReaderSettingsStore.KEY_CUSTOM_THEMES_RAW, settings.customThemesRaw);
+    await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
     await store.flush();
   }
 
@@ -346,6 +402,7 @@ export class ReaderSettingsStore {
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
     await store.put(ReaderSettingsStore.KEY_PAGE_TURN_MODE, settings.pageTurnMode);
+    await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
     await store.flush();
   }
 
@@ -365,6 +422,7 @@ export class ReaderSettingsStore {
     await store.put(ReaderSettingsStore.KEY_VOLUME_TURN_PAGE, settings.volumeTurnPage);
     await store.put(ReaderSettingsStore.KEY_KEEP_SCREEN_ON, settings.keepScreenOn);
     await store.put(ReaderSettingsStore.KEY_EXTEND_TO_STATUS_BAR, settings.extendToStatusBar);
+    await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
     await store.flush();
   }
 
@@ -375,6 +433,7 @@ export class ReaderSettingsStore {
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_TAP_ZONE_ACTIONS, settings.tapZoneActions);
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
     await store.put(ReaderSettingsStore.KEY_TAP_ZONE_ACTIONS, settings.tapZoneActions);
+    await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
     await store.flush();
   }
 
@@ -384,6 +443,7 @@ export class ReaderSettingsStore {
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
     await store.put(ReaderSettingsStore.KEY_PRELOAD_ENABLED, settings.preloadEnabled);
+    await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
     await store.flush();
   }
 
@@ -393,6 +453,7 @@ export class ReaderSettingsStore {
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
     await store.put(ReaderSettingsStore.KEY_PRELOAD_CHAPTER_COUNT, settings.preloadChapterCount);
+    await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
     await store.flush();
   }
 
@@ -420,6 +481,7 @@ export class ReaderSettingsStore {
     await store.put(ReaderSettingsStore.KEY_FONT_MODE, settings.fontMode);
     await store.put(ReaderSettingsStore.KEY_SYSTEM_FONT_FAMILY, settings.systemFontFamily);
     await store.put(ReaderSettingsStore.KEY_CUSTOM_FONTS_RAW, settings.customFontsRaw);
+    await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
     await store.flush();
   }
 
@@ -441,6 +503,31 @@ export class ReaderSettingsStore {
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(current);
     ReaderSettingsStore.applyLayoutToStorage(current);
     ReaderSettingsStore.applyReaderFontStyleToStorage(current);
+    const snapshot = ReaderSettingsStore.clone(current);
+    await ReaderSettingsStore.enqueueReaderFontStyleSave(context, snapshot);
+  }
+
+  private static enqueueReaderFontStyleSave(context: Context, settings: ReaderSettings): Promise<void> {
+    const themeId = ReaderSettingsStore.activeThemeId();
+    const previous = ReaderSettingsStore.readerFontStyleSaveQueue.catch(() => {
+    });
+    const next = previous.then(async () => {
+      await ReaderSettingsStore.persistReaderFontStyleSettings(context, settings, themeId);
+    });
+    ReaderSettingsStore.readerFontStyleSaveQueue = next;
+    return next;
+  }
+
+  static async waitForReaderFontStyleSaves(): Promise<void> {
+    try {
+      await ReaderSettingsStore.readerFontStyleSaveQueue;
+    } catch (e) {
+      console.warn('等待阅读字体设置保存失败:', e);
+    }
+  }
+
+  private static async persistReaderFontStyleSettings(context: Context, current: ReaderSettings,
+    themeId: string): Promise<void> {
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
     await store.put(ReaderSettingsStore.KEY_FONT_SIZE, current.fontSize);
     await store.put(ReaderSettingsStore.KEY_BODY_FONT_MODE, current.bodyFontMode);
@@ -455,6 +542,7 @@ export class ReaderSettingsStore {
     await store.put(ReaderSettingsStore.KEY_REGEX_FONT_SIZE, current.regexFontSize);
     await store.put(ReaderSettingsStore.KEY_REGEX_SHADOW_COLOR, current.regexShadowColor);
     await store.put(ReaderSettingsStore.KEY_REGEX_FONT_RULES_RAW, current.regexFontRulesRaw);
+    await ReaderSettingsStore.persistThemeProfile(store, themeId, current);
     await store.flush();
   }
 
@@ -473,16 +561,30 @@ export class ReaderSettingsStore {
       ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION,
       settings.pageTurnAnimationType !== ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE
     );
+    await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
+    await store.flush();
+  }
+
+  static async saveLandscapeDoublePage(context: Context, enabled: boolean): Promise<void> {
+    const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
+    settings.landscapeDoublePage = enabled;
+    ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_LANDSCAPE_DOUBLE_PAGE, enabled);
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    await store.put(ReaderSettingsStore.KEY_LANDSCAPE_DOUBLE_PAGE, enabled);
+    await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
     await store.flush();
   }
 
   static applyToStorage(settings: ReaderSettings): void {
     const normalized = ReaderSettingsStore.clone(settings);
     ReaderSettingsStore.cachedSettings = normalized;
+    ReaderSettingsStore.cachedThemeId = ReaderSettingsStore.activeThemeId();
     ReaderSettingsStore.applyLayoutToStorage(normalized);
     ReaderSettingsStore.applyThemeToStorage(normalized);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PAGE_TURN_MODE, normalized.pageTurnMode);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION_TYPE, normalized.pageTurnAnimationType);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_LANDSCAPE_DOUBLE_PAGE, normalized.landscapeDoublePage);
     AppStorage.setOrCreate(
       ReaderSettingsStore.KEY_PAGE_TURN_ANIMATION,
       normalized.pageTurnAnimationType !== ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE
@@ -552,6 +654,48 @@ export class ReaderSettingsStore {
       ReaderSettingsStore.KEY_DARK_CUSTOM_THEME_TEXT_COLOR,
       settings.darkCustomThemeTextColor
     );
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_CUSTOM_THEMES_RAW, settings.customThemesRaw);
+  }
+
+  private static activeThemeId(): string {
+    return ReaderSettingsStore.normalizeThemeProfileId(
+      AppStorage.get<string>('appThemeId') || 'classic-blue'
+    );
+  }
+
+  private static normalizeThemeProfileId(themeId: string): string {
+    const value = (themeId || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    return value || 'classic-blue';
+  }
+
+  private static themeProfileKey(themeId: string): string {
+    return `${ReaderSettingsStore.THEME_PROFILE_PREFIX}${ReaderSettingsStore.normalizeThemeProfileId(themeId)}`;
+  }
+
+  private static async loadThemeProfile(store: preferences.Preferences,
+    themeId: string): Promise<ReaderSettings | null> {
+    const raw = await store.get(ReaderSettingsStore.themeProfileKey(themeId), '');
+    if (typeof raw !== 'string' || !raw.trim()) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(raw) as ReaderSettings;
+      return ReaderSettingsStore.clone(parsed);
+    } catch (e) {
+      console.warn('读取主题阅读设置失败:', e);
+      return null;
+    }
+  }
+
+  private static async persistActiveThemeProfile(store: preferences.Preferences,
+    settings: ReaderSettings): Promise<void> {
+    await ReaderSettingsStore.persistThemeProfile(store, ReaderSettingsStore.activeThemeId(), settings);
+    ReaderSettingsStore.cachedThemeId = ReaderSettingsStore.activeThemeId();
+  }
+
+  private static async persistThemeProfile(store: preferences.Preferences, themeId: string,
+    settings: ReaderSettings): Promise<void> {
+    await store.put(ReaderSettingsStore.themeProfileKey(themeId), JSON.stringify(ReaderSettingsStore.clone(settings)));
   }
 
   private static async getNumber(
@@ -649,7 +793,7 @@ export class ReaderSettingsStore {
 
   private static normalizeFontSize(fontSize: number): number {
     const value = Math.round(fontSize);
-    return Math.max(14, Math.min(value, 30));
+    return Math.max(14, Math.min(value, 50));
   }
 
   private static normalizeLineHeight(lineHeight: number): number {
@@ -676,7 +820,7 @@ export class ReaderSettingsStore {
 
   private static normalizeMargin(margin: number): number {
     const value = Math.round(margin);
-    return Math.max(0, Math.min(value, 64));
+    return Math.max(0, Math.min(value, 300));
   }
 
   private static normalizeColor(color: string, fallback: string): string {
@@ -757,8 +901,10 @@ export class ReaderSettingsStore {
       source.darkCustomThemeTextColor,
       ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR
     );
+    settings.customThemesRaw = source.customThemesRaw || '';
     settings.pageTurnMode = ReaderSettingsStore.normalizePageTurnMode(source.pageTurnMode);
     settings.pageTurnAnimationType = ReaderSettingsStore.normalizePageTurnAnimationType(source.pageTurnAnimationType);
+    settings.landscapeDoublePage = source.landscapeDoublePage;
     settings.tapZoneActions = ReaderSettingsStore.normalizeTapZoneActions(source.tapZoneActions);
     settings.volumeTurnPage = source.volumeTurnPage;
     settings.keepScreenOn = source.keepScreenOn;
@@ -832,6 +978,7 @@ export class ReaderSettingsStore {
       AppStorage.get<string>(ReaderSettingsStore.KEY_DARK_CUSTOM_THEME_TEXT_COLOR) || '',
       ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR
     );
+    settings.customThemesRaw = AppStorage.get<string>(ReaderSettingsStore.KEY_CUSTOM_THEMES_RAW) || '';
     settings.pageTurnMode = ReaderSettingsStore.normalizePageTurnMode(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PAGE_TURN_MODE) ?? 1
     );
@@ -845,6 +992,7 @@ export class ReaderSettingsStore {
     settings.pageTurnAnimationType = legacyPageTurnAnimation ?
       storagePageTurnAnimationType :
       ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE;
+    settings.landscapeDoublePage = AppStorage.get<boolean>(ReaderSettingsStore.KEY_LANDSCAPE_DOUBLE_PAGE) ?? false;
     settings.tapZoneActions = ReaderSettingsStore.normalizeTapZoneActions(
       AppStorage.get<string>(ReaderSettingsStore.KEY_TAP_ZONE_ACTIONS) || ''
     );

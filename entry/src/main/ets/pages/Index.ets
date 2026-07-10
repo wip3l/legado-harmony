@@ -2790,6 +2790,8 @@ struct ExplorePage {
   @State selectedSourceName: string = '';
   @State selectedIndex: number = 0;
   @State showExploreSourcePicker: boolean = false;
+  @State exploreSourceFilterInput: string = '';
+  @State exploreSourceFilterKeyword: string = '';
   @State books: SearchBook[] = [];
   @State shelfBookKeys: string[] = [];
   @State addingShelfBookKeys: string[] = [];
@@ -2827,6 +2829,9 @@ struct ExplorePage {
   onActiveChanged(): void {
     if (this.isActive) {
       this.ensureLoaded();
+    } else if (this.showExploreSourcePicker) {
+      this.showExploreSourcePicker = false;
+      this.clearExploreSourceFilter();
     }
   }
 
@@ -2931,19 +2936,57 @@ struct ExplorePage {
     Column() {
       Row() {
         Row() {
-          Text(this.selectedSourceName || '发现')
-            .fontSize(16)
-            .fontFamily(this.readerActiveFontFamily)
-            .fontColor(this.primaryTextColor())
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1)
+          if (this.showExploreSourcePicker) {
+            TextInput({ placeholder: '输入书源关键词', text: this.exploreSourceFilterInput })
+              .fontSize(15)
+              .fontFamily(this.readerActiveFontFamily)
+              .fontColor(this.primaryTextColor())
+              .placeholderColor(this.secondaryTextColor())
+              .layoutWeight(1)
+              .height(36)
+              .padding(0)
+              .backgroundColor(Color.Transparent)
+              .onChange((value: string) => {
+                this.exploreSourceFilterInput = value;
+              })
+              .onSubmit(() => {
+                this.applyExploreSourceFilter();
+              })
+          } else {
+            Text(this.selectedSourceName || '发现')
+              .fontSize(16)
+              .fontFamily(this.readerActiveFontFamily)
+              .fontColor(this.primaryTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+              .onClick(() => {
+                this.openExploreSourcePicker();
+              })
+          }
 
           Text(this.showExploreSourcePicker ? '⌃' : '⌄')
             .fontSize(18)
             .fontFamily(this.readerActiveFontFamily)
             .fontColor(this.secondaryTextColor())
             .margin({ left: 6 })
+            .onClick(() => {
+              this.toggleExploreSourcePicker();
+            })
+
+          if (this.showExploreSourcePicker) {
+            Button('搜索')
+              .height(30)
+              .fontSize(12)
+              .borderRadius(15)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
+              .padding({ left: 10, right: 10 })
+              .margin({ left: 8 })
+              .onClick(() => {
+                this.applyExploreSourceFilter();
+              })
+          }
         }
           .layoutWeight(1)
           .height(40)
@@ -2951,23 +2994,11 @@ struct ExplorePage {
           .backgroundColor(this.glassCardColor())
           .border({ width: 1, color: this.glassBorderColor() })
           .shadow({ radius: 8, color: this.glassShadowColor(), offsetX: 0, offsetY: 3 })
-          .padding({ left: 16, right: 14 })
+          .padding({ left: 16, right: 10 })
           .alignItems(VerticalAlign.Center)
           .onClick(() => {
-            if (this.sourceOptions.length > 0) {
-              this.showExploreSourcePicker = !this.showExploreSourcePicker;
-            }
-          })
-          .bindPopup(this.showExploreSourcePicker, {
-            builder: this.exploreSourcePopup,
-            placement: Placement.Bottom,
-            popupColor: this.cardColor(),
-            enableArrow: false,
-            autoCancel: true,
-            onStateChange: (event) => {
-              if (!event.isVisible) {
-                this.showExploreSourcePicker = false;
-              }
+            if (!this.showExploreSourcePicker) {
+              this.openExploreSourcePicker();
             }
           })
 
@@ -2986,6 +3017,10 @@ struct ExplorePage {
       .height(56)
       .padding({ left: 16, right: 16 })
       .alignItems(VerticalAlign.Center)
+
+      if (this.showExploreSourcePicker) {
+        this.exploreSourceDropdown()
+      }
 
       if (this.platformNames.length > 0) {
         Scroll() {
@@ -3157,40 +3192,50 @@ struct ExplorePage {
   }
 
   @Builder
-  exploreSourcePopup() {
+  exploreSourceDropdown() {
     Column() {
       Scroll() {
         Column() {
-          ForEach(this.sourceOptions, (option: ExploreSourceOption) => {
-            Row() {
-              Text(option.sourceName || '未命名书源')
-                .fontSize(16)
-                .fontFamily(this.readerActiveFontFamily)
-                .fontColor(option.sourceUrl === this.selectedSourceUrl ? this.accentColor() : this.primaryTextColor())
-                .fontWeight(option.sourceUrl === this.selectedSourceUrl ? FontWeight.Medium : FontWeight.Regular)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .layoutWeight(1)
-
-              if (option.sourceUrl === this.selectedSourceUrl) {
-                Text('✓')
-                  .fontSize(15)
+          if (this.getFilteredExploreSourceOptions().length === 0) {
+            Text('没有匹配的书源')
+              .fontSize(14)
+              .fontColor(this.secondaryTextColor())
+              .width('100%')
+              .height(52)
+              .textAlign(TextAlign.Center)
+          } else {
+            ForEach(this.getFilteredExploreSourceOptions(), (option: ExploreSourceOption) => {
+              Row() {
+                Text(option.sourceName || '未命名书源')
+                  .fontSize(16)
                   .fontFamily(this.readerActiveFontFamily)
-                  .fontColor(this.accentColor())
-                  .margin({ left: 10 })
+                  .fontColor(option.sourceUrl === this.selectedSourceUrl ? this.accentColor() : this.primaryTextColor())
+                  .fontWeight(option.sourceUrl === this.selectedSourceUrl ? FontWeight.Medium : FontWeight.Regular)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+
+                if (option.sourceUrl === this.selectedSourceUrl) {
+                  Text('✓')
+                    .fontSize(15)
+                    .fontFamily(this.readerActiveFontFamily)
+                    .fontColor(this.accentColor())
+                    .margin({ left: 10 })
+                }
               }
-            }
-            .width('100%')
-            .height(44)
-            .padding({ left: 14, right: 14 })
-            .borderRadius(12)
-            .backgroundColor(option.sourceUrl === this.selectedSourceUrl ? this.exploreSelectedBackgroundColor() : '#00000000')
-            .alignItems(VerticalAlign.Center)
-            .onClick(() => {
-              this.showExploreSourcePicker = false;
-              this.switchExploreSource(option);
+              .width('100%')
+              .height(44)
+              .padding({ left: 14, right: 14 })
+              .borderRadius(12)
+              .backgroundColor(option.sourceUrl === this.selectedSourceUrl ? this.exploreSelectedBackgroundColor() : '#00000000')
+              .alignItems(VerticalAlign.Center)
+              .onClick(() => {
+                this.showExploreSourcePicker = false;
+                this.clearExploreSourceFilter();
+                this.switchExploreSource(option);
+              })
             })
-          })
+          }
         }
         .width('100%')
       }
@@ -3198,8 +3243,9 @@ struct ExplorePage {
       .constraintSize({ maxHeight: 320 })
       .scrollBar(BarState.Auto)
     }
-    .width(260)
+    .width('calc(100% - 32vp)')
     .padding(8)
+    .margin({ left: 16, right: 16, bottom: 8 })
     .borderRadius(16)
     .backgroundColor(this.cardColor())
     .border({ width: 1, color: this.glassBorderColor() })
@@ -3218,6 +3264,48 @@ struct ExplorePage {
     } finally {
       this.unmarkSearchBookJoining(searchKey);
     }
+  }
+
+  openExploreSourcePicker(): void {
+    if (this.sourceOptions.length === 0) {
+      return;
+    }
+    this.exploreSourceFilterInput = '';
+    this.exploreSourceFilterKeyword = '';
+    this.showExploreSourcePicker = true;
+  }
+
+  toggleExploreSourcePicker(): void {
+    if (this.showExploreSourcePicker) {
+      this.showExploreSourcePicker = false;
+      this.clearExploreSourceFilter();
+      return;
+    }
+    this.openExploreSourcePicker();
+  }
+
+  applyExploreSourceFilter(): void {
+    this.exploreSourceFilterKeyword = this.exploreSourceFilterInput.trim().toLowerCase();
+    if (this.sourceOptions.length > 0) {
+      this.showExploreSourcePicker = true;
+    }
+  }
+
+  clearExploreSourceFilter(): void {
+    this.exploreSourceFilterInput = '';
+    this.exploreSourceFilterKeyword = '';
+  }
+
+  getFilteredExploreSourceOptions(): ExploreSourceOption[] {
+    const keyword = this.exploreSourceFilterKeyword;
+    if (!keyword) {
+      return this.sourceOptions;
+    }
+    return this.sourceOptions.filter((option: ExploreSourceOption) => {
+      const searchable = `${option.sourceName || ''}\n${option.sourceUrl || ''}\n${(option.platforms || []).join(' ')}`
+        .toLowerCase();
+      return searchable.includes(keyword);
+    });
   }
 
   switchExplorePlatform(platform: string): void {

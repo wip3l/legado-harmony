@@ -6,6 +6,7 @@ export class ReaderThemeItem {
   textColor: string = '';
   subTextColor: string = '';
   backgroundAssetId: string = '';
+  backgroundImageUri: string = '';
   backgroundImageFit: string = 'cover';
   contentTone: string = 'light';
 }
@@ -23,38 +24,47 @@ export class ReaderThemeHelper {
     return value >= 0 && value <= ReaderThemeHelper.APP_THEME_INDEX ? value : 0;
   }
 
-  static lightThemes(customBackgroundColor: string, customTextColor: string): ReaderThemeItem[] {
+  static lightThemes(customBackgroundColor: string, customTextColor: string,
+    customBackgroundImageUri: string = '', customBackgroundImageFit: string = 'cover'): ReaderThemeItem[] {
     return [
       ReaderThemeHelper.theme('米黄', '#F7F1E3', '#2F261D', '#7A6F63'),
       ReaderThemeHelper.theme('素白', '#FFFFFF', '#333333', '#777777'),
       ReaderThemeHelper.theme('青绿', '#E9F3E5', '#26352A', '#657769'),
       ReaderThemeHelper.theme('自定义', customBackgroundColor || ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR,
         customTextColor || ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR,
-        ReaderThemeHelper.derivedSubTextColor(false, customTextColor)),
+        ReaderThemeHelper.derivedSubTextColor(false, customTextColor), '', '', customBackgroundImageFit,
+        customBackgroundImageUri),
       ReaderThemeHelper.applicationTheme(false)
     ];
   }
 
-  static darkThemes(customBackgroundColor: string, customTextColor: string): ReaderThemeItem[] {
+  static darkThemes(customBackgroundColor: string, customTextColor: string,
+    customBackgroundImageUri: string = '', customBackgroundImageFit: string = 'cover'): ReaderThemeItem[] {
     return [
       ReaderThemeHelper.theme('夜间', '#1F2329', '#D8D8D8', '#9AA0A6'),
       ReaderThemeHelper.theme('墨灰', '#14161A', '#C8CCD3', '#8A8F98'),
       ReaderThemeHelper.theme('深蓝', '#101826', '#D5DFEA', '#8FA2B8'),
       ReaderThemeHelper.theme('自定义', customBackgroundColor || ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR,
         customTextColor || ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR,
-        ReaderThemeHelper.derivedSubTextColor(true, customTextColor)),
+        ReaderThemeHelper.derivedSubTextColor(true, customTextColor), '', '', customBackgroundImageFit,
+        customBackgroundImageUri),
       ReaderThemeHelper.applicationTheme(true)
     ];
   }
 
-  static themes(darkMode: boolean, customBackgroundColor: string, customTextColor: string): ReaderThemeItem[] {
+  static themes(darkMode: boolean, customBackgroundColor: string, customTextColor: string,
+    customBackgroundImageUri: string = '', customBackgroundImageFit: string = 'cover'): ReaderThemeItem[] {
     return darkMode ?
-      ReaderThemeHelper.darkThemes(customBackgroundColor, customTextColor) :
-      ReaderThemeHelper.lightThemes(customBackgroundColor, customTextColor);
+      ReaderThemeHelper.darkThemes(customBackgroundColor, customTextColor, customBackgroundImageUri,
+        customBackgroundImageFit) :
+      ReaderThemeHelper.lightThemes(customBackgroundColor, customTextColor, customBackgroundImageUri,
+        customBackgroundImageFit);
   }
 
-  static themeAt(darkMode: boolean, index: number, customBackgroundColor: string, customTextColor: string): ReaderThemeItem {
-    const items = ReaderThemeHelper.themes(darkMode, customBackgroundColor, customTextColor);
+  static themeAt(darkMode: boolean, index: number, customBackgroundColor: string, customTextColor: string,
+    customBackgroundImageUri: string = '', customBackgroundImageFit: string = 'cover'): ReaderThemeItem {
+    const items = ReaderThemeHelper.themes(darkMode, customBackgroundColor, customTextColor,
+      customBackgroundImageUri, customBackgroundImageFit);
     return items[ReaderThemeHelper.normalizeIndex(index)] || items[0];
   }
 
@@ -71,13 +81,15 @@ export class ReaderThemeHelper {
   }
 
   private static theme(name: string, backgroundColor: string, textColor: string, subTextColor: string,
-    backgroundAssetId: string = '', contentTone: string = '', backgroundImageFit: string = 'cover'): ReaderThemeItem {
+    backgroundAssetId: string = '', contentTone: string = '', backgroundImageFit: string = 'cover',
+    backgroundImageUri: string = ''): ReaderThemeItem {
     const item = new ReaderThemeItem();
     item.name = name;
     item.backgroundColor = backgroundColor;
     item.textColor = textColor;
     item.subTextColor = subTextColor;
     item.backgroundAssetId = backgroundAssetId;
+    item.backgroundImageUri = backgroundImageUri;
     item.backgroundImageFit = backgroundImageFit;
     item.contentTone = contentTone || (ReaderThemeHelper.isDarkColor(backgroundColor) ? 'dark' : 'light');
     return item;

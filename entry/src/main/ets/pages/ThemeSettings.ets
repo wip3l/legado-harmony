@@ -99,7 +99,10 @@ struct ThemeSettingsPage {
       AppThemeSettingsStore.applyToStorage(settings);
       await AppThemeSettingsStore.save(getContext(this), settings);
       this.appThemeId = settings.themeId;
-      await this.useAppReaderTheme();
+      const readerSettings = await ReaderSettingsStore.switchThemeProfile(
+        getContext(this), previous.themeId, settings.themeId);
+      this.readerLightThemeIndex = readerSettings.lightThemeIndex;
+      this.readerDarkThemeIndex = readerSettings.darkThemeIndex;
       await this.applyThemeFontWhenAvailable();
       this.refreshRecentReadCard();
       this.syncBars();

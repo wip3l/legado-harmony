@@ -135,15 +135,16 @@ export default class EntryAbility extends UIAbility {
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Sync tts settings failed: %{public}s', JSON.stringify(e));
     });
-    ReaderSettingsStore.load(this.context).then((settings) => {
-      ReaderSettingsStore.applyToStorage(settings);
-    }).catch((e: Error) => {
-      hilog.warn(0x0000, 'testTag', 'Sync reader settings failed: %{public}s', JSON.stringify(e));
-    });
     this.themeBootstrapPromise = AppThemeSettingsStore.load(this.context).then((settings) => {
       AppThemeSettingsStore.applyToStorage(settings);
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Sync app theme settings failed: %{public}s', JSON.stringify(e));
+    }).then(() => {
+      return ReaderSettingsStore.load(this.context);
+    }).then((settings) => {
+      ReaderSettingsStore.applyToStorage(settings);
+    }).catch((e: Error) => {
+      hilog.warn(0x0000, 'testTag', 'Sync reader settings failed: %{public}s', JSON.stringify(e));
     });
     AppIconSettingsStore.load(this.context).then((settings) => {
       AppIconSettingsStore.applyToStorage(settings);

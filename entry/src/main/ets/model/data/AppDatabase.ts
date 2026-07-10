@@ -382,6 +382,21 @@ export class AppDatabase {
     await this.store.update(bucket, predicates);
   }
 
+  async updateBookReadingProgress(bookUrl: string, chapterTitle: string, chapterIndex: number,
+    chapterPos: number, chapterTime: number, variable: string): Promise<void> {
+    if (!this.store || !bookUrl) return;
+    const bucket: relationalStore.ValuesBucket = {
+      durChapterTitle: chapterTitle,
+      durChapterIndex: chapterIndex,
+      durChapterPos: chapterPos,
+      durChapterTime: chapterTime,
+      variable: variable
+    };
+    const predicates = new relationalStore.RdbPredicates('books');
+    predicates.equalTo('bookUrl', bookUrl);
+    await this.store.update(bucket, predicates);
+  }
+
   async deleteBook(bookUrl: string): Promise<void> {
     if (!this.store) return;
     const predicates = new relationalStore.RdbPredicates('books');

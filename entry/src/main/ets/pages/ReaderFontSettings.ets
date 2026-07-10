@@ -58,6 +58,9 @@ struct ReaderFontSettingsPage {
   @State regexRules: ReaderRegexFontRule[] = [];
   @State regexHighlightRefreshKey: number = 0;
   @State activeRegexInputKey: string = '';
+  private readerSettingsLoaded: boolean = false;
+  private readerSettingsLoading: boolean = false;
+  private closingReaderFontSettings: boolean = false;
 
   aboutToAppear(): void {
     this.loadSettings();
@@ -65,11 +68,35 @@ struct ReaderFontSettingsPage {
   }
 
   onPageShow(): void {
-    this.loadSettings();
+    if (!this.readerSettingsLoaded && !this.readerSettingsLoading) {
+      this.loadSettings();
+    }
     this.syncBars();
   }
 
+  onBackPress(): boolean {
+    this.closeReaderFontSettings();
+    return true;
+  }
+
+  async closeReaderFontSettings(): Promise<void> {
+    if (this.closingReaderFontSettings) {
+      return;
+    }
+    this.closingReaderFontSettings = true;
+    // Every editing control saves its own updated snapshot. Re-encoding the component
+    // state while the route is being removed can read a stale ForEach item and overwrite
+    // the just-persisted regex switches, which is especially visible when this page was
+    // opened above the still-mounted reader page.
+    await ReaderSettingsStore.waitForReaderFontStyleSaves();
+    router.back();
+  }
+
   async loadSettings(): Promise<void> {
+    if (this.readerSettingsLoading) {
+      return;
+    }
+    this.readerSettingsLoading = true;
     try {
       const settings = await ReaderSettingsStore.load(getContext(this));
       this.readerFontSize = settings.fontSize;
@@ -87,8 +114,11 @@ struct ReaderFontSettingsPage {
       this.readerRegexFontRulesRaw = settings.regexFontRulesRaw;
       this.regexRules = this.parseRegexRules(settings);
       this.bumpRegexHighlightRefresh();
+      this.readerSettingsLoaded = true;
     } catch (e) {
       console.warn('加载阅读字体设置失败:', e);
+    } finally {
+      this.readerSettingsLoading = false;
     }
   }
 
@@ -141,6 +171,9 @@ struct ReaderFontSettingsPage {
   }
 
   saveSettings(): void {
+    if (!this.readerSettingsLoaded) {
+      return;
+    }
     const settings = new ReaderSettings();
     settings.fontSize = this.readerFontSize;
     settings.bodyFontMode = this.normalizeFontMode(this.readerBodyFontMode);
@@ -154,19 +187,21 @@ struct ReaderFontSettingsPage {
     settings.regexFontFamily = this.readerRegexFontFamily;
     settings.regexFontSize = this.readerRegexFontSize;
     settings.regexShadowColor = this.readerRegexShadowColor;
-    settings.regexFontRulesRaw = this.encodeRegexRules(this.regexRules);
+    const rulesRaw = this.encodeRegexRules(this.regexRules);
+    this.readerRegexFontRulesRaw = rulesRaw;
+    settings.regexFontRulesRaw = rulesRaw;
     ReaderSettingsStore.saveReaderFontStyleSettings(getContext(this), settings).catch((e: Error) => {
       console.warn('保存阅读字体设置失败:', e);
     });
   }
 
   setBodyFontSize(value: number): void {
-    this.readerFontSize = Math.max(14, Math.min(Math.round(value), 30));
+    this.readerFontSize = Math.max(14, Math.min(Math.round(value), 50));
     this.saveSettings();
   }
 
   setTitleFontSize(value: number): void {
-    this.readerTitleFontSize = Math.max(14, Math.min(Math.round(value), 30));
+    this.readerTitleFontSize = Math.max(14, Math.min(Math.round(value), 50));
     this.saveSettings();
   }
 
@@ -409,7 +444,7 @@ struct ReaderFontSettingsPage {
         .height(56)
         .textAlign(TextAlign.Center)
         .onClick(() => {
-          router.back();
+          this.closeReaderFontSettings();
         })
       Text('阅读字体')
         .fontSize(20)
@@ -498,7 +533,7 @@ struct ReaderFontSettingsPage {
           .fontColor(this.subTextColor())
       }
       .width('100%')
-      Slider({ value: this.readerFontSize, min: 14, max: 30, step: 1 })
+      Slider({ value: this.readerFontSize, min: 14, max: 50, step: 1 })
         .width('100%')
         .margin({ top: 8 })
         .selectedColor(this.accentColor())
@@ -524,7 +559,7 @@ struct ReaderFontSettingsPage {
           .fontColor(this.subTextColor())
       }
       .width('100%')
-      Slider({ value: this.readerTitleFontSize, min: 14, max: 30, step: 1 })
+      Slider({ value: this.readerTitleFontSize, min: 14, max: 50, step: 1 })
         .width('100%')
         .margin({ top: 8 })
         .selectedColor(this.accentColor())
@@ -938,9 +973,7 @@ struct ReaderFontSettingsPage {
     return [
       { value: '跟随主题' },
       { value: '无强调' },
-      { value: '仅文字色' },
-      { value: '高亮色块' },
-      { value: '强调气泡' }
+      { value: '自定义' }
     ];
   }
 
@@ -948,14 +981,8 @@ struct ReaderFontSettingsPage {
     if (mode === 'none') {
       return 1;
     }
-    if (mode === 'text') {
+    if (mode === 'custom' || mode === 'text' || mode === 'highlight' || mode === 'bubble') {
       return 2;
-    }
-    if (mode === 'highlight') {
-      return 3;
-    }
-    if (mode === 'bubble') {
-      return 4;
     }
     return 0;
   }
@@ -965,13 +992,7 @@ struct ReaderFontSettingsPage {
       return 'none';
     }
     if (index === 2) {
-      return 'text';
-    }
-    if (index === 3) {
-      return 'highlight';
-    }
-    if (index === 4) {
-      return 'bubble';
+      return 'custom';
     }
     return 'inherit';
   }
@@ -1035,11 +1056,6 @@ struct ReaderFontSettingsPage {
     return String(options[this.bubbleStyleIndex(styleId)].value);
   }
 
-  shouldShowBubbleStyle(index: number): boolean {
-    const mode = this.regexRuleAt(index).emphasisMode;
-    return mode === 'inherit' || mode === 'bubble';
-  }
-
   @Builder
   regexEmphasisSettings(index: number, refreshKey: number) {
     Column({ space: 8 }) {
@@ -1066,66 +1082,96 @@ struct ReaderFontSettingsPage {
       .width('100%')
       .alignItems(VerticalAlign.Center)
 
-      if (this.shouldShowBubbleStyle(index)) {
-        Row() {
-          Text('气泡风格')
-            .fontSize(15)
-            .fontColor(this.primaryTextColor())
-            .layoutWeight(1)
-          Select(this.bubbleStyleOptions())
-            .selected(this.bubbleStyleIndex(this.regexRuleAt(index).bubbleStyleId))
-            .value(this.bubbleStyleLabel(this.regexRuleAt(index).bubbleStyleId))
-            .font({ size: 13 })
-            .fontColor(this.primaryTextColor())
-            .backgroundColor(this.inputColor())
-            .borderRadius(8)
-            .constraintSize({ minWidth: 126, maxWidth: 160 })
-            .onSelect((selectedIndex: number) => {
-              this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-                target.bubbleStyleId = this.bubbleStyleByIndex(selectedIndex);
-              });
-            })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-      }
-
-      if (this.regexRuleAt(index).emphasisMode !== 'none') {
-        Row() {
-          Text('强调颜色')
-            .fontSize(15)
-            .fontColor(this.primaryTextColor())
-            .layoutWeight(1)
-          Select([{ value: '跟随主题' }, { value: '自定义' }])
-            .selected(this.regexRuleAt(index).emphasisColor.trim() ? 1 : 0)
-            .value(this.regexRuleAt(index).emphasisColor.trim() ? '自定义' : '跟随主题')
-            .font({ size: 13 })
-            .fontColor(this.primaryTextColor())
-            .backgroundColor(this.inputColor())
-            .borderRadius(8)
-            .constraintSize({ minWidth: 126, maxWidth: 160 })
-            .onSelect((selectedIndex: number) => {
-              this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-                target.emphasisColor = selectedIndex === 0 ? '' :
-                  (target.emphasisColor.trim() || this.accentColor());
-                target.shadowColor = target.emphasisColor;
-              });
-            })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        if (this.regexRuleAt(index).emphasisColor.trim()) {
+      if (this.emphasisModeIndex(this.regexRuleAt(index).emphasisMode) === 2) {
+        this.regexEmphasisToggle('设置文字色', this.regexRuleAt(index).customTextColorEnabled, (enabled: boolean) => {
+          this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+            target.customTextColorEnabled = enabled;
+            if (enabled && !target.customTextColor.trim()) {
+              target.customTextColor = this.accentColor();
+            }
+          });
+        })
+        if (this.regexRuleAt(index).customTextColorEnabled) {
           ColorCodePicker({
-            value: this.regexRuleAt(index).emphasisColor,
+            value: this.regexRuleAt(index).customTextColor,
             placeholder: this.accentColor(),
             appDarkMode: this.appDarkMode,
             accentColor: this.accentColor(),
-            optionTitle: '自定义强调色',
+            optionTitle: '文字颜色',
             onColorChange: (value: string) => {
               this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-                target.emphasisColor = this.normalizeColorInput(value, target.emphasisColor);
-                target.shadowColor = target.emphasisColor;
+                target.customTextColor = this.normalizeColorInput(value, target.customTextColor || this.accentColor());
+              });
+            }
+          })
+        }
+
+        this.regexEmphasisToggle('设置高亮色块', this.regexRuleAt(index).customHighlightEnabled,
+          (enabled: boolean) => {
+            this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+              target.customHighlightEnabled = enabled;
+              if (enabled && !target.customHighlightColor.trim()) {
+                target.customHighlightColor = this.accentColor();
+              }
+            });
+          })
+        if (this.regexRuleAt(index).customHighlightEnabled) {
+          ColorCodePicker({
+            value: this.regexRuleAt(index).customHighlightColor,
+            placeholder: this.accentColor(),
+            appDarkMode: this.appDarkMode,
+            accentColor: this.accentColor(),
+            optionTitle: '高亮色块颜色',
+            onColorChange: (value: string) => {
+              this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+                target.customHighlightColor = this.normalizeColorInput(value,
+                  target.customHighlightColor || this.accentColor());
+              });
+            }
+          })
+        }
+
+        this.regexEmphasisToggle('设置强调气泡', this.regexRuleAt(index).customBubbleEnabled,
+          (enabled: boolean) => {
+            this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+              target.customBubbleEnabled = enabled;
+              if (enabled && !target.customBubbleColor.trim()) {
+                target.customBubbleColor = this.accentColor();
+              }
+            });
+          })
+        if (this.regexRuleAt(index).customBubbleEnabled) {
+          Row() {
+            Text('气泡风格')
+              .fontSize(15)
+              .fontColor(this.primaryTextColor())
+              .layoutWeight(1)
+            Select(this.bubbleStyleOptions())
+              .selected(this.bubbleStyleIndex(this.regexRuleAt(index).bubbleStyleId))
+              .value(this.bubbleStyleLabel(this.regexRuleAt(index).bubbleStyleId))
+              .font({ size: 13 })
+              .fontColor(this.primaryTextColor())
+              .backgroundColor(this.inputColor())
+              .borderRadius(8)
+              .constraintSize({ minWidth: 126, maxWidth: 160 })
+              .onSelect((selectedIndex: number) => {
+                this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+                  target.bubbleStyleId = this.bubbleStyleByIndex(selectedIndex);
+                });
+              })
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+          ColorCodePicker({
+            value: this.regexRuleAt(index).customBubbleColor,
+            placeholder: this.accentColor(),
+            appDarkMode: this.appDarkMode,
+            accentColor: this.accentColor(),
+            optionTitle: '强调气泡颜色',
+            onColorChange: (value: string) => {
+              this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+                target.customBubbleColor = this.normalizeColorInput(value,
+                  target.customBubbleColor || this.accentColor());
               });
             }
           })
@@ -1133,6 +1179,23 @@ struct ReaderFontSettingsPage {
       }
     }
     .width('100%')
+  }
+
+  @Builder
+  regexEmphasisToggle(title: string, enabled: boolean, onChange: (enabled: boolean) => void) {
+    Row() {
+      Text(title)
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
+      Toggle({ type: ToggleType.Switch, isOn: enabled })
+        .selectedColor(this.accentColor())
+        .onChange((checked: boolean) => {
+          onChange(checked);
+        })
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
   }
   @Builder
   compactFontModeItem(title: string, mode: string, family: string, onChange: (mode: string, family: string) => void) {
@@ -1171,7 +1234,7 @@ struct ReaderFontSettingsPage {
           .fontColor(this.subTextColor())
       }
       .width('100%')
-      Slider({ value: value, min: 14, max: 30, step: 1 })
+      Slider({ value: value, min: 14, max: 50, step: 1 })
         .width('100%')
         .margin({ top: 6 })
         .selectedColor(this.accentColor())
@@ -1196,13 +1259,13 @@ struct ReaderFontSettingsPage {
           .opacity(refreshKey >= 0 ? 1 : 1)
       }
       .width('100%')
-      Slider({ value: this.regexRuleAt(index).fontSize, min: 14, max: 30, step: 1 })
+      Slider({ value: this.regexRuleAt(index).fontSize, min: 14, max: 50, step: 1 })
         .width('100%')
         .margin({ top: 6 })
         .selectedColor(this.accentColor())
         .onChange((sliderValue: number) => {
           this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-            target.fontSize = Math.max(14, Math.min(Math.round(sliderValue), 30));
+            target.fontSize = Math.max(14, Math.min(Math.round(sliderValue), 50));
           });
         })
     }

@@ -3,6 +3,8 @@ import { ConfigurationConstant } from '@kit.AbilityKit';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderThemeHelper, ReaderThemeItem } from '../utils/ReaderThemeHelper';
+import { ReaderCustomThemeData, ReaderCustomThemeHelper, ReaderCustomThemeScheme } from '../utils/ReaderCustomThemeHelper';
+import { ReaderBackgroundImageStore } from '../utils/ReaderBackgroundImageStore';
 import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
@@ -34,12 +36,15 @@ struct SettingsPage {
   @StorageLink('readerMarginTop') readerMarginTop: number = 18;
   @StorageLink('readerMarginBottom') readerMarginBottom: number = 18;
   @State typographySettingIndex: number = 0;
+  @State showTypographyValueInput: boolean = false;
+  @State typographyValueDraft: string = '';
   @StorageLink('readerLightThemeIndex') readerLightThemeIndex: number = 0;
   @StorageLink('readerDarkThemeIndex') readerDarkThemeIndex: number = 0;
   @StorageLink('readerLightCustomThemeBackgroundColor') readerLightCustomThemeBackgroundColor: string = ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR;
   @StorageLink('readerLightCustomThemeTextColor') readerLightCustomThemeTextColor: string = ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR;
   @StorageLink('readerDarkCustomThemeBackgroundColor') readerDarkCustomThemeBackgroundColor: string = ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR;
   @StorageLink('readerDarkCustomThemeTextColor') readerDarkCustomThemeTextColor: string = ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR;
+  @StorageLink('readerCustomThemesRaw') readerCustomThemesRaw: string = '';
   @StorageLink('readerFontFamily') readerFontFamily: string = '';
   @StorageLink('readerFontFilePath') readerFontFilePath: string = '';
   @StorageLink('readerFontSourceName') readerFontSourceName: string = '系统默认';
@@ -52,6 +57,7 @@ struct SettingsPage {
   @StorageLink('readerBodyFontFamily') readerBodyFontFamily: string = '';
   @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
   @StorageLink('readerPageTurnAnimationType') readerPageTurnAnimationType: number = ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE;
+  @StorageLink('readerLandscapeDoublePage') readerLandscapeDoublePage: boolean = false;
   @StorageLink('readerTapZoneActions') readerTapZoneActions: string = '3,3,3,3,1,2,2,2,2';
   @StorageLink('readerVolumeTurnPage') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
@@ -66,6 +72,7 @@ struct SettingsPage {
   @State customFonts: ReaderCustomFontItem[] = [];
   @State previewFontRenderVersion: number = 0;
   @State showTapZoneSettings: boolean = false;
+  @State customThemeNameDraft: string = '';
 
   aboutToAppear() {
     this.loadThemeMode();
@@ -136,6 +143,10 @@ struct SettingsPage {
             this.pageTurnAnimationOptions(), this.pageTurnAnimationSelectedIndex(), (index: number) => {
               this.setReaderPageTurnAnimationType(index);
             })
+          this.switchItem('使用双翻页', '横屏或折叠屏展开等宽屏状态下同时显示左右两页',
+            this.readerLandscapeDoublePage, (value: boolean) => {
+              this.setReaderLandscapeDoublePage(value);
+            })
           this.switchItem('音量键翻页', '阅读页获得焦点时使用音量上/下键切换上一页/下一页', this.readerVolumeTurnPage, (value: boolean) => {
             this.setReaderVolumeTurnPage(value);
           })
@@ -177,6 +188,8 @@ struct SettingsPage {
             bottom: this.readerMarginBottom
           })
           .backgroundColor(this.previewBackgroundColor())
+          .backgroundImage(this.previewBackgroundImage(), ImageRepeat.NoRepeat)
+          .backgroundImageSize(this.previewBackgroundImageSize())
           .borderRadius(10)
           .margin({ left: 16, right: 16, top: 12, bottom: 32 })
         }
@@ -460,8 +473,10 @@ struct SettingsPage {
     this.readerLightCustomThemeTextColor = settings.lightCustomThemeTextColor;
     this.readerDarkCustomThemeBackgroundColor = settings.darkCustomThemeBackgroundColor;
     this.readerDarkCustomThemeTextColor = settings.darkCustomThemeTextColor;
+    this.readerCustomThemesRaw = settings.customThemesRaw || '';
     this.readerPageTurnMode = settings.pageTurnMode;
     this.readerPageTurnAnimationType = settings.pageTurnAnimationType;
+    this.readerLandscapeDoublePage = settings.landscapeDoublePage;
     this.readerTapZoneActions = settings.tapZoneActions;
     this.readerVolumeTurnPage = settings.volumeTurnPage;
     this.readerKeepScreenOn = settings.keepScreenOn;
@@ -879,7 +894,7 @@ struct SettingsPage {
   }
 
   setReaderFontSize(fontSize: number): void {
-    this.readerFontSize = Math.max(14, Math.min(Math.round(fontSize), 30));
+    this.readerFontSize = Math.max(14, Math.min(Math.round(fontSize), 50));
     this.saveReaderLayoutSettings();
   }
 
@@ -924,7 +939,7 @@ struct SettingsPage {
   }
 
   normalizeReaderMargin(value: number): number {
-    return Math.max(0, Math.min(Math.round(value), 64));
+    return Math.max(0, Math.min(Math.round(value), 300));
   }
 
   typographySettingOptions(): SelectOption[] {
@@ -990,24 +1005,147 @@ struct SettingsPage {
     }
   }
 
+  openTypographyValueInput(): void {
+    this.typographyValueDraft = '';
+    this.showTypographyValueInput = true;
+  }
+
+  applyTypographyValueInput(): void {
+    if (!this.showTypographyValueInput) {
+      return;
+    }
+    const value = Number(this.typographyValueDraft);
+    if (!this.typographyValueDraft.trim() || !Number.isFinite(value)) {
+      this.showTypographyValueInput = false;
+      return;
+    }
+    switch (this.typographySettingIndex) {
+      case 1:
+        this.setReaderLineHeight(value);
+        break;
+      case 2:
+        this.setReaderParagraphSpacing(value);
+        break;
+      case 3:
+        this.setReaderMarginLeft(value);
+        break;
+      case 4:
+        this.setReaderMarginRight(value);
+        break;
+      case 5:
+        this.setReaderMarginTop(value);
+        break;
+      case 6:
+        this.setReaderMarginBottom(value);
+        break;
+      default:
+        this.setReaderFontSize(value);
+    }
+    this.showTypographyValueInput = false;
+  }
+
   setCurrentThemeBackgroundColor(color: string): void {
     const value = this.normalizeColor(color, this.currentCustomThemeBackgroundColor());
-    if (this.appDarkMode) {
-      this.readerDarkCustomThemeBackgroundColor = value;
-    } else {
-      this.readerLightCustomThemeBackgroundColor = value;
-    }
-    this.saveReaderThemeSettings();
+    const data = this.customThemeData();
+    ReaderCustomThemeHelper.selected(data, this.appDarkMode).backgroundColor = value;
+    this.persistCustomThemeData(data);
   }
 
   setCurrentThemeTextColor(color: string): void {
     const value = this.normalizeColor(color, this.currentCustomThemeTextColor());
-    if (this.appDarkMode) {
-      this.readerDarkCustomThemeTextColor = value;
-    } else {
-      this.readerLightCustomThemeTextColor = value;
+    const data = this.customThemeData();
+    ReaderCustomThemeHelper.selected(data, this.appDarkMode).textColor = value;
+    this.persistCustomThemeData(data);
+  }
+
+  addCustomTheme(): void {
+    const data = this.customThemeData();
+    const item = ReaderCustomThemeHelper.add(data, this.appDarkMode);
+    this.customThemeNameDraft = item.name;
+    this.persistCustomThemeData(data);
+  }
+
+  deleteCurrentCustomTheme(): void {
+    const data = this.customThemeData();
+    if (ReaderCustomThemeHelper.schemesForMode(data, this.appDarkMode).length <= 1) {
+      promptAction.showToast({ message: '至少保留一套自定义背景' });
+      return;
     }
-    this.saveReaderThemeSettings();
+    ReaderCustomThemeHelper.removeSelected(data, this.appDarkMode);
+    this.customThemeNameDraft = ReaderCustomThemeHelper.selected(data, this.appDarkMode).name;
+    this.persistCustomThemeData(data);
+  }
+
+  selectCustomTheme(index: number): void {
+    const data = this.customThemeData();
+    const schemes = ReaderCustomThemeHelper.schemesForMode(data, this.appDarkMode);
+    if (index < 0 || index >= schemes.length) {
+      return;
+    }
+    ReaderCustomThemeHelper.select(data, this.appDarkMode, schemes[index].id);
+    this.customThemeNameDraft = schemes[index].name;
+    this.persistCustomThemeData(data);
+  }
+
+  renameCurrentCustomTheme(name: string): void {
+    const data = this.customThemeData();
+    const current = ReaderCustomThemeHelper.selected(data, this.appDarkMode);
+    const value = (name || '').trim().substring(0, 20);
+    if (!value) {
+      this.customThemeNameDraft = current.name;
+      return;
+    }
+    current.name = value;
+    this.customThemeNameDraft = value;
+    this.persistCustomThemeData(data);
+  }
+
+  async chooseCurrentCustomThemeImage(): Promise<void> {
+    const data = this.customThemeData();
+    const current = ReaderCustomThemeHelper.selected(data, this.appDarkMode);
+    try {
+      const imageUri = await ReaderBackgroundImageStore.pickAndSave(getContext(this), current.id);
+      if (!imageUri) {
+        return;
+      }
+      current.backgroundImageUri = imageUri;
+      current.backgroundType = 'image';
+      this.persistCustomThemeData(data);
+    } catch (e) {
+      console.error('选择阅读背景图片失败:', e);
+      promptAction.showToast({ message: '选择背景图片失败' });
+    }
+  }
+
+  clearCurrentCustomThemeImage(): void {
+    const data = this.customThemeData();
+    const current = ReaderCustomThemeHelper.selected(data, this.appDarkMode);
+    current.backgroundImageUri = '';
+    current.backgroundType = 'color';
+    this.persistCustomThemeData(data);
+  }
+
+  setCurrentCustomThemeBackgroundType(index: number): void {
+    const data = this.customThemeData();
+    const current = ReaderCustomThemeHelper.selected(data, this.appDarkMode);
+    current.backgroundType = index === 1 ? 'image' : 'color';
+    this.persistCustomThemeData(data);
+  }
+
+  currentCustomThemeBackgroundTypeIndex(): number {
+    return this.currentCustomThemeScheme().backgroundType === 'image' ? 1 : 0;
+  }
+
+  currentCustomThemeBackgroundImageUri(): string {
+    const current = this.currentCustomThemeScheme();
+    return current.backgroundType === 'image' ? current.backgroundImageUri : '';
+  }
+
+  setCurrentCustomThemeImageFit(index: number): void {
+    const fits = ['cover', 'contain', 'fill'];
+    const data = this.customThemeData();
+    ReaderCustomThemeHelper.selected(data, this.appDarkMode).backgroundImageFit = fits[index] || 'cover';
+    this.persistCustomThemeData(data);
   }
 
   saveReaderThemeSettings(): void {
@@ -1019,7 +1157,8 @@ struct SettingsPage {
       this.readerLightCustomThemeTextColor,
       this.readerDarkCustomThemeBackgroundColor,
       this.readerDarkCustomThemeTextColor,
-      this.appDarkMode
+      this.appDarkMode,
+      this.readerCustomThemesRaw
     ).catch((e: Error) => {
       console.warn('保存阅读配色设置失败:', e);
     });
@@ -1038,6 +1177,13 @@ struct SettingsPage {
     this.readerPageTurnAnimationType = this.normalizePageTurnAnimationType(type);
     ReaderSettingsStore.savePageTurnAnimationType(getContext(this), this.readerPageTurnAnimationType).catch((e: Error) => {
       console.error('保存翻页动画失败:', e);
+    });
+  }
+
+  setReaderLandscapeDoublePage(enabled: boolean): void {
+    this.readerLandscapeDoublePage = enabled;
+    ReaderSettingsStore.saveLandscapeDoublePage(getContext(this), enabled).catch((e: Error) => {
+      console.error('保存双翻页设置失败:', e);
     });
   }
 
@@ -1125,6 +1271,15 @@ struct SettingsPage {
     return this.currentReaderTheme().backgroundColor;
   }
 
+  previewBackgroundImage(): ResourceStr {
+    return this.currentReaderTheme().backgroundImageUri || '';
+  }
+
+  previewBackgroundImageSize(): ImageSize {
+    const fit = this.currentReaderTheme().backgroundImageFit;
+    return fit === 'contain' ? ImageSize.Contain : (fit === 'fill' ? ImageSize.FILL : ImageSize.Cover);
+  }
+
   previewTitleColor(): string {
     return this.currentReaderTheme().textColor;
   }
@@ -1146,15 +1301,69 @@ struct SettingsPage {
   }
 
   currentCustomThemeBackgroundColor(): string {
-    return this.appDarkMode ? this.readerDarkCustomThemeBackgroundColor : this.readerLightCustomThemeBackgroundColor;
+    return this.currentCustomThemeScheme().backgroundColor;
   }
 
   currentCustomThemeTextColor(): string {
-    return this.appDarkMode ? this.readerDarkCustomThemeTextColor : this.readerLightCustomThemeTextColor;
+    return this.currentCustomThemeScheme().textColor;
+  }
+
+  customThemeData(): ReaderCustomThemeData {
+    return ReaderCustomThemeHelper.parse(
+      this.readerCustomThemesRaw,
+      this.readerLightCustomThemeBackgroundColor,
+      this.readerLightCustomThemeTextColor,
+      this.readerDarkCustomThemeBackgroundColor,
+      this.readerDarkCustomThemeTextColor
+    );
+  }
+
+  currentCustomThemeScheme(): ReaderCustomThemeScheme {
+    return ReaderCustomThemeHelper.selected(this.customThemeData(), this.appDarkMode);
+  }
+
+  currentCustomThemeSchemes(): ReaderCustomThemeScheme[] {
+    return ReaderCustomThemeHelper.schemesForMode(this.customThemeData(), this.appDarkMode);
+  }
+
+  currentCustomThemeSelectedIndex(): number {
+    const schemes = this.currentCustomThemeSchemes();
+    const selectedId = this.currentCustomThemeScheme().id;
+    const index = schemes.findIndex((item: ReaderCustomThemeScheme) => item.id === selectedId);
+    return Math.max(0, index);
+  }
+
+  customThemeOptions(): SelectOption[] {
+    const options: SelectOption[] = [];
+    for (const item of this.currentCustomThemeSchemes()) {
+      const option: SelectOption = { value: item.name };
+      options.push(option);
+    }
+    return options;
+  }
+
+  customThemeFitSelectedIndex(): number {
+    const fit = this.currentCustomThemeScheme().backgroundImageFit;
+    return fit === 'contain' ? 1 : (fit === 'fill' ? 2 : 0);
+  }
+
+  persistCustomThemeData(data: ReaderCustomThemeData): void {
+    const selected = ReaderCustomThemeHelper.selected(data, this.appDarkMode);
+    if (this.appDarkMode) {
+      this.readerDarkCustomThemeBackgroundColor = selected.backgroundColor;
+      this.readerDarkCustomThemeTextColor = selected.textColor;
+    } else {
+      this.readerLightCustomThemeBackgroundColor = selected.backgroundColor;
+      this.readerLightCustomThemeTextColor = selected.textColor;
+    }
+    this.readerCustomThemesRaw = ReaderCustomThemeHelper.stringify(data);
+    this.saveReaderThemeSettings();
   }
 
   currentReaderThemes(): ReaderThemeItem[] {
-    return ReaderThemeHelper.themes(this.appDarkMode, this.currentCustomThemeBackgroundColor(), this.currentCustomThemeTextColor());
+    const custom = this.currentCustomThemeScheme();
+    return ReaderThemeHelper.themes(this.appDarkMode, custom.backgroundColor, custom.textColor,
+      this.currentCustomThemeBackgroundImageUri(), custom.backgroundImageFit);
   }
 
   currentReaderTheme(): ReaderThemeItem {
@@ -1162,7 +1371,9 @@ struct SettingsPage {
       this.appDarkMode,
       this.currentReaderThemeIndex(),
       this.currentCustomThemeBackgroundColor(),
-      this.currentCustomThemeTextColor()
+      this.currentCustomThemeTextColor(),
+      this.currentCustomThemeBackgroundImageUri(),
+      this.currentCustomThemeScheme().backgroundImageFit
     );
   }
 
@@ -1494,6 +1705,8 @@ struct SettingsPage {
               .height(44)
               .borderRadius(22)
               .backgroundColor(theme.backgroundColor)
+              .backgroundImage(theme.backgroundImageUri || '', ImageRepeat.NoRepeat)
+              .backgroundImageSize(ImageSize.Cover)
               .border({
                 width: this.currentReaderThemeIndex() === index ? 3 : 1,
                 color: this.currentReaderThemeIndex() === index ? this.accentColor() : '#22000000'
@@ -1507,22 +1720,117 @@ struct SettingsPage {
             this.setReaderThemeIndex(index);
           })
         }, (theme: ReaderThemeItem) =>
-          `${theme.name}_${theme.backgroundColor}_${theme.textColor}_${theme.backgroundAssetId}_${theme.backgroundImageFit}`)
+          `${theme.name}_${theme.backgroundColor}_${theme.textColor}_${theme.backgroundAssetId}_${theme.backgroundImageUri}_${theme.backgroundImageFit}`)
       }
       .width('100%')
 
       if (this.currentReaderThemeIndex() === ReaderThemeHelper.CUSTOM_THEME_INDEX) {
         Column({ space: 10 }) {
-          ColorCodePicker({
-            value: this.currentCustomThemeBackgroundColor(),
-            placeholder: this.currentCustomThemeBackgroundColor(),
-            appDarkMode: this.appDarkMode,
-            accentColor: this.accentColor(),
-            optionTitle: '背景颜色',
-            onColorChange: (value: string) => {
-              this.setCurrentThemeBackgroundColor(value);
+          Row({ space: 8 }) {
+            Select(this.customThemeOptions())
+              .selected(this.currentCustomThemeSelectedIndex())
+              .value(this.currentCustomThemeScheme().name)
+              .font({ size: 14 })
+              .fontColor(this.primaryTextColor())
+              .backgroundColor(this.inputColor())
+              .layoutWeight(1)
+              .onSelect((index: number) => {
+                this.selectCustomTheme(index);
+              })
+            Button('新增')
+              .height(36)
+              .fontSize(13)
+              .backgroundColor(this.buttonColor())
+              .fontColor('#FFFFFF')
+              .onClick(() => {
+                this.addCustomTheme();
+              })
+            Button('删除')
+              .height(36)
+              .fontSize(13)
+              .backgroundColor(this.inputColor())
+              .fontColor(this.primaryTextColor())
+              .onClick(() => {
+                this.deleteCurrentCustomTheme();
+              })
+          }
+          .width('100%')
+          TextInput({ text: this.customThemeNameDraft || this.currentCustomThemeScheme().name, placeholder: '方案名称' })
+            .fontSize(14)
+            .fontColor(this.primaryTextColor())
+            .height(36)
+            .padding({ left: 10, right: 10 })
+            .backgroundColor(this.inputColor())
+            .borderRadius(8)
+            .onChange((value: string) => {
+              this.customThemeNameDraft = value.substring(0, 20);
+            })
+            .onSubmit(() => {
+              this.renameCurrentCustomTheme(this.customThemeNameDraft);
+            })
+            .onBlur(() => {
+              this.renameCurrentCustomTheme(this.customThemeNameDraft);
+            })
+          Row() {
+            Text('背景设置')
+              .fontSize(14)
+              .fontColor(this.primaryTextColor())
+            Blank()
+            Select([{ value: '背景色' }, { value: '背景图片' }])
+              .selected(this.currentCustomThemeBackgroundTypeIndex())
+              .value(this.currentCustomThemeBackgroundTypeIndex() === 1 ? '背景图片' : '背景色')
+              .font({ size: 14 })
+              .fontColor(this.primaryTextColor())
+              .backgroundColor(this.inputColor())
+              .onSelect((index: number) => {
+                this.setCurrentCustomThemeBackgroundType(index);
+              })
+          }
+          .width('100%')
+          if (this.currentCustomThemeBackgroundTypeIndex() === 0) {
+            ColorCodePicker({
+              value: this.currentCustomThemeBackgroundColor(),
+              placeholder: this.currentCustomThemeBackgroundColor(),
+              appDarkMode: this.appDarkMode,
+              accentColor: this.accentColor(),
+              optionTitle: '背景颜色',
+              onColorChange: (value: string) => {
+                this.setCurrentThemeBackgroundColor(value);
+              }
+            })
+          } else {
+            Row({ space: 8 }) {
+              Button(this.currentCustomThemeScheme().backgroundImageUri ? '更换背景图片' : '选择背景图片')
+                .height(36)
+                .fontSize(13)
+                .backgroundColor(this.buttonColor())
+                .fontColor('#FFFFFF')
+                .onClick(() => {
+                  this.chooseCurrentCustomThemeImage();
+                })
+              if (this.currentCustomThemeScheme().backgroundImageUri) {
+                Button('移除图片')
+                  .height(36)
+                  .fontSize(13)
+                  .backgroundColor(this.inputColor())
+                  .fontColor(this.primaryTextColor())
+                  .onClick(() => {
+                    this.clearCurrentCustomThemeImage();
+                  })
+                Select([{ value: '裁剪填充' }, { value: '完整显示' }, { value: '拉伸铺满' }])
+                  .selected(this.customThemeFitSelectedIndex())
+                  .value(['裁剪填充', '完整显示', '拉伸铺满'][this.customThemeFitSelectedIndex()])
+                  .font({ size: 13 })
+                  .fontColor(this.primaryTextColor())
+                  .backgroundColor(this.inputColor())
+                  .layoutWeight(1)
+                  .onSelect((index: number) => {
+                    this.setCurrentCustomThemeImageFit(index);
+                  })
+              }
             }
-          })
+            .width('100%')
+          }
           ColorCodePicker({
             value: this.currentCustomThemeTextColor(),
             placeholder: this.currentCustomThemeTextColor(),
@@ -1554,6 +1862,7 @@ struct SettingsPage {
         .borderRadius(8)
         .constraintSize({ minWidth: 130, maxWidth: 170 })
         .onSelect((index: number) => {
+          this.showTypographyValueInput = false;
           this.typographySettingIndex = Math.max(0, Math.min(index, this.typographySettingOptions().length - 1));
         })
       Blank()
@@ -1566,11 +1875,38 @@ struct SettingsPage {
         .onClick(() => {
           this.adjustCurrentTypographySetting(-1);
         })
-      Text(`${this.currentTypographySettingValue()}`)
-        .fontSize(15)
-        .fontColor(this.primaryTextColor())
-        .width(42)
-        .textAlign(TextAlign.Center)
+      if (this.showTypographyValueInput) {
+        TextInput({ text: this.typographyValueDraft, placeholder: `${this.currentTypographySettingValue()}` })
+          .type(InputType.Number)
+          .defaultFocus(true)
+          .fontSize(15)
+          .fontColor(this.primaryTextColor())
+          .width(52)
+          .height(36)
+          .padding(0)
+          .textAlign(TextAlign.Center)
+          .backgroundColor(this.inputColor())
+          .borderRadius(6)
+          .onChange((value: string) => {
+            this.typographyValueDraft = value.replace(/[^0-9]/g, '').substring(0, 3);
+          })
+          .onSubmit(() => {
+            this.applyTypographyValueInput();
+          })
+          .onBlur(() => {
+            this.applyTypographyValueInput();
+          })
+      } else {
+        Text(`${this.currentTypographySettingValue()}`)
+          .fontSize(15)
+          .fontColor(this.primaryTextColor())
+          .width(52)
+          .height(36)
+          .textAlign(TextAlign.Center)
+          .onClick(() => {
+            this.openTypographyValueInput();
+          })
+      }
       Button('+')
         .width(44)
         .height(36)

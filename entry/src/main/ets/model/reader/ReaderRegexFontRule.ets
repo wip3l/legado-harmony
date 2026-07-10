@@ -8,6 +8,12 @@ export class ReaderRegexFontRule {
   emphasisMode: string = 'inherit';
   bubbleStyleId: string = 'inherit';
   emphasisColor: string = '';
+  customTextColorEnabled: boolean = false;
+  customTextColor: string = '';
+  customHighlightEnabled: boolean = false;
+  customHighlightColor: string = '';
+  customBubbleEnabled: boolean = false;
+  customBubbleColor: string = '';
   // Kept in schema v2 so older installations can still read a compatible rule.
   highlightColorEnabled: boolean = false;
   shadowColor: string = '';
@@ -15,7 +21,7 @@ export class ReaderRegexFontRule {
 }
 
 export class ReaderRegexFontRulesData {
-  schemaVersion: number = 2;
+  schemaVersion: number = 3;
   rules: ReaderRegexFontRule[] = [];
 }
 
@@ -28,7 +34,7 @@ export class ReaderRegexLegacySettings {
 }
 
 export class ReaderRegexFontCodec {
-  static readonly SCHEMA_VERSION: number = 2;
+  static readonly SCHEMA_VERSION: number = 3;
 
   static decode(raw: string, legacy: ReaderRegexLegacySettings | null = null): ReaderRegexFontRule[] {
     const text = (raw || '').trim();
@@ -53,9 +59,11 @@ export class ReaderRegexFontCodec {
       rule.fontMode = ReaderRegexFontCodec.normalizeFontMode(legacy.fontMode);
       rule.fontFamily = legacy.fontFamily || '';
       rule.fontSize = ReaderRegexFontCodec.normalizeFontSize(legacy.fontSize);
-      rule.emphasisMode = (legacy.shadowColor || '').trim() ? 'highlight' : 'none';
+      rule.emphasisMode = (legacy.shadowColor || '').trim() ? 'custom' : 'none';
       rule.emphasisColor = (legacy.shadowColor || '').trim();
-      rule.highlightColorEnabled = rule.emphasisMode === 'highlight';
+      rule.customHighlightEnabled = rule.emphasisMode === 'custom';
+      rule.customHighlightColor = rule.emphasisColor;
+      rule.highlightColorEnabled = rule.customHighlightEnabled;
       rule.shadowColor = rule.emphasisColor;
       return [rule];
     }
@@ -85,12 +93,25 @@ export class ReaderRegexFontCodec {
       rule.fontMode = ReaderRegexFontCodec.normalizeFontMode(item.fontMode);
       rule.fontFamily = item.fontFamily || '';
       rule.fontSize = ReaderRegexFontCodec.normalizeFontSize(item.fontSize);
+      const legacyEmphasisMode = (item.emphasisMode || '').trim();
       rule.emphasisMode = ReaderRegexFontCodec.normalizeEmphasisMode(
         item.emphasisMode,
         item.highlightColorEnabled === true
       );
       rule.bubbleStyleId = ReaderRegexFontCodec.normalizeBubbleStyleId(item.bubbleStyleId);
       rule.emphasisColor = ((item.emphasisColor || item.shadowColor) || '').trim();
+      rule.customTextColorEnabled = item.customTextColorEnabled === true || legacyEmphasisMode === 'text';
+      rule.customTextColor = (item.customTextColor ||
+        (legacyEmphasisMode === 'text' ? rule.emphasisColor : '')).trim();
+      rule.customHighlightEnabled = item.customHighlightEnabled === true || legacyEmphasisMode === 'highlight';
+      rule.customHighlightColor = (item.customHighlightColor ||
+        (legacyEmphasisMode === 'highlight' ? rule.emphasisColor : '')).trim();
+      rule.customBubbleEnabled = item.customBubbleEnabled === true || legacyEmphasisMode === 'bubble';
+      rule.customBubbleColor = (item.customBubbleColor ||
+        (legacyEmphasisMode === 'bubble' ? rule.emphasisColor : '')).trim();
+      if (legacyEmphasisMode === 'text' || legacyEmphasisMode === 'highlight' || legacyEmphasisMode === 'bubble') {
+        rule.emphasisMode = 'custom';
+      }
       rule.highlightColorEnabled = item.highlightColorEnabled === true;
       rule.shadowColor = (item.shadowColor || rule.emphasisColor).trim();
       rule.expanded = item.expanded !== false;
@@ -107,18 +128,21 @@ export class ReaderRegexFontCodec {
 
   static normalizeEmphasisMode(mode: string, legacyEnabled: boolean = false): string {
     const value = (mode || '').trim();
-    if (value === 'inherit' || value === 'none' || value === 'text' || value === 'highlight' || value === 'bubble') {
+    if (value === 'inherit' || value === 'none' || value === 'custom') {
       return value;
     }
-    if (value === 'accent') {
-      return 'highlight';
+    if (value === 'text' || value === 'highlight' || value === 'bubble' || value === 'accent') {
+      return 'custom';
     }
     return legacyEnabled ? 'highlight' : 'none';
   }
 
   static normalizeResolvedEmphasisMode(mode: string): string {
-    const value = ReaderRegexFontCodec.normalizeEmphasisMode(mode, false);
-    return value === 'inherit' ? 'none' : value;
+    const value = (mode || '').trim();
+    if (value === 'text' || value === 'highlight' || value === 'bubble' || value === 'custom') {
+      return value;
+    }
+    return 'none';
   }
 
   static normalizeBubbleStyleId(styleId: string): string {
@@ -147,15 +171,20 @@ export class ReaderRegexFontCodec {
   }
 
   static normalizeFontSize(value: number): number {
-    return Math.max(14, Math.min(Math.round(value || 20), 30));
+    return Math.max(14, Math.min(Math.round(value || 20), 50));
   }
 
   static syncLegacyFields(rule: ReaderRegexFontRule): void {
     const mode = ReaderRegexFontCodec.normalizeEmphasisMode(rule.emphasisMode, rule.highlightColorEnabled);
     rule.emphasisMode = mode;
     rule.bubbleStyleId = ReaderRegexFontCodec.normalizeBubbleStyleId(rule.bubbleStyleId);
-    rule.emphasisColor = (rule.emphasisColor || rule.shadowColor || '').trim();
-    rule.highlightColorEnabled = mode === 'highlight' || mode === 'bubble';
+    rule.customTextColor = (rule.customTextColor || '').trim();
+    rule.customHighlightColor = (rule.customHighlightColor || '').trim();
+    rule.customBubbleColor = (rule.customBubbleColor || '').trim();
+    rule.emphasisColor = (rule.customHighlightColor || rule.customBubbleColor || rule.customTextColor ||
+      rule.emphasisColor || rule.shadowColor || '').trim();
+    rule.highlightColorEnabled = mode === 'custom' &&
+      (rule.customHighlightEnabled || rule.customBubbleEnabled);
     rule.shadowColor = rule.emphasisColor;
   }
 
@@ -213,6 +242,41 @@ export class ReaderRegexBubbleStyleResolver {
       context.normalTextColor,
       context.darkMode ? '#F2F3F5' : '#1F1F1F'
     );
+
+    if (result.mode === 'custom' && rule) {
+      const bubbleColor = ReaderRegexBubbleStyleResolver.normalizeColor(
+        rule.customBubbleColor || context.inheritedColor || context.accentColor,
+        context.accentColor
+      );
+      const highlightColor = ReaderRegexBubbleStyleResolver.normalizeColor(
+        rule.customHighlightColor || context.inheritedColor || context.accentColor,
+        context.accentColor
+      );
+      const textColor = ReaderRegexBubbleStyleResolver.normalizeColor(
+        rule.customTextColor || context.inheritedTextColor || context.accentColor,
+        context.accentColor
+      );
+      if (rule.customBubbleEnabled) {
+        result.emphasisColor = bubbleColor;
+        result.backgroundEnabled = true;
+        ReaderRegexBubbleStyleResolver.applyBubblePreset(result, context);
+      }
+      if (rule.customHighlightEnabled) {
+        result.emphasisColor = highlightColor;
+        result.backgroundEnabled = true;
+        result.backgroundColor = highlightColor;
+        result.textColor = ReaderRegexBubbleStyleResolver.contrastTextColor(highlightColor);
+        ReaderRegexBubbleStyleResolver.setUniformRadius(result, 4);
+        if (rule.customBubbleEnabled) {
+          result.textShadowRadius = Math.max(5, result.textShadowRadius);
+          result.textShadowColor = ReaderRegexBubbleStyleResolver.withAlpha(bubbleColor, 180);
+        }
+      }
+      if (rule.customTextColorEnabled) {
+        result.textColor = textColor;
+      }
+      return result;
+    }
 
     if (result.mode === 'text') {
       result.textColor = result.emphasisColor;

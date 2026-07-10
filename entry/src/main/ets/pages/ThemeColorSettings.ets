@@ -1,6 +1,7 @@
 import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { AppThemeSettings, AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
+import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ColorCodePicker } from '../components/ColorCodePicker';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ThemeIds } from '../theme/ThemeModels';
@@ -116,6 +117,7 @@ struct ThemeColorSettingsPage {
   async onSettingChanged(): Promise<void> {
     try {
       const settings: AppThemeSettings = await AppThemeSettingsStore.load(getContext(this));
+      const previousThemeId = settings.themeId;
       settings.themeId = ThemeIds.CUSTOM;
       settings.customBaseThemeId = this.customBaseThemeId;
       settings.lightAccentColor = this.lightAccentColor;
@@ -128,6 +130,9 @@ struct ThemeColorSettingsPage {
       settings.customDarkButtonColor = this.darkButtonColor;
       AppThemeSettingsStore.applyToStorage(settings);
       await AppThemeSettingsStore.save(getContext(this), settings);
+      if (previousThemeId !== settings.themeId) {
+        await ReaderSettingsStore.switchThemeProfile(getContext(this), previousThemeId, settings.themeId);
+      }
     } catch (e) {
       console.warn('保存主题色设置失败:', e);
     }

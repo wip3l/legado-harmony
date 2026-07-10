@@ -17,6 +17,8 @@ import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { SystemTtsReader, TtsChunk, TtsVoiceOption } from '../utils/SystemTtsReader';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderThemeHelper, ReaderThemeItem } from '../utils/ReaderThemeHelper';
+import { ReaderCustomThemeData, ReaderCustomThemeHelper, ReaderCustomThemeScheme } from '../utils/ReaderCustomThemeHelper';
+import { ReaderBackgroundImageStore } from '../utils/ReaderBackgroundImageStore';
 import { ColorCodePicker } from '../components/ColorCodePicker';
 import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
@@ -82,6 +84,7 @@ class ReaderCustomFontData {
 
 interface PageTurnPreview {
   text: string;
+  secondaryText?: string;
   pageIndex: number;
   chapterIndex: number;
 }
@@ -101,6 +104,8 @@ struct ReadBookPage {
   @State showTapZoneSettings: boolean = false;
   @State settingsPanelTab: number = 0;
   @State quickTypographySettingIndex: number = 0;
+  @State showQuickTypographyValueInput: boolean = false;
+  @State quickTypographyValueDraft: string = '';
   @State loadStatus: string = '';
   @State verificationUrl: string = '';
   @State verificationTitle: string = '网页验证';
@@ -120,6 +125,7 @@ struct ReadBookPage {
   @State chapterJumpRenderGeneration: number = 0;
   @State pageViewWidth: number = 0;
   @State pageViewHeight: number = 0;
+  @State readerInitialPageReady: boolean = true;
   @State statusBarSafeHeight: number = 0;
   @State isTtsSpeaking: boolean = false;
   @State ttsMediaControlsExpanded: boolean = false;
@@ -169,6 +175,7 @@ struct ReadBookPage {
   @State pageSlideDirection: number = 0;
   @State pageTurnAnimating: boolean = false;
   @State pageTurnIncomingText: string = '';
+  @State pageTurnIncomingSecondaryText: string = '';
   @State pageTurnIncomingX: number = 0;
   @State pageTurnIncomingOpacity: number = 1;
   @State pageTurnIncomingPageIndex: number = 0;
@@ -204,8 +211,11 @@ struct ReadBookPage {
   @StorageLink('readerLightCustomThemeTextColor') @Watch('onReaderThemeChanged') readerLightCustomThemeTextColor: string = ReaderThemeHelper.LIGHT_CUSTOM_TEXT_COLOR;
   @StorageLink('readerDarkCustomThemeBackgroundColor') @Watch('onReaderThemeChanged') readerDarkCustomThemeBackgroundColor: string = ReaderThemeHelper.DARK_CUSTOM_BACKGROUND_COLOR;
   @StorageLink('readerDarkCustomThemeTextColor') @Watch('onReaderThemeChanged') readerDarkCustomThemeTextColor: string = ReaderThemeHelper.DARK_CUSTOM_TEXT_COLOR;
+  @StorageLink('readerCustomThemesRaw') @Watch('onReaderThemeChanged') readerCustomThemesRaw: string = '';
+  @State customThemeNameDraft: string = '';
   @StorageLink('readerPageTurnMode') readerPageTurnMode: number = 1;
   @StorageLink('readerPageTurnAnimationType') @Watch('onReaderPageTurnAnimationChanged') readerPageTurnAnimationType: number = ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE;
+  @StorageLink('readerLandscapeDoublePage') @Watch('onReaderLandscapeDoublePageChanged') readerLandscapeDoublePage: boolean = false;
   @StorageLink('readerTapZoneActions') readerTapZoneActions: string = '3,3,3,3,1,2,2,2,2';
   @StorageLink('readerVolumeTurnPage') @Watch('onReaderVolumeTurnPageChanged') readerVolumeTurnPage: boolean = false;
   @StorageLink('readerKeepScreenOn') readerKeepScreenOn: boolean = true;
@@ -274,6 +284,8 @@ struct ReadBookPage {
   private volumeDownCallback?: (event: KeyEvent) => void;
   private lastLoggedReaderFontFamily: string = '';
   private readerFontChangeSerial: number = 0;
+  private readingProgressSaveQueue: Promise<void> = Promise.resolve();
+  private readerExitProgressSaved: boolean = false;
 
   async aboutToAppear() {
     this.enterReaderImmersive();
@@ -288,13 +300,54 @@ struct ReadBookPage {
   }
 
   onPageShow(): void {
-    this.loadReaderSettings().catch((error: Error) => {
+    this.reloadReaderSettingsAfterPageShow().catch((error: Error) => {
       console.warn('恢复阅读设置失败:', error);
     });
     this.reregisterReaderFontAfterShow(0);
     this.reregisterReaderFontAfterShow(120);
     this.syncTtsFocusAfterResumeLater(0);
     this.syncTtsFocusAfterResumeLater(180);
+  }
+
+  onBackPress(): boolean {
+    if (this.showChangeSourceDialog) {
+      this.showChangeSourceDialog = false;
+      return true;
+    }
+    if (this.showTapZoneSettings) {
+      this.showTapZoneSettings = false;
+      return true;
+    }
+    if (this.showToc || this.showSettings || this.showMenu) {
+      this.showToc = false;
+      this.hideReaderPanels();
+      return true;
+    }
+    this.exitReaderPage();
+    return true;
+  }
+
+  async reloadReaderSettingsAfterPageShow(): Promise<void> {
+    await ReaderSettingsStore.waitForReaderFontStyleSaves();
+    const regexEnabled = AppStorage.get<boolean>(ReaderSettingsStore.KEY_REGEX_FONT_ENABLED);
+    const regexPattern = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_PATTERN);
+    const regexMode = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_MODE);
+    const regexFamily = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_FAMILY);
+    const regexSize = AppStorage.get<number>(ReaderSettingsStore.KEY_REGEX_FONT_SIZE);
+    const regexShadow = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_SHADOW_COLOR);
+    const regexRulesRaw = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_RULES_RAW);
+    await this.loadReaderSettings();
+    if (regexEnabled !== undefined) this.readerRegexFontEnabled = regexEnabled;
+    if (regexPattern !== undefined) this.readerRegexFontPattern = regexPattern;
+    if (regexMode !== undefined) this.readerRegexFontMode = regexMode;
+    if (regexFamily !== undefined) this.readerRegexFontFamily = regexFamily;
+    if (regexSize !== undefined) this.readerRegexFontSize = regexSize;
+    if (regexShadow !== undefined) this.readerRegexShadowColor = regexShadow;
+    if (regexRulesRaw !== undefined) this.readerRegexFontRulesRaw = regexRulesRaw;
+    this.cachedRegexRulesKey = '';
+    this.cachedRegexRules = [];
+    this.refreshReaderTextRender();
+    this.paginateContent(this.content);
   }
 
   reregisterReaderFontAfterShow(delayMs: number): void {
@@ -310,9 +363,11 @@ struct ReadBookPage {
     this.flushPendingTtsSpeedSettings();
     this.stopTtsReading();
     this.ttsReader.shutdown();
-    this.saveReadingProgress().catch((error: Error) => {
-      console.error('离开阅读页保存进度失败:', error);
-    });
+    if (!this.readerExitProgressSaved) {
+      this.saveReadingProgress().catch((error: Error) => {
+        console.error('离开阅读页保存进度失败:', error);
+      });
+    }
     this.unregisterVolumeKeyTurn();
     this.exitReaderImmersive();
   }
@@ -341,6 +396,8 @@ struct ReadBookPage {
       const useLightIcons = this.isReaderThemeDark();
       const systemTextColor = useLightIcons ? '#D8D8D8' : '#2F261D';
       mainWindow.setWindowBackgroundColor(bg);
+      mainWindow.setWindowLayoutFullScreen(true);
+      mainWindow.setWindowSystemBarEnable(this.readerExtendToStatusBar ? ['navigation'] : ['navigation', 'status']);
       mainWindow.setWindowSystemBarProperties({
         statusBarColor: '#00000000',
         isStatusBarLightIcon: useLightIcons,
@@ -349,15 +406,7 @@ struct ReadBookPage {
         isNavigationBarLightIcon: useLightIcons,
         navigationBarContentColor: systemTextColor
       });
-      if (this.readerExtendToStatusBar) {
-        mainWindow.setWindowLayoutFullScreen(true);
-        mainWindow.setWindowSystemBarEnable(['navigation']);
-        this.updateStatusBarSafeHeight(mainWindow);
-      } else {
-        mainWindow.setWindowLayoutFullScreen(true);
-        mainWindow.setWindowSystemBarEnable(['navigation', 'status']);
-        this.updateStatusBarSafeHeight(mainWindow);
-      }
+      this.updateStatusBarSafeHeight(mainWindow);
     }).catch((err: Error) => {
       console.error('进入阅读沉浸模式失败:', err);
     });
@@ -479,6 +528,7 @@ struct ReadBookPage {
     this.chapterJumpRenderGeneration = 0;
     this.pageViewWidth = 0;
     this.pageViewHeight = 0;
+    this.readerInitialPageReady = false;
     this.pendingRestorePageIndex = -1;
     this.pageTransitionX = 0;
     this.pageTransitionOpacity = 1;
@@ -487,6 +537,7 @@ struct ReadBookPage {
     this.pageSlideDirection = 0;
     this.pageTurnAnimating = false;
     this.pageTurnIncomingText = '';
+    this.pageTurnIncomingSecondaryText = '';
     this.pageTurnIncomingX = 0;
     this.pageTurnIncomingOpacity = 1;
     this.pageTurnIncomingPageIndex = 0;
@@ -849,11 +900,12 @@ struct ReadBookPage {
   }
 
   shouldShowReaderLoadingOverlay(): boolean {
-    return this.shouldRenderPrimaryReaderContent() && (this.isLoading || this.isPagedReaderAwaitingPagination());
+    return this.shouldRenderPrimaryReaderContent() &&
+      (this.isLoading || this.isPagedReaderAwaitingPagination() || !this.readerInitialPageReady);
   }
 
   shouldBlockReaderInteraction(): boolean {
-    return this.isLoading || this.isPagedReaderAwaitingPagination();
+    return this.isLoading || this.isPagedReaderAwaitingPagination() || !this.readerInitialPageReady;
   }
 
   getReaderLoadingText(): string {
@@ -877,11 +929,19 @@ struct ReadBookPage {
     .width('100%')
     .height('100%')
     .justifyContent(FlexAlign.Center)
-    .backgroundColor(this.getBackgroundColor())
+    .backgroundColor(this.readerContentLayerColor())
   }
 
   build() {
     Stack() {
+      if (this.hasBackgroundImage()) {
+        Image(this.getBackgroundImage())
+          .width('100%')
+          .height('100%')
+          .objectFit(this.getBackgroundImageFit())
+          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+          .hitTestBehavior(HitTestMode.None)
+      }
       Column() {
         if (!this.shouldRenderPrimaryReaderContent()) {
           this.readerLoadingPanel()
@@ -918,6 +978,7 @@ struct ReadBookPage {
           .width('100%')
           .height('100%')
           .clip(true)
+          .opacity(this.readerInitialPageReady ? 1 : 0)
           .onAreaChange((oldValue: Area, newValue: Area) => {
             this.updatePagedReaderArea(newValue);
           })
@@ -926,7 +987,7 @@ struct ReadBookPage {
       .width('100%')
       .height('100%')
       .padding({ top: this.getReaderTopSafePadding() })
-      .backgroundColor(this.getBackgroundColor())
+      .backgroundColor(this.readerContentLayerColor())
       .onClick(() => {
         if (this.showToc || this.showSettings) {
           return;
@@ -1228,7 +1289,7 @@ struct ReadBookPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.getBackgroundColor())
+    .backgroundColor(this.readerContentLayerColor())
     .expandSafeArea([SafeAreaType.SYSTEM], this.getReaderSafeAreaEdges())
   }
 
@@ -1270,7 +1331,10 @@ struct ReadBookPage {
     if (this.contentPages.length === 0) {
       return `${this.currentChapterIndex + 1}/${this.chapters.length}`;
     }
-    return `${this.currentChapterIndex + 1}/${this.chapters.length} · ${this.currentPageIndex + 1}/${this.contentPages.length}`;
+    const pageText = this.isLandscapeDoublePageActive() ?
+      `${this.currentPageIndex + 1}-${Math.min(this.currentPageIndex + 2, this.contentPages.length)}` :
+      `${this.currentPageIndex + 1}`;
+    return `${this.currentChapterIndex + 1}/${this.chapters.length} · ${pageText}/${this.contentPages.length}`;
   }
 
   getChapterInfoText(): string {
@@ -1287,6 +1351,10 @@ struct ReadBookPage {
       return '1/1';
     }
     const index = Math.max(0, Math.min(this.currentPageIndex, this.contentPages.length - 1));
+    if (this.isLandscapeDoublePageActive()) {
+      const end = Math.min(index + 2, this.contentPages.length);
+      return `${index + 1}-${end}/${this.contentPages.length}`;
+    }
     return `${index + 1}/${this.contentPages.length}`;
   }
 
@@ -1303,6 +1371,27 @@ struct ReadBookPage {
 
   getCurrentPageText(): string {
     return this.getPageText(this.currentPageIndex);
+  }
+
+  isLandscapeDoublePageActive(): boolean {
+    return this.readerLandscapeDoublePage &&
+      (this.pageViewWidth > this.pageViewHeight || this.pageViewWidth >= 600);
+  }
+
+  getReaderPageTurnStep(): number {
+    return this.isLandscapeDoublePageActive() ? 2 : 1;
+  }
+
+  normalizeReaderSpreadPageIndex(pageIndex: number): number {
+    const safeIndex = Math.max(0, Math.round(pageIndex));
+    return this.isLandscapeDoublePageActive() ? Math.floor(safeIndex / 2) * 2 : safeIndex;
+  }
+
+  getSecondaryPageText(pageIndex: number = this.currentPageIndex): string {
+    if (!this.isLandscapeDoublePageActive() || pageIndex + 1 >= this.contentPages.length) {
+      return '';
+    }
+    return this.getPageText(pageIndex + 1);
   }
 
   currentReaderSurfaceIndex(): number {
@@ -1368,9 +1457,15 @@ struct ReadBookPage {
     if (Math.abs(this.pageViewWidth - width) < 0.5 && Math.abs(this.pageViewHeight - height) < 0.5) {
       return;
     }
+    const shouldRestoreSavedPage = this.pendingRestorePageIndex >= 0;
+    const readingOffset = this.getCurrentPageStartOffset();
     this.pageViewWidth = width;
     this.pageViewHeight = height;
     this.paginateContent(this.content);
+    if (!shouldRestoreSavedPage) {
+      this.currentPageIndex = this.normalizeReaderSpreadPageIndex(this.findPageIndexByOffset(readingOffset));
+    }
+    this.syncCurrentPageText();
     this.preloadNextChapterPaginationLater();
   }
 
@@ -1425,7 +1520,7 @@ struct ReadBookPage {
   }
 
   getBackgroundImage(): ResourceStr {
-    return ThemeAssetRegistry.readerBackground(this.getBackgroundAssetId());
+    return this.currentReaderTheme().backgroundImageUri || ThemeAssetRegistry.readerBackground(this.getBackgroundAssetId());
   }
 
   getBackgroundImageSize(): ImageSize {
@@ -1439,8 +1534,19 @@ struct ReadBookPage {
     return ImageSize.Cover;
   }
 
+  getBackgroundImageFit(): ImageFit {
+    const fit = this.currentReaderTheme().backgroundImageFit;
+    if (fit === 'contain') {
+      return ImageFit.Contain;
+    }
+    if (fit === 'fill') {
+      return ImageFit.Fill;
+    }
+    return ImageFit.Cover;
+  }
+
   hasBackgroundImage(): boolean {
-    return !!this.getBackgroundAssetId();
+    return !!this.currentReaderTheme().backgroundImageUri || !!this.getBackgroundAssetId();
   }
 
   readerContentLayerColor(): string {
@@ -1456,10 +1562,13 @@ struct ReadBookPage {
   }
 
   currentReaderThemes(): ReaderThemeItem[] {
+    const custom = this.currentCustomThemeScheme();
     return ReaderThemeHelper.themes(
       this.appDarkMode,
-      this.currentCustomThemeBackgroundColor(),
-      this.currentCustomThemeTextColor()
+      custom.backgroundColor,
+      custom.textColor,
+      this.currentCustomThemeBackgroundImageUri(),
+      custom.backgroundImageFit
     );
   }
 
@@ -1468,16 +1577,66 @@ struct ReadBookPage {
       this.appDarkMode,
       this.currentReaderThemeIndex(),
       this.currentCustomThemeBackgroundColor(),
-      this.currentCustomThemeTextColor()
+      this.currentCustomThemeTextColor(),
+      this.currentCustomThemeBackgroundImageUri(),
+      this.currentCustomThemeScheme().backgroundImageFit
     );
   }
 
   currentCustomThemeBackgroundColor(): string {
-    return this.appDarkMode ? this.readerDarkCustomThemeBackgroundColor : this.readerLightCustomThemeBackgroundColor;
+    return this.currentCustomThemeScheme().backgroundColor;
   }
 
   currentCustomThemeTextColor(): string {
-    return this.appDarkMode ? this.readerDarkCustomThemeTextColor : this.readerLightCustomThemeTextColor;
+    return this.currentCustomThemeScheme().textColor;
+  }
+
+  currentCustomThemeBackgroundImageUri(): string {
+    const current = this.currentCustomThemeScheme();
+    return current.backgroundType === 'image' ? current.backgroundImageUri : '';
+  }
+
+  currentCustomThemeBackgroundTypeIndex(): number {
+    return this.currentCustomThemeScheme().backgroundType === 'image' ? 1 : 0;
+  }
+
+  customThemeData(): ReaderCustomThemeData {
+    return ReaderCustomThemeHelper.parse(
+      this.readerCustomThemesRaw,
+      this.readerLightCustomThemeBackgroundColor,
+      this.readerLightCustomThemeTextColor,
+      this.readerDarkCustomThemeBackgroundColor,
+      this.readerDarkCustomThemeTextColor
+    );
+  }
+
+  currentCustomThemeScheme(): ReaderCustomThemeScheme {
+    return ReaderCustomThemeHelper.selected(this.customThemeData(), this.appDarkMode);
+  }
+
+  currentCustomThemeSchemes(): ReaderCustomThemeScheme[] {
+    return ReaderCustomThemeHelper.schemesForMode(this.customThemeData(), this.appDarkMode);
+  }
+
+  currentCustomThemeSelectedIndex(): number {
+    const schemes = this.currentCustomThemeSchemes();
+    const selectedId = this.currentCustomThemeScheme().id;
+    const index = schemes.findIndex((item: ReaderCustomThemeScheme) => item.id === selectedId);
+    return Math.max(0, index);
+  }
+
+  customThemeOptions(): SelectOption[] {
+    const options: SelectOption[] = [];
+    for (const item of this.currentCustomThemeSchemes()) {
+      const option: SelectOption = { value: item.name };
+      options.push(option);
+    }
+    return options;
+  }
+
+  customThemeFitSelectedIndex(): number {
+    const fit = this.currentCustomThemeScheme().backgroundImageFit;
+    return fit === 'contain' ? 1 : (fit === 'fill' ? 2 : 0);
   }
 
   normalizeColor(color: string, fallback: string): string {
@@ -1755,8 +1914,10 @@ struct ReadBookPage {
     this.readerLightCustomThemeTextColor = settings.lightCustomThemeTextColor;
     this.readerDarkCustomThemeBackgroundColor = settings.darkCustomThemeBackgroundColor;
     this.readerDarkCustomThemeTextColor = settings.darkCustomThemeTextColor;
+    this.readerCustomThemesRaw = settings.customThemesRaw || '';
     this.readerPageTurnMode = settings.pageTurnMode;
     this.readerPageTurnAnimationType = settings.pageTurnAnimationType;
+    this.readerLandscapeDoublePage = settings.landscapeDoublePage;
     this.readerTapZoneActions = settings.tapZoneActions;
     this.readerVolumeTurnPage = settings.volumeTurnPage;
     this.readerKeepScreenOn = settings.keepScreenOn;
@@ -2291,7 +2452,8 @@ struct ReadBookPage {
   }
 
   getReaderSafeAreaEdges(): SafeAreaEdge[] {
-    return this.readerExtendToStatusBar ? [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM] : [SafeAreaEdge.BOTTOM];
+    return this.readerExtendToStatusBar || this.hasBackgroundImage() ?
+      [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM] : [SafeAreaEdge.BOTTOM];
   }
 
   getReaderTopSafePadding(): number {
@@ -2482,7 +2644,9 @@ struct ReadBookPage {
       return;
     }
     const maxPage = Math.max(0, this.contentPages.length - 1);
-    this.currentPageIndex = Math.max(0, Math.min(this.pendingRestorePageIndex, maxPage));
+    this.currentPageIndex = this.normalizeReaderSpreadPageIndex(
+      Math.max(0, Math.min(this.pendingRestorePageIndex, maxPage))
+    );
     this.pendingRestorePageIndex = -1;
   }
 
@@ -2851,7 +3015,7 @@ struct ReadBookPage {
     target.putVariable('lastReadTime', `${Date.now()}`);
   }
 
-  async saveReadingProgress() {
+  async saveReadingProgress(): Promise<void> {
     if (!this.book || this.chapters.length === 0) {
       return;
     }
@@ -2872,13 +3036,22 @@ struct ReadBookPage {
     engine.curIdx = chapterIndex;
     engine.curPos = pageIndex;
     engine.book = this.book;
+    const bookUrl = this.book.bookUrl;
+    const chapterTitle = this.book.durChapterTitle;
+    const variable = this.book.variable;
     const shouldRefreshRecentCard = chapterIndex !== this.lastRecentReadCardChapterIndex;
     this.lastRecentReadCardChapterIndex = chapterIndex;
-    try {
+    const previous = this.readingProgressSaveQueue.catch(() => {
+    });
+    const next = previous.then(async () => {
       const db = AppDatabase.getInstance();
-      await db.updateBook(this.book);
+      await db.updateBookReadingProgress(bookUrl, chapterTitle, chapterIndex, pageIndex, now, variable);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       this.reloadRecentReadCardLater(shouldRefreshRecentCard);
+    });
+    this.readingProgressSaveQueue = next;
+    try {
+      await next;
     } catch (e) {
       console.error('保存阅读进度失败:', e);
     }
@@ -2949,6 +3122,18 @@ struct ReadBookPage {
     .alignItems(VerticalAlign.Top)
     .backgroundColor(Color.Transparent)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  onReaderLandscapeDoublePageChanged(): void {
+    const readingOffset = this.getCurrentPageStartOffset();
+    this.finishPageTurnAnimation();
+    this.readerPaginationCache.clear();
+    this.paginateContent(this.content);
+    this.currentPageIndex = this.normalizeReaderSpreadPageIndex(this.findPageIndexByOffset(readingOffset));
+    this.syncCurrentPageText();
+    this.refreshReaderTextRender();
+    this.saveReadingProgress();
+    this.saveReadConfig();
   }
 
   @Builder
@@ -3662,6 +3847,7 @@ struct ReadBookPage {
         .borderRadius(8)
         .constraintSize({ minWidth: 126, maxWidth: 160 })
         .onSelect((index: number) => {
+          this.showQuickTypographyValueInput = false;
           this.quickTypographySettingIndex = Math.max(0,
             Math.min(index, this.quickTypographySettingOptions().length - 1));
         })
@@ -3675,11 +3861,39 @@ struct ReadBookPage {
         .onClick(() => {
           this.adjustQuickTypographySetting(-1);
         })
-      Text(`${this.currentQuickTypographySettingValue()}`)
-        .fontSize(15)
-        .fontColor(this.getTextColor())
-        .width(42)
-        .textAlign(TextAlign.Center)
+      if (this.showQuickTypographyValueInput) {
+        TextInput({ text: this.quickTypographyValueDraft,
+          placeholder: `${this.currentQuickTypographySettingValue()}` })
+          .type(InputType.Number)
+          .defaultFocus(true)
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+          .width(52)
+          .height(36)
+          .padding(0)
+          .textAlign(TextAlign.Center)
+          .backgroundColor(this.isReaderThemeDark() ? '#24272D' : '#EEF0F3')
+          .borderRadius(6)
+          .onChange((value: string) => {
+            this.quickTypographyValueDraft = value.replace(/[^0-9]/g, '').substring(0, 3);
+          })
+          .onSubmit(() => {
+            this.applyQuickTypographyValueInput();
+          })
+          .onBlur(() => {
+            this.applyQuickTypographyValueInput();
+          })
+      } else {
+        Text(`${this.currentQuickTypographySettingValue()}`)
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+          .width(52)
+          .height(36)
+          .textAlign(TextAlign.Center)
+          .onClick(() => {
+            this.openQuickTypographyValueInput();
+          })
+      }
       Button('+')
         .width(44)
         .height(36)
@@ -3714,6 +3928,11 @@ struct ReadBookPage {
           this.setReaderPageTurnAnimationType(index);
         })
 
+      this.readerSwitchSettingItem('使用双翻页', '横屏或折叠屏展开等宽屏状态下同时显示左右两页',
+        this.readerLandscapeDoublePage, (checked: boolean) => {
+          this.setReaderLandscapeDoublePage(checked);
+        })
+
       this.readerSwitchSettingItem('音量键翻页', '阅读页获得焦点时使用音量上/下键翻页', this.readerVolumeTurnPage,
         (checked: boolean) => {
           this.setReaderVolumeTurnPage(checked);
@@ -3730,6 +3949,8 @@ struct ReadBookPage {
             .fontColor(theme.textColor)
             .textAlign(TextAlign.Center)
             .backgroundColor(theme.backgroundColor)
+            .backgroundImage(theme.backgroundImageUri || '', ImageRepeat.NoRepeat)
+            .backgroundImageSize(ImageSize.Cover)
             .border({
               width: this.currentReaderThemeIndex() === index ? 3 : 1,
               color: this.currentReaderThemeIndex() === index ? this.accentColor() : '#22000000'
@@ -3743,16 +3964,111 @@ struct ReadBookPage {
 
       if (this.currentReaderThemeIndex() === ReaderThemeHelper.CUSTOM_THEME_INDEX) {
         Column({ space: 10 }) {
-          ColorCodePicker({
-            value: this.currentCustomThemeBackgroundColor(),
-            placeholder: this.currentCustomThemeBackgroundColor(),
-            appDarkMode: this.appDarkMode,
-            accentColor: this.accentColor(),
-            optionTitle: '背景颜色',
-            onColorChange: (value: string) => {
-              this.setCurrentThemeBackgroundColor(value);
+          Row({ space: 8 }) {
+            Select(this.customThemeOptions())
+              .selected(this.currentCustomThemeSelectedIndex())
+              .value(this.currentCustomThemeScheme().name)
+              .font({ size: 14 })
+              .fontColor(this.getTextColor())
+              .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
+              .layoutWeight(1)
+              .onSelect((index: number) => {
+                this.selectCustomTheme(index);
+              })
+            Button('新增')
+              .height(36)
+              .fontSize(13)
+              .backgroundColor(this.accentColor())
+              .fontColor('#FFFFFF')
+              .onClick(() => {
+                this.addCustomTheme();
+              })
+            Button('删除')
+              .height(36)
+              .fontSize(13)
+              .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
+              .fontColor(this.getTextColor())
+              .onClick(() => {
+                this.deleteCurrentCustomTheme();
+              })
+          }
+          .width('100%')
+          TextInput({ text: this.customThemeNameDraft || this.currentCustomThemeScheme().name, placeholder: '方案名称' })
+            .fontSize(14)
+            .fontColor(this.getTextColor())
+            .height(36)
+            .padding({ left: 10, right: 10 })
+            .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
+            .borderRadius(8)
+            .onChange((value: string) => {
+              this.customThemeNameDraft = value.substring(0, 20);
+            })
+            .onSubmit(() => {
+              this.renameCurrentCustomTheme(this.customThemeNameDraft);
+            })
+            .onBlur(() => {
+              this.renameCurrentCustomTheme(this.customThemeNameDraft);
+            })
+          Row() {
+            Text('背景设置')
+              .fontSize(14)
+              .fontColor(this.getTextColor())
+            Blank()
+            Select([{ value: '背景色' }, { value: '背景图片' }])
+              .selected(this.currentCustomThemeBackgroundTypeIndex())
+              .value(this.currentCustomThemeBackgroundTypeIndex() === 1 ? '背景图片' : '背景色')
+              .font({ size: 14 })
+              .fontColor(this.getTextColor())
+              .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
+              .onSelect((index: number) => {
+                this.setCurrentCustomThemeBackgroundType(index);
+              })
+          }
+          .width('100%')
+          if (this.currentCustomThemeBackgroundTypeIndex() === 0) {
+            ColorCodePicker({
+              value: this.currentCustomThemeBackgroundColor(),
+              placeholder: this.currentCustomThemeBackgroundColor(),
+              appDarkMode: this.appDarkMode,
+              accentColor: this.accentColor(),
+              optionTitle: '背景颜色',
+              onColorChange: (value: string) => {
+                this.setCurrentThemeBackgroundColor(value);
+              }
+            })
+          } else {
+            Row({ space: 8 }) {
+              Button(this.currentCustomThemeScheme().backgroundImageUri ? '更换背景图片' : '选择背景图片')
+                .height(36)
+                .fontSize(13)
+                .backgroundColor(this.accentColor())
+                .fontColor('#FFFFFF')
+                .onClick(() => {
+                  this.chooseCurrentCustomThemeImage();
+                })
+              if (this.currentCustomThemeScheme().backgroundImageUri) {
+                Button('移除图片')
+                  .height(36)
+                  .fontSize(13)
+                  .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
+                  .fontColor(this.getTextColor())
+                  .onClick(() => {
+                    this.clearCurrentCustomThemeImage();
+                  })
+                Select([{ value: '裁剪填充' }, { value: '完整显示' }, { value: '拉伸铺满' }])
+                  .selected(this.customThemeFitSelectedIndex())
+                  .value(['裁剪填充', '完整显示', '拉伸铺满'][this.customThemeFitSelectedIndex()])
+                  .font({ size: 13 })
+                  .fontColor(this.getTextColor())
+                  .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
+                  .layoutWeight(1)
+                  .onSelect((index: number) => {
+                    this.setCurrentCustomThemeImageFit(index);
+                  })
+              }
             }
-          })
+            .width('100%')
+          }
           ColorCodePicker({
             value: this.currentCustomThemeTextColor(),
             placeholder: this.currentCustomThemeTextColor(),
@@ -4281,6 +4597,13 @@ struct ReadBookPage {
     });
   }
 
+  setReaderLandscapeDoublePage(enabled: boolean): void {
+    this.readerLandscapeDoublePage = enabled;
+    ReaderSettingsStore.saveLandscapeDoublePage(getContext(this), enabled).catch((e: Error) => {
+      console.error('保存双翻页设置失败:', e);
+    });
+  }
+
   quickTypographySettingOptions(): SelectOption[] {
     return [
       { value: '字号' },
@@ -4338,8 +4661,41 @@ struct ReadBookPage {
     }
   }
 
+  openQuickTypographyValueInput(): void {
+    this.quickTypographyValueDraft = '';
+    this.showQuickTypographyValueInput = true;
+  }
+
+  applyQuickTypographyValueInput(): void {
+    if (!this.showQuickTypographyValueInput) {
+      return;
+    }
+    const value = Number(this.quickTypographyValueDraft);
+    if (!this.quickTypographyValueDraft.trim() || !Number.isFinite(value)) {
+      this.showQuickTypographyValueInput = false;
+      return;
+    }
+    switch (this.quickTypographySettingIndex) {
+      case 1:
+        this.applyReaderLineHeight(value);
+        break;
+      case 2:
+        this.applyReaderParagraphSpacing(value);
+        break;
+      case 3:
+      case 4:
+      case 5:
+      case 6:
+        this.applyReaderMargin(this.quickTypographySettingIndex, value);
+        break;
+      default:
+        this.applyReaderFontSize(value);
+    }
+    this.showQuickTypographyValueInput = false;
+  }
+
   applyReaderMargin(settingIndex: number, margin: number): void {
-    const next = Math.max(0, Math.min(Math.round(margin), 64));
+    const next = Math.max(0, Math.min(Math.round(margin), 300));
     if ((settingIndex === 3 && next === this.readerMarginLeft) ||
       (settingIndex === 4 && next === this.readerMarginRight) ||
       (settingIndex === 5 && next === this.readerMarginTop) ||
@@ -4361,7 +4717,7 @@ struct ReadBookPage {
   }
 
   applyReaderFontSize(fontSize: number): void {
-    const nextFontSize = Math.max(14, Math.min(Math.round(fontSize), 30));
+    const nextFontSize = Math.max(14, Math.min(Math.round(fontSize), 50));
     if (nextFontSize === this.readerFontSize) {
       return;
     }
@@ -4416,7 +4772,8 @@ struct ReadBookPage {
       this.readerLightCustomThemeTextColor,
       this.readerDarkCustomThemeBackgroundColor,
       this.readerDarkCustomThemeTextColor,
-      this.appDarkMode
+      this.appDarkMode,
+      this.readerCustomThemesRaw
     ).catch((e: Error) => {
       console.warn('保存阅读配色设置失败:', e);
     });
@@ -4424,22 +4781,110 @@ struct ReadBookPage {
 
   setCurrentThemeBackgroundColor(color: string): void {
     const value = this.normalizeColor(color, this.currentCustomThemeBackgroundColor());
-    if (this.appDarkMode) {
-      this.readerDarkCustomThemeBackgroundColor = value;
-    } else {
-      this.readerLightCustomThemeBackgroundColor = value;
-    }
-    this.saveReaderThemeSettings();
+    const data = this.customThemeData();
+    ReaderCustomThemeHelper.selected(data, this.appDarkMode).backgroundColor = value;
+    this.persistCustomThemeData(data);
   }
 
   setCurrentThemeTextColor(color: string): void {
     const value = this.normalizeColor(color, this.currentCustomThemeTextColor());
+    const data = this.customThemeData();
+    ReaderCustomThemeHelper.selected(data, this.appDarkMode).textColor = value;
+    this.persistCustomThemeData(data);
+  }
+
+  persistCustomThemeData(data: ReaderCustomThemeData): void {
+    const selected = ReaderCustomThemeHelper.selected(data, this.appDarkMode);
     if (this.appDarkMode) {
-      this.readerDarkCustomThemeTextColor = value;
+      this.readerDarkCustomThemeBackgroundColor = selected.backgroundColor;
+      this.readerDarkCustomThemeTextColor = selected.textColor;
     } else {
-      this.readerLightCustomThemeTextColor = value;
+      this.readerLightCustomThemeBackgroundColor = selected.backgroundColor;
+      this.readerLightCustomThemeTextColor = selected.textColor;
     }
+    this.readerCustomThemesRaw = ReaderCustomThemeHelper.stringify(data);
     this.saveReaderThemeSettings();
+    this.saveReadConfig();
+  }
+
+  addCustomTheme(): void {
+    const data = this.customThemeData();
+    const item = ReaderCustomThemeHelper.add(data, this.appDarkMode);
+    this.customThemeNameDraft = item.name;
+    this.persistCustomThemeData(data);
+  }
+
+  deleteCurrentCustomTheme(): void {
+    const data = this.customThemeData();
+    if (ReaderCustomThemeHelper.schemesForMode(data, this.appDarkMode).length <= 1) {
+      promptAction.showToast({ message: '至少保留一套自定义背景' });
+      return;
+    }
+    ReaderCustomThemeHelper.removeSelected(data, this.appDarkMode);
+    this.customThemeNameDraft = ReaderCustomThemeHelper.selected(data, this.appDarkMode).name;
+    this.persistCustomThemeData(data);
+  }
+
+  selectCustomTheme(index: number): void {
+    const data = this.customThemeData();
+    const schemes = ReaderCustomThemeHelper.schemesForMode(data, this.appDarkMode);
+    if (index < 0 || index >= schemes.length) {
+      return;
+    }
+    ReaderCustomThemeHelper.select(data, this.appDarkMode, schemes[index].id);
+    this.customThemeNameDraft = schemes[index].name;
+    this.persistCustomThemeData(data);
+  }
+
+  renameCurrentCustomTheme(name: string): void {
+    const data = this.customThemeData();
+    const current = ReaderCustomThemeHelper.selected(data, this.appDarkMode);
+    const value = (name || '').trim().substring(0, 20);
+    if (!value) {
+      this.customThemeNameDraft = current.name;
+      return;
+    }
+    current.name = value;
+    this.customThemeNameDraft = value;
+    this.persistCustomThemeData(data);
+  }
+
+  async chooseCurrentCustomThemeImage(): Promise<void> {
+    const data = this.customThemeData();
+    const current = ReaderCustomThemeHelper.selected(data, this.appDarkMode);
+    try {
+      const imageUri = await ReaderBackgroundImageStore.pickAndSave(getContext(this), current.id);
+      if (!imageUri) {
+        return;
+      }
+      current.backgroundImageUri = imageUri;
+      current.backgroundType = 'image';
+      this.persistCustomThemeData(data);
+    } catch (e) {
+      console.error('选择阅读背景图片失败:', e);
+      promptAction.showToast({ message: '选择背景图片失败' });
+    }
+  }
+
+  clearCurrentCustomThemeImage(): void {
+    const data = this.customThemeData();
+    const current = ReaderCustomThemeHelper.selected(data, this.appDarkMode);
+    current.backgroundImageUri = '';
+    current.backgroundType = 'color';
+    this.persistCustomThemeData(data);
+  }
+
+  setCurrentCustomThemeBackgroundType(index: number): void {
+    const data = this.customThemeData();
+    ReaderCustomThemeHelper.selected(data, this.appDarkMode).backgroundType = index === 1 ? 'image' : 'color';
+    this.persistCustomThemeData(data);
+  }
+
+  setCurrentCustomThemeImageFit(index: number): void {
+    const fits = ['cover', 'contain', 'fill'];
+    const data = this.customThemeData();
+    ReaderCustomThemeHelper.selected(data, this.appDarkMode).backgroundImageFit = fits[index] || 'cover';
+    this.persistCustomThemeData(data);
   }
 
   saveReaderInteractionSettings(): void {
@@ -4643,11 +5088,7 @@ struct ReadBookPage {
     if (this.chapters.length === 0) {
       return false;
     }
-    if (this.currentPageIndex < this.contentPages.length - 1) {
-      await this.runTtsPageTurnAnimation(1);
-      return true;
-    }
-    if (this.currentChapterIndex < this.chapters.length - 1) {
+    if (this.canTurnPage(1)) {
       await this.runTtsPageTurnAnimation(1);
       return true;
     }
@@ -5750,10 +6191,11 @@ struct ReadBookPage {
 
   applyTtsChunkFocus(chunk: TtsChunk): void {
     const pageIndex = this.resolveTtsChunkPageIndex(chunk);
+    const spreadPageIndex = this.normalizeReaderSpreadPageIndex(pageIndex);
     this.ttsLastFocusChunk = chunk;
     this.ttsLastFocusPageIndex = pageIndex;
-    if (pageIndex !== this.currentPageIndex) {
-      this.animateTtsToPage(pageIndex, chunk);
+    if (spreadPageIndex !== this.currentPageIndex) {
+      this.animateTtsToPage(spreadPageIndex, chunk);
       return;
     }
     this.updateTtsChunkHighlight(chunk, pageIndex);
@@ -5784,8 +6226,9 @@ struct ReadBookPage {
     this.ttsAutoTurningPage = false;
     this.ttsPageTurnSerial++;
     this.finishPageTurnAnimation();
-    if (pageIndex !== this.currentPageIndex) {
-      this.currentPageIndex = pageIndex;
+    const spreadPageIndex = this.normalizeReaderSpreadPageIndex(pageIndex);
+    if (spreadPageIndex !== this.currentPageIndex) {
+      this.currentPageIndex = spreadPageIndex;
       this.saveReadingProgress().catch((error: Error) => {
         console.warn('同步朗读恢复页码失败:', error);
       });
@@ -5818,9 +6261,11 @@ struct ReadBookPage {
   }
 
   animateTtsToPage(targetPageIndex: number, chunk: TtsChunk): void {
-    const target = Math.max(0, Math.min(targetPageIndex, Math.max(0, this.contentPages.length - 1)));
+    const target = this.normalizeReaderSpreadPageIndex(
+      Math.max(0, Math.min(targetPageIndex, Math.max(0, this.contentPages.length - 1)))
+    );
     if (target <= this.currentPageIndex) {
-      this.updateTtsChunkHighlight(chunk, this.currentPageIndex);
+      this.updateTtsChunkHighlight(chunk, this.resolveTtsChunkPageIndex(chunk));
       return;
     }
     this.ttsPendingTargetPageIndex = Math.max(this.ttsPendingTargetPageIndex, target);
@@ -5843,7 +6288,8 @@ struct ReadBookPage {
         }
       }
       if (turnSerial === this.ttsPageTurnSerial && this.isTtsSpeaking && this.ttsPendingHighlightChunk) {
-        this.updateTtsChunkHighlight(this.ttsPendingHighlightChunk, this.currentPageIndex);
+        this.updateTtsChunkHighlight(this.ttsPendingHighlightChunk,
+          this.resolveTtsChunkPageIndex(this.ttsPendingHighlightChunk));
       }
     } finally {
       if (turnSerial === this.ttsPageTurnSerial) {
@@ -5905,8 +6351,9 @@ struct ReadBookPage {
       return;
     }
     if (direction > 0) {
-      if (this.currentPageIndex < this.contentPages.length - 1) {
-        this.currentPageIndex++;
+      const localPageIndex = this.getLocalPageTurnTargetPageIndex(direction);
+      if (localPageIndex >= 0) {
+        this.currentPageIndex = localPageIndex;
         this.syncCurrentPageText();
         if (this.contentPages.length - this.currentPageIndex <= 3) {
           this.preloadReaderContent();
@@ -5918,8 +6365,9 @@ struct ReadBookPage {
       return;
     }
 
-    if (this.currentPageIndex > 0) {
-      this.currentPageIndex--;
+    const localPageIndex = this.getLocalPageTurnTargetPageIndex(direction);
+    if (localPageIndex >= 0) {
+      this.currentPageIndex = localPageIndex;
       this.syncCurrentPageText();
       await this.saveReadingProgress();
     } else {
@@ -5945,7 +6393,7 @@ struct ReadBookPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.getBackgroundColor())
+    .backgroundColor(this.readerContentLayerColor())
     .clip(true)
   }
 
@@ -5961,7 +6409,7 @@ struct ReadBookPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.getBackgroundColor())
+    .backgroundColor(this.readerContentLayerColor())
     .clip(true)
   }
 
@@ -5973,9 +6421,7 @@ struct ReadBookPage {
     .width('100%')
     .height('100%')
     .id(`reader_current_${this.currentChapterIndex}_${this.currentPageIndex}_${this.displayPageRenderKey}_${renderVersion}_${ttsRenderVersion}`)
-    .backgroundColor(Color.Transparent)
-    .backgroundImage(this.getBackgroundImage(), ImageRepeat.NoRepeat)
-    .backgroundImageSize(this.getBackgroundImageSize())
+    .backgroundColor(this.readerContentLayerColor())
     .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() })
     .opacity(this.getCurrentPageTurnOpacity())
   }
@@ -5988,9 +6434,7 @@ struct ReadBookPage {
     .width('100%')
     .height('100%')
     .id(`reader_current_alt_${this.currentChapterIndex}_${this.currentPageIndex}_${this.displayPageRenderKey}_${renderVersion}_${ttsRenderVersion}`)
-    .backgroundColor(this.getBackgroundColor())
-    .backgroundImage(this.getBackgroundImage(), ImageRepeat.NoRepeat)
-    .backgroundImageSize(this.getBackgroundImageSize())
+    .backgroundColor(this.readerContentLayerColor())
     .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() })
     .opacity(this.getCurrentPageTurnOpacity())
   }
@@ -6003,53 +6447,98 @@ struct ReadBookPage {
     .width('100%')
     .height('100%')
     .id(`reader_incoming_${this.pageTurnIncomingChapterIndex}_${this.pageTurnIncomingPageIndex}_${renderVersion}`)
-    .backgroundColor(this.getBackgroundColor())
-    .backgroundImage(this.getBackgroundImage(), ImageRepeat.NoRepeat)
-    .backgroundImageSize(this.getBackgroundImageSize())
+    .backgroundColor(this.readerContentLayerColor())
     .translate({ x: this.getIncomingSlideX(), y: this.getIncomingSlideY() })
     .opacity(this.getVisiblePageTurnIncomingOpacity())
   }
 
   @Builder
   readerCurrentPageLayer(renderVersion: number, text: string, ttsRenderVersion: number) {
-    Column() {
-      if (renderVersion % 2 === 0) {
-        this.styledCurrentReaderText(text, this.getReaderContentBottomPadding(),
-          this.currentChapterIndex,
-          ttsRenderVersion, renderVersion, this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion))
-      } else {
+    if (this.isLandscapeDoublePageActive()) {
+      Row() {
+        Column() {
+          this.styledCurrentReaderText(text, this.getReaderContentBottomPadding(), this.currentChapterIndex,
+            ttsRenderVersion, renderVersion,
+            `${this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion)}_left`)
+        }
+        .layoutWeight(1)
+        .height('100%')
+
+        Blank()
+          .width(1)
+          .height('88%')
+          .backgroundColor(this.getSubTextColor())
+          .opacity(0.22)
+
+        Column() {
+          this.styledCurrentReaderText(this.getSecondaryPageText(), this.getReaderContentBottomPadding(),
+            this.currentChapterIndex, ttsRenderVersion, renderVersion,
+            `${this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion)}_right`)
+        }
+        .layoutWeight(1)
+        .height('100%')
+      }
+      .width('100%')
+      .height('100%')
+      .alignItems(VerticalAlign.Center)
+      .backgroundColor(this.readerContentLayerColor())
+    } else {
+      Column() {
         this.styledCurrentReaderText(text, this.getReaderContentBottomPadding(),
           this.currentChapterIndex,
           ttsRenderVersion, renderVersion, this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion))
       }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Start)
+      .alignItems(HorizontalAlign.Start)
+      .backgroundColor(this.readerContentLayerColor())
+      .id(`reader_layer_${this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion)}`)
     }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Start)
-    .alignItems(HorizontalAlign.Start)
-    .backgroundColor(this.readerContentLayerColor())
-    .id(`reader_layer_${this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion)}`)
   }
 
   @Builder
   readerIncomingPageLayer(renderVersion: number, text: string) {
-    Column() {
-      if (renderVersion % 2 === 0) {
-        this.styledReaderText(text, this.getReaderContentBottomPadding(),
-          this.pageTurnIncomingChapterIndex, 0,
-          renderVersion, this.incomingReaderPageRenderIdentity(renderVersion, text))
-      } else {
+    if (this.isLandscapeDoublePageActive()) {
+      Row() {
+        Column() {
+          this.styledReaderText(text, this.getReaderContentBottomPadding(), this.pageTurnIncomingChapterIndex, 0,
+            renderVersion, `${this.incomingReaderPageRenderIdentity(renderVersion, text)}_left`)
+        }
+        .layoutWeight(1)
+        .height('100%')
+
+        Blank()
+          .width(1)
+          .height('88%')
+          .backgroundColor(this.getSubTextColor())
+          .opacity(0.22)
+
+        Column() {
+          this.styledReaderText(this.pageTurnIncomingSecondaryText, this.getReaderContentBottomPadding(),
+            this.pageTurnIncomingChapterIndex, 0, renderVersion,
+            `${this.incomingReaderPageRenderIdentity(renderVersion, text)}_right`)
+        }
+        .layoutWeight(1)
+        .height('100%')
+      }
+      .width('100%')
+      .height('100%')
+      .alignItems(VerticalAlign.Center)
+      .backgroundColor(this.readerContentLayerColor())
+    } else {
+      Column() {
         this.styledReaderText(text, this.getReaderContentBottomPadding(),
           this.pageTurnIncomingChapterIndex, 0,
           renderVersion, this.incomingReaderPageRenderIdentity(renderVersion, text))
       }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Start)
+      .alignItems(HorizontalAlign.Start)
+      .backgroundColor(this.readerContentLayerColor())
+      .id(`reader_incoming_layer_${this.incomingReaderPageRenderIdentity(renderVersion, text)}`)
     }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Start)
-    .alignItems(HorizontalAlign.Start)
-    .backgroundColor(this.readerContentLayerColor())
-    .id(`reader_incoming_layer_${this.incomingReaderPageRenderIdentity(renderVersion, text)}`)
   }
 
   currentReaderPageRenderIdentity(renderVersion: number = this.pageRenderVersion,
@@ -6791,14 +7280,21 @@ struct ReadBookPage {
   hideReaderPanels() {
     this.showMenu = false;
     this.showSettings = false;
+    this.showQuickTypographyValueInput = false;
   }
 
-  exitReaderPage(): void {
+  async exitReaderPage(): Promise<void> {
+    if (this.readerExitProgressSaved) {
+      return;
+    }
     this.hideReaderPanels();
     this.stopTtsReading();
-    this.saveReadingProgress().catch((e: Error) => {
+    try {
+      await this.saveReadingProgress();
+      this.readerExitProgressSaved = true;
+    } catch (e) {
       console.error('返回阅读页时保存进度失败:', e);
-    });
+    }
     router.back();
   }
 
@@ -6816,7 +7312,8 @@ struct ReadBookPage {
     const horizontalPadding = this.readerMarginLeft + this.readerMarginRight;
     const verticalPadding = this.readerMarginTop + this.getReaderContentBottomPadding() +
       this.getReaderBottomInfoBarHeight();
-    const availableWidth = Math.max(1, this.pageViewWidth - horizontalPadding);
+    const columnWidth = this.isLandscapeDoublePageActive() ? this.pageViewWidth / 2 : this.pageViewWidth;
+    const availableWidth = Math.max(1, columnWidth - horizontalPadding);
     const availableHeight = Math.max(1, this.pageViewHeight - verticalPadding);
     const measuredAvailableHeight = this.toMeasurePx(availableHeight) + this.getReaderPaginationHeightTolerancePx();
     const pages: string[] = [];
@@ -6842,7 +7339,8 @@ struct ReadBookPage {
   }
 
   buildReaderPaginationCacheKey(chapterIndex: number, source: string): string {
-    return `reader_page_v5_${chapterIndex}_${this.pageViewWidth}_${this.pageViewHeight}_${this.readerTypographyCacheIdentity()}_` +
+    return `reader_page_v6_${chapterIndex}_${this.pageViewWidth}_${this.pageViewHeight}_` +
+      `${this.isLandscapeDoublePageActive()}_${this.readerTypographyCacheIdentity()}_` +
       `${source.length}_${this.hashText(source)}`;
   }
 
@@ -6942,9 +7440,12 @@ struct ReadBookPage {
     if (this.currentPageIndex >= pages.length) {
       this.currentPageIndex = Math.max(0, pages.length - 1);
     }
-    const pageIndex = Math.max(0, Math.min(this.currentPageIndex, Math.max(0, pages.length - 1)));
+    const pageIndex = this.normalizeReaderSpreadPageIndex(
+      Math.max(0, Math.min(this.currentPageIndex, Math.max(0, pages.length - 1)))
+    );
     this.currentPageIndex = pageIndex;
     this.setCurrentPageText(pages[pageIndex] || '');
+    this.readerInitialPageReady = true;
   }
 
   async turnNext() {
@@ -6985,7 +7486,8 @@ struct ReadBookPage {
       return false;
     }
     if (direction > 0) {
-      return this.currentPageIndex < this.contentPages.length - 1 || this.currentChapterIndex < this.chapters.length - 1;
+      return this.currentPageIndex + this.getReaderPageTurnStep() < this.contentPages.length ||
+        this.currentChapterIndex < this.chapters.length - 1;
     }
     return this.currentPageIndex > 0 || this.currentChapterIndex > 0;
   }
@@ -6993,9 +7495,10 @@ struct ReadBookPage {
   async applyPageTurn(direction: number, targetPreview: PageTurnPreview | null = null,
     commitText: boolean = true): Promise<void> {
     this.stopTtsReading();
+    const localPageIndex = this.getLocalPageTurnTargetPageIndex(direction);
     if (direction > 0) {
-      if (this.currentPageIndex < this.contentPages.length - 1) {
-        this.applyLocalPageTurnTarget(this.currentPageIndex + 1, targetPreview, commitText);
+      if (localPageIndex >= 0) {
+        this.applyLocalPageTurnTarget(localPageIndex, targetPreview, commitText);
         if (this.contentPages.length - this.currentPageIndex <= 3) {
           this.preloadReaderContentLater();
           this.preloadNextChapterPaginationLater(0);
@@ -7007,8 +7510,8 @@ struct ReadBookPage {
       return;
     }
 
-    if (this.currentPageIndex > 0) {
-      this.applyLocalPageTurnTarget(this.currentPageIndex - 1, targetPreview, commitText);
+    if (localPageIndex >= 0) {
+      this.applyLocalPageTurnTarget(localPageIndex, targetPreview, commitText);
       if (this.currentPageIndex <= 2) {
         this.preloadReaderContentLater();
       }
@@ -7046,6 +7549,7 @@ struct ReadBookPage {
     if (localPageIndex >= 0) {
       return {
         text: this.getPageText(localPageIndex),
+        secondaryText: this.getSecondaryPageText(localPageIndex),
         pageIndex: localPageIndex,
         chapterIndex: this.currentChapterIndex
       };
@@ -7053,6 +7557,7 @@ struct ReadBookPage {
     if (this.pageTurnIncomingText) {
       return {
         text: this.pageTurnIncomingText,
+        secondaryText: this.pageTurnIncomingSecondaryText,
         pageIndex: this.pageTurnIncomingPageIndex,
         chapterIndex: this.pageTurnIncomingChapterIndex
       };
@@ -7067,7 +7572,7 @@ struct ReadBookPage {
       this.resetSlidePageEffect();
       if (direction > 0 && this.chapters.length > 0 &&
         this.currentChapterIndex >= this.chapters.length - 1 &&
-        this.currentPageIndex >= this.contentPages.length - 1) {
+        this.getLocalPageTurnTargetPageIndex(1) < 0) {
         promptAction.showToast({ message: '本书已阅读完成' });
       }
       return;
@@ -7245,17 +7750,19 @@ struct ReadBookPage {
   }
 
   setPageTurnIncomingState(pageIndex: number, text: string, animating: boolean = true,
-    chapterIndex: number = this.currentChapterIndex): void {
+    chapterIndex: number = this.currentChapterIndex, secondaryText: string = ''): void {
     const safeText = text || '';
+    const safeSecondaryText = secondaryText || '';
     const nextAnimating = animating && !!safeText;
     if (this.pageTurnIncomingPageIndex !== pageIndex || this.pageTurnIncomingChapterIndex !== chapterIndex ||
-      this.pageTurnIncomingText !== safeText ||
+      this.pageTurnIncomingText !== safeText || this.pageTurnIncomingSecondaryText !== safeSecondaryText ||
       this.pageTurnAnimating !== nextAnimating) {
       this.pageTurnIncomingRenderVersion++;
     }
     this.pageTurnIncomingPageIndex = pageIndex;
     this.pageTurnIncomingChapterIndex = chapterIndex;
     this.pageTurnIncomingText = safeText;
+    this.pageTurnIncomingSecondaryText = safeSecondaryText;
     this.pageTurnAnimating = nextAnimating;
   }
 
@@ -7282,17 +7789,18 @@ struct ReadBookPage {
   }
 
   getLocalPageTurnTargetPageIndex(direction: number): number {
-    if (direction > 0 && this.currentPageIndex < this.contentPages.length - 1) {
-      return this.currentPageIndex + 1;
+    const step = this.getReaderPageTurnStep();
+    if (direction > 0 && this.currentPageIndex + step < this.contentPages.length) {
+      return this.currentPageIndex + step;
     }
     if (direction < 0 && this.currentPageIndex > 0) {
-      return this.currentPageIndex - 1;
+      return Math.max(0, this.currentPageIndex - step);
     }
     return -1;
   }
 
   getAdjacentPageTurnChapterIndex(direction: number): number {
-    if (direction > 0 && this.currentPageIndex >= this.contentPages.length - 1 &&
+    if (direction > 0 && this.currentPageIndex + this.getReaderPageTurnStep() >= this.contentPages.length &&
       this.currentChapterIndex < this.chapters.length - 1) {
       return this.currentChapterIndex + 1;
     }
@@ -7306,7 +7814,8 @@ struct ReadBookPage {
     const localPageIndex = this.getLocalPageTurnTargetPageIndex(direction);
     if (localPageIndex >= 0) {
       this.pageTurnPreviewKey = `local_${localPageIndex}`;
-      this.setPageTurnIncomingState(localPageIndex, this.getPageText(localPageIndex));
+      this.setPageTurnIncomingState(localPageIndex, this.getPageText(localPageIndex), true,
+        this.currentChapterIndex, this.getSecondaryPageText(localPageIndex));
       return;
     }
 
@@ -7337,7 +7846,7 @@ struct ReadBookPage {
 
   buildPageTurnPreviewKey(direction: number, chapterIndex: number): string {
     return `${direction}_${chapterIndex}_${this.pageViewWidth}_${this.pageViewHeight}_` +
-      `${this.readerTypographyCacheIdentity()}`;
+      `${this.isLandscapeDoublePageActive()}_${this.readerTypographyCacheIdentity()}`;
   }
 
   buildCachedAdjacentPageTurnPreview(direction: number, chapterIndex: number): PageTurnPreview {
@@ -7354,9 +7863,10 @@ struct ReadBookPage {
     if (result.pages.length === 0) {
       return { text: '', pageIndex: 0, chapterIndex: chapterIndex };
     }
-    const pageIndex = direction > 0 ? 0 : result.pages.length - 1;
+    const pageIndex = direction > 0 ? 0 : this.normalizeReaderSpreadPageIndex(result.pages.length - 1);
     return {
       text: result.pages[pageIndex],
+      secondaryText: this.isLandscapeDoublePageActive() ? (result.pages[pageIndex + 1] || '') : '',
       pageIndex: pageIndex,
       chapterIndex: chapterIndex
     };
@@ -7368,7 +7878,8 @@ struct ReadBookPage {
   }
 
   applyPageTurnPreview(preview: PageTurnPreview): void {
-    this.setPageTurnIncomingState(preview.pageIndex, preview.text, true, preview.chapterIndex);
+    this.setPageTurnIncomingState(preview.pageIndex, preview.text, true, preview.chapterIndex,
+      preview.secondaryText || '');
     this.pageTurnIncomingOpacity = 1;
   }
 
