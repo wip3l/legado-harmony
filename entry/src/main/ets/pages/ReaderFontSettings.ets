@@ -61,6 +61,8 @@ struct ReaderFontSettingsPage {
   private readerSettingsLoaded: boolean = false;
   private readerSettingsLoading: boolean = false;
   private closingReaderFontSettings: boolean = false;
+  private latestReaderFontStyleSave: Promise<void> = Promise.resolve();
+  private latestReaderFontStyleSettings: ReaderSettings | null = null;
 
   aboutToAppear(): void {
     this.loadSettings();
@@ -88,7 +90,19 @@ struct ReaderFontSettingsPage {
     // state while the route is being removed can read a stale ForEach item and overwrite
     // the just-persisted regex switches, which is especially visible when this page was
     // opened above the still-mounted reader page.
+    try {
+      await this.latestReaderFontStyleSave;
+    } catch (e) {
+      console.warn('等待当前阅读字体设置保存失败:', e);
+    }
     await ReaderSettingsStore.waitForReaderFontStyleSaves();
+    if (this.latestReaderFontStyleSettings) {
+      await ReaderSettingsStore.saveReaderFontStyleSettings(
+        getContext(this),
+        this.latestReaderFontStyleSettings
+      );
+      await ReaderSettingsStore.waitForReaderFontStyleSaves();
+    }
     router.back();
   }
 
@@ -170,8 +184,8 @@ struct ReaderFontSettingsPage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
-  saveSettings(): void {
-    if (!this.readerSettingsLoaded) {
+  saveSettings(regexRules: ReaderRegexFontRule[] = this.regexRules): void {
+    if (!this.readerSettingsLoaded || this.closingReaderFontSettings) {
       return;
     }
     const settings = new ReaderSettings();
@@ -187,10 +201,12 @@ struct ReaderFontSettingsPage {
     settings.regexFontFamily = this.readerRegexFontFamily;
     settings.regexFontSize = this.readerRegexFontSize;
     settings.regexShadowColor = this.readerRegexShadowColor;
-    const rulesRaw = this.encodeRegexRules(this.regexRules);
+    const rulesRaw = this.encodeRegexRules(regexRules);
     this.readerRegexFontRulesRaw = rulesRaw;
     settings.regexFontRulesRaw = rulesRaw;
-    ReaderSettingsStore.saveReaderFontStyleSettings(getContext(this), settings).catch((e: Error) => {
+    this.latestReaderFontStyleSettings = settings;
+    this.latestReaderFontStyleSave = ReaderSettingsStore.saveReaderFontStyleSettings(getContext(this), settings);
+    this.latestReaderFontStyleSave.catch((e: Error) => {
       console.warn('保存阅读字体设置失败:', e);
     });
   }
@@ -256,7 +272,7 @@ struct ReaderFontSettingsPage {
     next[index] = rule;
     this.regexRules = next;
     this.bumpRegexHighlightRefresh();
-    this.saveSettings();
+    this.saveSettings(next);
   }
 
   updateRegexRuleById(ruleId: string, updater: (rule: ReaderRegexFontRule) => void): void {

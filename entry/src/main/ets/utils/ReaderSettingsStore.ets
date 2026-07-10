@@ -286,6 +286,13 @@ export class ReaderSettingsStore {
     return settings;
   }
 
+  static async reload(context: Context): Promise<ReaderSettings> {
+    await ReaderSettingsStore.waitForReaderFontStyleSaves();
+    ReaderSettingsStore.cachedSettings = null;
+    ReaderSettingsStore.cachedThemeId = '';
+    return await ReaderSettingsStore.load(context);
+  }
+
   static async switchThemeProfile(context: Context, previousThemeId: string,
     nextThemeId: string): Promise<ReaderSettings> {
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);

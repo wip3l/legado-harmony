@@ -97,7 +97,7 @@ struct ReadBookPage {
   @State chapters: BookChapter[] = [];
   @State currentChapterIndex: number = 0;
   @State content: string = '';
-  @State isLoading: boolean = false;
+  @State isLoading: boolean = true;
   @State showMenu: boolean = false;
   @State showToc: boolean = false;
   @State showSettings: boolean = false;
@@ -106,7 +106,7 @@ struct ReadBookPage {
   @State quickTypographySettingIndex: number = 0;
   @State showQuickTypographyValueInput: boolean = false;
   @State quickTypographyValueDraft: string = '';
-  @State loadStatus: string = '';
+  @State loadStatus: string = '正在加载...';
   @State verificationUrl: string = '';
   @State verificationTitle: string = '网页验证';
   @State showChangeSourceDialog: boolean = false;
@@ -125,7 +125,7 @@ struct ReadBookPage {
   @State chapterJumpRenderGeneration: number = 0;
   @State pageViewWidth: number = 0;
   @State pageViewHeight: number = 0;
-  @State readerInitialPageReady: boolean = true;
+  @State readerInitialPageReady: boolean = false;
   @State statusBarSafeHeight: number = 0;
   @State isTtsSpeaking: boolean = false;
   @State ttsMediaControlsExpanded: boolean = false;
@@ -286,23 +286,37 @@ struct ReadBookPage {
   private readerFontChangeSerial: number = 0;
   private readingProgressSaveQueue: Promise<void> = Promise.resolve();
   private readerExitProgressSaved: boolean = false;
+  private readerEntryInitializing: boolean = true;
+  private readerSettingsReloadSerial: number = 0;
 
   async aboutToAppear() {
+    this.readerEntryInitializing = true;
     this.enterReaderImmersive();
     this.updateVolumeKeySubscription();
-    await this.loadReaderSettings();
-    this.loadTtsSettingsAndVoices();
     const params = router.getParams() as Record<string, string>;
     if (params && params['bookUrl']) {
       this.bookUrl = params['bookUrl'];
-      this.loadBook();
+      this.isLoading = true;
+      this.loadStatus = '正在加载...';
+      this.resetReaderStateForBookLoad();
+    }
+    try {
+      await this.loadReaderSettings();
+      this.loadTtsSettingsAndVoices();
+      if (this.bookUrl) {
+        await this.loadBook();
+      }
+    } finally {
+      this.readerEntryInitializing = false;
     }
   }
 
   onPageShow(): void {
-    this.reloadReaderSettingsAfterPageShow().catch((error: Error) => {
-      console.warn('恢复阅读设置失败:', error);
-    });
+    if (!this.readerEntryInitializing) {
+      this.reloadReaderSettingsAfterPageShow().catch((error: Error) => {
+        console.warn('恢复阅读设置失败:', error);
+      });
+    }
     this.reregisterReaderFontAfterShow(0);
     this.reregisterReaderFontAfterShow(120);
     this.syncTtsFocusAfterResumeLater(0);
@@ -328,24 +342,16 @@ struct ReadBookPage {
   }
 
   async reloadReaderSettingsAfterPageShow(): Promise<void> {
-    await ReaderSettingsStore.waitForReaderFontStyleSaves();
-    const regexEnabled = AppStorage.get<boolean>(ReaderSettingsStore.KEY_REGEX_FONT_ENABLED);
-    const regexPattern = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_PATTERN);
-    const regexMode = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_MODE);
-    const regexFamily = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_FAMILY);
-    const regexSize = AppStorage.get<number>(ReaderSettingsStore.KEY_REGEX_FONT_SIZE);
-    const regexShadow = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_SHADOW_COLOR);
-    const regexRulesRaw = AppStorage.get<string>(ReaderSettingsStore.KEY_REGEX_FONT_RULES_RAW);
-    await this.loadReaderSettings();
-    if (regexEnabled !== undefined) this.readerRegexFontEnabled = regexEnabled;
-    if (regexPattern !== undefined) this.readerRegexFontPattern = regexPattern;
-    if (regexMode !== undefined) this.readerRegexFontMode = regexMode;
-    if (regexFamily !== undefined) this.readerRegexFontFamily = regexFamily;
-    if (regexSize !== undefined) this.readerRegexFontSize = regexSize;
-    if (regexShadow !== undefined) this.readerRegexShadowColor = regexShadow;
-    if (regexRulesRaw !== undefined) this.readerRegexFontRulesRaw = regexRulesRaw;
+    const reloadSerial = ++this.readerSettingsReloadSerial;
+    const settings = await ReaderSettingsStore.reload(getContext(this));
+    if (reloadSerial !== this.readerSettingsReloadSerial) {
+      return;
+    }
+    ReaderSettingsStore.applyToStorage(settings);
+    this.applyLoadedReaderSettings(settings);
     this.cachedRegexRulesKey = '';
     this.cachedRegexRules = [];
+    this.readerPaginationCache.clear();
     this.refreshReaderTextRender();
     this.paginateContent(this.content);
   }
