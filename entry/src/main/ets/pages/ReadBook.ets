@@ -10,6 +10,7 @@ import graphicsText from '@ohos.graphics.text';
 import { Book, BookChapter, SearchBook, HttpTTS } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
+import { LocalBookService } from '../core/book/LocalBookService';
 import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
 import { WebBookService } from '../core/book/WebBookService';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
@@ -455,6 +456,17 @@ struct ReadBookPage {
       if (!this.book) {
         this.setReaderContent('书籍不存在，请先从搜索结果加入书架。');
         this.isLoading = false;
+        return;
+      }
+      if (this.book.origin === LocalBookService.ORIGIN) {
+        this.loadStatus = '正在优化本地书籍...';
+        const rebuilt = await LocalBookService.ensureTxtParserCurrent(getContext(this), this.book);
+        if (rebuilt) {
+          const rebuiltBook = await db.getBook(this.bookUrl);
+          if (rebuiltBook) this.book = rebuiltBook;
+        }
+      }
+      if (loadSerial !== this.bookLoadSerial) {
         return;
       }
       await this.markBookRecentlyRead();
@@ -1235,7 +1247,7 @@ struct ReadBookPage {
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
                       .layoutWeight(1)
 
-                    if (chapter.cacheDate > 0) {
+                    if (this.book?.origin !== 'local' && chapter.cacheDate > 0) {
                       Text('已缓存')
                         .fontSize(11)
                         .fontColor(this.isReaderThemeDark() ? '#7CC7A0' : '#1F8F55')

@@ -48,7 +48,7 @@ export class ReadBookEngine {
     console.log('[RE] cached chapters:', this.chapters.length);
 
     // 检查缓存章节是否有未解析的变量（旧版本残留）
-    const hasBrokenUrls = this.chapters.some(c => this.isBrokenChapterUrl(c.url));
+    const hasBrokenUrls = book.origin !== 'local' && this.chapters.some(c => this.isBrokenChapterUrl(c.url));
 
     if (hasBrokenUrls || (this.chapters.length === 0 && this.source && book.origin !== 'local')) {
       if (hasBrokenUrls) {
@@ -163,6 +163,11 @@ export class ReadBookEngine {
     if (idx < 0 || idx >= this.chapters.length || !this.book) return '';
 
     this.curIdx = idx;
+    if (this.book.origin === 'local') {
+      this.chapterCache.delete(idx);
+      this.chapterLoading.delete(idx);
+      return await this.fetchContent(idx);
+    }
     this.chapterCache.delete(idx);
     this.chapterLoading.delete(idx);
     await appDb.deleteCachedChapterContent(this.book.bookUrl, idx);
@@ -262,7 +267,7 @@ export class ReadBookEngine {
   }
 
   preloadAround(idx: number, forwardCount: number = 2, backwardCount: number = 1): void {
-    if (this.chapters.length === 0 || !this.book || !this.source) {
+    if (this.chapters.length === 0 || !this.book) {
       return;
     }
     for (let offset = 1; offset <= forwardCount; offset++) {

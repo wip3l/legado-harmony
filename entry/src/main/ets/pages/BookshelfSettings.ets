@@ -101,8 +101,11 @@ struct BookshelfSettingsPage {
               this.onDisplaySettingChanged();
             })
 
+          this.sectionTitle('本地书籍')
+          this.navItem('添加书籍', '选择并导入 TXT 和 EPUB 书籍文件', 'pages/LocalBookSettings')
+
           this.sectionTitle('封面设置')
-          this.switchItem('忽略书源封面', '开启后书架封面只使用当前应用的封面图集', this.bookshelfIgnoreSourceCover, (value: boolean) => {
+          this.switchItem('忽略原始封面', '开启后书架封面只使用当前应用的封面图集', this.bookshelfIgnoreSourceCover, (value: boolean) => {
             this.bookshelfIgnoreSourceCover = value;
             this.onCoverSettingChanged();
           })

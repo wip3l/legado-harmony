@@ -12,6 +12,7 @@
     "pages/TtsSettings",
     "pages/CustomTtsVoiceManager",
     "pages/BookshelfSettings",
+    "pages/LocalBookSettings",
     "pages/SearchExploreSettings",
     "pages/ExploreSourceSort",
     "pages/OtherSettings",

@@ -693,6 +693,40 @@ export class AppDatabase {
     }
   }
 
+  async insertBookChaptersWithContents(bookUrl: string, chapters: BookChapter[], contents: string[]): Promise<void> {
+    if (!this.store || !bookUrl || chapters.length === 0 || chapters.length !== contents.length) return;
+    const cacheDate = Date.now();
+    const chapterBuckets: relationalStore.ValuesBucket[] = [];
+    const contentBuckets: relationalStore.ValuesBucket[] = [];
+    for (let i = 0; i < chapters.length; i++) {
+      const chapter = chapters[i];
+      chapterBuckets.push({
+        url: chapter.url,
+        title: chapter.title,
+        bookUrl: chapter.bookUrl,
+        chapterIndex: chapter.index,
+        isVip: chapter.isVip ? 1 : 0,
+        isPay: chapter.isPay ? 1 : 0,
+        resourceUrl: chapter.resourceUrl,
+        tag: chapter.tag,
+        startOffset: chapter.start,
+        endOffset: chapter.end,
+        variable: chapter.variable
+      });
+      contentBuckets.push({
+        bookUrl: bookUrl,
+        chapterIndex: chapter.index,
+        chapterUrl: chapter.url,
+        chapterName: chapter.title,
+        content: contents[i] || ' ',
+        cacheDate: cacheDate
+      });
+      chapter.cacheDate = cacheDate;
+    }
+    await this.store.batchInsert('book_chapters', chapterBuckets);
+    await this.store.batchInsert('book_contents', contentBuckets);
+  }
+
   async deleteBookChapters(bookUrl: string): Promise<void> {
     if (!this.store) return;
     const predicates = new relationalStore.RdbPredicates('book_chapters');

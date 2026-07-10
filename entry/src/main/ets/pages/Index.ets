@@ -28,6 +28,7 @@ import { SearchExploreSettings, SearchExploreSettingsStore } from '../utils/Sear
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { LocalBookService } from '../core/book/LocalBookService';
 
 const SHELF_FULL_TEXT_CACHE_CANCEL_EVENT: string = 'com.legado.harmony.action.SHELF_FULL_TEXT_CACHE_CANCEL';
 
@@ -456,6 +457,8 @@ struct BookshelfPage {
   @Prop statusBarHeight: number = 0;
   @Prop navBarHeight: number = 0;
   @State books: Book[] = [];
+  @State allBooks: Book[] = [];
+  @State shelfScope: string = 'network';
   @State isLoading: boolean = false;
   @State showDeleteDialog: boolean = false;
   @State showActionDialog: boolean = false;
@@ -567,7 +570,8 @@ struct BookshelfPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      this.books = this.sortBooks(SearchExplorePendingBook.filterShelfBooks(await db.getAllBooks()));
+      this.allBooks = SearchExplorePendingBook.filterShelfBooks(await db.getAllBooks());
+      this.applyShelfScope();
       this.refreshShelfCoverCache(this.books);
     } catch (e) {
       console.error('加载书籍失败:', e);
@@ -590,6 +594,7 @@ struct BookshelfPage {
     try {
       const db = AppDatabase.getInstance();
       this.deleteBookCoverCache(book);
+      LocalBookService.deleteLocalBookFiles(getContext(this), book);
       await db.deleteBook(book.bookUrl);
       promptAction.showToast({ message: `已删除《${book.name}》` });
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
@@ -693,7 +698,14 @@ struct BookshelfPage {
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.primaryTextColor())
-            .layoutWeight(1)
+
+          Row() {
+            this.scopeChip('网络', 'network')
+            this.scopeChip('本地', 'local')
+          }
+          .margin({ left: 10 })
+
+          Blank()
 
           if (this.books.length > 0) {
             Row({ space: 6 }) {
@@ -734,7 +746,7 @@ struct BookshelfPage {
             Text('暂无书籍')
               .fontSize(16)
               .fontColor(this.subTextColor())
-            Text('搜索并加入喜欢的书籍吧')
+            Text(this.shelfScope === 'local' ? '请在书架设置中添加本地书籍' : '搜索并加入喜欢的书籍吧')
               .fontSize(14)
               .fontColor(this.subTextColor())
               .margin({ top: 8 })
@@ -829,15 +841,17 @@ struct BookshelfPage {
                 this.showDeleteConfirm(book);
               }
             })
-            this.actionItem('缓存', this.primaryTextColor(), () => {
-              if (this.pendingActionBook) {
-                const book = this.pendingActionBook;
-                this.showActionDialog = false;
-                setTimeout(() => {
-                  this.openCacheDialog(book);
-                }, 0);
-              }
-            })
+            if (!LocalBookService.isLocalBook(this.pendingActionBook)) {
+              this.actionItem('缓存', this.primaryTextColor(), () => {
+                if (this.pendingActionBook) {
+                  const book = this.pendingActionBook;
+                  this.showActionDialog = false;
+                  setTimeout(() => {
+                    this.openCacheDialog(book);
+                  }, 0);
+                }
+              })
+            }
             this.actionItem('自定义标签', this.primaryTextColor(), () => {
               if (this.pendingActionBook) {
                 this.editingTags = BookDisplayHelper.getBookTags(this.pendingActionBook);
@@ -1496,6 +1510,20 @@ struct BookshelfPage {
     if (!this.isBookCaching(book)) {
       this.loadCacheChapters(book);
     }
+  }
+
+  applyShelfScope(): void {
+    const local = this.shelfScope === 'local';
+    this.books = this.sortBooks(this.allBooks.filter((book: Book) =>
+      local ? LocalBookService.isLocalBook(book) : !LocalBookService.isLocalBook(book)));
+  }
+
+  setShelfScope(scope: string): void {
+    const next = scope === 'local' ? 'local' : 'network';
+    if (this.shelfScope === next) return;
+    this.shelfScope = next;
+    this.applyShelfScope();
+    this.refreshShelfCoverCache(this.books);
   }
 
   closeCacheDialog(resetCaching: boolean = true): void {
@@ -2403,6 +2431,10 @@ struct BookshelfPage {
       this.isShelfRefreshing = true;
       return;
     }
+    if (this.shelfScope === 'local') {
+      await this.refreshLocalBooks();
+      return;
+    }
     if (this.books.length === 0) {
       this.isShelfRefreshing = false;
       return;
@@ -2477,6 +2509,24 @@ struct BookshelfPage {
     }
   }
 
+  async refreshLocalBooks(): Promise<void> {
+    this.shelfRefreshRunning = true;
+    this.isShelfRefreshing = true;
+    this.shelfRefreshPrompt = '正在刷新本地书籍...';
+    try {
+      await this.loadBooks();
+      promptAction.showToast({ message: '本地书架已刷新' });
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+    } catch (e) {
+      console.error('刷新本地书籍失败:', e);
+      promptAction.showToast({ message: '本地书架刷新失败' });
+    } finally {
+      this.shelfRefreshRunning = false;
+      this.isShelfRefreshing = false;
+      this.shelfRefreshPrompt = '下拉刷新书架';
+    }
+  }
+
   isFinishedBook(book: Book): boolean {
     const text = `${book.kind || ''},${book.customTag || ''}`.replace(/\s+/g, '');
     if (!text) {
@@ -2538,6 +2588,21 @@ struct BookshelfPage {
     .width('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  scopeChip(label: string, scope: string) {
+    Text(label)
+      .fontSize(13)
+      .fontColor(this.shelfScope === scope ? '#FFFFFF' : this.secondaryTextColor())
+      .height(30)
+      .padding({ left: 10, right: 10 })
+      .textAlign(TextAlign.Center)
+      .backgroundColor(this.shelfScope === scope ? this.accentColor() : this.glassCardColor())
+      .border({ width: 1, color: this.shelfScope === scope ? this.accentColor() : this.glassBorderColor() })
+      .onClick(() => {
+        this.setShelfScope(scope);
+      })
   }
 
   @Builder

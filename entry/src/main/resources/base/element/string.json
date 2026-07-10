@@ -65,6 +65,10 @@
       "value": "关于"
     },
     {
+      "name": "local_book_directory_permission",
+      "value": "用于扫描下载和文档目录中的本地 TXT、EPUB 书籍"
+    },
+    {
       "name": "loading",
       "value": "加载中..."
     },
