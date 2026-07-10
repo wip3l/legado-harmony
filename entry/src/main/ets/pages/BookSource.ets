@@ -9,6 +9,8 @@ import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { VerificationSupport } from '../core/http/VerificationSupport';
+import { CookieStore } from '../core/http/CookieStore';
 
 const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const BOOK_SOURCE_IMPORT_TIMEOUT_MS = 20000;
@@ -35,6 +37,9 @@ struct BookSourcePage {
   @State showBatchDeleteDialog: boolean = false;
   @State showGroupDialog: boolean = false;
   @State showMoreActionDialog: boolean = false;
+  @State showSourceActionDialog: boolean = false;
+  @State showSourceDeleteDialog: boolean = false;
+  @State actionSourceUrl: string = '';
   @State groupNameInput: string = '';
   @State importUrl: string = '';
   @State isImporting: boolean = false;
@@ -253,12 +258,27 @@ struct BookSourcePage {
                   }
 
                   Column() {
-                    Text(source.bookSourceName)
-                      .fontSize(16)
-                      .fontWeight(FontWeight.Bold)
-                      .fontColor(this.primaryTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Row() {
+                      Text(source.bookSourceName)
+                        .fontSize(16)
+                        .fontWeight(FontWeight.Bold)
+                        .fontColor(this.primaryTextColor())
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .layoutWeight(1)
+
+                      if (this.sourceNeedsLogin(source)) {
+                        Text(this.sourceLoggedIn(source) ? '已登录' : '未登录')
+                          .fontSize(11)
+                          .fontColor(this.sourceLoggedIn(source) ? '#1E8E3E' : '#C62828')
+                          .backgroundColor(this.sourceLoggedIn(source) ? '#E7F5EA' : '#FDECEC')
+                          .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+                          .borderRadius(4)
+                          .margin({ left: 8 })
+                      }
+                    }
+                    .width('100%')
+                    .alignItems(VerticalAlign.Center)
 
                     Text(source.bookSourceUrl)
                       .fontSize(12)
@@ -286,16 +306,6 @@ struct BookSourcePage {
                           this.updateSource(source);
                         })
 
-                      Text('编辑')
-                        .fontSize(12)
-                        .fontColor(this.accentColor())
-                        .margin({ top: 8 })
-                        .onClick(() => {
-                          router.pushUrl({
-                            url: 'pages/BookSourceEdit',
-                            params: { bookSourceUrl: source.bookSourceUrl }
-                          });
-                        })
                     } else {
                       Text(source.enabled ? '已启用' : '已禁用')
                         .fontSize(12)
@@ -314,17 +324,20 @@ struct BookSourcePage {
                 .borderRadius(8)
                 .border({ width: 1, color: this.glassBorderColor() })
                 .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
+                .gesture(
+                  LongPressGesture({ repeat: false })
+                    .onAction(() => {
+                      if (!this.selectionMode && !this.isBatchOperating) {
+                        this.openSourceActions(source);
+                      }
+                    })
+                )
                 .onClick(() => {
                   if (this.isBatchOperating) {
                     return;
                   }
                   if (this.selectionMode) {
                     this.toggleSourceSelected(source.bookSourceUrl);
-                  } else {
-                    router.pushUrl({
-                      url: 'pages/BookSourceEdit',
-                      params: { bookSourceUrl: source.bookSourceUrl }
-                    });
                   }
                 })
               }
@@ -742,6 +755,14 @@ struct BookSourcePage {
         this.checkOptionsDialog()
       }
 
+      if (this.showSourceActionDialog) {
+        this.sourceActionDialog()
+      }
+
+      if (this.showSourceDeleteDialog) {
+        this.sourceDeleteDialog()
+      }
+
       if (this.showCheckDialog) {
         Column() {
           Column() {
@@ -1035,6 +1056,147 @@ struct BookSourcePage {
     })
   }
 
+  @Builder
+  sourceActionDialog() {
+    Column() {
+      Column({ space: 10 }) {
+        Text(this.actionSourceName())
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        if (this.actionSourceNeedsLogin()) {
+          Text(this.actionSourceLoggedIn() ? '当前状态：已登录' : '当前状态：未登录')
+            .fontSize(13)
+            .fontColor(this.actionSourceLoggedIn() ? '#1E8E3E' : '#C62828')
+            .width('100%')
+            .textAlign(TextAlign.Center)
+            .margin({ bottom: 4 })
+
+          Button(this.actionSourceLoggedIn() ? '重新登录' : '登录')
+            .width('100%')
+            .height(44)
+            .backgroundColor(this.buttonColor())
+            .fontColor('#FFFFFF')
+            .onClick(() => {
+              this.openActionSourceLogin();
+            })
+        }
+
+        Button('修改')
+          .width('100%')
+          .height(44)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.openActionSourceEdit();
+          })
+
+        Button(this.actionSourceEnabled() ? '禁用' : '启用')
+          .width('100%')
+          .height(44)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.toggleActionSourceEnabled();
+          })
+
+        Button('删除')
+          .width('100%')
+          .height(44)
+          .backgroundColor('#B71C1C')
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.showSourceActionDialog = false;
+            this.showSourceDeleteDialog = true;
+          })
+
+        Button('取消')
+          .width('100%')
+          .height(44)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.closeSourceActions();
+          })
+      }
+      .width('86%')
+      .padding(22)
+      .backgroundColor(this.cardColor())
+      .borderRadius(12)
+      .onClick(() => {
+      })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#80000000')
+    .justifyContent(FlexAlign.Center)
+    .onClick(() => {
+      this.closeSourceActions();
+    })
+  }
+
+  @Builder
+  sourceDeleteDialog() {
+    Column() {
+      Column() {
+        Text('删除书源')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .width('100%')
+          .textAlign(TextAlign.Center)
+
+        Text(`确定删除“${this.actionSourceName()}”吗？删除后不可恢复。`)
+          .fontSize(14)
+          .fontColor(this.secondaryTextColor())
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .margin({ top: 12, bottom: 20 })
+
+        Row({ space: 10 }) {
+          Button('取消')
+            .layoutWeight(1)
+            .height(44)
+            .backgroundColor(this.inputColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => {
+              this.showSourceDeleteDialog = false;
+              this.actionSourceUrl = '';
+            })
+
+          Button('删除')
+            .layoutWeight(1)
+            .height(44)
+            .backgroundColor('#B71C1C')
+            .fontColor('#FFFFFF')
+            .onClick(() => {
+              this.deleteActionSource();
+            })
+        }
+        .width('100%')
+      }
+      .width('86%')
+      .padding(22)
+      .backgroundColor(this.cardColor())
+      .borderRadius(12)
+      .onClick(() => {
+      })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#80000000')
+    .justifyContent(FlexAlign.Center)
+    .onClick(() => {
+      this.showSourceDeleteDialog = false;
+      this.actionSourceUrl = '';
+    })
+  }
+
   syncBars(): void {
     syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
@@ -1106,6 +1268,183 @@ struct BookSourcePage {
     }
   }
 
+  sourceNeedsLogin(source: BookSource): boolean {
+    const loginUrl = String(source.loginUrl || '').trim();
+    const loginUi = String(source.loginUi || '').trim();
+    const loginCheckJs = String(source.loginCheckJs || '').trim();
+    const loginHeader = String(source.loginHeader || '').trim();
+    if (loginUrl || loginUi || loginCheckJs || loginHeader) {
+      return true;
+    }
+    const rules = `${source.jsLib || ''}\n${source.searchUrl || ''}\n${source.exploreUrl || ''}\n` +
+      `${source.bookInfoRule?.init || ''}\n${source.tocRule?.chapterList || ''}\n${source.contentRule?.content || ''}`;
+    return /loginCheck|loginUrl|loginUi|book-source-login|请先登[录陆]|需要登[录陆]|账号登[录陆]|网页登录|登[录陆]后/i.test(rules);
+  }
+
+  sourceLoggedIn(source: BookSource): boolean {
+    if (!this.sourceNeedsLogin(source)) {
+      return false;
+    }
+    if (String(source.loginHeader || '').trim()) {
+      return true;
+    }
+    const loginUrl = VerificationSupport.resolveBookSourceLoginUrl(source);
+    const urls = [
+      String(source.loginUrl || '').trim(),
+      loginUrl,
+      this.sourceUrlOrigin(loginUrl),
+      String(source.bookSourceUrl || '').trim(),
+      this.sourceUrlOrigin(String(source.bookSourceUrl || '').trim())
+    ];
+    for (const url of urls) {
+      if (url && this.hasLoginCookie(CookieStore.getCookie(url))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  hasLoginCookie(cookie: string): boolean {
+    if (!cookie) {
+      return false;
+    }
+    const names: string[] = [];
+    for (const part of cookie.split(';')) {
+      const index = part.indexOf('=');
+      if (index <= 0 || !part.substring(index + 1).trim()) {
+        continue;
+      }
+      const name = part.substring(0, index).trim().toLowerCase();
+      if (name && name !== 'cookiecheck' && name !== '__cf_bm' && name !== 'cf_clearance') {
+        names.push(name);
+      }
+    }
+    return names.some((name: string) => /session|sess|token|auth|user|uid|sid|ticket|login|account|key/.test(name)) ||
+      names.length >= 2;
+  }
+
+  sourceUrlOrigin(url: string): string {
+    const match = (url || '').match(/^(https?:\/\/[^/]+)/i);
+    return match && match[1] ? match[1] : '';
+  }
+
+  openSourceActions(source: BookSource): void {
+    this.actionSourceUrl = source.bookSourceUrl;
+    this.showSourceDeleteDialog = false;
+    this.showSourceActionDialog = true;
+  }
+
+  closeSourceActions(): void {
+    this.showSourceActionDialog = false;
+    this.actionSourceUrl = '';
+  }
+
+  actionSource(): BookSource | null {
+    return this.sources.find((source: BookSource) => source.bookSourceUrl === this.actionSourceUrl) || null;
+  }
+
+  actionSourceName(): string {
+    const source = this.actionSource();
+    return source ? (source.bookSourceName || source.bookSourceUrl) : '当前书源';
+  }
+
+  actionSourceNeedsLogin(): boolean {
+    const source = this.actionSource();
+    return source ? this.sourceNeedsLogin(source) : false;
+  }
+
+  actionSourceLoggedIn(): boolean {
+    const source = this.actionSource();
+    return source ? this.sourceLoggedIn(source) : false;
+  }
+
+  actionSourceEnabled(): boolean {
+    const source = this.actionSource();
+    return source ? source.enabled : false;
+  }
+
+  openActionSourceLogin(): void {
+    const source = this.actionSource();
+    if (!source || !this.sourceNeedsLogin(source)) {
+      return;
+    }
+    this.showSourceActionDialog = false;
+    if (this.sourceUsesEditorLogin(source)) {
+      this.actionSourceUrl = '';
+      router.pushUrl({
+        url: 'pages/BookSourceEdit',
+        params: { bookSourceUrl: source.bookSourceUrl }
+      });
+      return;
+    }
+    const loginEntryUrl = VerificationSupport.buildBookSourceLoginUrl(source);
+    VerificationSupport.requestVerification(
+      VerificationSupport.resolveBookSourceLoginUrl(source),
+      `${source.bookSourceName || '书源'} 登录`,
+      source
+    );
+    this.actionSourceUrl = '';
+    router.pushUrl({
+      url: 'pages/VerifyWeb',
+      params: {
+        url: loginEntryUrl,
+        title: `${source.bookSourceName || '书源'} 登录`
+      }
+    });
+  }
+
+  sourceUsesEditorLogin(source: BookSource): boolean {
+    const raw = `${source.bookSourceName || ''}\n${source.bookSourceUrl || ''}\n${source.loginUrl || ''}\n${source.jsLib || ''}`.toLowerCase();
+    return raw.includes('书山') || raw.includes('shushan');
+  }
+
+  openActionSourceEdit(): void {
+    const source = this.actionSource();
+    if (!source) {
+      return;
+    }
+    this.closeSourceActions();
+    router.pushUrl({
+      url: 'pages/BookSourceEdit',
+      params: { bookSourceUrl: source.bookSourceUrl }
+    });
+  }
+
+  async toggleActionSourceEnabled(): Promise<void> {
+    const source = this.actionSource();
+    if (!source) {
+      return;
+    }
+    source.enabled = !source.enabled;
+    await this.updateSource(source);
+    this.sources = this.sources.map((item: BookSource) =>
+      item.bookSourceUrl === source.bookSourceUrl ? source : item);
+    this.closeSourceActions();
+    promptAction.showToast({ message: source.enabled ? '书源已启用' : '书源已禁用' });
+  }
+
+  async deleteActionSource(): Promise<void> {
+    const source = this.actionSource();
+    if (!source || this.isBatchOperating) {
+      return;
+    }
+    this.showSourceDeleteDialog = false;
+    this.isBatchOperating = true;
+    this.batchOperationText = '正在删除书源...';
+    try {
+      const db = AppDatabase.getInstance();
+      await db.deleteBookSource(source.bookSourceUrl);
+      this.sources = this.sources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
+      this.actionSourceUrl = '';
+      promptAction.showToast({ message: '书源已删除' });
+    } catch (e) {
+      console.error('删除书源失败:', e);
+      promptAction.showToast({ message: '删除书源失败' });
+    } finally {
+      this.isBatchOperating = false;
+    }
+  }
+
   enterSelectionMode(): void {
     this.selectionMode = true;
     this.selectedSourceUrls = [];
@@ -1119,7 +1458,8 @@ struct BookSourcePage {
   }
 
   sourceListItemKey(source: BookSource): string {
-    return `${source.bookSourceUrl}_${source.bookSourceGroup || ''}_${source.enabled ? '1' : '0'}_${source.enabledExplore ? '1' : '0'}_${source.bookSourceName || ''}`;
+    const loginStatus = this.sourceNeedsLogin(source) ? (this.sourceLoggedIn(source) ? 'logged' : 'unlogged') : 'none';
+    return `${source.bookSourceUrl}_${source.bookSourceGroup || ''}_${source.enabled ? '1' : '0'}_${source.enabledExplore ? '1' : '0'}_${source.bookSourceName || ''}_${loginStatus}`;
   }
 
   isSourceSelected(bookSourceUrl: string): boolean {
@@ -1684,7 +2024,9 @@ struct BookSourcePage {
         }
       }
 
-      promptAction.showToast({ message: `成功导入 ${importCount} 个书源` });
+      const loginCount = sources.filter((source: BookSource) => this.sourceNeedsLogin(source)).length;
+      const loginMessage = loginCount > 0 ? `，其中 ${loginCount} 个需要登录` : '';
+      promptAction.showToast({ message: `成功导入 ${importCount} 个书源${loginMessage}` });
       await this.loadSources();
     } catch (e) {
       console.error('解析书源失败:', e);
