@@ -40,7 +40,7 @@ struct SearchPage {
   @StorageLink('searchExploreExactSearch') exactSearch: boolean = false;
   @StorageLink('searchExploreExactSearchMatchAuthor') exactSearchMatchAuthor: boolean = true;
   @StorageLink('searchExploreShowSearchProgress') showSearchProgress: boolean = true;
-  @StorageLink('searchExploreSearchConcurrency') searchConcurrency: number = 8;
+  @StorageLink('searchExploreSearchConcurrency') searchConcurrency: number = 6;
   @StorageLink('searchExploreSelectedSourceGroups') selectedSourceGroupsRaw: string = '';
   private shelfStatusVersion: number = 0;
   private shelfSyncRunning: boolean = false;
@@ -656,7 +656,7 @@ struct SearchPage {
           this.saveSearchExploreSettings();
         })
 
-        this.numberSettingRow('搜索并发数', this.searchConcurrency, 1, 32, (value: number) => {
+        this.numberSettingRow('搜索并发数', this.searchConcurrency, 1, 12, (value: number) => {
           this.searchConcurrency = SearchExploreSettingsStore.normalizeSearchConcurrency(value);
           this.saveSearchExploreSettings();
         })

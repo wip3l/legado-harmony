@@ -1378,21 +1378,25 @@ struct BookSourcePage {
     this.checkBadNames = [];
     this.checkAutoHandledCount = 0;
     this.checkStatus = `准备校验 ${enabledSources.length} 个启用书源`;
+    const availableUrls = new Set<string>();
 
     try {
       const coordinator = new SearchCoordinator(SearchExploreSettingsStore.getSearchConcurrency());
-      const results = await coordinator.search(BOOK_SOURCE_CHECK_KEYWORD, (progress: SearchProgress) => {
+      await coordinator.search(BOOK_SOURCE_CHECK_KEYWORD, (progress: SearchProgress) => {
         this.checkDone = progress.done;
         this.checkTotal = progress.total;
         this.checkStatus = this.formatCheckProgressStatus(progress);
       }, {
         onSourceComplete: async (source: BookSource, books: SearchBook[]) => {
+          if (books.length > 0) {
+            availableUrls.add(source.bookSourceUrl);
+          }
           await this.handleCheckedSourceCompletion(source, books.length > 0);
-        }
+        },
+        validationOnly: true
       });
 
-      const okUrls = this.uniqueResultOrigins(results);
-      const badSources = enabledSources.filter((source: BookSource) => !okUrls.includes(source.bookSourceUrl));
+      const badSources = enabledSources.filter((source: BookSource) => !availableUrls.has(source.bookSourceUrl));
       this.checkOkCount = Math.max(0, enabledSources.length - badSources.length);
       this.checkBadUrls = badSources.map((source: BookSource) => source.bookSourceUrl);
       this.checkBadNames = badSources.map((source: BookSource) => source.bookSourceName || source.bookSourceUrl);
@@ -1440,17 +1444,6 @@ struct BookSourcePage {
     } catch (e) {
       console.error(`自动${this.checkInvalidAction === 'delete' ? '删除' : '禁用'}无效书源失败:`, e);
     }
-  }
-
-  uniqueResultOrigins(results: SearchBook[]): string[] {
-    const origins: string[] = [];
-    for (const book of results) {
-      const origin = book.origin || '';
-      if (origin && !origins.includes(origin)) {
-        origins.push(origin);
-      }
-    }
-    return origins;
   }
 
   checkSummaryText(): string {

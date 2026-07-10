@@ -15,7 +15,7 @@ struct SearchExploreSettingsPage {
   @StorageLink('searchExploreExactSearch') searchExploreExactSearch: boolean = false;
   @StorageLink('searchExploreExactSearchMatchAuthor') searchExploreExactSearchMatchAuthor: boolean = true;
   @StorageLink('searchExploreShowSearchProgress') searchExploreShowSearchProgress: boolean = true;
-  @StorageLink('searchExploreSearchConcurrency') searchExploreSearchConcurrency: number = 8;
+  @StorageLink('searchExploreSearchConcurrency') searchExploreSearchConcurrency: number = 6;
   @StorageLink('searchExploreSelectedSourceGroups') searchExploreSelectedSourceGroups: string = '';
   @StorageLink('searchExploreSourceSort') searchExploreSourceSort: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
@@ -87,7 +87,7 @@ struct SearchExploreSettingsPage {
               this.onSettingChanged();
             })
           this.numberSettingItem('搜索并发数', '控制书籍检索、书源校验和换源同时并发请求的数量',
-            this.searchExploreSearchConcurrency, 1, 32, (value: number) => {
+            this.searchExploreSearchConcurrency, 1, 12, (value: number) => {
               this.searchExploreSearchConcurrency = SearchExploreSettingsStore.normalizeSearchConcurrency(value);
               this.onSettingChanged();
             })

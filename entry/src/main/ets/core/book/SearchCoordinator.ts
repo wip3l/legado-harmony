@@ -25,9 +25,13 @@ export interface SearchProgress {
 
 export type SearchCallback = (progress: SearchProgress) => void;
 
-const MAX_SEARCH_CONCURRENCY = 32;
+const MAX_SEARCH_CONCURRENCY = 12;
+const MAX_VALIDATION_CONCURRENCY = 4;
 const SEARCH_PROGRESS_EMIT_INTERVAL_MS = 250;
-const MAX_SEARCH_RESPONSE_BYTES = 4 * 1024 * 1024;
+const MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_VALIDATION_RESPONSE_BYTES = 1024 * 1024;
+const MAX_RESULTS_PER_SOURCE = 50;
+const MAX_TOTAL_SEARCH_RESULTS = 1000;
 const ENABLE_SEARCH_DEBUG_LOG = false;
 
 export interface SearchOptions {
@@ -35,6 +39,7 @@ export interface SearchOptions {
   exactMatchAuthor?: boolean;
   sourceGroups?: string[];
   onSourceComplete?: (source: BookSource, books: SearchBook[]) => Promise<void>;
+  validationOnly?: boolean;
 }
 
 interface ScoredSearchBook {
@@ -84,13 +89,13 @@ export class SearchCoordinator {
     let lastProgressEmitAt = 0;
     let currentSourceLabel = '';
     let pendingDeltaResults: SearchBook[] = [];
-    const workerCount = Math.min(this.concurrency, sources.length);
+    const validationOnly = options.validationOnly === true;
+    const effectiveConcurrency = validationOnly ? Math.min(this.concurrency, MAX_VALIDATION_CONCURRENCY) : this.concurrency;
+    const workerCount = Math.min(effectiveConcurrency, sources.length);
 
     const emitProgress = (force: boolean = false): void => {
       const now = Date.now();
-      const hasDeltaResults = pendingDeltaResults.length > 0;
-      if (!force && !hasDeltaResults && done < sources.length &&
-        now - lastProgressEmitAt < SEARCH_PROGRESS_EMIT_INTERVAL_MS) {
+      if (!force && done < sources.length && now - lastProgressEmitAt < SEARCH_PROGRESS_EMIT_INTERVAL_MS) {
         return;
       }
       lastProgressEmitAt = now;
@@ -100,8 +105,8 @@ export class SearchCoordinator {
       pendingDeltaResults = [];
       safeCallback({
         done: done, total: sources.length,
-        results: finished ? this.filterAndSortSearchResults(all, keyword, options) : [],
-        deltaResults: deltaResults,
+        results: finished && !validationOnly ? this.filterAndSortSearchResults(all, keyword, options) : [],
+        deltaResults: validationOnly ? [] : deltaResults,
         finished: finished,
         status: verifyUrl ?
           `已搜索 ${done}/${sources.length}，当前：${currentSourceLabel || '准备中'}，找到 ${displayResultCount} 本；有书源需要网页验证` :
@@ -130,12 +135,16 @@ export class SearchCoordinator {
             console.error('[SC] source completion callback failed:', e);
           }
         }
-        const displayBooks = this.filterSearchResults(books, keyword, options);
+        const remainingCapacity = Math.max(0, MAX_TOTAL_SEARCH_RESULTS - all.length);
+        const acceptedBooks = validationOnly ? [] : books.slice(0, remainingCapacity);
+        const displayBooks = this.filterSearchResults(acceptedBooks, keyword, options);
 
         done++;
         displayResultCount += displayBooks.length;
-        pendingDeltaResults.push(...displayBooks);
-        all.push(...books);
+        if (!validationOnly) {
+          pendingDeltaResults.push(...displayBooks);
+          all.push(...acceptedBooks);
+        }
         emitProgress();
       }
     };
@@ -147,15 +156,18 @@ export class SearchCoordinator {
     await Promise.all(workers);
     emitProgress(true);
 
-    return this.filterAndSortSearchResults(all, keyword, options);
+    return validationOnly ? [] : this.filterAndSortSearchResults(all, keyword, options);
   }
 
   private async searchOne(source: BookSource, keyword: string, options: SearchOptions): Promise<SearchBook[]> {
     try {
       if (this.cancelled) return [];
+      const responseLimit = options.validationOnly === true ?
+        MAX_VALIDATION_RESPONSE_BYTES : MAX_SEARCH_RESPONSE_BYTES;
+      const resultLimit = options.validationOnly === true ? 1 : MAX_RESULTS_PER_SOURCE;
       if (BookSourceDataUrlSupport.sourceUsesGySearch(source)) {
-        const books = await BookSourceDataUrlSupport.search(this.http, source, keyword, 1, MAX_SEARCH_RESPONSE_BYTES);
-        return this.sanitizeSearchBooks(books);
+        const books = await BookSourceDataUrlSupport.search(this.http, source, keyword, 1, responseLimit);
+        return this.sanitizeSearchBooks(books, resultLimit);
       }
       if (this.cancelled) return [];
       if (!source.searchUrl || !source.searchRule?.bookList || !source.searchRule?.name || !source.searchRule?.bookUrl) {
@@ -172,7 +184,7 @@ export class SearchCoordinator {
       js.setVar('page', '1');
 
       const au = new AnalyzeUrl(source, this.http);
-      let urlTemplate = await this.evalAndBuild(js, source, keyword);
+      let urlTemplate = await this.evalAndBuild(js, source, keyword, responseLimit);
       if (!urlTemplate && source.searchUrl.includes('gysearch')) {
         urlTemplate = EncodedSourceUrl.buildSearchUrl(keyword);
       }
@@ -180,7 +192,7 @@ export class SearchCoordinator {
         console.log('[SC] search source:', source.bookSourceName, 'url:', urlTemplate);
       }
       const resp = EncodedSourceUrl.canHandle(urlTemplate) ?
-        await this.fetchEncodedDataUrl(urlTemplate, source) : await au.fetch(urlTemplate, MAX_SEARCH_RESPONSE_BYTES);
+        await this.fetchEncodedDataUrl(urlTemplate, source, responseLimit) : await au.fetch(urlTemplate, responseLimit);
       if (this.cancelled) return [];
 
       if (ENABLE_SEARCH_DEBUG_LOG) {
@@ -282,6 +294,9 @@ export class SearchCoordinator {
             console.log('[SC] 第一条结果:', book.name, book.bookUrl, 'from:', source.bookSourceName);
           }
           books.push(book);
+          if (books.length >= resultLimit) {
+            break;
+          }
         }
       }
       if (books.length === 0 && items.length > 0) {
@@ -338,7 +353,7 @@ export class SearchCoordinator {
     book.variable = this.cleanJsonField(book.variable, 8192);
   }
 
-  private sanitizeSearchBooks(books: SearchBook[]): SearchBook[] {
+  private sanitizeSearchBooks(books: SearchBook[], limit: number): SearchBook[] {
     const cleaned: SearchBook[] = [];
     const seen = new Set<string>();
     for (const book of books || []) {
@@ -348,6 +363,7 @@ export class SearchCoordinator {
       if (seen.has(key)) continue;
       seen.add(key);
       cleaned.push(book);
+      if (cleaned.length >= limit) break;
     }
     return cleaned;
   }
@@ -587,11 +603,12 @@ export class SearchCoordinator {
       /\/(?:thumb_url|cover|audio_thumb_uri)$/.test(value);
   }
 
-  private async evalAndBuild(js: JsRuntime, source: BookSource, keyword: string): Promise<string> {
+  private async evalAndBuild(js: JsRuntime, source: BookSource, keyword: string,
+    maxResponseBytes: number): Promise<string> {
     const searchUrl = source.searchUrl;
     const baseUrl = source.bookSourceUrl;
     if (!searchUrl) return `${baseUrl}/search?q={{key}}`;
-    const scriptedFormUrl = await this.tryBuildScriptedFormSearchUrl(source, keyword);
+    const scriptedFormUrl = await this.tryBuildScriptedFormSearchUrl(source, keyword, maxResponseBytes);
     if (scriptedFormUrl) return scriptedFormUrl;
     const buildRequestUrl = BookSourceDataUrlSupport.buildRequestUrl(source, searchUrl, '1', keyword);
     if (buildRequestUrl) return buildRequestUrl;
@@ -648,7 +665,8 @@ export class SearchCoordinator {
     if (!ctx.has('source.variable')) ctx.put('source.variable', source.variableComment || '');
   }
 
-  private async tryBuildScriptedFormSearchUrl(source: BookSource, keyword: string): Promise<string> {
+  private async tryBuildScriptedFormSearchUrl(source: BookSource, keyword: string,
+    maxResponseBytes: number): Promise<string> {
     const script = source.searchUrl || '';
     if (!script.startsWith('@js:') || !script.includes('java.ajax') || !script.includes('input[name=act]')) {
       return '';
@@ -661,7 +679,8 @@ export class SearchCoordinator {
     const resp = await this.http.execute({
       url: formBaseUrl,
       method: 'GET',
-      headers: this.parseSourceHeaders(source.header)
+      headers: this.parseSourceHeaders(source.header),
+      maxResponseBytes: maxResponseBytes
     });
     if (!resp.success || !resp.body) return '';
 
@@ -769,9 +788,10 @@ export class SearchCoordinator {
     return hosts;
   }
 
-  private async fetchEncodedDataUrl(url: string, source: BookSource): Promise<{ url: string, statusCode: number, headers: Record<string, string>, body: string, success: boolean, error?: string }> {
+  private async fetchEncodedDataUrl(url: string, source: BookSource,
+    maxResponseBytes: number): Promise<{ url: string, statusCode: number, headers: Record<string, string>, body: string, success: boolean, error?: string }> {
     const root = await EncodedSourceUrl.requestJsonForDataUrl(this.http, url,
-      BookSourceDataUrlSupport.sourceBackendHost(source), MAX_SEARCH_RESPONSE_BYTES);
+      BookSourceDataUrlSupport.sourceBackendHost(source), maxResponseBytes);
     if (!root) {
       return { url: url, statusCode: 0, headers: {}, body: '', success: false, error: 'encoded data url request failed' };
     }

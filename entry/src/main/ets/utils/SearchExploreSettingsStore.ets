@@ -9,7 +9,7 @@ export class SearchExploreSettings {
   exactSearch: boolean = false;
   exactSearchMatchAuthor: boolean = true;
   showSearchProgress: boolean = true;
-  searchConcurrency: number = 8;
+  searchConcurrency: number = 6;
   selectedSourceGroupsRaw: string = '';
   sourceSortRaw: string = '';
   exploreSourceUrl: string = '';
@@ -30,9 +30,9 @@ export class SearchExploreSettingsStore {
   static readonly KEY_EXPLORE_SOURCE_URL: string = 'exploreSourceUrl';
   static readonly KEY_EXPLORE_PLATFORM: string = 'explorePlatform';
   private static readonly STORE_NAME: string = 'search_explore_settings';
-  private static readonly DEFAULT_SEARCH_CONCURRENCY: number = 8;
+  private static readonly DEFAULT_SEARCH_CONCURRENCY: number = 6;
   private static readonly MIN_SEARCH_CONCURRENCY: number = 1;
-  private static readonly MAX_SEARCH_CONCURRENCY: number = 32;
+  private static readonly MAX_SEARCH_CONCURRENCY: number = 12;
   private static cachedSettings: SearchExploreSettings | null = null;
 
   static async load(context: Context): Promise<SearchExploreSettings> {
