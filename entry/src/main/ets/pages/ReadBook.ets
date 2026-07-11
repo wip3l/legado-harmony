@@ -1935,6 +1935,7 @@ struct ReadBookPage {
     this.readerDarkCustomThemeBackgroundColor = settings.darkCustomThemeBackgroundColor;
     this.readerDarkCustomThemeTextColor = settings.darkCustomThemeTextColor;
     this.readerCustomThemesRaw = settings.customThemesRaw || '';
+    this.customThemeNameDraft = this.currentCustomThemeScheme().name;
     this.readerPageTurnMode = settings.pageTurnMode;
     this.readerPageTurnAnimationType = settings.pageTurnAnimationType;
     this.readerLandscapeDoublePage = settings.landscapeDoublePage;
@@ -2497,8 +2498,7 @@ struct ReadBookPage {
   }
 
   getReaderContentBottomPadding(): number {
-    const bottomPadding = this.readerMarginBottom + this.getReaderContentBottomReserve();
-    return Math.max(0, bottomPadding - 14);
+    return Math.max(0, this.readerMarginBottom + this.getReaderContentBottomReserve());
   }
 
   getEffectiveReaderLineHeight(): number {
@@ -4020,7 +4020,7 @@ struct ReadBookPage {
               })
           }
           .width('100%')
-          TextInput({ text: this.customThemeNameDraft || this.currentCustomThemeScheme().name, placeholder: '方案名称' })
+          TextInput({ text: this.customThemeNameDraft, placeholder: '输入方案名称' })
             .fontSize(14)
             .fontColor(this.getTextColor())
             .height(36)
@@ -5968,8 +5968,7 @@ struct ReadBookPage {
   }
 
   getReaderPaginationHeightTolerancePx(): number {
-    const bottomInsetPx = this.toMeasurePx(this.getReaderContentBottomPadding());
-    return Math.max(1, bottomInsetPx);
+    return 1;
   }
 
   getReaderTextParagraphs(text: string): ReaderTextParagraph[] {
@@ -6412,8 +6411,13 @@ struct ReadBookPage {
   readerSlidingPageTurnSurface(currentText: string, currentRenderVersion: number, ttsRenderVersion: number) {
     Stack() {
       if (this.shouldRenderSlidingPageTurn()) {
-        this.readerIncomingPageSurface(this.pageTurnIncomingRenderVersion, this.getVisiblePageTurnIncomingText())
-        this.readerCurrentPageSurface(currentRenderVersion, currentText, ttsRenderVersion)
+        if (this.isStackPageTurnAnimation()) {
+          this.readerCurrentPageSurface(currentRenderVersion, currentText, ttsRenderVersion)
+          this.readerIncomingPageSurface(this.pageTurnIncomingRenderVersion, this.getVisiblePageTurnIncomingText())
+        } else {
+          this.readerIncomingPageSurface(this.pageTurnIncomingRenderVersion, this.getVisiblePageTurnIncomingText())
+          this.readerCurrentPageSurface(currentRenderVersion, currentText, ttsRenderVersion)
+        }
       } else {
         this.readerCurrentPageSurface(currentRenderVersion, currentText, ttsRenderVersion)
       }
@@ -6428,8 +6432,13 @@ struct ReadBookPage {
   readerSlidingPageTurnSurfaceAlternate(currentText: string, currentRenderVersion: number, ttsRenderVersion: number) {
     Stack() {
       if (this.shouldRenderSlidingPageTurn()) {
-        this.readerIncomingPageSurface(this.pageTurnIncomingRenderVersion, this.getVisiblePageTurnIncomingText())
-        this.readerCurrentPageSurfaceAlternate(currentRenderVersion, currentText, ttsRenderVersion)
+        if (this.isStackPageTurnAnimation()) {
+          this.readerCurrentPageSurfaceAlternate(currentRenderVersion, currentText, ttsRenderVersion)
+          this.readerIncomingPageSurface(this.pageTurnIncomingRenderVersion, this.getVisiblePageTurnIncomingText())
+        } else {
+          this.readerIncomingPageSurface(this.pageTurnIncomingRenderVersion, this.getVisiblePageTurnIncomingText())
+          this.readerCurrentPageSurfaceAlternate(currentRenderVersion, currentText, ttsRenderVersion)
+        }
       } else {
         this.readerCurrentPageSurfaceAlternate(currentRenderVersion, currentText, ttsRenderVersion)
       }
@@ -6468,8 +6477,15 @@ struct ReadBookPage {
 
   @Builder
   readerIncomingPageSurface(renderVersion: number, text: string) {
-    Column() {
-      this.readerIncomingPageLayer(renderVersion, text)
+    Stack() {
+      if (this.isStackPageTurnAnimation()) {
+        this.readerIncomingPageBackground()
+      }
+      Column() {
+        this.readerIncomingPageLayer(renderVersion, text)
+      }
+      .width('100%')
+      .height('100%')
     }
     .width('100%')
     .height('100%')
@@ -6477,6 +6493,23 @@ struct ReadBookPage {
     .backgroundColor(this.readerContentLayerColor())
     .translate({ x: this.getIncomingSlideX(), y: this.getIncomingSlideY() })
     .opacity(this.getVisiblePageTurnIncomingOpacity())
+    .clip(true)
+  }
+
+  @Builder
+  readerIncomingPageBackground() {
+    if (this.hasBackgroundImage()) {
+      Image(this.getBackgroundImage())
+        .width('100%')
+        .height('100%')
+        .objectFit(this.getBackgroundImageFit())
+        .hitTestBehavior(HitTestMode.None)
+    } else {
+      Blank()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.getBackgroundColor())
+    }
   }
 
   @Builder
@@ -8029,7 +8062,7 @@ struct ReadBookPage {
       return Math.max(0, Math.min(1, this.pageTurnIncomingOpacity * this.getPageTurnProgress()));
     }
     if (type === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK) {
-      return Math.max(0, Math.min(1, this.pageTurnIncomingOpacity * (0.62 + this.getPageTurnProgress() * 0.38)));
+      return this.pageTurnIncomingOpacity;
     }
     return this.pageTurnIncomingOpacity;
   }
@@ -8044,6 +8077,11 @@ struct ReadBookPage {
 
   isVerticalPageTurnAnimation(): boolean {
     return this.readerPageTurnMode === 0;
+  }
+
+  isStackPageTurnAnimation(): boolean {
+    return this.normalizePageTurnAnimationType(this.readerPageTurnAnimationType) ===
+      ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK;
   }
 
   getPageTurnDistance(): number {
@@ -8089,7 +8127,7 @@ struct ReadBookPage {
       return 0;
     }
     if (type === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK) {
-      return this.pageSlideOffsetX * 0.24;
+      return 0;
     }
     return this.pageTransitionX + this.pageSlideOffsetX;
   }
@@ -8106,7 +8144,7 @@ struct ReadBookPage {
       return 0;
     }
     if (type === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK) {
-      return this.pageSlideOffsetY * 0.24;
+      return 0;
     }
     return this.pageSlideOffsetY;
   }
@@ -8120,7 +8158,7 @@ struct ReadBookPage {
       return Math.max(0.12, 1 - this.getPageTurnProgress());
     }
     if (type === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK) {
-      return Math.max(0.72, 1 - this.getPageTurnProgress() * 0.28);
+      return 1;
     }
     return this.pageTransitionOpacity;
   }
@@ -8131,7 +8169,7 @@ struct ReadBookPage {
       return 0;
     }
     if (type === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK) {
-      return direction > 0 ? width * 0.36 + offsetX * 0.36 : offsetX * 0.36 - width * 0.36;
+      return direction > 0 ? width + offsetX : offsetX - width;
     }
     return direction > 0 ? width + offsetX : offsetX - width;
   }
@@ -8149,7 +8187,7 @@ struct ReadBookPage {
       return 0;
     }
     if (type === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK) {
-      return direction > 0 ? height * 0.36 + offsetY * 0.36 : offsetY * 0.36 - height * 0.36;
+      return direction > 0 ? height + offsetY : offsetY - height;
     }
     return direction > 0 ? height + offsetY : offsetY - height;
   }

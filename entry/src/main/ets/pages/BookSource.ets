@@ -715,6 +715,17 @@ struct BookSourcePage {
                 this.batchSetExploreEnabled(false);
               })
 
+            Button('导出 JSON')
+              .width('100%')
+              .height(44)
+              .backgroundColor(this.inputColor())
+              .fontColor(this.primaryTextColor())
+              .margin({ bottom: 10 })
+              .onClick(() => {
+                this.showMoreActionDialog = false;
+                this.exportSelectedSources();
+              })
+
             Button('删除')
               .width('100%')
               .height(44)
@@ -1309,22 +1320,7 @@ struct BookSourcePage {
   }
 
   hasLoginCookie(cookie: string): boolean {
-    if (!cookie) {
-      return false;
-    }
-    const names: string[] = [];
-    for (const part of cookie.split(';')) {
-      const index = part.indexOf('=');
-      if (index <= 0 || !part.substring(index + 1).trim()) {
-        continue;
-      }
-      const name = part.substring(0, index).trim().toLowerCase();
-      if (name && name !== 'cookiecheck' && name !== '__cf_bm' && name !== 'cf_clearance') {
-        names.push(name);
-      }
-    }
-    return names.some((name: string) => /session|sess|token|auth|user|uid|sid|ticket|login|account|key/.test(name)) ||
-      names.length >= 2;
+    return VerificationSupport.hasEffectiveLoginCookie(cookie);
   }
 
   sourceUrlOrigin(url: string): string {
@@ -1381,9 +1377,15 @@ struct BookSourcePage {
       });
       return;
     }
-    const loginEntryUrl = VerificationSupport.buildBookSourceLoginUrl(source);
+    const loginEntryUrl = VerificationSupport.resolveBookSourceLoginUrl(source) ||
+      VerificationSupport.pickVerificationUrl(source, source.bookSourceUrl);
+    if (!loginEntryUrl || !/^https?:\/\//i.test(loginEntryUrl)) {
+      this.actionSourceUrl = '';
+      promptAction.showToast({ message: '未找到可用的网页登录地址，请检查书源登录配置' });
+      return;
+    }
     VerificationSupport.requestVerification(
-      VerificationSupport.resolveBookSourceLoginUrl(source),
+      loginEntryUrl,
       `${source.bookSourceName || '书源'} 登录`,
       source
     );
@@ -1392,7 +1394,8 @@ struct BookSourcePage {
       url: 'pages/VerifyWeb',
       params: {
         url: loginEntryUrl,
-        title: `${source.bookSourceName || '书源'} 登录`
+        title: `${source.bookSourceName || '书源'} 登录`,
+        requireLoginCookie: 'true'
       }
     });
   }
@@ -1905,6 +1908,60 @@ struct BookSourcePage {
     } finally {
       this.isImporting = false;
     }
+  }
+
+  async exportSelectedSources(): Promise<void> {
+    if (this.selectedSourceUrls.length === 0 || this.isBatchOperating) {
+      promptAction.showToast({ message: '请先选择书源' });
+      return;
+    }
+    const selected = this.sources.filter((source: BookSource) =>
+      this.selectedSourceUrls.includes(source.bookSourceUrl));
+    if (selected.length === 0) {
+      promptAction.showToast({ message: '未找到可导出的书源' });
+      return;
+    }
+
+    let file: fs.File | null = null;
+    try {
+      const options: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+      options.newFileNames = [`legado_book_sources_${this.exportTimestamp()}.json`];
+      options.fileSuffixChoices = ['JSON 文件|.json'];
+      const result = await new picker.DocumentViewPicker(getContext(this)).save(options);
+      if (!result || result.length === 0) {
+        return;
+      }
+
+      this.isBatchOperating = true;
+      this.batchOperationText = '正在导出书源...';
+      const json = JSON.stringify(selected, null, 2);
+      const bytes = new util.TextEncoder().encodeInto(json);
+      file = await fs.open(result[0], fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
+      await fs.write(file.fd, bytes.buffer, { offset: 0, length: bytes.byteLength });
+      await fs.close(file);
+      file = null;
+      promptAction.showToast({ message: `已导出 ${selected.length} 个书源` });
+    } catch (e) {
+      console.error('导出书源失败:', e);
+      const message = e instanceof Error ? e.message : String(e);
+      promptAction.showToast({ message: `导出失败: ${message}` });
+    } finally {
+      if (file) {
+        try {
+          await fs.close(file);
+        } catch (_) {
+        }
+      }
+      this.isBatchOperating = false;
+      this.batchOperationText = '正在操作书源...';
+    }
+  }
+
+  exportTimestamp(): string {
+    const date = new Date();
+    const pad = (value: number): string => value < 10 ? `0${value}` : `${value}`;
+    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_` +
+      `${pad(date.getHours())}${pad(date.getMinutes())}`;
   }
 
   async readTextFile(filePath: string): Promise<string> {

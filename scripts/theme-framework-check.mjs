@@ -128,6 +128,10 @@ assert(indexPage.includes('shelfScopeSegment()') &&
   indexPage.includes("this.scopeSegmentItem('本地', 'local')") &&
   !indexPage.includes("this.scopeChip('网络', 'network')"),
   'Bookshelf network/local switch must use the segmented control');
+assert(indexPage.includes("this.actionItem('多选'") && indexPage.includes('this.bookMultiSelectBar()'),
+  'Bookshelf multi-select entry and action bar must stay connected');
+assert(indexPage.includes("this.shelfGroupChip('未分组', -1)") && indexPage.includes("Text('＋')"),
+  'Bookshelf group bar must include ungrouped and add-group actions');
 const settingsPageSource = indexPage.slice(indexPage.indexOf('struct SettingsPage'));
 assert(settingsPageSource.includes('.backgroundColor(this.pageColor())'),
   'Mine page background is not connected to the active theme');

@@ -474,6 +474,7 @@ struct SettingsPage {
     this.readerDarkCustomThemeBackgroundColor = settings.darkCustomThemeBackgroundColor;
     this.readerDarkCustomThemeTextColor = settings.darkCustomThemeTextColor;
     this.readerCustomThemesRaw = settings.customThemesRaw || '';
+    this.customThemeNameDraft = this.currentCustomThemeScheme().name;
     this.readerPageTurnMode = settings.pageTurnMode;
     this.readerPageTurnAnimationType = settings.pageTurnAnimationType;
     this.readerLandscapeDoublePage = settings.landscapeDoublePage;
@@ -1755,7 +1756,7 @@ struct SettingsPage {
               })
           }
           .width('100%')
-          TextInput({ text: this.customThemeNameDraft || this.currentCustomThemeScheme().name, placeholder: '方案名称' })
+          TextInput({ text: this.customThemeNameDraft, placeholder: '输入方案名称' })
             .fontSize(14)
             .fontColor(this.primaryTextColor())
             .height(36)

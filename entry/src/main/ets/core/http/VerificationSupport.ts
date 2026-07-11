@@ -100,6 +100,22 @@ export class VerificationSupport {
     return AppStorage.get<string>('pendingVerificationUrl') || '';
   }
 
+  static hasEffectiveLoginCookie(cookie: string): boolean {
+    if (!cookie) return false;
+    const authName = /(session|sess|token|auth|jwt|user|uid|sid|ticket|login|account|credential|passport|access|refresh|qttoken|sso|secret|key)/i;
+    const ignoredName = /^(cookiecheck|__cf_bm|cf_clearance|_ga(?:_.+)?|_gid|_gat|hm_lvt_.+|hm_lpvt_.+|csrf(?:token)?|xsrf-token|deviceid|novel_web_id)$/i;
+    for (const item of cookie.split(';')) {
+      const pair = item.trim();
+      const index = pair.indexOf('=');
+      if (index <= 0) continue;
+      const name = pair.substring(0, index).trim();
+      const value = pair.substring(index + 1).trim();
+      if (!name || !value || ignoredName.test(name) || /^(null|undefined|false|0)$/i.test(value)) continue;
+      if (authName.test(name)) return true;
+    }
+    return false;
+  }
+
   static pickVerificationUrl(source: BookSource, requestUrl: string, rule?: string): string {
     const fromRule = this.pickStartBrowserUrl(rule || '') ||
       this.pickStartBrowserUrl(source.searchUrl || '') ||

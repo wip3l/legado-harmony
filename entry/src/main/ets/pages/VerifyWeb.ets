@@ -20,6 +20,7 @@ struct VerifyWebPage {
   @State title: string = '网页验证';
   @State currentUrl: string = '';
   @State progress: number = 0;
+  @State requireLoginCookie: boolean = false;
   private controller: webview.WebviewController = new webview.WebviewController();
   private readonly mobileUserAgent: string =
     'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -38,6 +39,7 @@ struct VerifyWebPage {
     const params = router.getParams() as Record<string, string>;
     const initialUrl = params?.['url'] || AppStorage.get<string>('pendingVerificationUrl') || 'https://www.qidian.com';
     this.title = params?.['title'] || AppStorage.get<string>('pendingVerificationTitle') || '网页验证';
+    this.requireLoginCookie = params?.['requireLoginCookie'] === 'true';
     if (VerificationSupport.isBookSourceLoginUrl(initialUrl)) {
       this.url = 'about:blank';
       this.currentUrl = '';
@@ -152,7 +154,8 @@ struct VerifyWebPage {
     this.syncGuangYuCookies(verifyUrl);
     CookieStore.saveSync();
     const isGuangYu = this.isGuangYuVerify(verifyUrl);
-    const verified = !isGuangYu || this.hasGuangYuToken();
+    const verified = this.requireLoginCookie ? this.hasEffectiveBookSourceLoginCookie() :
+      (!isGuangYu || this.hasGuangYuToken());
     if (verified) {
       AppStorage.setOrCreate('pendingVerificationUrl', '');
       AppStorage.setOrCreate('pendingVerificationTitle', '');
@@ -162,8 +165,29 @@ struct VerifyWebPage {
       this.showToastSafely('验证信息已保存，请重试搜索或刷新目录');
       this.backSafely();
     } else {
-      this.showToastSafely('未检测到登录态，请登录后再点完成');
+      this.showToastSafely('未检测到有效登录 Cookie，请正常登录后再点完成');
     }
+  }
+
+  hasEffectiveBookSourceLoginCookie(): boolean {
+    const sourceUrl = AppStorage.get<string>('pendingVerificationSourceUrl') || '';
+    const loginUrl = AppStorage.get<string>('pendingVerificationLoginUrl') || this.url;
+    const urls = [
+      this.currentUrl,
+      this.url,
+      loginUrl,
+      sourceUrl,
+      this.originOf(this.currentUrl),
+      this.originOf(this.url),
+      this.originOf(loginUrl),
+      this.originOf(sourceUrl)
+    ];
+    for (const url of urls) {
+      if (url && VerificationSupport.hasEffectiveLoginCookie(CookieStore.getCookie(url))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   saveCookies(url: string): void {
@@ -190,6 +214,13 @@ struct VerifyWebPage {
         this.title = `${source.bookSourceName || '书源'} 登录`;
         AppStorage.setOrCreate('pendingVerificationSourceUrl', source.bookSourceUrl || '');
         AppStorage.setOrCreate('pendingVerificationLoginUrl', loginUrl);
+        setTimeout(() => {
+          try {
+            this.controller.loadUrl(loginUrl);
+          } catch (e) {
+            console.warn('主动加载书源登录地址失败，将由 Web 组件状态刷新:', e);
+          }
+        }, 0);
         return;
       }
     } catch (e) {

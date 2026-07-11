@@ -429,6 +429,61 @@ export class AppDatabase {
     return books;
   }
 
+  async getCustomBookGroups(): Promise<BookGroup[]> {
+    const groups: BookGroup[] = [];
+    if (!this.store) return groups;
+    const resultSet = await this.store.querySql(
+      'SELECT groupId, groupName, groupOrder, show, enableRefresh FROM book_groups WHERE groupId > 0 ORDER BY groupOrder, groupId'
+    );
+    while (resultSet.goToNextRow()) {
+      const group = new BookGroup();
+      group.groupId = resultSet.getLong(resultSet.getColumnIndex('groupId'));
+      group.groupName = resultSet.getString(resultSet.getColumnIndex('groupName'));
+      group.order = resultSet.getLong(resultSet.getColumnIndex('groupOrder'));
+      group.show = resultSet.getLong(resultSet.getColumnIndex('show')) === 1;
+      group.enableRefresh = resultSet.getLong(resultSet.getColumnIndex('enableRefresh')) === 1;
+      groups.push(group);
+    }
+    return groups;
+  }
+
+  async addBookGroup(groupName: string): Promise<BookGroup | null> {
+    if (!this.store || !groupName.trim()) return null;
+    const name = groupName.trim();
+    const duplicate = await this.store.querySql('SELECT groupId FROM book_groups WHERE groupName = ?', [name]);
+    if (duplicate.rowCount > 0) return null;
+    const maxResult = await this.store.querySql('SELECT MAX(groupId) AS maxId FROM book_groups WHERE groupId > 0');
+    maxResult.goToFirstRow();
+    const maxId = maxResult.getLong(maxResult.getColumnIndex('maxId'));
+    const group = new BookGroup();
+    group.groupId = Math.max(0, maxId) + 1;
+    group.groupName = name;
+    group.order = group.groupId;
+    await this.store.insert('book_groups', {
+      groupId: group.groupId, groupName: group.groupName, groupOrder: group.order, show: 1, enableRefresh: 1
+    });
+    return group;
+  }
+
+  async updateBooksGroup(bookUrls: string[], groupId: number): Promise<void> {
+    if (!this.store) return;
+    for (const bookUrl of bookUrls) {
+      const predicates = new relationalStore.RdbPredicates('books');
+      predicates.equalTo('bookUrl', bookUrl);
+      await this.store.update({ groupId: groupId }, predicates);
+    }
+  }
+
+  async deleteBookGroup(groupId: number): Promise<void> {
+    if (!this.store || groupId <= 0) return;
+    const bookPredicates = new relationalStore.RdbPredicates('books');
+    bookPredicates.equalTo('groupId', groupId);
+    await this.store.update({ groupId: 0 }, bookPredicates);
+    const groupPredicates = new relationalStore.RdbPredicates('book_groups');
+    groupPredicates.equalTo('groupId', groupId);
+    await this.store.delete(groupPredicates);
+  }
+
   private resultSetToBook(resultSet: relationalStore.ResultSet): Book {
     const book = new Book();
     book.bookUrl = this.getStringColumn(resultSet, 'bookUrl');

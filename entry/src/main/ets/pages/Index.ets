@@ -9,7 +9,7 @@ import image from '@ohos.multimedia.image';
 import fs from '@ohos.file.fs';
 import commonEventManager from '@ohos.commonEventManager';
 import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
-import { Book, BookChapter, BookSource, SearchBook } from '../model/data/Book';
+import { Book, BookChapter, BookGroup, BookSource, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { SearchCoordinator, SearchCallback, SearchProgress } from '../core/book/SearchCoordinator';
 import { ExploreCoordinator, ExploreEntry, ExploreSourceOption } from '../core/book/ExploreCoordinator';
@@ -59,6 +59,7 @@ interface ShelfFullTextCacheTask {
 @Component
 struct Index {
   @State currentIndex: number = 0;
+  @State bookshelfMultiSelectActive: boolean = false;
   @StorageLink('themeRevision') @Watch('onThemeRevisionChanged') themeRevision: number = 0;
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
@@ -120,7 +121,11 @@ struct Index {
     HdsTabs({ barPosition: BarPosition.End, index: this.currentIndex }) {
       TabContent() {
         if (this.currentIndex === 0) {
-          BookshelfPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+          BookshelfPage({
+            statusBarHeight: this.statusBarHeight,
+            navBarHeight: this.navBarHeight,
+            isBookMultiSelect: $bookshelfMultiSelectActive
+          })
         } else {
           BlankTabPage()
         }
@@ -171,6 +176,7 @@ struct Index {
       .tabBar(this.bottomTabBar(this.navigationIcon('mine'), '我的'))
     }
     .barMode(BarMode.Fixed)
+    .barHeight(this.bookshelfMultiSelectActive ? 0 : 56)
     .barOverlap(true)
     .barFloatingStyle({
       systemMaterialEffect: {
@@ -184,7 +190,7 @@ struct Index {
       },
       adaptToHandedness: true,
       thermoCtrl: true,
-      barOpacity: 1
+      barOpacity: this.bookshelfMultiSelectActive ? 0 : 1
     })
     .scrollable(false)
     .onChange((index: number) => {
@@ -202,7 +208,11 @@ struct Index {
     Tabs({ barPosition: BarPosition.End, index: this.currentIndex }) {
       TabContent() {
         if (this.currentIndex === 0) {
-          BookshelfPage({ statusBarHeight: this.statusBarHeight, navBarHeight: this.navBarHeight })
+          BookshelfPage({
+            statusBarHeight: this.statusBarHeight,
+            navBarHeight: this.navBarHeight,
+            isBookMultiSelect: $bookshelfMultiSelectActive
+          })
         } else {
           BlankTabPage()
         }
@@ -253,7 +263,7 @@ struct Index {
       .tabBar(this.compatTabBar(this.navigationIcon('mine'), '我的', 3))
     }
     .barMode(BarMode.Fixed)
-    .barHeight(56 + this.compatTabSafeHeight())
+    .barHeight(this.bookshelfMultiSelectActive ? 0 : 56 + this.compatTabSafeHeight())
     .barBackgroundColor(ThemeRuntime.cardColor(this.appDarkMode))
     .scrollable(false)
     .onChange((index: number) => {
@@ -456,10 +466,21 @@ struct BlankTabPage {
 struct BookshelfPage {
   @Prop statusBarHeight: number = 0;
   @Prop navBarHeight: number = 0;
+  @Link isBookMultiSelect: boolean;
   @State books: Book[] = [];
   @State allBooks: Book[] = [];
   @State shelfScope: string = 'network';
   @State showShelfSortMenu: boolean = false;
+  @State showShelfGroups: boolean = false;
+  @State shelfGroups: BookGroup[] = [];
+  @State activeShelfGroupId: number = 0;
+  @State selectedBookUrls: string[] = [];
+  @State showBookGroupPicker: boolean = false;
+  @State showAddBookGroupDialog: boolean = false;
+  @State newBookGroupName: string = '';
+  @State showDeleteBookGroupDialog: boolean = false;
+  @State pendingDeleteBookGroup: BookGroup | null = null;
+  @State showBatchDeleteDialog: boolean = false;
   @State isLoading: boolean = false;
   @State showDeleteDialog: boolean = false;
   @State showActionDialog: boolean = false;
@@ -572,6 +593,10 @@ struct BookshelfPage {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
       this.allBooks = SearchExplorePendingBook.filterShelfBooks(await db.getAllBooks());
+      this.shelfGroups = await db.getCustomBookGroups();
+      if (this.activeShelfGroupId > 0 && !this.shelfGroups.some((group: BookGroup) => group.groupId === this.activeShelfGroupId)) {
+        this.activeShelfGroupId = 0;
+      }
       this.applyShelfScope();
       this.refreshShelfCoverCache(this.books);
     } catch (e) {
@@ -692,7 +717,7 @@ struct BookshelfPage {
   }
 
   build() {
-    Stack() {
+    Stack({ alignContent: Alignment.Bottom }) {
       Column() {
         Row() {
           Text('书架')
@@ -708,9 +733,20 @@ struct BookshelfPage {
             this.shelfSortButton()
           }
 
-          Text(this.books.length > 0 ? `${this.books.length}本` : '')
-            .fontSize(14)
-            .fontColor('#999')
+          Row({ space: 4 }) {
+            Text(this.books.length > 0 ? `${this.books.length}本` : '')
+              .fontSize(14)
+              .fontColor('#999')
+            Text(this.showShelfGroups ? '⌃' : '⌄')
+              .fontSize(15)
+              .fontColor(this.secondaryTextColor())
+          }
+          .height(36)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.showShelfGroups = !this.showShelfGroups;
+            this.showShelfSortMenu = false;
+          })
         }
         .width('100%')
         .height(56)
@@ -719,6 +755,10 @@ struct BookshelfPage {
 
         if (this.showShelfSortMenu && this.books.length > 0) {
           this.shelfSortDropdown()
+        }
+
+        if (this.showShelfGroups) {
+          this.shelfGroupBar()
         }
 
         if (this.isLoading) {
@@ -755,31 +795,43 @@ struct BookshelfPage {
             List({ space: 8 }) {
               ForEach(this.books, (book: Book) => {
                 ListItem() {
-                  Column() {
-                    if (this.isCompactLayout()) {
-                      this.compactBookContent(book)
-                    } else {
-                      this.looseBookContent(book)
+                  Stack({ alignContent: Alignment.TopEnd }) {
+                    Column() {
+                      if (this.isCompactLayout()) {
+                        this.compactBookContent(book)
+                      } else {
+                        this.looseBookContent(book)
+                      }
+                    }
+                    .width('100%')
+                    .alignItems(HorizontalAlign.Start)
+                    .backgroundColor(this.glassCardColor())
+                    .borderRadius(8)
+                    .border({ width: 1, color: this.glassBorderColor() })
+                    .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
+                    .gesture(
+                      LongPressGesture({ repeat: false })
+                        .onAction(() => {
+                          if (!this.isBookMultiSelect) {
+                            this.showBookActions(book);
+                          }
+                        })
+                    )
+                    .onClick(() => {
+                      if (this.isBookMultiSelect) {
+                        this.toggleSelectedBook(book.bookUrl);
+                        return;
+                      }
+                      router.pushUrl({
+                        url: 'pages/ReadBook',
+                        params: { bookUrl: book.bookUrl }
+                      });
+                    })
+                    if (this.isBookMultiSelect) {
+                      this.bookSelectionMark(book)
                     }
                   }
                   .width('100%')
-                  .alignItems(HorizontalAlign.Start)
-                  .backgroundColor(this.glassCardColor())
-                  .borderRadius(8)
-                  .border({ width: 1, color: this.glassBorderColor() })
-                  .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
-                  .gesture(
-                    LongPressGesture({ repeat: false })
-                      .onAction(() => {
-                        this.showBookActions(book);
-                      })
-                  )
-                  .onClick(() => {
-                    router.pushUrl({
-                      url: 'pages/ReadBook',
-                      params: { bookUrl: book.bookUrl }
-                    });
-                  })
                 }
               })
 
@@ -855,6 +907,13 @@ struct BookshelfPage {
               }
               this.showActionDialog = false;
               this.showTagDialog = true;
+            })
+            this.actionItem('多选', this.primaryTextColor(), () => {
+              if (this.pendingActionBook) {
+                const bookUrl = this.pendingActionBook.bookUrl;
+                this.closeBookActions();
+                this.enterBookMultiSelect(bookUrl);
+              }
             })
 
             Button('取消')
@@ -1179,16 +1238,352 @@ struct BookshelfPage {
           this.pendingDeleteBook = null;
         })
       }
+
+      if (this.isBookMultiSelect) {
+        this.bookMultiSelectBar()
+      }
+      if (this.showBookGroupPicker) {
+        this.bookGroupPickerDialog()
+      }
+      if (this.showAddBookGroupDialog) {
+        this.addBookGroupDialog()
+      }
+      if (this.showDeleteBookGroupDialog && this.pendingDeleteBookGroup) {
+        this.deleteBookGroupDialog()
+      }
+      if (this.showBatchDeleteDialog) {
+        this.batchDeleteBooksDialog()
+      }
     }
     .width('100%')
     .height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
+  @Builder
+  shelfGroupBar() {
+    Scroll() {
+      Row({ space: 8 }) {
+        this.shelfGroupChip('全部', 0)
+        ForEach(this.shelfGroups, (group: BookGroup) => {
+          Text(group.groupName)
+            .fontSize(13)
+            .fontColor(this.activeShelfGroupId === group.groupId ? '#FFFFFF' : this.primaryTextColor())
+            .padding({ left: 13, right: 13, top: 7, bottom: 7 })
+            .borderRadius(16)
+            .backgroundColor(this.activeShelfGroupId === group.groupId ? this.accentColor() : this.glassCardColor())
+            .border({ width: this.activeShelfGroupId === group.groupId ? 0 : 1, color: this.glassBorderColor() })
+            .onClick(() => {
+              this.selectShelfGroup(group.groupId);
+            })
+            .gesture(
+              LongPressGesture({ repeat: false })
+                .onAction(() => {
+                  this.pendingDeleteBookGroup = group;
+                  this.showDeleteBookGroupDialog = true;
+                })
+            )
+        }, (group: BookGroup) => `${group.groupId}_${group.groupName}`)
+        this.shelfGroupChip('未分组', -1)
+        Text('＋')
+          .fontSize(20)
+          .fontColor(this.accentColor())
+          .width(34)
+          .height(34)
+          .textAlign(TextAlign.Center)
+          .borderRadius(17)
+          .backgroundColor(this.glassCardColor())
+          .border({ width: 1, color: this.glassBorderColor() })
+          .onClick(() => {
+            this.newBookGroupName = '';
+            this.showAddBookGroupDialog = true;
+          })
+      }
+      .padding({ left: 16, right: 16, bottom: 8 })
+    }
+    .width('100%')
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
+  }
+
+  @Builder
+  shelfGroupChip(label: string, groupId: number) {
+    Text(label)
+      .fontSize(13)
+      .fontColor(this.activeShelfGroupId === groupId ? '#FFFFFF' : this.primaryTextColor())
+      .padding({ left: 13, right: 13, top: 7, bottom: 7 })
+      .borderRadius(16)
+      .backgroundColor(this.activeShelfGroupId === groupId ? this.accentColor() : this.glassCardColor())
+      .border({ width: this.activeShelfGroupId === groupId ? 0 : 1, color: this.glassBorderColor() })
+      .onClick(() => {
+        this.selectShelfGroup(groupId);
+      })
+  }
+
+  @Builder
+  bookSelectionMark(book: Book) {
+    Text(this.selectedBookUrls.includes(book.bookUrl) ? '✓' : '')
+      .fontSize(16)
+      .fontWeight(FontWeight.Bold)
+      .fontColor('#FFFFFF')
+      .width(28)
+      .height(28)
+      .textAlign(TextAlign.Center)
+      .borderRadius(14)
+      .backgroundColor(this.selectedBookUrls.includes(book.bookUrl) ? this.accentColor() : '#66000000')
+      .border({ width: 1, color: '#CCFFFFFF' })
+      .margin({ top: 8, right: 8 })
+  }
+
+  @Builder
+  bookMultiSelectBar() {
+    Column() {
+      Text(`已选择 ${this.selectedBookUrls.length} 本`)
+        .fontSize(13)
+        .fontColor(this.secondaryTextColor())
+        .margin({ bottom: 8 })
+      Row({ space: 10 }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .fontSize(14)
+          .borderRadius(10)
+          .backgroundColor(this.glassCardColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.exitBookMultiSelect())
+        Button('删除', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .fontSize(14)
+          .borderRadius(10)
+          .backgroundColor('#E53935')
+          .fontColor('#FFFFFF')
+          .enabled(this.selectedBookUrls.length > 0)
+          .onClick(() => {
+            if (this.selectedBookUrls.length > 0) this.showBatchDeleteDialog = true;
+          })
+        Button('分组', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .fontSize(14)
+          .borderRadius(10)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .enabled(this.selectedBookUrls.length > 0)
+          .onClick(() => {
+            if (this.selectedBookUrls.length > 0) this.showBookGroupPicker = true;
+          })
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 10, bottom: this.multiSelectBottomPadding() })
+    .backgroundColor(this.cardColor())
+    .borderRadius({ topLeft: 18, topRight: 18 })
+    .alignSelf(ItemAlign.End)
+  }
+
+  @Builder
+  bookGroupPickerDialog() {
+    Column() {
+      Blank().layoutWeight(1).onClick(() => this.showBookGroupPicker = false)
+      Column({ space: 6 }) {
+        Text('移动到分组')
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .margin({ bottom: 8 })
+        this.bookGroupPickerItem('未分组', 0)
+        ForEach(this.shelfGroups, (group: BookGroup) => {
+          this.bookGroupPickerItem(group.groupName, group.groupId)
+        }, (group: BookGroup) => `picker_${group.groupId}`)
+        Button('取消', { type: ButtonType.Normal })
+          .width('100%')
+          .height(42)
+          .fontSize(14)
+          .borderRadius(10)
+          .backgroundColor(this.glassCardColor())
+          .fontColor(this.primaryTextColor())
+          .margin({ top: 6 })
+          .onClick(() => this.showBookGroupPicker = false)
+      }
+      .width('100%')
+      .padding(18)
+      .backgroundColor(this.cardColor())
+      .borderRadius({ topLeft: 18, topRight: 18 })
+      .margin({ bottom: this.actionSheetBottomMargin() })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#66000000')
+  }
+
+  @Builder
+  bookGroupPickerItem(label: string, groupId: number) {
+    Text(label)
+      .fontSize(15)
+      .fontColor(this.primaryTextColor())
+      .width('100%')
+      .height(42)
+      .padding({ left: 14, right: 14 })
+      .borderRadius(10)
+      .backgroundColor(this.glassCardColor())
+      .onClick(() => this.assignSelectedBooksToGroup(groupId))
+  }
+
+  @Builder
+  addBookGroupDialog() {
+    Column() {
+      Column({ space: 16 }) {
+        Text('新增书籍分组').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
+        TextInput({ placeholder: '输入分组名称', text: this.newBookGroupName })
+          .width('100%').height(42).backgroundColor(this.inputColor()).fontColor(this.primaryTextColor())
+          .borderRadius(10).onChange((value: string) => this.newBookGroupName = value)
+        Row({ space: 12 }) {
+          Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+            .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
+            .onClick(() => this.showAddBookGroupDialog = false)
+          Button('新增', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+            .backgroundColor(this.buttonColor()).fontColor('#FFFFFF').enabled(!!this.newBookGroupName.trim())
+            .onClick(() => this.addShelfBookGroup())
+        }.width('100%')
+      }
+      .width('85%').padding(22).borderRadius(14).backgroundColor(this.cardColor())
+    }
+    .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor('#80000000')
+  }
+
+  @Builder
+  deleteBookGroupDialog() {
+    Column() {
+      Column({ space: 16 }) {
+        Text('删除分组').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
+        Text(`删除“${this.pendingDeleteBookGroup?.groupName || ''}”后，分组内书籍将移到未分组。`)
+          .fontSize(14).fontColor(this.secondaryTextColor()).textAlign(TextAlign.Center)
+        Row({ space: 12 }) {
+          Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+            .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
+            .onClick(() => this.closeDeleteBookGroupDialog())
+          Button('删除', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+            .backgroundColor('#E53935').fontColor('#FFFFFF').onClick(() => this.deleteShelfBookGroup())
+        }.width('100%')
+      }
+      .width('85%').padding(22).borderRadius(14).backgroundColor(this.cardColor())
+    }
+    .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor('#80000000')
+  }
+
+  @Builder
+  batchDeleteBooksDialog() {
+    Column() {
+      Column({ space: 16 }) {
+        Text('批量删除').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
+        Text(`确定从书架移除选中的 ${this.selectedBookUrls.length} 本书吗？`)
+          .fontSize(14).fontColor(this.secondaryTextColor()).textAlign(TextAlign.Center)
+        Row({ space: 12 }) {
+          Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+            .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
+            .onClick(() => this.showBatchDeleteDialog = false)
+          Button('删除', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+            .backgroundColor('#E53935').fontColor('#FFFFFF').onClick(() => this.deleteSelectedBooks())
+        }.width('100%')
+      }
+      .width('85%').padding(22).borderRadius(14).backgroundColor(this.cardColor())
+    }
+    .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor('#80000000')
+  }
+
+  selectShelfGroup(groupId: number): void {
+    this.activeShelfGroupId = groupId;
+    this.applyShelfScope();
+  }
+
+  enterBookMultiSelect(initialBookUrl: string): void {
+    this.isBookMultiSelect = true;
+    this.selectedBookUrls = initialBookUrl ? [initialBookUrl] : [];
+    this.showShelfSortMenu = false;
+  }
+
+  exitBookMultiSelect(): void {
+    this.isBookMultiSelect = false;
+    this.selectedBookUrls = [];
+    this.showBookGroupPicker = false;
+    this.showBatchDeleteDialog = false;
+  }
+
+  toggleSelectedBook(bookUrl: string): void {
+    this.selectedBookUrls = this.selectedBookUrls.includes(bookUrl) ?
+      this.selectedBookUrls.filter((url: string) => url !== bookUrl) : [...this.selectedBookUrls, bookUrl];
+  }
+
+  async addShelfBookGroup(): Promise<void> {
+    const name = this.newBookGroupName.trim();
+    if (!name) return;
+    const db = AppDatabase.getInstance();
+    const group = await db.addBookGroup(name);
+    if (!group) {
+      promptAction.showToast({ message: '分组名称已存在' });
+      return;
+    }
+    this.showAddBookGroupDialog = false;
+    this.newBookGroupName = '';
+    this.shelfGroups = await db.getCustomBookGroups();
+    this.selectShelfGroup(group.groupId);
+  }
+
+  closeDeleteBookGroupDialog(): void {
+    this.showDeleteBookGroupDialog = false;
+    this.pendingDeleteBookGroup = null;
+  }
+
+  async deleteShelfBookGroup(): Promise<void> {
+    const group = this.pendingDeleteBookGroup;
+    if (!group) return;
+    const db = AppDatabase.getInstance();
+    await db.deleteBookGroup(group.groupId);
+    if (this.activeShelfGroupId === group.groupId) this.activeShelfGroupId = -1;
+    this.closeDeleteBookGroupDialog();
+    await this.loadBooks();
+    promptAction.showToast({ message: '分组已删除，书籍已移到未分组' });
+  }
+
+  async assignSelectedBooksToGroup(groupId: number): Promise<void> {
+    if (this.selectedBookUrls.length === 0) return;
+    const count = this.selectedBookUrls.length;
+    const db = AppDatabase.getInstance();
+    await db.updateBooksGroup(this.selectedBookUrls, groupId);
+    this.exitBookMultiSelect();
+    await this.loadBooks();
+    promptAction.showToast({ message: `已为 ${count} 本书设置分组` });
+  }
+
+  async deleteSelectedBooks(): Promise<void> {
+    const urls = [...this.selectedBookUrls];
+    const targets = this.allBooks.filter((book: Book) => urls.includes(book.bookUrl));
+    const db = AppDatabase.getInstance();
+    for (const book of targets) {
+      this.deleteBookCoverCache(book);
+      LocalBookService.deleteLocalBookFiles(getContext(this), book);
+      await db.deleteBook(book.bookUrl);
+    }
+    this.exitBookMultiSelect();
+    AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+    await this.loadBooks();
+    promptAction.showToast({ message: `已删除 ${targets.length} 本书` });
+  }
+
+
   bookshelfListBottomInset(): number {
     const comfortableGap = 20;
+    const multiSelectBarHeight = this.isBookMultiSelect ? 104 : 0;
     if (deviceInfo.sdkApiVersion < 23) {
-      return comfortableGap;
+      return comfortableGap + multiSelectBarHeight;
+    }
+    if (this.isBookMultiSelect) {
+      return Math.max(this.navBarHeight, 8) + comfortableGap + multiSelectBarHeight;
     }
     const floatingTabHeight = 56;
     return floatingTabHeight + Math.max(this.navBarHeight, 8) + comfortableGap;
@@ -1467,6 +1862,10 @@ struct BookshelfPage {
     return 82 + (this.navBarHeight > 0 ? this.navBarHeight : 0);
   }
 
+  multiSelectBottomPadding(): number {
+    return Math.max(this.navBarHeight, 8) + 6;
+  }
+
   addEditingTag(): void {
     const tag = this.tagInput.trim();
     if (!tag || this.editingTags.includes(tag)) {
@@ -1510,8 +1909,12 @@ struct BookshelfPage {
 
   applyShelfScope(): void {
     const local = this.shelfScope === 'local';
-    this.books = this.sortBooks(this.allBooks.filter((book: Book) =>
-      local ? LocalBookService.isLocalBook(book) : !LocalBookService.isLocalBook(book)));
+    this.books = this.sortBooks(this.allBooks.filter((book: Book) => {
+      const scopeMatches = local ? LocalBookService.isLocalBook(book) : !LocalBookService.isLocalBook(book);
+      const groupMatches = this.activeShelfGroupId === 0 ||
+        (this.activeShelfGroupId === -1 ? book.group <= 0 : book.group === this.activeShelfGroupId);
+      return scopeMatches && groupMatches;
+    }));
     if (this.books.length === 0) {
       this.showShelfSortMenu = false;
     }
