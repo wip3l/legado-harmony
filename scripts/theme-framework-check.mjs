@@ -30,6 +30,7 @@ const readerSettingsPage = read('entry/src/main/ets/pages/Settings.ets');
 const ttsSettingsPage = read('entry/src/main/ets/pages/TtsSettings.ets');
 const themeStore = read('entry/src/main/ets/utils/AppThemeSettingsStore.ets');
 const readerStore = read('entry/src/main/ets/utils/ReaderSettingsStore.ets');
+const moduleConfig = read('entry/src/main/module.json5');
 const themeColorPage = read('entry/src/main/ets/pages/ThemeColorSettings.ets');
 const otherSettingsPage = read('entry/src/main/ets/pages/OtherSettings.ets');
 const bookSourcePage = read('entry/src/main/ets/pages/BookSource.ets');
@@ -226,6 +227,8 @@ assert(!themePage.includes("'衬线字体'") && !themePage.includes("'清晰字�
   !themePage.includes("this.advancedEntry('桌面图标'"),
   'Theme page must not expose font descriptions, font management, or desktop icon entries');
 assert(pages.src.includes('pages/ThemeSettings'), 'Theme settings page is not registered');
+assert(moduleConfig.includes('"orientation": "auto_rotation_restricted"'),
+  'Entry ability orientation must respect the system rotation lock');
 
 const desktopThemeIcons = [
   'classic_blue', 'warm_paper', 'forest_mist', 'ink_wash', 'neon_night'

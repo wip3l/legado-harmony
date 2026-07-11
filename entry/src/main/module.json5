@@ -28,7 +28,7 @@
         "label": "$string:EntryAbility_label",
         "startWindowIcon": "$media:ic_startup_blank",
         "startWindowBackground": "$color:start_window_background",
-        "orientation": "auto_rotation",
+        "orientation": "auto_rotation_restricted",
         "backgroundModes": [
           "audioPlayback",
           "dataTransfer"
