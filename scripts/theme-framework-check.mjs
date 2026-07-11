@@ -118,6 +118,16 @@ assert(indexPage.includes('ThemeRuntime.iconPackId()'), 'Floating tab bar does n
 for (const tabId of ['bookshelf', 'explore', 'search', 'mine']) {
   assert(indexPage.includes(`this.navigationIcon('${tabId}')`), `Floating tab icon is not themed: ${tabId}`);
 }
+assert(indexPage.includes('this.shelfSortButton()') &&
+  indexPage.includes('shelfSortDropdown()') &&
+  indexPage.includes("this.sortDropdownItem('新阅读', 'recentRead')") &&
+  !indexPage.includes("this.sortChip('新阅读', 'recentRead')"),
+  'Bookshelf sorting must use a compact dropdown selector');
+assert(indexPage.includes('shelfScopeSegment()') &&
+  indexPage.includes("this.scopeSegmentItem('网络', 'network')") &&
+  indexPage.includes("this.scopeSegmentItem('本地', 'local')") &&
+  !indexPage.includes("this.scopeChip('网络', 'network')"),
+  'Bookshelf network/local switch must use the segmented control');
 const settingsPageSource = indexPage.slice(indexPage.indexOf('struct SettingsPage'));
 assert(settingsPageSource.includes('.backgroundColor(this.pageColor())'),
   'Mine page background is not connected to the active theme');

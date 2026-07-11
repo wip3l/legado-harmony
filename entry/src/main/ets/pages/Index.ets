@@ -459,6 +459,7 @@ struct BookshelfPage {
   @State books: Book[] = [];
   @State allBooks: Book[] = [];
   @State shelfScope: string = 'network';
+  @State showShelfSortMenu: boolean = false;
   @State isLoading: boolean = false;
   @State showDeleteDialog: boolean = false;
   @State showActionDialog: boolean = false;
@@ -699,21 +700,12 @@ struct BookshelfPage {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.primaryTextColor())
 
-          Row() {
-            this.scopeChip('网络', 'network')
-            this.scopeChip('本地', 'local')
-          }
-          .margin({ left: 10 })
+          this.shelfScopeSegment()
 
           Blank()
 
           if (this.books.length > 0) {
-            Row({ space: 6 }) {
-              this.sortChip('新阅读', 'recentRead')
-              this.sortChip('新加入', 'recentAdd')
-              this.sortChip('名称', 'name')
-            }
-            .margin({ right: 10 })
+            this.shelfSortButton()
           }
 
           Text(this.books.length > 0 ? `${this.books.length}本` : '')
@@ -724,6 +716,10 @@ struct BookshelfPage {
         .height(56)
         .padding({ left: 16, right: 16 })
         .alignItems(VerticalAlign.Center)
+
+        if (this.showShelfSortMenu && this.books.length > 0) {
+          this.shelfSortDropdown()
+        }
 
         if (this.isLoading) {
           Column() {
@@ -1516,12 +1512,16 @@ struct BookshelfPage {
     const local = this.shelfScope === 'local';
     this.books = this.sortBooks(this.allBooks.filter((book: Book) =>
       local ? LocalBookService.isLocalBook(book) : !LocalBookService.isLocalBook(book)));
+    if (this.books.length === 0) {
+      this.showShelfSortMenu = false;
+    }
   }
 
   setShelfScope(scope: string): void {
     const next = scope === 'local' ? 'local' : 'network';
     if (this.shelfScope === next) return;
     this.shelfScope = next;
+    this.showShelfSortMenu = false;
     this.applyShelfScope();
     this.refreshShelfCoverCache(this.books);
   }
@@ -2591,33 +2591,124 @@ struct BookshelfPage {
   }
 
   @Builder
-  scopeChip(label: string, scope: string) {
+  shelfScopeSegment() {
+    Row({ space: 0 }) {
+      this.scopeSegmentItem('网络', 'network')
+      this.scopeSegmentItem('本地', 'local')
+    }
+    .height(32)
+    .padding(3)
+    .borderRadius(18)
+    .backgroundColor(this.glassCardColor())
+    .border({ width: 1, color: this.glassBorderColor() })
+    .margin({ left: 10 })
+  }
+
+  @Builder
+  scopeSegmentItem(label: string, scope: string) {
     Text(label)
       .fontSize(13)
+      .fontWeight(this.shelfScope === scope ? FontWeight.Medium : FontWeight.Regular)
       .fontColor(this.shelfScope === scope ? '#FFFFFF' : this.secondaryTextColor())
-      .height(30)
-      .padding({ left: 10, right: 10 })
+      .height(26)
+      .padding({ left: 12, right: 12 })
       .textAlign(TextAlign.Center)
-      .backgroundColor(this.shelfScope === scope ? this.accentColor() : this.glassCardColor())
-      .border({ width: 1, color: this.shelfScope === scope ? this.accentColor() : this.glassBorderColor() })
+      .borderRadius(13)
+      .backgroundColor(this.shelfScope === scope ? this.accentColor() : '#00000000')
       .onClick(() => {
         this.setShelfScope(scope);
       })
   }
 
   @Builder
-  sortChip(label: string, mode: string) {
-    Text(label)
-      .fontSize(13)
-      .fontColor(this.sortMode === mode ? '#FFFFFF' : this.secondaryTextColor())
-      .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-      .backgroundColor(this.sortMode === mode ? this.accentColor() : this.glassCardColor())
-      .borderRadius(16)
-      .border({ width: this.sortMode === mode ? 0 : 1, color: this.glassBorderColor() })
-      .onClick(() => {
-        this.sortMode = mode;
-        this.books = this.sortBooks(this.books);
-      })
+  shelfSortButton() {
+    Row({ space: 5 }) {
+      Text('⇅')
+        .fontSize(14)
+        .fontColor(this.accentColor())
+      Text(this.sortModeLabel())
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.primaryTextColor())
+      Text(this.showShelfSortMenu ? '⌃' : '⌄')
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+    }
+    .height(32)
+    .padding({ left: 11, right: 9 })
+    .borderRadius(16)
+    .backgroundColor(this.glassCardColor())
+    .border({ width: 1, color: this.glassBorderColor() })
+    .alignItems(VerticalAlign.Center)
+    .margin({ right: 10 })
+    .onClick(() => {
+      this.showShelfSortMenu = !this.showShelfSortMenu;
+    })
+  }
+
+  @Builder
+  shelfSortDropdown() {
+    Column({ space: 4 }) {
+      this.sortDropdownItem('新阅读', 'recentRead')
+      this.sortDropdownItem('新加入', 'recentAdd')
+      this.sortDropdownItem('名称', 'name')
+    }
+    .width(116)
+    .padding(6)
+    .margin({ left: 16, right: 56, bottom: 6 })
+    .alignSelf(ItemAlign.End)
+    .borderRadius(14)
+    .backgroundColor(this.cardColor())
+    .border({ width: 1, color: this.glassBorderColor() })
+    .shadow({ radius: 12, color: this.glassShadowColor(), offsetX: 0, offsetY: 5 })
+  }
+
+  @Builder
+  sortDropdownItem(label: string, mode: string) {
+    Row() {
+      Text(label)
+        .fontSize(13)
+        .fontWeight(this.sortMode === mode ? FontWeight.Medium : FontWeight.Regular)
+        .fontColor(this.sortMode === mode ? this.accentColor() : this.primaryTextColor())
+        .layoutWeight(1)
+
+      if (this.sortMode === mode) {
+        Text('✓')
+          .fontSize(13)
+          .fontColor(this.accentColor())
+      }
+    }
+    .width('100%')
+    .height(34)
+    .padding({ left: 10, right: 10 })
+    .borderRadius(10)
+    .backgroundColor(this.sortMode === mode ? this.selectedSoftBackgroundColor() : '#00000000')
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      this.applyShelfSortMode(mode);
+    })
+  }
+
+  sortModeLabel(): string {
+    if (this.sortMode === 'recentAdd') {
+      return '新加入';
+    }
+    if (this.sortMode === 'name') {
+      return '名称';
+    }
+    return '新阅读';
+  }
+
+  selectedSoftBackgroundColor(): string {
+    const color = this.accentColor();
+    return `#1A${color.substring(1)}`;
+  }
+
+  applyShelfSortMode(mode: string): void {
+    const next = mode === 'recentAdd' || mode === 'name' ? mode : 'recentRead';
+    this.sortMode = next;
+    this.books = this.sortBooks(this.books);
+    this.showShelfSortMenu = false;
   }
 
   sortBooks(books: Book[]): Book[] {
