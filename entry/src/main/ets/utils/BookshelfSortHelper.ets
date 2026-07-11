@@ -22,12 +22,12 @@ export class BookshelfSortHelper {
   }
 
   static getBookReadTime(book: Book): number {
+    if (!Book.hasStartedReading(book)) {
+      return 0;
+    }
     const lastReadTime = BookshelfSortHelper.parseBookTime(book.getVariable('lastReadTime'));
     if (lastReadTime > 0) {
       return lastReadTime;
-    }
-    if (!book.durChapterTitle && book.durChapterIndex <= 0 && book.durChapterPos <= 0) {
-      return 0;
     }
     return book.durChapterTime || 0;
   }

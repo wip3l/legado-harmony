@@ -25,12 +25,15 @@ const regexModel = read('entry/src/main/ets/model/reader/ReaderRegexFontRule.ets
 const regexSettings = read('entry/src/main/ets/pages/ReaderFontSettings.ets');
 const reader = read('entry/src/main/ets/pages/ReadBook.ets');
 const indexPage = read('entry/src/main/ets/pages/Index.ets');
+const bookModel = read('entry/src/main/ets/model/data/Book.ts');
 const themePage = read('entry/src/main/ets/pages/ThemeSettings.ets');
 const readerSettingsPage = read('entry/src/main/ets/pages/Settings.ets');
 const ttsSettingsPage = read('entry/src/main/ets/pages/TtsSettings.ets');
 const themeStore = read('entry/src/main/ets/utils/AppThemeSettingsStore.ets');
 const readerStore = read('entry/src/main/ets/utils/ReaderSettingsStore.ets');
 const moduleConfig = read('entry/src/main/module.json5');
+const bookshelfSortHelper = read('entry/src/main/ets/utils/BookshelfSortHelper.ets');
+const recentReadCardData = read('entry/src/main/ets/utils/RecentReadCardData.ets');
 const themeColorPage = read('entry/src/main/ets/pages/ThemeColorSettings.ets');
 const otherSettingsPage = read('entry/src/main/ets/pages/OtherSettings.ets');
 const bookSourcePage = read('entry/src/main/ets/pages/BookSource.ets');
@@ -197,6 +200,17 @@ assert(reader.includes('this.readerQuickTypographyStepper()') &&
   reader.includes('adjustQuickTypographySetting') &&
   reader.includes('applyReaderMargin'),
   'In-reader settings do not provide the shared typography dropdown/stepper');
+assert(bookModel.includes('static hasStartedReading(book: Book | null)') &&
+  bookModel.includes("book.getVariable('readStarted')"),
+  'Book model must provide a shared started-reading check');
+assert(reader.includes("this.book.putVariable('readStarted', '1')") &&
+  reader.includes('!Book.hasStartedReading(this.book) && chapterIndex <= 0 && pageIndex <= 0') &&
+  reader.includes('if (Book.hasStartedReading(this.book))'),
+  'Reader must not persist first-open progress before the reader turns forward');
+assert(indexPage.includes('Book.hasStartedReading(book)') &&
+  bookshelfSortHelper.includes('!Book.hasStartedReading(book)') &&
+  recentReadCardData.includes('!Book.hasStartedReading(book)'),
+  'Bookshelf and recent-read surfaces must treat unopened first pages as unread');
 assert(readerSettingsPage.includes("this.selectItem('翻页方式'") &&
   reader.includes("this.readerSelectSettingItem('翻页方式'") &&
   !readerSettingsPage.includes('this.pageTurnOptions()') &&

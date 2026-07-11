@@ -469,7 +469,9 @@ struct ReadBookPage {
       if (loadSerial !== this.bookLoadSerial) {
         return;
       }
-      await this.markBookRecentlyRead();
+      if (Book.hasStartedReading(this.book)) {
+        await this.markBookRecentlyRead();
+      }
 
       const engine = ReadBookEngine.get();
       await engine.openBook(this.book);
@@ -3043,6 +3045,11 @@ struct ReadBookPage {
     const engine = ReadBookEngine.get();
     const chapterIndex = this.clampChapterIndex(this.currentChapterIndex);
     const pageIndex = Math.max(0, Math.min(this.currentPageIndex, Math.max(0, this.contentPages.length - 1)));
+    if (!Book.hasStartedReading(this.book) && chapterIndex <= 0 && pageIndex <= 0) {
+      engine.curIdx = chapterIndex;
+      engine.curPos = pageIndex;
+      return;
+    }
     this.currentChapterIndex = chapterIndex;
     this.currentPageIndex = pageIndex;
     this.book.durChapterIndex = chapterIndex;
@@ -3050,6 +3057,7 @@ struct ReadBookPage {
     const now = Date.now();
     this.book.durChapterTitle = this.getChapterTitle();
     this.book.durChapterTime = now;
+    this.book.putVariable('readStarted', '1');
     this.book.putVariable('lastReadTime', `${now}`);
     engine.curIdx = chapterIndex;
     engine.curPos = pageIndex;
@@ -3081,6 +3089,7 @@ struct ReadBookPage {
     }
     const now = Date.now();
     this.book.durChapterTime = now;
+    this.book.putVariable('readStarted', '1');
     this.book.putVariable('lastReadTime', `${now}`);
     try {
       const db = AppDatabase.getInstance();

@@ -64,7 +64,22 @@ export class Book {
   }
 
   getUnreadChapterNum(): number {
+    if (!Book.hasStartedReading(this)) {
+      return Math.max(this.totalChapterNum, 0);
+    }
     return Math.max(this.totalChapterNum - this.durChapterIndex - 1, 0);
+  }
+
+  static hasStartedReading(book: Book | null): boolean {
+    if (!book) {
+      return false;
+    }
+    const started = book.getVariable('readStarted');
+    return started === '1' || started === 'true' || book.durChapterIndex > 0 || book.durChapterPos > 0;
+  }
+
+  hasStartedReading(): boolean {
+    return Book.hasStartedReading(this);
   }
 
   getDisplayCover(): string {

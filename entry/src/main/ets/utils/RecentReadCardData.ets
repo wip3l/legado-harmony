@@ -210,6 +210,9 @@ export class RecentReadCardDataProvider {
   }
 
   private static progressText(book: Book): string {
+    if (!Book.hasStartedReading(book)) {
+      return '未读';
+    }
     if (book.durChapterTitle) {
       return book.durChapterTitle;
     }

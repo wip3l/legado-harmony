@@ -2669,7 +2669,7 @@ struct BookshelfPage {
     if (!book.totalChapterNum || book.totalChapterNum <= 0) {
       return '未读';
     }
-    if (!book.durChapterTitle && book.durChapterIndex <= 0 && book.durChapterPos <= 0) {
+    if (!Book.hasStartedReading(book)) {
       return '未读';
     }
     const unread = book.getUnreadChapterNum();
@@ -2680,7 +2680,7 @@ struct BookshelfPage {
     if (!book.totalChapterNum || book.totalChapterNum <= 0) {
       return 0;
     }
-    if (!book.durChapterTitle && book.durChapterIndex <= 0 && book.durChapterPos <= 0) {
+    if (!Book.hasStartedReading(book)) {
       return 0;
     }
     const readChapterCount = Math.min(Math.max(book.durChapterIndex + 1, 0), book.totalChapterNum);
@@ -2773,6 +2773,9 @@ struct BookshelfPage {
   }
 
   getReadProgressInfoText(book: Book): string {
+    if (!Book.hasStartedReading(book)) {
+      return '未读';
+    }
     const parts: string[] = [this.getReadProgressPercentText(book)];
     if (this.bookshelfShowLastReadTime) {
       parts.push(this.getLastReadTimeText(book));
@@ -2787,6 +2790,9 @@ struct BookshelfPage {
   }
 
   getReadChapterText(book: Book): string {
+    if (!Book.hasStartedReading(book)) {
+      return '';
+    }
     return (book.durChapterTitle || '').trim();
   }
 

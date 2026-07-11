@@ -308,10 +308,14 @@ export class ReadBookEngine {
 
   async saveProgress(): Promise<void> {
     if (!this.book) return;
+    if (!Book.hasStartedReading(this.book) && this.curIdx <= 0 && this.curPos <= 0) {
+      return;
+    }
     const now = Date.now();
     this.book.durChapterIndex = this.curIdx;
     this.book.durChapterPos = this.curPos;
     this.book.durChapterTime = now;
+    this.book.putVariable('readStarted', '1');
     this.book.putVariable('lastReadTime', `${now}`);
     await appDb.updateBook(this.book);
   }

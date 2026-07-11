@@ -834,11 +834,13 @@ struct BookSourcePage {
                 .scrollBar(BarState.Auto)
               }
 
-              Row() {
+              Row({ space: 8 }) {
                 if (this.checkInvalidAction === 'none') {
-                  Button('一键禁用')
+                  Button('一键禁用', { type: ButtonType.Normal })
                     .layoutWeight(1)
-                    .height(44)
+                    .height(42)
+                    .borderRadius(10)
+                    .fontSize(13)
                     .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
                     .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#E53935' : this.inputColor())
                     .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
@@ -846,10 +848,11 @@ struct BookSourcePage {
                       this.disableFailedCheckedSources();
                     })
 
-                  Button('一键删除')
+                  Button('一键删除', { type: ButtonType.Normal })
                     .layoutWeight(1)
-                    .height(44)
-                    .margin({ left: 8 })
+                    .height(42)
+                    .borderRadius(10)
+                    .fontSize(13)
                     .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
                     .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#B71C1C' : this.inputColor())
                     .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
@@ -858,10 +861,11 @@ struct BookSourcePage {
                     })
                 }
 
-                Button(this.checkInvalidAction === 'none' ? '取消' : '关闭')
+                Button(this.checkInvalidAction === 'none' ? '取消' : '关闭', { type: ButtonType.Normal })
                   .layoutWeight(1)
-                  .height(44)
-                  .margin({ left: this.checkInvalidAction === 'none' ? 8 : 0 })
+                  .height(42)
+                  .borderRadius(10)
+                  .fontSize(13)
                   .backgroundColor(this.inputColor())
                   .fontColor(this.primaryTextColor())
                   .onClick(() => {
