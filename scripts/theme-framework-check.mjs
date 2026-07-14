@@ -128,7 +128,8 @@ assert(indexPage.includes('shelfScopeSegment()') &&
   indexPage.includes("this.scopeSegmentItem('本地', 'local')") &&
   !indexPage.includes("this.scopeChip('网络', 'network')"),
   'Bookshelf network/local switch must use the segmented control');
-assert((indexPage.includes("this.actionItem('多选'") || indexPage.includes("this.contextActionItem('☑', '多选'")) &&
+assert((indexPage.includes("this.actionItem('多选'") ||
+  indexPage.includes("this.contextActionItem($r('sys.symbol.checkmark_circle'), '多选'")) &&
   indexPage.includes('this.bookMultiSelectBar()'),
   'Bookshelf multi-select entry and action bar must stay connected');
 assert(indexPage.includes("this.shelfGroupChip('未分组', -1)") && indexPage.includes("Text('＋')"),
@@ -141,10 +142,12 @@ assert(!settingsPageSource.includes(".backgroundColor(this.appDarkMode ? '#10111
 assert(settingsPageSource.includes('ThemeRuntime.primaryTextColor') &&
   settingsPageSource.includes('ThemeRuntime.subTextColor'),
   'Mine page semantic text colors are not connected to ThemeRuntime');
-assert(settingsPageSource.includes('menuItem(title: string, desc: string, onClick: () => void)') &&
-  !settingsPageSource.includes('.border({ width: 1') &&
-  !settingsPageSource.includes('List({ space: 1 })'),
-  'Mine page menu items have regressed to the old divided-list style');
+assert(settingsPageSource.includes('menuItem(icon: Resource, title: string, showDivider: boolean, onClick: () => void)') &&
+  settingsPageSource.includes('SymbolGlyph(icon)') &&
+  settingsPageSource.includes("SymbolGlyph($r('sys.symbol.chevron_right'))") &&
+  settingsPageSource.includes('Divider()') &&
+  settingsPageSource.includes('dividerColor()'),
+  'Mine page menu items must use official symbols and themed dividers');
 assert(fontBootstrap.includes('ThemeRuntime.fontFamily()'), 'Cold-start font bootstrap ignores the theme font');
 assert(entryAbility.includes('this.themeBootstrapPromise.then'), 'Theme bootstrap must finish before font bootstrap');
 assert(themeStore.includes('KEY_THEME_ID') && themeStore.includes('createForTheme'),

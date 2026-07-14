@@ -4,6 +4,7 @@ import { AppDatabase } from '../model/data/AppDatabase';
 import { SearchExploreSettings, SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 
 @Entry
 @Component
@@ -327,15 +328,8 @@ struct ExploreSourceSortPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
       Text('书源排序')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)

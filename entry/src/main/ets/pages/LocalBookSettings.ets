@@ -4,6 +4,7 @@ import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { LocalBookScanResult, LocalBookService } from '../core/book/LocalBookService';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { Book } from '../model/data/Book';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 
 @Entry
 @Component
@@ -141,15 +142,8 @@ struct LocalBookSettingsPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
       Text('添加书籍')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)

@@ -3,6 +3,7 @@ import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
 import fileUri from '@ohos.file.fileuri';
@@ -502,15 +503,8 @@ struct CustomFontManagerPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
 
       Text('自定义字体')
         .fontSize(20)

@@ -6,6 +6,7 @@ import { syncSystemBars } from '../utils/SystemBars';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
 import { BookIdentity } from '../utils/BookIdentity';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { CoverGallerySettings } from '../utils/CoverGallerySettings';
 import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
 import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
@@ -81,15 +82,8 @@ struct SearchBookDetailPage {
     Stack() {
       Column() {
         Row() {
-          Text('<')
-            .fontSize(28)
-            .fontColor(this.primaryTextColor())
-            .width(40)
-            .height(56)
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.handleBack();
-            })
+          ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+            onBack: () => this.handleBack() })
 
           Text('书籍详情')
             .fontSize(20)
@@ -99,7 +93,7 @@ struct SearchBookDetailPage {
         }
         .width('100%')
         .height(56)
-        .padding({ left: 12, right: 16 })
+        .padding({ right: 16 })
         .alignItems(VerticalAlign.Center)
         .backgroundColor(this.cardColor())
 

@@ -1,5 +1,5 @@
 import relationalStore from '@ohos.data.relationalStore';
-import { Book, BookChapter, BookSource, BookGroup, SearchKeyword } from './Book';
+import { Book, BookChapter, BookSource, BookGroup, Bookmark, SearchKeyword } from './Book';
 import { Context } from '@kit.AbilityKit';
 
 interface ColumnMigration {
@@ -14,7 +14,7 @@ export class AppDatabase {
   private initialized: boolean = false;
   private initPromise: Promise<void> | null = null;
   private readonly DATABASE_NAME = 'legado.db';
-  private readonly SCHEMA_VERSION = 4;
+  private readonly SCHEMA_VERSION = 5;
 
   private constructor() {}
 
@@ -171,6 +171,23 @@ export class AppDatabase {
         keyword TEXT PRIMARY KEY,
         usage INTEGER DEFAULT 0,
         lastUseTime INTEGER DEFAULT 0
+      )
+    `);
+
+    await this.store.executeSql(`
+      CREATE TABLE IF NOT EXISTS bookmarks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bookUrl TEXT DEFAULT '',
+        bookName TEXT DEFAULT '',
+        bookAuthor TEXT DEFAULT '',
+        chapterIndex INTEGER DEFAULT 0,
+        chapterName TEXT DEFAULT '',
+        pageIndex INTEGER DEFAULT 0,
+        startPos INTEGER DEFAULT 0,
+        endPos INTEGER DEFAULT 0,
+        content TEXT DEFAULT '',
+        createTime INTEGER DEFAULT 0,
+        UNIQUE(bookUrl, chapterIndex, pageIndex)
       )
     `);
 
@@ -404,6 +421,88 @@ export class AppDatabase {
     await this.store.delete(predicates);
     await this.deleteBookChapters(bookUrl);
     await this.deleteBookCachedContent(bookUrl);
+    await this.deleteBookBookmarks(bookUrl);
+  }
+
+  async insertBookmark(bookmark: Bookmark): Promise<number> {
+    if (!this.store) return 0;
+    const bucket: relationalStore.ValuesBucket = {
+      bookUrl: bookmark.bookUrl,
+      bookName: bookmark.bookName,
+      bookAuthor: bookmark.bookAuthor,
+      chapterIndex: bookmark.chapterIndex,
+      chapterName: bookmark.chapterName,
+      pageIndex: bookmark.pageIndex,
+      startPos: bookmark.startPos,
+      endPos: bookmark.endPos,
+      content: bookmark.content,
+      createTime: bookmark.createTime
+    };
+    return await this.store.insert('bookmarks', bucket);
+  }
+
+  async getBookmarks(bookUrl: string): Promise<Bookmark[]> {
+    const bookmarks: Bookmark[] = [];
+    if (!this.store || !bookUrl) return bookmarks;
+    const predicates = new relationalStore.RdbPredicates('bookmarks');
+    predicates.equalTo('bookUrl', bookUrl);
+    predicates.orderByDesc('createTime');
+    const resultSet = await this.store.query(predicates, []);
+    while (resultSet.goToNextRow()) {
+      bookmarks.push(this.resultSetToBookmark(resultSet));
+    }
+    return bookmarks;
+  }
+
+  async getBookmarkAt(bookUrl: string, chapterIndex: number, pageIndex: number): Promise<Bookmark | null> {
+    if (!this.store || !bookUrl) return null;
+    const predicates = new relationalStore.RdbPredicates('bookmarks');
+    predicates.equalTo('bookUrl', bookUrl);
+    predicates.equalTo('chapterIndex', chapterIndex);
+    predicates.equalTo('pageIndex', pageIndex);
+    const resultSet = await this.store.query(predicates, []);
+    if (!resultSet.goToFirstRow()) return null;
+    return this.resultSetToBookmark(resultSet);
+  }
+
+  async deleteBookmark(id: number): Promise<void> {
+    if (!this.store || id <= 0) return;
+    const predicates = new relationalStore.RdbPredicates('bookmarks');
+    predicates.equalTo('id', id);
+    await this.store.delete(predicates);
+  }
+
+  async deleteBookmarks(ids: number[]): Promise<void> {
+    if (!this.store || ids.length === 0) return;
+    for (const id of ids) {
+      if (id <= 0) continue;
+      const predicates = new relationalStore.RdbPredicates('bookmarks');
+      predicates.equalTo('id', id);
+      await this.store.delete(predicates);
+    }
+  }
+
+  async deleteBookBookmarks(bookUrl: string): Promise<void> {
+    if (!this.store || !bookUrl) return;
+    const predicates = new relationalStore.RdbPredicates('bookmarks');
+    predicates.equalTo('bookUrl', bookUrl);
+    await this.store.delete(predicates);
+  }
+
+  private resultSetToBookmark(resultSet: relationalStore.ResultSet): Bookmark {
+    const bookmark = new Bookmark();
+    bookmark.id = resultSet.getLong(resultSet.getColumnIndex('id'));
+    bookmark.bookUrl = resultSet.getString(resultSet.getColumnIndex('bookUrl'));
+    bookmark.bookName = resultSet.getString(resultSet.getColumnIndex('bookName'));
+    bookmark.bookAuthor = resultSet.getString(resultSet.getColumnIndex('bookAuthor'));
+    bookmark.chapterIndex = resultSet.getLong(resultSet.getColumnIndex('chapterIndex'));
+    bookmark.chapterName = resultSet.getString(resultSet.getColumnIndex('chapterName'));
+    bookmark.pageIndex = resultSet.getLong(resultSet.getColumnIndex('pageIndex'));
+    bookmark.startPos = resultSet.getLong(resultSet.getColumnIndex('startPos'));
+    bookmark.endPos = resultSet.getLong(resultSet.getColumnIndex('endPos'));
+    bookmark.content = resultSet.getString(resultSet.getColumnIndex('content'));
+    bookmark.createTime = resultSet.getLong(resultSet.getColumnIndex('createTime'));
+    return bookmark;
   }
 
   async getBook(bookUrl: string): Promise<Book | null> {

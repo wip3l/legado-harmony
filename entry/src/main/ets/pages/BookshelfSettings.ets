@@ -6,6 +6,7 @@ import { Book } from '../model/data/Book';
 import { CoverAlbum, CoverGallerySettings } from '../utils/CoverGallerySettings';
 import { CoverGalleryStore, CoverGallerySnapshot } from '../utils/CoverGalleryStore';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { BookshelfDisplaySettings, BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettingsStore';
 import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
@@ -63,76 +64,117 @@ struct BookshelfSettingsPage {
       Scroll() {
         Column() {
           this.sectionTitle('书籍信息')
+          Column() {
           this.switchItem('书籍标签', '控制书架卡片是否显示书籍标签', this.bookshelfShowTags, (value: boolean) => {
             this.bookshelfShowTags = value;
             this.onDisplaySettingChanged();
           })
+          this.itemDivider()
           this.switchItem('书籍来源', '控制书架卡片是否显示书籍来源', this.bookshelfShowSource, (value: boolean) => {
             this.bookshelfShowSource = value;
             this.onDisplaySettingChanged();
           })
+          this.itemDivider()
           this.switchItem('书籍简介', '开启后显示书源抓取的简介内容', this.bookshelfShowIntro, (value: boolean) => {
             this.bookshelfShowIntro = value;
             this.onDisplaySettingChanged();
           })
           if (this.bookshelfShowIntro) {
+            this.itemDivider()
             this.switchItem('显示全部简介', '开启后书架卡片显示完整简介内容', this.bookshelfShowFullIntro, (value: boolean) => {
               this.bookshelfShowFullIntro = value;
               this.onDisplaySettingChanged();
             })
           }
+          this.itemDivider()
           this.switchItem('使用阅读进度条', '开启后在书架卡片底部显示阅读百分比和阅读信息', this.bookshelfShowProgressBar, (value: boolean) => {
             this.bookshelfShowProgressBar = value;
             this.onDisplaySettingChanged();
           })
           if (this.bookshelfShowProgressBar) {
+            this.itemDivider()
             this.switchItem('显示最后阅读时间', '开启后阅读进度条旁显示最近一次阅读时间', this.bookshelfShowLastReadTime, (value: boolean) => {
               this.bookshelfShowLastReadTime = value;
               this.onDisplaySettingChanged();
             })
+            this.itemDivider()
             this.switchItem('显示最后阅读章节', '开启后阅读进度条旁显示最近一次阅读章节', this.bookshelfShowLastReadChapter, (value: boolean) => {
               this.bookshelfShowLastReadChapter = value;
               this.onDisplaySettingChanged();
             })
           }
+          this.itemDivider()
           this.selectItem('书架布局', '切换书架卡片的信息排布密度',
             this.bookshelfLayoutOptions(), this.bookshelfLayoutSelectedIndex(), (index: number) => {
               this.bookshelfLayoutMode = index === 1 ? 'loose' : 'compact';
               this.onDisplaySettingChanged();
             })
 
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
+
           this.sectionTitle('本地书籍')
-          this.navItem('添加书籍', '选择并导入 TXT 和 EPUB 书籍文件', 'pages/LocalBookSettings')
+          Column() {
+            this.navItem('添加书籍', '选择并导入 TXT 和 EPUB 书籍文件', 'pages/LocalBookSettings')
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
 
           this.sectionTitle('封面设置')
+          Column() {
           this.switchItem('忽略原始封面', '开启后书架封面只使用当前应用的封面图集', this.bookshelfIgnoreSourceCover, (value: boolean) => {
             this.bookshelfIgnoreSourceCover = value;
             this.onCoverSettingChanged();
           })
+          this.itemDivider()
           this.selectItem('封面模式', '控制多张封面的展示顺序',
             this.modeOptions(), this.modeSelectedIndex(), (index: number) => {
               this.bookshelfCoverMode = index === 1 ? 'random' : 'sequence';
               this.onCoverSettingChanged();
             })
+          this.itemDivider()
           this.selectItem('浅色配色图集', '浅色模式下使用的封面图集',
             this.albumOptions(), this.albumSelectedIndex(false), (index: number) => {
               this.setThemeAlbum(false, this.albumIdByIndex(index));
             })
+          this.itemDivider()
           this.selectItem('深色配色图集', '深色模式下使用的封面图集',
             this.albumOptions(), this.albumSelectedIndex(true), (index: number) => {
               this.setThemeAlbum(true, this.albumIdByIndex(index));
             })
+          this.itemDivider()
           this.selectItem('图集应用范围', '选择图集作用于全部书籍或指定书籍',
             this.scopeOptions(), this.scopeSelectedIndex(), (index: number) => {
               this.setCoverApplyScope(index === 1 ? 'books' : 'all');
             })
 
           if (this.showTargetBookList) {
+            this.itemDivider()
             this.targetBooksPanel()
           }
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
 
           this.sectionTitle('封面图集')
-          this.navItem('图集管理', '新建图集、导入图片、重命名和预览封面', 'pages/CoverGalleryManager')
+          Column() {
+            this.navItem('图集管理', '新建图集、导入图片、重命名和预览封面', 'pages/CoverGalleryManager')
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
         }
         .width('100%')
         .padding({ bottom: 32 })
@@ -429,15 +471,8 @@ struct BookshelfSettingsPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
       Text('书架设置')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
@@ -457,6 +492,15 @@ struct BookshelfSettingsPage {
       .fontColor(this.subTextColor())
       .width('100%')
       .padding({ left: 16, right: 16, top: 20, bottom: 8 })
+  }
+
+  @Builder
+  itemDivider() {
+    Divider()
+      .strokeWidth(0.5)
+      .color(this.appDarkMode ? '#24FFFFFF' : '#14000000')
+      .width('calc(100% - 32vp)')
+      .margin({ left: 16, right: 16 })
   }
 
   @Builder
@@ -480,10 +524,11 @@ struct BookshelfSettingsPage {
           onChange(checked);
         })
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .constraintSize({ minHeight: 64 })
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    .backgroundColor(this.cardColor())
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
   }
 
   @Builder
@@ -512,10 +557,11 @@ struct BookshelfSettingsPage {
           onSelect(index);
         })
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .constraintSize({ minHeight: 66 })
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    .backgroundColor(this.cardColor())
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
     .alignItems(VerticalAlign.Center)
   }
 
@@ -583,16 +629,16 @@ struct BookshelfSettingsPage {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      Text('>')
+      SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(18)
-        .fontColor(this.subTextColor())
+        .fontColor([this.subTextColor()])
         .width(24)
-        .textAlign(TextAlign.Center)
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .constraintSize({ minHeight: 66 })
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    .backgroundColor(this.cardColor())
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
       router.pushUrl({ url });

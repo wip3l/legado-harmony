@@ -5,6 +5,7 @@ import { promptAction } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { HttpClient } from '../core/http/HttpClient';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 
 @Entry
 @Component
@@ -111,15 +112,8 @@ struct BookSourceEditPage {
     Stack() {
       Column() {
         Row() {
-          Text('<')
-            .fontSize(24)
-            .fontColor(this.primaryTextColor())
-            .width(40)
-            .height(56)
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.requestBack();
-            })
+          ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+            onBack: () => this.requestBack() })
 
           Text(this.bookSourceUrl ? '编辑书源' : '新建书源')
             .fontSize(20)

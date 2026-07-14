@@ -6,6 +6,7 @@ import { VerificationSupport } from '../core/http/VerificationSupport';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { BookSource } from '../model/data/Book';
 import { syncSystemBars } from '../utils/SystemBars';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 @Entry
@@ -59,15 +60,8 @@ struct VerifyWebPage {
   build() {
     Column() {
       Row() {
-        Text('<')
-          .fontSize(24)
-          .fontColor(this.primaryTextColor())
-          .width(44)
-          .height(56)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            this.finishVerify();
-          })
+        ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+          onBack: () => this.finishVerify() })
 
         Column() {
           Text(this.title)
@@ -97,7 +91,7 @@ struct VerifyWebPage {
       }
       .width('100%')
       .height(56)
-      .padding({ left: 4, right: 8 })
+      .padding({ right: 8 })
       .backgroundColor(this.cardColor())
       .alignItems(VerticalAlign.Center)
 

@@ -6,6 +6,7 @@ import { HttpTTS } from '../model/data/Book';
 import { HttpClient } from '../core/http/HttpClient';
 import { syncSystemBars } from '../utils/SystemBars';
 import { SystemTtsReader, TtsVoiceOption } from '../utils/SystemTtsReader';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 
@@ -66,7 +67,7 @@ struct TtsSettingsPage {
       Scroll() {
         Column() {
           this.sectionTitle('朗读音色')
-          Column({ space: 8 }) {
+          Column() {
             ForEach(this.customVoices, (voice: HttpTTS) => {
               this.customVoiceSelectRow(voice)
             }, (voice: HttpTTS) => this.customVoiceKey(voice))
@@ -81,8 +82,11 @@ struct TtsSettingsPage {
                 .padding({ top: 4, bottom: 4 })
             }
           }
-          .width('100%')
+          .width('calc(100% - 24vp)')
           .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
           .backgroundColor(this.cardColor())
 
           this.sectionTitle('自定义音色')
@@ -107,9 +111,13 @@ struct TtsSettingsPage {
               .width(52)
               .textAlign(TextAlign.Center)
           }
-          .width('100%')
+          .width('calc(100% - 24vp)')
           .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
           .backgroundColor(this.cardColor())
+          .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
           .onClick(() => {
             router.pushUrl({ url: 'pages/CustomTtsVoiceManager' });
           })
@@ -145,8 +153,11 @@ struct TtsSettingsPage {
             .width('100%')
             .margin({ top: 10 })
           }
-          .width('100%')
+          .width('calc(100% - 24vp)')
           .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
           .backgroundColor(this.cardColor())
 
           this.sectionTitle('预览')
@@ -166,8 +177,11 @@ struct TtsSettingsPage {
                 this.togglePreview();
               })
           }
-          .width('100%')
+          .width('calc(100% - 24vp)')
           .padding(16)
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
           .backgroundColor(this.cardColor())
         }
         .width('100%')
@@ -774,15 +788,8 @@ struct TtsSettingsPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
 
       Text('朗读设置')
         .fontSize(20)
@@ -847,7 +854,7 @@ struct TtsSettingsPage {
       Text(this.voiceTitle(voice))
         .fontSize(16)
         .fontColor((voice.available || this.isVoiceDownloading(voice)) ? this.primaryTextColor() : this.subTextColor())
-      .layoutWeight(1)
+        .layoutWeight(1)
 
       Text(this.voiceTrailingText(voice))
         .fontSize(this.voiceTrailingFontSize(voice))
@@ -857,8 +864,8 @@ struct TtsSettingsPage {
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-    .borderRadius(8)
     .backgroundColor(this.voiceRowColor(voice))
+    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
     .onClick(() => {
       this.selectVoice(voice);
     })
@@ -881,7 +888,7 @@ struct TtsSettingsPage {
         .fontSize(13)
         .fontColor(Math.abs(this.ttsSpeed - value) < 0.01 ? '#FFFFFF' : this.primaryTextColor())
     }
-      .layoutWeight(1)
+        .layoutWeight(1)
       .height(32)
       .borderRadius(16)
       .backgroundColor(Math.abs(this.ttsSpeed - value) < 0.01 ? this.accentColor() : this.inputColor())
@@ -923,9 +930,9 @@ struct TtsSettingsPage {
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-    .borderRadius(8)
     .backgroundColor(this.isCustomVoiceSelected(voice) ? ThemeRuntime.accentSurfaceColor(this.appDarkMode) :
       this.inputColor())
+    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
   }
 
   @Builder

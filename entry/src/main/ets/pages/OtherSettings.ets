@@ -1,6 +1,7 @@
 import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 
 @Entry
 @Component
@@ -27,15 +28,22 @@ struct OtherSettingsPage {
       Scroll() {
         Column() {
           this.sectionTitle('外观')
-          this.menuItem('主题与外观', '内置主题 / 阅读背景 / 气泡 / 导航图标', () => {
-            router.pushUrl({ url: 'pages/ThemeSettings' });
-          })
-          this.menuItem('字体设置', '全局字体 / 自定义字体', () => {
-            router.pushUrl({ url: 'pages/FontSettings' });
-          })
-          this.menuItem('图标设置', '桌面图标 / 候选图标', () => {
-            router.pushUrl({ url: 'pages/AppIconSettings' });
-          })
+          Column() {
+            this.menuItem('主题与外观', '内置主题 / 阅读背景 / 气泡 / 导航图标', true, () => {
+              router.pushUrl({ url: 'pages/ThemeSettings' });
+            })
+            this.menuItem('字体设置', '全局字体 / 自定义字体', true, () => {
+              router.pushUrl({ url: 'pages/FontSettings' });
+            })
+            this.menuItem('图标设置', '桌面图标 / 候选图标', false, () => {
+              router.pushUrl({ url: 'pages/AppIconSettings' });
+            })
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
         }
         .width('100%')
         .padding({ bottom: 32 })
@@ -72,15 +80,8 @@ struct OtherSettingsPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
       Text('其他设置')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
@@ -103,7 +104,7 @@ struct OtherSettingsPage {
   }
 
   @Builder
-  menuItem(title: string, desc: string, onClick: () => void) {
+  menuItem(title: string, desc: string, showDivider: boolean, onClick: () => void) {
     Row() {
       Column() {
         Text(title)
@@ -117,14 +118,17 @@ struct OtherSettingsPage {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      Text('>')
+      SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(18)
-        .fontColor(this.subTextColor())
+        .fontColor([this.subTextColor()])
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .height(64)
-    .padding({ left: 16, right: 16 })
-    .backgroundColor(this.cardColor())
+    .padding({ left: 0, right: 0 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: showDivider ? 0.5 : 0 },
+      color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
     .alignItems(VerticalAlign.Center)
     .onClick(onClick)
   }

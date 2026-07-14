@@ -4,6 +4,7 @@ import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStor
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { ColorCodePicker } from '../components/ColorCodePicker';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import {
   ReaderRegexBubbleStyleResolver,
   ReaderRegexEmphasisContext,
@@ -453,15 +454,8 @@ struct ReaderFontSettingsPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          this.closeReaderFontSettings();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => this.closeReaderFontSettings() })
       Text('阅读字体')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)

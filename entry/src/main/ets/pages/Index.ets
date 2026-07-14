@@ -781,9 +781,9 @@ struct BookshelfPage {
               Text(this.books.length > 0 ? `${this.books.length}本` : '')
                 .fontSize(14)
                 .fontColor('#999')
-              Text(this.showShelfGroups ? '⌃' : '⌄')
+              SymbolGlyph(this.showShelfGroups ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
                 .fontSize(15)
-                .fontColor(this.secondaryTextColor())
+                .fontColor([this.secondaryTextColor()])
             }
             .height(36)
             .alignItems(VerticalAlign.Center)
@@ -928,7 +928,7 @@ struct BookshelfPage {
             .onClick(() => this.closeBookActions())
 
           Column() {
-            this.contextActionItem('⌫', '移出书架', '#E53935', () => {
+            this.contextActionItem($r('sys.symbol.trash'), '移出书架', '#E53935', () => {
               if (this.pendingActionBook) {
                 const book = this.pendingActionBook;
                 this.closeBookActions();
@@ -936,7 +936,7 @@ struct BookshelfPage {
               }
             })
             if (!LocalBookService.isLocalBook(this.pendingActionBook)) {
-              this.contextActionItem('⇩', '缓存', this.primaryTextColor(), () => {
+              this.contextActionItem($r('sys.symbol.download'), '缓存', this.primaryTextColor(), () => {
                 if (this.pendingActionBook) {
                   const book = this.pendingActionBook;
                   this.showActionDialog = false;
@@ -946,7 +946,7 @@ struct BookshelfPage {
                 }
               })
             }
-            this.contextActionItem('◇', '自定义标签', this.primaryTextColor(), () => {
+            this.contextActionItem($r('sys.symbol.bookmark'), '自定义标签', this.primaryTextColor(), () => {
               if (this.pendingActionBook) {
                 this.editingTags = BookDisplayHelper.getBookTags(this.pendingActionBook);
                 this.tagInput = '';
@@ -954,7 +954,7 @@ struct BookshelfPage {
               this.showActionDialog = false;
               this.showTagDialog = true;
             })
-            this.contextActionItem('☑', '多选', this.primaryTextColor(), () => {
+            this.contextActionItem($r('sys.symbol.checkmark_circle'), '多选', this.primaryTextColor(), () => {
               if (this.pendingActionBook) {
                 const bookUrl = this.pendingActionBook.bookUrl;
                 this.closeBookActions();
@@ -1509,12 +1509,12 @@ struct BookshelfPage {
         .backdropBlur(18)
         .onClick(() => this.closeBookGroupActionMenu())
       Column() {
-        this.contextActionItem('✎', '重命名', this.primaryTextColor(), () => {
+        this.contextActionItem($r('sys.symbol.square_and_pencil'), '重命名', this.primaryTextColor(), () => {
             this.renameBookGroupName = this.pendingBookGroup?.groupName || '';
             this.showBookGroupActionMenu = false;
             this.showRenameBookGroupDialog = true;
           })
-        this.contextActionItem('⌫', '删除', '#E53935', () => {
+        this.contextActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => {
             this.pendingDeleteBookGroup = this.pendingBookGroup;
             this.showBookGroupActionMenu = false;
             this.showDeleteBookGroupDialog = true;
@@ -2009,13 +2009,12 @@ struct BookshelfPage {
   }
 
   @Builder
-  contextActionItem(icon: string, label: string, color: string, action: () => void) {
+  contextActionItem(icon: Resource, label: string, color: string, action: () => void) {
     Row({ space: 10 }) {
-      Text(icon)
+      SymbolGlyph(icon)
         .fontSize(18)
-        .fontColor(color)
+        .fontColor([color])
         .width(24)
-        .textAlign(TextAlign.Center)
       Text(label)
         .fontSize(15)
         .fontColor(color)
@@ -3203,9 +3202,9 @@ struct BookshelfPage {
         .fontSize(13)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.primaryTextColor())
-      Text(this.showShelfSortMenu ? '⌃' : '⌄')
+      SymbolGlyph(this.showShelfSortMenu ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
         .fontSize(14)
-        .fontColor(this.secondaryTextColor())
+        .fontColor([this.secondaryTextColor()])
     }
     .height(32)
     .padding({ left: 11, right: 9 })
@@ -3710,10 +3709,9 @@ struct ExplorePage {
               })
           }
 
-          Text(this.showExploreSourcePicker ? '⌃' : '⌄')
+          SymbolGlyph(this.showExploreSourcePicker ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
             .fontSize(18)
-            .fontFamily(this.readerActiveFontFamily)
-            .fontColor(this.secondaryTextColor())
+            .fontColor([this.secondaryTextColor()])
             .margin({ left: 6 })
             .onClick(() => {
               this.toggleExploreSourcePicker();
@@ -4755,13 +4753,11 @@ struct SearchPage {
         }, (keyword: string) => keyword)
 
         if (!this.searchHistoryEditing && this.searchHistory.length > 5) {
-          Text(this.searchHistoryExpanded ? '⌃' : '⌄')
+          SymbolGlyph(this.searchHistoryExpanded ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
             .fontSize(18)
-            .fontColor(this.secondaryTextColor())
+            .fontColor([this.secondaryTextColor()])
             .width(36)
             .height(32)
-            .textAlign(TextAlign.Center)
-            .backgroundColor(this.buttonBackgroundColor())
             .borderRadius(16)
             .margin({ right: 8, bottom: 8 })
             .onClick(() => {
@@ -5460,35 +5456,38 @@ struct SettingsPage {
 
       Scroll() {
         Column() {
-          this.menuItem('书源管理', '导入、编辑、启用和调试书源', () => {
+          this.menuItem($r('sys.symbol.externaldrive'), '书源管理', true, () => {
             router.pushUrl({ url: 'pages/BookSource' });
           })
-          this.menuItem('阅读设置', '字号、行距、背景与阅读偏好', () => {
+          this.menuItem($r('sys.symbol.book'), '阅读设置', true, () => {
             router.pushUrl({ url: 'pages/Settings' });
           })
-          this.menuItem('朗读设置', '音色与朗读倍速', () => {
+          this.menuItem($r('sys.symbol.speaker_wave_3'), '朗读设置', true, () => {
             router.pushUrl({ url: 'pages/TtsSettings' });
           })
-          this.menuItem('书架设置', '标签、简介与封面图集', () => {
+          this.menuItem($r('sys.symbol.bookshelf'), '书架设置', true, () => {
             router.pushUrl({ url: 'pages/BookshelfSettings' });
           })
-          this.menuItem('搜索/发现配置', '封面、标签与阅读后加入书架提示', () => {
+          this.menuItem($r('sys.symbol.magnifyingglass'), '搜索/发现配置', true, () => {
             router.pushUrl({ url: 'pages/SearchExploreSettings' });
           })
-          this.menuItem('其他设置', '主题色、按钮色与通用偏好', () => {
+          this.menuItem($r('sys.symbol.gearshape'), '其他设置', true, () => {
             router.pushUrl({ url: 'pages/OtherSettings' });
           })
-          this.menuItem('关于', '版本、说明、开源许可与致谢', () => {
+          this.menuItem($r('sys.symbol.info_circle'), '关于', false, () => {
             router.pushUrl({ url: 'pages/About' });
           })
         }
-        .width('100%')
-        .height('100%')
-        .padding({ bottom: 96 })
+        .width('calc(100% - 24vp)')
+        .margin({ left: 12, right: 12, top: 12 })
+        .borderRadius(16)
+        .clip(true)
+        .backgroundColor(this.glassCardColor())
         .justifyContent(FlexAlign.Start)
       }
       .width('100%')
       .layoutWeight(1)
+      .padding({ bottom: 96 })
       .backgroundColor(this.pageColor())
     }
     .width('100%')
@@ -5498,29 +5497,38 @@ struct SettingsPage {
   }
 
   @Builder
-  menuItem(title: string, desc: string, onClick: () => void) {
-    Row() {
-      Column() {
+  menuItem(icon: Resource, title: string, showDivider: boolean, onClick: () => void) {
+    Column() {
+      Row() {
+        SymbolGlyph(icon)
+          .fontSize(22)
+          .fontColor([this.subTextColor()])
+          .width(32)
+
         Text(title)
           .fontSize(16)
+          .fontWeight(FontWeight.Medium)
           .fontColor(this.primaryTextColor())
-        Text(desc)
-          .fontSize(12)
-          .fontColor(this.subTextColor())
-          .margin({ top: 4 })
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          .margin({ left: 12 })
 
-      Text('>')
-        .fontSize(18)
-        .fontColor(this.subTextColor())
+        SymbolGlyph($r('sys.symbol.chevron_right'))
+          .fontSize(18)
+          .fontColor([this.subTextColor()])
+      }
+      .width('100%')
+      .height(56)
+      .padding({ left: 16, right: 16 })
+      .alignItems(VerticalAlign.Center)
+
+      if (showDivider) {
+        Divider()
+          .strokeWidth(0.5)
+          .color(this.dividerColor())
+          .margin({ left: 60, right: 16 })
+      }
     }
     .width('100%')
-    .height(64)
-    .padding({ left: 16, right: 16 })
-    .backgroundColor(this.glassCardColor())
-    .alignItems(VerticalAlign.Center)
     .onClick(onClick)
   }
 
@@ -5538,6 +5546,10 @@ struct SettingsPage {
 
   glassCardColor(): string {
     return ThemeRuntime.cardColor(this.appDarkMode);
+  }
+
+  dividerColor(): string {
+    return this.appDarkMode ? '#24FFFFFF' : '#14000000';
   }
 
 }

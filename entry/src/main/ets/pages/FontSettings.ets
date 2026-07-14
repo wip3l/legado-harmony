@@ -5,6 +5,7 @@ import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import fs from '@ohos.file.fs';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -59,8 +60,15 @@ struct FontSettingsPage {
       Scroll() {
         Column() {
           this.sectionTitle('全局字体设置')
-          this.fontSettingPanel()
-          this.customFontEntryItem()
+          Column() {
+            this.fontSettingPanel()
+            this.customFontEntryItem()
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
         }
         .width('100%')
         .padding({ bottom: 32 })
@@ -443,15 +451,8 @@ struct FontSettingsPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
 
       Text('字体设置')
         .fontSize(20)
@@ -461,7 +462,8 @@ struct FontSettingsPage {
     }
     .width('100%')
     .height(56)
-    .backgroundColor(this.cardColor())
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
     .alignItems(VerticalAlign.Center)
   }
 
@@ -495,10 +497,12 @@ struct FontSettingsPage {
           this.selectReaderFontByIndex(index);
         })
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .constraintSize({ minHeight: 56 })
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor(this.cardColor())
+    .padding({ left: 0, right: 0, top: 12, bottom: 12 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
     .alignItems(VerticalAlign.Center)
   }
 
@@ -513,14 +517,16 @@ struct FontSettingsPage {
         .fontSize(13)
         .fontColor(this.subTextColor())
         .margin({ right: 8 })
-      Text('>')
+      SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(18)
-        .fontColor(this.subTextColor())
+        .fontColor([this.subTextColor()])
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .height(56)
-    .padding({ left: 16, right: 16 })
-    .backgroundColor(this.cardColor())
+    .padding({ left: 0, right: 0 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
       router.pushUrl({ url: 'pages/CustomFontManager' });

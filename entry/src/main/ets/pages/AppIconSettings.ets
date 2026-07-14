@@ -4,6 +4,7 @@ import { syncSystemBars } from '../utils/SystemBars';
 import { AppIconManager, AppIconOption } from '../utils/AppIconManager';
 import { AppIconSettings, AppIconSettingsStore } from '../utils/AppIconSettingsStore';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 
 @Entry
 @Component
@@ -150,15 +151,8 @@ struct AppIconSettingsPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          this.backSafely();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => this.backSafely() })
       Text('图标设置')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)

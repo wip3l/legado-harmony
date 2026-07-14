@@ -5,6 +5,7 @@ import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ColorCodePicker } from '../components/ColorCodePicker';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ThemeIds } from '../theme/ThemeModels';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 
 @Component
 struct ThemeColorOption {
@@ -30,10 +31,12 @@ struct ThemeColorOption {
           .backgroundColor(this.color)
           .border({ width: 2, color: this.appDarkMode ? '#55FFFFFF' : '#22000000' })
       }
-      .width('100%')
+      .width('calc(100% - 32vp)')
       .height(60)
-      .padding({ left: 16, right: 16 })
-      .backgroundColor(this.cardColor)
+      .padding({ left: 0, right: 0 })
+      .margin({ left: 16, right: 16 })
+      .backgroundColor(Color.Transparent)
+      .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
       .alignItems(VerticalAlign.Center)
 
       ColorCodePicker({
@@ -85,7 +88,14 @@ struct ThemeColorSettingsPage {
         Column() {
           this.sectionTitle('修改任一颜色后会自动启用自定义主题')
           this.modeOptions()
-          this.colorOptions()
+          Column() {
+            this.colorOptions()
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12, top: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
           this.previewPanel()
         }
         .width('100%')
@@ -193,15 +203,8 @@ struct ThemeColorSettingsPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
       Text('自定义主题')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
@@ -229,8 +232,11 @@ struct ThemeColorSettingsPage {
       this.modeButton('浅色模式', 'light')
       this.modeButton('深色模式', 'dark')
     }
-    .width('100%')
+    .width('calc(100% - 24vp)')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .margin({ left: 12, right: 12 })
+    .borderRadius(16)
+    .clip(true)
     .backgroundColor(this.cardColor())
   }
 

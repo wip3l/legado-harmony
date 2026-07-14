@@ -6,6 +6,7 @@ import { HttpTTS } from '../model/data/Book';
 import { HttpClient } from '../core/http/HttpClient';
 import { syncSystemBars } from '../utils/SystemBars';
 import { SystemTtsReader } from '../utils/SystemTtsReader';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 
@@ -500,15 +501,8 @@ struct CustomTtsVoiceManagerPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
 
       Text('自定义音色管理')
         .fontSize(20)

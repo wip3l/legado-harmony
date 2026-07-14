@@ -2,6 +2,7 @@ import { bundleManager, common } from '@kit.AbilityKit';
 import { promptAction, router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 
 @Entry
 @Component
@@ -23,15 +24,8 @@ struct AboutPage {
   build() {
     Column() {
       Row() {
-        Text('<')
-          .fontSize(24)
-          .fontColor(this.primaryTextColor())
-          .width(40)
-          .height(56)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            router.back();
-          })
+        ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+          onBack: () => router.back() })
 
         Text('关于')
           .fontSize(20)

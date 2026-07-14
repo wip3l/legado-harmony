@@ -27,6 +27,7 @@ hs_err_pid*
 *.iml
 .gradle/
 build/
+.agents/
 
 # HarmonyOS
 /node_modules

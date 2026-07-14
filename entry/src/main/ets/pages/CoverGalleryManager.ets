@@ -6,6 +6,7 @@ import fileUri from '@ohos.file.fileuri';
 import zlib from '@ohos.zlib';
 import { syncSystemBars } from '../utils/SystemBars';
 import { CoverAlbum, CoverGallerySettings } from '../utils/CoverGallerySettings';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { CoverGalleryStore, CoverGallerySnapshot } from '../utils/CoverGalleryStore';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
@@ -608,16 +609,11 @@ struct CoverGalleryManagerPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => {
           AppStorage.setOrCreate('coverGalleryUpdateTime', Date.now());
           router.back();
-        })
+        } })
       Text('封面图集')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)

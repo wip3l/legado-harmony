@@ -6,6 +6,7 @@ import { ReaderThemeHelper, ReaderThemeItem } from '../utils/ReaderThemeHelper';
 import { ReaderCustomThemeData, ReaderCustomThemeHelper, ReaderCustomThemeScheme } from '../utils/ReaderCustomThemeHelper';
 import { ReaderBackgroundImageStore } from '../utils/ReaderBackgroundImageStore';
 import { AppThemeModeStore } from '../utils/AppThemeModeStore';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { ColorCodePicker } from '../components/ColorCodePicker';
@@ -123,13 +124,28 @@ struct SettingsPage {
       Scroll() {
         Column() {
           this.sectionTitle('App 配色')
-          this.appThemeOptions()
+          Column() {
+            this.appThemeOptions()
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
 
           this.sectionTitle('排版')
-          this.typographyStepper()
-          this.readerFontEntryItem()
+          Column() {
+            this.typographyStepper()
+            this.readerFontEntryItem()
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
 
           this.sectionTitle('阅读背景')
+          Column() {
           this.readerThemePanel()
 
           this.selectItem('翻页方式', '选择滚动、滑动或点击翻页',
@@ -157,6 +173,12 @@ struct SettingsPage {
             this.setReaderExtendToStatusBar(value);
           })
           this.preloadSettingPanel()
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
 
           this.sectionTitle('预览')
           Column() {
@@ -1407,15 +1429,8 @@ struct SettingsPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
 
       Text('阅读设置')
         .fontSize(20)
@@ -1444,7 +1459,7 @@ struct SettingsPage {
       Text('字体设置')
         .fontSize(16)
         .fontColor(this.primaryTextColor())
-      .layoutWeight(1)
+        .layoutWeight(1)
 
       Select(this.readerFontOptions())
         .selected(this.readerFontSelectedIndex())
@@ -1477,9 +1492,9 @@ struct SettingsPage {
         .fontSize(13)
         .fontColor(this.subTextColor())
         .margin({ right: 8 })
-      Text('>')
+      SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(18)
-        .fontColor(this.subTextColor())
+        .fontColor([this.subTextColor()])
     }
     .width('100%')
     .height(56)
@@ -1502,13 +1517,14 @@ struct SettingsPage {
         .fontSize(13)
         .fontColor(this.subTextColor())
         .margin({ right: 8 })
-      Text('>')
+      SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(18)
-        .fontColor(this.subTextColor())
+        .fontColor([this.subTextColor()])
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .height(56)
-    .padding({ left: 16, right: 16 })
+    .padding({ left: 0, right: 0 })
+    .margin({ left: 16, right: 16 })
     .backgroundColor(this.cardColor())
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
@@ -2003,10 +2019,12 @@ struct SettingsPage {
           onSelect(index);
         })
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .constraintSize({ minHeight: 64 })
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    .backgroundColor(this.cardColor())
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
     .alignItems(VerticalAlign.Center)
   }
 
@@ -2038,9 +2056,11 @@ struct SettingsPage {
           onChange(checked);
         })
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .constraintSize({ minHeight: 64 })
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    .backgroundColor(this.cardColor())
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
   }
 }

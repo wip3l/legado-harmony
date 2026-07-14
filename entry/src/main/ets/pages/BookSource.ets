@@ -5,6 +5,7 @@ import { HttpClient } from '../core/http/HttpClient';
 import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
 import { syncSystemBars } from '../utils/SystemBars';
 import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
@@ -102,15 +103,8 @@ struct BookSourcePage {
     Stack() {
       Column() {
         Row() {
-          Text('<')
-            .fontSize(24)
-            .fontColor(this.primaryTextColor())
-            .width(40)
-            .height(56)
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              router.back();
-            })
+          ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+            onBack: () => router.back() })
 
           Text('书源管理')
             .fontSize(20)
@@ -1087,13 +1081,16 @@ struct BookSourcePage {
         .onClick(() => this.closeSourceActions())
       Column() {
         if (this.actionSourceNeedsLogin()) {
-          this.contextActionItem('↗', this.actionSourceLoggedIn() ? '重新登录' : '登录',
+          this.contextActionItem($r('sys.symbol.arrow_right_up_and_square'),
+            this.actionSourceLoggedIn() ? '重新登录' : '登录',
             this.primaryTextColor(), () => this.openActionSourceLogin())
         }
-        this.contextActionItem('✎', '修改', this.primaryTextColor(), () => this.openActionSourceEdit())
-        this.contextActionItem('◉', this.actionSourceEnabled() ? '禁用' : '启用', this.primaryTextColor(),
+        this.contextActionItem($r('sys.symbol.square_and_pencil'), '修改', this.primaryTextColor(),
+          () => this.openActionSourceEdit())
+        this.contextActionItem(this.actionSourceEnabled() ? $r('sys.symbol.minus_circle') :
+          $r('sys.symbol.checkmark_circle'), this.actionSourceEnabled() ? '禁用' : '启用', this.primaryTextColor(),
           () => this.toggleActionSourceEnabled())
-        this.contextActionItem('⌫', '删除', '#E53935', () => {
+        this.contextActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => {
             this.showSourceActionDialog = false;
             this.showSourceDeleteDialog = true;
           })
@@ -1114,13 +1111,12 @@ struct BookSourcePage {
   }
 
   @Builder
-  contextActionItem(icon: string, label: string, color: string, action: () => void) {
+  contextActionItem(icon: Resource, label: string, color: string, action: () => void) {
     Row({ space: 10 }) {
-      Text(icon)
+      SymbolGlyph(icon)
         .fontSize(18)
-        .fontColor(color)
+        .fontColor([color])
         .width(24)
-        .textAlign(TextAlign.Center)
       Text(label)
         .fontSize(15)
         .fontColor(color)

@@ -6,6 +6,7 @@ import { ReaderThemeHelper } from '../utils/ReaderThemeHelper';
 import { syncSystemBars } from '../utils/SystemBars';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { BuiltinThemeRegistry } from '../theme/BuiltinThemeRegistry';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
 import { ThemeIds, ThemePack, ThemeVariant } from '../theme/ThemeModels';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
@@ -239,15 +240,8 @@ struct ThemeSettingsPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
       Text('主题与外观')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)

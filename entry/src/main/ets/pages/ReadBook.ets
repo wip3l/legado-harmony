@@ -7,7 +7,9 @@ import { notificationManager } from '@kit.NotificationKit';
 import image from '@ohos.multimedia.image';
 import fs from '@ohos.file.fs';
 import graphicsText from '@ohos.graphics.text';
-import { Book, BookChapter, SearchBook, HttpTTS } from '../model/data/Book';
+import deviceInfo from '@ohos.deviceInfo';
+import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
+import { Book, BookChapter, Bookmark, SearchBook, HttpTTS } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
 import { LocalBookService } from '../core/book/LocalBookService';
@@ -21,6 +23,7 @@ import { ReaderThemeHelper, ReaderThemeItem } from '../utils/ReaderThemeHelper';
 import { ReaderCustomThemeData, ReaderCustomThemeHelper, ReaderCustomThemeScheme } from '../utils/ReaderCustomThemeHelper';
 import { ReaderBackgroundImageStore } from '../utils/ReaderBackgroundImageStore';
 import { ColorCodePicker } from '../components/ColorCodePicker';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
@@ -98,10 +101,21 @@ struct ReadBookPage {
   @State book: Book | null = null;
   @State chapters: BookChapter[] = [];
   @State currentChapterIndex: number = 0;
+  @State menuChapterPreviewIndex: number = 0;
+  @State menuChapterSliderActive: boolean = false;
+  @State menuChapterTooltipVisible: boolean = false;
   @State content: string = '';
   @State isLoading: boolean = true;
   @State showMenu: boolean = false;
   @State showToc: boolean = false;
+  @State tocPanelTab: number = 0;
+  @State bookmarks: Bookmark[] = [];
+  @State bookmarkMultiSelectMode: boolean = false;
+  @State selectedBookmarkIds: number[] = [];
+  @State showBookmarkActionMenu: boolean = false;
+  @State pendingBookmarkAction: Bookmark | null = null;
+  @State bookmarkActionMenuX: number = 16;
+  @State bookmarkActionMenuY: number = 96;
   @State showSettings: boolean = false;
   @State showTapZoneSettings: boolean = false;
   @State settingsPanelTab: number = 0;
@@ -129,6 +143,7 @@ struct ReadBookPage {
   @State pageViewHeight: number = 0;
   @State readerInitialPageReady: boolean = false;
   @State statusBarSafeHeight: number = 0;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State isTtsSpeaking: boolean = false;
   @State ttsMediaControlsExpanded: boolean = false;
   @State ttsMediaImage: string = '';
@@ -138,6 +153,7 @@ struct ReadBookPage {
   @State ttsHighlightRenderVersion: number = 0;
   private pendingRestorePageIndex: number = -1;
   private tocScroller: Scroller = new Scroller();
+  private bookmarkScroller: ListScroller = new ListScroller();
   private ttsReader: SystemTtsReader = new SystemTtsReader();
   private ttsAutoContinue: boolean = false;
   private ttsReadToken: number = 0;
@@ -174,6 +190,9 @@ struct ReadBookPage {
   @State pageTransitionOpacity: number = 1;
   @State pageSlideOffsetX: number = 0;
   @State pageSlideOffsetY: number = 0;
+  @State bookmarkPullOffsetY: number = 0;
+  @State bookmarkPullActive: boolean = false;
+  @State bookmarkPullReady: boolean = false;
   @State pageSlideDirection: number = 0;
   @State pageTurnAnimating: boolean = false;
   @State pageTurnIncomingText: string = '';
@@ -307,6 +326,7 @@ struct ReadBookPage {
       this.loadTtsSettingsAndVoices();
       if (this.bookUrl) {
         await this.loadBook();
+        await this.loadBookmarks();
       }
     } finally {
       this.readerEntryInitializing = false;
@@ -326,6 +346,10 @@ struct ReadBookPage {
   }
 
   onBackPress(): boolean {
+    if (this.showBookmarkActionMenu) {
+      this.closeBookmarkActionMenu();
+      return true;
+    }
     if (this.showChangeSourceDialog) {
       this.showChangeSourceDialog = false;
       return true;
@@ -500,7 +524,7 @@ struct ReadBookPage {
       }
     } catch (e) {
       console.error('加载书籍失败:', e);
-      this.setReaderContent('加载失败,请重试');
+      this.setReaderContent('书籍或目录加载失败。请点击右上角橙色感叹号圆形 Logo（重试）重新加载。');
       this.isLoading = false;
     } finally {
       this.updatePendingVerification();
@@ -556,6 +580,9 @@ struct ReadBookPage {
     this.pageSlideOffsetX = 0;
     this.pageSlideOffsetY = 0;
     this.pageSlideDirection = 0;
+    this.bookmarkPullOffsetY = 0;
+    this.bookmarkPullActive = false;
+    this.bookmarkPullReady = false;
     this.pageTurnAnimating = false;
     this.pageTurnIncomingText = '';
     this.pageTurnIncomingSecondaryText = '';
@@ -598,8 +625,9 @@ struct ReadBookPage {
       } else {
         this.updatePendingVerification();
         const c = this.chapters[chapterIndex];
-        loadedContent = this.verificationUrl ? `${c ? c.title : '当前章节'}\n\n该书源需要先完成网页验证。请点击阅读菜单里的「验证」，完成后返回并重试。` :
-          (c ? `${c.title}\n\n章节内容加载失败，请稍后重试或尝试换源。` : '加载失败');
+        loadedContent = this.verificationUrl ? `${c ? c.title : '当前章节'}\n\n该书源需要先完成网页验证。请点击右上角盾牌对勾 Logo（验证），完成后返回，再点击旁边橙色感叹号圆形 Logo（重试）。` :
+          (c ? `${c.title}\n\n章节正文加载失败。请点击右上角环形箭头 Logo（刷新本章），或点击双向箭头 Logo（换源）。` :
+            '章节正文加载失败。请点击右上角橙色感叹号圆形 Logo（重试）。');
         this.content = loadedContent;
       }
       this.paginateContent(loadedContent, chapterIndex);
@@ -637,8 +665,9 @@ struct ReadBookPage {
       } else {
         this.updatePendingVerification();
         const chapter = this.chapters[this.currentChapterIndex];
-        const loadedContent = this.verificationUrl ? `${chapter ? chapter.title : '当前章节'}\n\n该书源需要先完成网页验证。请点击阅读菜单里的「验证」，完成后返回并重试。` :
-          (chapter ? `${chapter.title}\n\n章节内容刷新失败，请稍后重试或尝试换源。` : '刷新失败');
+        const loadedContent = this.verificationUrl ? `${chapter ? chapter.title : '当前章节'}\n\n该书源需要先完成网页验证。请点击右上角盾牌对勾 Logo（验证），完成后返回，再点击旁边橙色感叹号圆形 Logo（重试）。` :
+          (chapter ? `${chapter.title}\n\n章节正文刷新失败。请再次点击右上角环形箭头 Logo（刷新本章），或点击双向箭头 Logo（换源）。` :
+            '章节正文刷新失败。请点击右上角橙色感叹号圆形 Logo（重试）。');
         this.content = loadedContent;
         this.paginateContent(loadedContent);
         promptAction.showToast({ message: '刷新本章失败' });
@@ -1028,8 +1057,12 @@ struct ReadBookPage {
         this.readerTapLayer()
       }
 
-      if (this.shouldShowTtsMediaControls()) {
-        this.ttsMediaControlsBar()
+      if (this.bookmarkPullActive) {
+        this.readerBookmarkPullHint()
+      }
+
+      if (this.isCurrentPageBookmarked() && !this.showMenu && !this.showToc && !this.showSettings) {
+        this.readerCurrentPageBookmarkMarker()
       }
 
       if (this.showMenu && !this.showToc && !this.showSettings) {
@@ -1041,263 +1074,37 @@ struct ReadBookPage {
       }
 
       if (this.showMenu) {
-        Column() {
-          Row() {
-            Row() {
-              Text('<')
-                .fontSize(24)
-                .textAlign(TextAlign.Center)
-            }
-              .width(40)
-              .height(56)
-              .justifyContent(FlexAlign.Center)
-              .alignItems(VerticalAlign.Center)
-              .onClick(() => {
-                this.exitReaderPage();
-              })
-
-            Text(this.book?.name || '')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .layoutWeight(1)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-            if (this.chapters.length > 0) {
-              Button('刷新本章')
-                .height(36)
-                .fontSize(14)
-                .margin({ right: 8 })
-                .backgroundColor(this.buttonColor())
-                .fontColor('#FFFFFF')
-                .onClick(() => {
-                  this.hideReaderPanels();
-                  this.refreshCurrentChapter();
-                })
-            }
-
-            if (this.book && this.book.origin !== 'local') {
-              Button('换源')
-                .height(36)
-                .fontSize(14)
-                .margin({ right: 8 })
-                .backgroundColor(this.buttonColor())
-                .fontColor('#FFFFFF')
-                .onClick(() => {
-                  this.openChangeSourceDialog();
-                })
-            }
-
-            if (this.verificationUrl) {
-              Button('验证')
-                .height(36)
-                .fontSize(14)
-                .margin({ right: 8 })
-                .backgroundColor(this.buttonColor())
-                .fontColor('#FFFFFF')
-                .onClick(() => {
-                  this.openVerificationPage();
-                })
-            }
-
-            if ((this.chapters.length === 0 && this.book?.origin !== 'local') || this.verificationUrl) {
-              Button('重试')
-                .height(36)
-                .fontSize(14)
-                .backgroundColor(this.buttonColor())
-                .fontColor('#FFFFFF')
-                .onClick(() => {
-                  this.hideReaderPanels();
-                  if (this.chapters.length === 0) {
-                    this.retryFetchChapters();
-                  } else {
-                    this.loadContent();
-                  }
-                })
-            }
-          }
-          .width('100%')
-          .height(this.getTopOverlayHeight())
-          .padding({ left: 16, right: 16, top: this.getTopControlSafePadding() })
-          .backgroundColor(this.readerSolidPanelColor())
-          .alignItems(VerticalAlign.Center)
-        }
-        .width('100%')
-        .position({ x: 0, y: 0 })
+        this.readerFloatingTopMenu()
       }
 
-      if (this.showMenu && this.chapters.length > 0) {
-        Column() {
-          Row() {
-            Text(this.getChapterTitle())
-              .fontSize(14)
-              .fontColor('#666')
-              .layoutWeight(1)
-
-            Text(`${this.currentChapterIndex + 1}/${this.chapters.length}`)
-              .fontSize(14)
-              .fontColor('#999')
-          }
-          .width('100%')
-          .padding({ left: 16, right: 16 })
-
-          Row() {
-            Button('上一章')
-              .fontSize(14)
-              .layoutWeight(1)
-              .margin({ right: 8 })
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(async () => {
-                this.hideReaderPanels();
-                await this.jumpToAdjacentChapterFirstPage(-1);
-              })
-
-            Button('目录')
-              .fontSize(14)
-              .layoutWeight(1)
-              .margin({ right: 8 })
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.openTocPanel();
-              })
-
-            Button('下一章')
-              .fontSize(14)
-              .layoutWeight(1)
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(async () => {
-                this.hideReaderPanels();
-                await this.jumpToAdjacentChapterFirstPage(1);
-              })
-          }
-          .width('100%')
-          .margin({ top: 16 })
-
-          Row() {
-            Button('设置')
-              .fontSize(14)
-              .layoutWeight(1)
-              .margin({ right: 8 })
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.openSettingsPanel();
-              })
-
-            Button(this.isTtsSpeaking ? '停止朗读' : '朗读')
-              .fontSize(14)
-              .layoutWeight(1)
-              .margin({ right: 8 })
-              .backgroundColor(this.isTtsSpeaking ? '#E53935' : this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.toggleTtsReading();
-              })
-
-            Button('刷新目录')
-              .fontSize(14)
-              .layoutWeight(1)
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.hideReaderPanels();
-                this.retryFetchChapters();
-              })
-          }
-          .width('100%')
-          .margin({ top: 10 })
+      if (this.showMenu && !this.showToc && !this.showSettings && this.chapters.length > 0) {
+        if (this.supportsReaderImmersiveMaterial()) {
+          this.readerHdsFloatingBottomMenu()
+        } else {
+          this.readerFloatingBottomMenu()
         }
-        .width('100%')
-        .padding(16)
-        .backgroundColor(this.readerSolidPanelColor())
-        .position({ x: 0, y: '100%' })
-        .translate({ y: '-100%' })
+        this.readerTtsQuickActionButton()
+        if (this.shouldShowTtsMediaControls()) {
+          this.ttsExpandedMediaControlsBar()
+        }
       }
 
       if (this.showToc) {
-        Row() {
-          Column() {
-            Row() {
-              Text('目录')
-                .fontSize(20)
-                .fontWeight(FontWeight.Bold)
-                .layoutWeight(1)
-              Button('关闭')
-                .height(34)
-                .fontSize(13)
-                .borderRadius(17)
-                .backgroundColor(this.buttonColor())
-                .fontColor('#FFFFFF')
-                .onClick(() => {
-                  this.showToc = false;
-                })
-            }
-            .width('100%')
-            .height(this.getTopOverlayHeight())
-            .padding({ left: 16, right: 16, top: this.getTopControlSafePadding() })
-
-            List({ space: 2, scroller: this.tocScroller, initialIndex: this.getTocInitialIndex() }) {
-              ForEach(this.chapters, (chapter: BookChapter, index: number) => {
-                ListItem() {
-                  Row({ space: 8 }) {
-                    Text(this.cleanChapterTitle(chapter.title))
-                      .fontSize(15)
-                      .fontColor(this.getTocTitleColor(chapter, index))
-                      .maxLines(2)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                      .layoutWeight(1)
-
-                    if (this.book?.origin !== 'local' && chapter.cacheDate > 0) {
-                      Text('已缓存')
-                        .fontSize(11)
-                        .fontColor(this.isReaderThemeDark() ? '#7CC7A0' : '#1F8F55')
-                        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-                        .backgroundColor(this.isReaderThemeDark() ? '#24382F' : '#E6F4EC')
-                        .borderRadius(4)
-                    }
-                  }
-                  .width('100%')
-                  .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-                  .backgroundColor(index === this.currentChapterIndex ? this.tocSelectedBackgroundColor() : '#00000000')
-                    .onClick(async () => {
-                      const targetChapterIndex = index;
-                      this.currentPageIndex = 0;
-                      this.pendingRestorePageIndex = 0;
-                      this.showToc = false;
-                      this.showMenu = false;
-                      await this.loadContent(false, targetChapterIndex);
-                      await this.saveReadingProgress();
-                    })
-                }
-              })
-            }
-            .layoutWeight(1)
-            .width('100%')
-            .scrollBar(BarState.On)
-            .scrollBarWidth(16)
-            .scrollBarColor(this.isReaderThemeDark() ? '#668A8F98' : '#667A6F63')
-          }
-          .width('82%')
-          .height('100%')
-          .backgroundColor(this.readerSolidPanelColor())
-
-          Blank()
-            .layoutWeight(1)
-            .height('100%')
-            .onClick(() => {
-              this.showToc = false;
-            })
+        this.readerFloatingTocPanel()
+        if (this.supportsReaderImmersiveMaterial()) {
+          this.readerHdsFloatingActionBar(true)
         }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#66000000')
       }
 
       if (this.showSettings) {
         this.settingsPanel()
+        if (this.supportsReaderImmersiveMaterial()) {
+          this.readerHdsFloatingActionBar(false, true)
+        }
+      }
+
+      if (this.showBookmarkActionMenu && this.pendingBookmarkAction) {
+        this.bookmarkActionMenu()
       }
 
       if (this.showTapZoneSettings) {
@@ -1312,6 +1119,1054 @@ struct ReadBookPage {
     .height('100%')
     .backgroundColor(this.readerContentLayerColor())
     .expandSafeArea([SafeAreaType.SYSTEM], this.getReaderSafeAreaEdges())
+  }
+
+  @Builder
+  readerFloatingTopMenu() {
+    Row() {
+      ImmersiveBackButton({
+        iconColor: this.getTextColor(),
+        darkMode: this.isReaderThemeDark(),
+        buttonSize: 46,
+        containerWidth: 46,
+        containerHeight: 64,
+        startInset: 0,
+        onBack: () => this.exitReaderPage()
+      })
+
+      Blank()
+        .layoutWeight(1)
+
+      Row({ space: 2 }) {
+        if (this.chapters.length > 0) {
+          this.readerRoundMenuButton($r('sys.symbol.arrow_clockwise'), '刷新本章', () => {
+            this.hideReaderPanels();
+            this.refreshCurrentChapter();
+          })
+        }
+        if (this.book && this.book.origin !== 'local') {
+          this.readerRoundMenuButton($r('sys.symbol.arrow_left_arrow_right'), '换源', () => {
+            this.openChangeSourceDialog();
+          })
+        }
+        if (this.verificationUrl) {
+          this.readerRoundMenuButton($r('sys.symbol.checkmark_shield'), '验证', () => {
+            this.openVerificationPage();
+          })
+        }
+        if ((this.chapters.length === 0 && this.book?.origin !== 'local') || this.verificationUrl) {
+          this.readerRoundMenuButton($r('sys.symbol.exclamationmark_circle'), '重试', () => {
+            this.hideReaderPanels();
+            if (this.chapters.length === 0) {
+              this.retryFetchChapters();
+            } else {
+              this.loadContent();
+            }
+          }, true)
+        }
+      }
+    }
+    .width('100%')
+    .padding({ left: 18, right: 0, top: this.getTopControlSafePadding() + 10 })
+    .position({ x: 0, y: 0 })
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  readerRoundMenuButton(icon: Resource, accessibilityText: string, action: () => void,
+    emphasized: boolean = false) {
+    ImmersiveBackButton({
+      icon: icon,
+      iconColor: emphasized ? this.accentColor() : this.getTextColor(),
+      darkMode: this.isReaderThemeDark(),
+      buttonSize: 46,
+      containerWidth: 46,
+      containerHeight: 64,
+      startInset: 0,
+      accessibilityLabel: accessibilityText,
+      onBack: action
+    })
+  }
+
+  supportsReaderImmersiveMaterial(): boolean {
+    return deviceInfo.sdkApiVersion >= 23;
+  }
+
+  @Builder
+  readerHdsFloatingBottomMenu() {
+    Column({ space: 4 }) {
+      this.readerHdsChapterTabBar()
+      this.readerHdsActionBar(false)
+    }
+    .width('100%')
+    .height(this.readerBottomMenuOverlayHeight())
+    .padding({ bottom: this.readerFloatingBarBottomMargin() })
+    .justifyContent(FlexAlign.End)
+    .alignItems(HorizontalAlign.Center)
+    .position({ x: 0, y: '100%' })
+    .translate({ y: -this.readerBottomMenuOverlayHeight() })
+  }
+
+  @Builder
+  readerHdsChapterTabBar() {
+    Stack({ alignContent: Alignment.Center }) {
+      HdsTabs({ barPosition: BarPosition.End, index: 0 }) {
+        TabContent() {
+          Column()
+        }
+        .height(56)
+        .tabBar(this.readerHdsChapterBarContent())
+      }
+      .barMode(BarMode.Fixed)
+      .barHeight(48)
+      .barOverlap(true)
+      .barFloatingStyle({
+        barWidth: {
+          smallWidth: this.readerFloatingBarWidth(),
+          mediumWidth: this.readerFloatingBarWidth(),
+          largeWidth: this.readerFloatingBarWidth()
+        },
+        systemMaterialEffect: {
+          materialType: hdsMaterial.MaterialType.IMMERSIVE,
+          materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+        },
+        barSideMargin: 0,
+        barBottomMargin: 4,
+        gradientMask: {
+          maskColor: '#00000000',
+          maskHeight: 56
+        },
+        adaptToHandedness: false,
+        thermoCtrl: true,
+        barOpacity: 1
+      })
+      .scrollable(false)
+      .width('100%')
+      .height(56)
+
+      if (this.menuChapterTooltipVisible) {
+        Column({ space: 2 }) {
+          Text(this.getChapterTitle(this.getMenuChapterDisplayIndex()))
+            .fontSize(12)
+            .fontColor('#FFFFFFFF')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(`${this.getMenuChapterDisplayIndex() + 1}/${this.chapters.length}`)
+            .fontSize(11)
+            .fontColor('#CCFFFFFF')
+        }
+        .width('62%')
+        .height(44)
+        .padding({ left: 14, right: 14, top: 5, bottom: 5 })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .borderRadius(22)
+        .backgroundColor(this.isReaderThemeDark() ? '#E63A3C40' : '#D94B4D52')
+        .shadow({ radius: 10, color: '#50000000', offsetX: 0, offsetY: 3 })
+        .position({ x: '19%', y: -48 })
+      }
+    }
+    .width('100%')
+    .height(56)
+  }
+
+  @Builder
+  readerHdsChapterBarContent() {
+    Row() {
+      Stack({ alignContent: Alignment.Center }) {
+        SymbolGlyph($r('sys.symbol.arrow_left'))
+          .fontSize(25)
+          .fontColor([this.currentChapterIndex > 0 && !this.isLoading ?
+            this.getTextColor() : this.getSubTextColor()])
+      }
+        .width(46)
+        .height(48)
+        .enabled(this.currentChapterIndex > 0 && !this.isLoading)
+        .onClick(async () => {
+          await this.jumpToAdjacentChapterFromMenu(-1);
+        })
+
+      Slider({
+        value: this.getMenuChapterDisplayIndex(),
+        min: 0,
+        max: Math.max(0, this.chapters.length - 1),
+        step: 1,
+        style: SliderStyle.OutSet
+      })
+        .layoutWeight(1)
+        .height(48)
+        .trackThickness(30)
+        .blockSize({ width: 30, height: 30 })
+        .selectedColor(this.accentColor())
+        .trackColor(this.isReaderThemeDark() ? '#55FFFFFF' : '#2E000000')
+        .blockColor(this.readerSolidPanelColor())
+        .showSteps(false)
+        .onChange((value: number, mode: SliderChangeMode) => {
+          this.handleMenuChapterSliderChange(value, mode);
+        })
+
+      Stack({ alignContent: Alignment.Center }) {
+        SymbolGlyph($r('sys.symbol.arrow_right'))
+          .fontSize(25)
+          .fontColor([this.currentChapterIndex < this.chapters.length - 1 && !this.isLoading ?
+            this.getTextColor() : this.getSubTextColor()])
+      }
+        .width(46)
+        .height(48)
+        .enabled(this.currentChapterIndex < this.chapters.length - 1 && !this.isLoading)
+        .onClick(async () => {
+          await this.jumpToAdjacentChapterFromMenu(1);
+        })
+    }
+    .width('100%')
+    .height(48)
+    .padding({ left: 4, right: 4 })
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  readerHdsFloatingActionBar(fromToc: boolean, fromSettings: boolean = false) {
+    Column() {
+      this.readerHdsActionBar(fromToc, fromSettings)
+    }
+    .width('100%')
+    .height(this.readerBottomActionOverlayHeight())
+    .padding({ bottom: this.readerFloatingBarBottomMargin() })
+    .justifyContent(FlexAlign.End)
+    .position({ x: 0, y: '100%' })
+    .translate({ y: -this.readerBottomActionOverlayHeight() })
+  }
+
+  @Builder
+  readerHdsActionBar(fromToc: boolean, fromSettings: boolean = false) {
+    HdsTabs({ barPosition: BarPosition.End, index: 0 }) {
+      TabContent() {
+        Column()
+      }
+      .height(56)
+      .tabBar(this.readerHdsMenuItem($r('sys.symbol.list_bullet'), fromToc))
+
+      TabContent() {
+        Column()
+      }
+      .height(56)
+      .tabBar(this.readerHdsMenuItem($r('sys.symbol.textformat'),
+        fromSettings && this.settingsPanelTab === 0))
+
+      TabContent() {
+        Column()
+      }
+      .height(56)
+      .tabBar(this.readerHdsMenuItem($r('sys.symbol.speaker_wave_3'),
+        this.isTtsSpeaking || (fromSettings && this.settingsPanelTab === 1)))
+
+      TabContent() {
+        Column()
+      }
+      .height(56)
+      .tabBar(this.readerHdsMenuItem($r('sys.symbol.bookmark'), false, true))
+    }
+    .barMode(BarMode.Fixed)
+    .barHeight(48)
+    .barOverlap(true)
+    .barFloatingStyle({
+      barWidth: {
+        smallWidth: this.readerFloatingBarWidth(),
+        mediumWidth: this.readerFloatingBarWidth(),
+        largeWidth: this.readerFloatingBarWidth()
+      },
+      systemMaterialEffect: {
+        materialType: hdsMaterial.MaterialType.IMMERSIVE,
+        materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+      },
+      barSideMargin: 0,
+      barBottomMargin: 4,
+      gradientMask: {
+        maskColor: '#00000000',
+        maskHeight: 56
+      },
+      adaptToHandedness: false,
+      thermoCtrl: true,
+      barOpacity: 1
+    })
+    .scrollable(false)
+    .onContentWillChange(() => false)
+    .onTabBarClick((index: number) => {
+      this.handleReaderHdsAction(index, fromToc, fromSettings);
+    })
+    .width('100%')
+    .height(56)
+  }
+
+  @Builder
+  readerHdsMenuItem(icon: Resource, active: boolean, showAddBadge: boolean = false) {
+    Stack({ alignContent: Alignment.Center }) {
+      Stack({ alignContent: Alignment.Center }) {
+        SymbolGlyph(icon)
+          .fontSize(24)
+          .fontColor([active ? this.accentColor() : this.getSubTextColor()])
+
+        if (showAddBadge) {
+          SymbolGlyph($r('sys.symbol.plus'))
+            .fontSize(12)
+            .fontWeight(FontWeight.Bold)
+            .fontColor([this.accentColor()])
+            .position({ x: 20, y: 0 })
+        }
+      }
+      .width(32)
+      .height(32)
+    }
+    .width('100%')
+    .height(48)
+  }
+
+  handleReaderHdsAction(index: number, fromToc: boolean, fromSettings: boolean = false): void {
+    if (index === 0) {
+      if (fromToc) {
+        this.cancelBookmarkMultiSelect();
+        this.showToc = false;
+        this.showMenu = true;
+      } else if (fromSettings) {
+        this.showSettings = false;
+        this.openTocPanel();
+      } else {
+        this.openTocPanel();
+      }
+      return;
+    }
+    if (index === 3) {
+      this.addCurrentBookmark();
+      return;
+    }
+    if (fromToc) {
+      this.showToc = false;
+    }
+    if (index === 1) {
+      if (fromSettings && this.settingsPanelTab === 0) {
+        this.closeSettingsPanelKeepMenu();
+      } else {
+        this.openSettingsPanel();
+      }
+      return;
+    }
+    if (index === 2) {
+      if (fromSettings && this.settingsPanelTab === 1) {
+        this.closeSettingsPanelKeepMenu();
+      } else {
+        this.openTtsSettingsPanel();
+      }
+      return;
+    }
+  }
+
+  @Builder
+  readerFloatingBottomMenu() {
+    Column({ space: 10 }) {
+      Row() {
+        Text('‹')
+          .fontSize(30)
+          .fontColor(this.currentChapterIndex > 0 && !this.isLoading ? this.getTextColor() : this.getSubTextColor())
+          .width(46)
+          .height(54)
+          .textAlign(TextAlign.Center)
+          .enabled(this.currentChapterIndex > 0 && !this.isLoading)
+          .onClick(async () => {
+            await this.jumpToAdjacentChapterFromMenu(-1);
+          })
+
+        Column({ space: 1 }) {
+          Row() {
+            Text(this.getChapterTitle(this.getMenuChapterDisplayIndex()))
+              .fontSize(12)
+              .fontColor(this.getSubTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+            Text(`${this.getMenuChapterDisplayIndex() + 1}/${this.chapters.length}`)
+              .fontSize(11)
+              .fontColor(this.getSubTextColor())
+              .margin({ left: 8 })
+          }
+          .width('100%')
+
+          Slider({
+            value: this.getMenuChapterDisplayIndex(),
+            min: 0,
+            max: Math.max(0, this.chapters.length - 1),
+            step: 1,
+            style: SliderStyle.OutSet
+          })
+            .width('100%')
+            .height(24)
+            .selectedColor(this.accentColor())
+            .trackColor(this.isReaderThemeDark() ? '#4DFFFFFF' : '#26000000')
+            .blockColor(this.readerSolidPanelColor())
+            .showSteps(false)
+            .onChange((value: number, mode: SliderChangeMode) => {
+              this.handleMenuChapterSliderChange(value, mode);
+            })
+        }
+        .layoutWeight(1)
+
+        Text('›')
+          .fontSize(30)
+          .fontColor(this.currentChapterIndex < this.chapters.length - 1 && !this.isLoading ?
+            this.getTextColor() : this.getSubTextColor())
+          .width(46)
+          .height(54)
+          .textAlign(TextAlign.Center)
+          .enabled(this.currentChapterIndex < this.chapters.length - 1 && !this.isLoading)
+          .onClick(async () => {
+            await this.jumpToAdjacentChapterFromMenu(1);
+          })
+      }
+      .width('100%')
+      .height(56)
+      .padding({ left: 4, right: 4 })
+      .borderRadius(28)
+      .backgroundColor(Color.Transparent)
+      .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
+        colorMode: this.isReaderThemeDark() ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+        adaptiveColor: AdaptiveColor.AVERAGE,
+        scale: 1
+      })
+      .border({ width: 0.5, color: this.readerGlassBorderColor() })
+      .shadow({ radius: 14, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 4 })
+
+      Row() {
+        this.readerFloatingIconMenuItem($r('sys.symbol.list_bullet'), false, () => {
+          this.openTocPanel();
+        })
+        this.readerFloatingIconMenuItem($r('sys.symbol.textformat'), false, () => {
+          this.openSettingsPanel();
+        })
+        this.readerFloatingIconMenuItem($r('sys.symbol.speaker_wave_3'), this.isTtsSpeaking, () => {
+          this.openTtsSettingsPanel();
+        })
+        this.readerFloatingIconMenuItem($r('sys.symbol.bookmark'), false, () => {
+          this.addCurrentBookmark();
+        }, true)
+      }
+      .width('100%')
+      .height(56)
+      .padding({ left: 8, right: 8 })
+      .borderRadius(28)
+      .backgroundColor(Color.Transparent)
+      .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
+        colorMode: this.isReaderThemeDark() ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+        adaptiveColor: AdaptiveColor.AVERAGE,
+        scale: 1
+      })
+      .border({ width: 0.5, color: this.readerGlassBorderColor() })
+      .shadow({ radius: 14, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 4 })
+    }
+    .width('94%')
+    .padding({ bottom: 14 })
+    .position({ x: '3%', y: '100%' })
+    .translate({ y: '-100%' })
+  }
+
+  @Builder
+  readerFloatingIconMenuItem(icon: Resource, active: boolean, action: () => void,
+    showAddBadge: boolean = false) {
+    Column() {
+      Stack({ alignContent: Alignment.Center }) {
+        SymbolGlyph(icon)
+          .fontSize(24)
+          .fontColor([active ? this.accentColor() : this.getSubTextColor()])
+
+        if (showAddBadge) {
+          SymbolGlyph($r('sys.symbol.plus'))
+            .fontSize(12)
+            .fontWeight(FontWeight.Bold)
+            .fontColor([this.accentColor()])
+            .position({ x: 20, y: 0 })
+        }
+      }
+      .width(32)
+      .height(32)
+    }
+    .layoutWeight(1)
+    .height(56)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .borderRadius(28)
+    .onClick(action)
+  }
+
+  @Builder
+  readerFloatingTocPanel() {
+    Stack() {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.isReaderThemeDark() ? '#52000000' : '#1AFFFFFF')
+        .backdropBlur(12)
+        .onClick(() => {
+          this.showToc = false;
+        })
+
+      Column() {
+        Row({ space: 14 }) {
+          if (this.getTocCover()) {
+            Image(this.getTocCover())
+              .width(52)
+              .height(68)
+              .borderRadius(8)
+              .objectFit(ImageFit.Cover)
+          } else {
+            Text(this.getTocBookInitial())
+              .fontSize(22)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#FFFFFF')
+              .textAlign(TextAlign.Center)
+              .width(52)
+              .height(68)
+              .borderRadius(8)
+              .backgroundColor(this.accentColor())
+          }
+
+          Column({ space: 5 }) {
+            Text(this.book?.name || '目录')
+              .fontSize(20)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.getTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.book?.author || '未知作者')
+              .fontSize(12)
+              .fontColor(this.getSubTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+
+          Text('×')
+            .fontSize(28)
+            .fontColor(this.getTextColor())
+            .textAlign(TextAlign.Center)
+            .width(46)
+            .height(46)
+            .borderRadius(23)
+            .backgroundColor(this.isReaderThemeDark() ? '#24FFFFFF' : '#0D000000')
+            .accessibilityText('关闭目录')
+            .onClick(() => {
+              this.showToc = false;
+            })
+        }
+        .width('100%')
+        .padding({ left: 20, right: 16, top: 20, bottom: 16 })
+        .alignItems(VerticalAlign.Center)
+
+        Row() {
+          Text('目录')
+            .fontSize(15)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.tocPanelTab === 0 ? this.getTextColor() : this.getSubTextColor())
+            .textAlign(TextAlign.Center)
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(21)
+            .backgroundColor(this.tocPanelTab === 0 ? this.readerSolidPanelColor() : Color.Transparent)
+            .shadow({ radius: this.tocPanelTab === 0 ? 8 : 0,
+              color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 2 })
+            .onClick(() => {
+              this.tocPanelTab = 0;
+              this.cancelBookmarkMultiSelect();
+              this.scrollTocToCurrentChapter(false);
+            })
+          Text('书签')
+            .fontSize(15)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.tocPanelTab === 1 ? this.getTextColor() : this.getSubTextColor())
+            .textAlign(TextAlign.Center)
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(21)
+            .backgroundColor(this.tocPanelTab === 1 ? this.readerSolidPanelColor() : Color.Transparent)
+            .shadow({ radius: this.tocPanelTab === 1 ? 8 : 0,
+              color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 2 })
+            .onClick(() => {
+              this.tocPanelTab = 1;
+              this.loadBookmarks();
+            })
+        }
+        .width('100%')
+        .height(46)
+        .padding(2)
+        .borderRadius(23)
+        .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
+        .margin({ left: 20, right: 20 })
+
+        if (this.tocPanelTab === 0) {
+          this.tocPanelSummary()
+          this.tocChapterList()
+        } else {
+          this.bookmarkPanelSummary()
+          this.bookmarkList()
+        }
+      }
+      .width('92%')
+      .height('84%')
+      .borderRadius(28)
+      .clip(true)
+      .backgroundColor(this.readerGlassPanelColor())
+      .backdropBlur(22)
+      .border({ width: 0.5, color: this.readerGlassBorderColor() })
+      .shadow({ radius: 24, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 8 })
+      .position({ x: '4%', y: '5%' })
+
+      if (!this.supportsReaderImmersiveMaterial()) {
+        Row() {
+          this.readerFloatingIconMenuItem($r('sys.symbol.list_bullet'), true, () => {
+            this.tocPanelTab = 0;
+          })
+          this.readerFloatingIconMenuItem($r('sys.symbol.textformat'), false, () => {
+            this.showToc = false;
+            this.openSettingsPanel();
+          })
+          this.readerFloatingIconMenuItem($r('sys.symbol.speaker_wave_3'), this.isTtsSpeaking, () => {
+            this.showToc = false;
+            this.openTtsSettingsPanel();
+          })
+          this.readerFloatingIconMenuItem($r('sys.symbol.bookmark'), false, () => {
+            this.addCurrentBookmark();
+          }, true)
+        }
+        .width('94%')
+        .height(56)
+        .padding({ left: 8, right: 8 })
+        .borderRadius(28)
+        .backgroundColor(Color.Transparent)
+        .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
+          colorMode: this.isReaderThemeDark() ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+          adaptiveColor: AdaptiveColor.AVERAGE,
+          scale: 1
+        })
+        .border({ width: 0.5, color: this.readerGlassBorderColor() })
+        .shadow({ radius: 14, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 4 })
+        .position({ x: '3%', y: '100%' })
+        .translate({ y: -70 })
+      }
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  tocPanelSummary() {
+    Row() {
+      Text(`共 ${this.chapters.length} 章`)
+        .fontSize(14)
+        .fontColor(this.getSubTextColor())
+        .layoutWeight(1)
+      Text(`当前 ${Math.min(this.currentChapterIndex + 1, this.chapters.length)}/${this.chapters.length}`)
+        .fontSize(12)
+        .fontColor(this.getTextColor())
+        .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+        .borderRadius(16)
+        .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
+      SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+        .fontSize(20)
+        .fontColor([this.getTextColor()])
+        .width(36)
+        .height(36)
+        .margin({ left: 8 })
+        .accessibilityText('刷新目录')
+        .onClick(() => {
+          this.refreshTocFromPanel();
+        })
+    }
+    .width('100%')
+    .padding({ left: 20, right: 16, top: 18, bottom: 10 })
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  tocChapterList() {
+    List({ space: 0, scroller: this.tocScroller, initialIndex: this.getTocInitialIndex() }) {
+      ForEach(this.chapters, (chapter: BookChapter, index: number) => {
+        ListItem() {
+          Row({ space: 10 }) {
+            Text(index === this.currentChapterIndex ? '•' : '·')
+              .fontSize(index === this.currentChapterIndex ? 22 : 18)
+              .fontColor(index === this.currentChapterIndex ? this.accentColor() : this.getSubTextColor())
+              .width(18)
+              .textAlign(TextAlign.Center)
+
+            Text(this.cleanChapterTitle(chapter.title))
+              .fontSize(15)
+              .fontWeight(index === this.currentChapterIndex ? FontWeight.Medium : FontWeight.Regular)
+              .fontColor(this.getTocTitleColor(chapter, index))
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+
+            if (this.book?.origin !== 'local' && chapter.cacheDate > 0) {
+              Text('已缓存')
+                .fontSize(10)
+                .fontColor(this.isReaderThemeDark() ? '#7CC7A0' : '#1F8F55')
+                .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+                .backgroundColor(this.isReaderThemeDark() ? '#24382F' : '#E6F4EC')
+                .borderRadius(10)
+            }
+          }
+          .width('100%')
+          .padding({ left: 14, right: 16, top: 14, bottom: 14 })
+          .backgroundColor(index === this.currentChapterIndex ? this.tocSelectedBackgroundColor() : Color.Transparent)
+          .border({ width: { bottom: 0.5 }, color: this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000' })
+          .onClick(async () => {
+            const targetChapterIndex = index;
+            this.currentPageIndex = 0;
+            this.pendingRestorePageIndex = 0;
+            this.showToc = false;
+            this.showMenu = false;
+            await this.loadContent(false, targetChapterIndex);
+            await this.saveReadingProgress();
+          })
+        }
+      })
+    }
+    .layoutWeight(1)
+    .width('100%')
+    .scrollBar(BarState.Auto)
+    .scrollBarColor(this.isReaderThemeDark() ? '#668A8F98' : '#667A6F63')
+  }
+
+  @Builder
+  bookmarkPanelSummary() {
+    if (this.bookmarkMultiSelectMode) {
+      Row({ space: 16 }) {
+        Text(`已选 ${this.selectedBookmarkIds.length} 项`)
+          .fontSize(14)
+          .fontColor(this.getTextColor())
+          .layoutWeight(1)
+        Text(this.selectedBookmarkIds.length === this.bookmarks.length ? '取消全选' : '全选')
+          .fontSize(13)
+          .fontColor(this.accentColor())
+          .onClick(() => {
+            this.toggleSelectAllBookmarks();
+          })
+        Text('删除')
+          .fontSize(13)
+          .fontColor(this.selectedBookmarkIds.length > 0 ? '#D94841' : this.getSubTextColor())
+          .enabled(this.selectedBookmarkIds.length > 0)
+          .onClick(() => {
+            this.deleteSelectedBookmarks();
+          })
+        Text('取消')
+          .fontSize(13)
+          .fontColor(this.getSubTextColor())
+          .onClick(() => {
+            this.cancelBookmarkMultiSelect();
+          })
+      }
+      .width('100%')
+      .height(52)
+      .padding({ left: 20, right: 20 })
+      .alignItems(VerticalAlign.Center)
+    } else {
+      Row() {
+        Text(`${this.bookmarks.length} 条书签`)
+          .fontSize(14)
+          .fontColor(this.getSubTextColor())
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .padding({ left: 20, right: 20, top: 18, bottom: 10 })
+    }
+  }
+
+  @Builder
+  bookmarkList() {
+    if (this.bookmarks.length === 0) {
+      Column({ space: 12 }) {
+        SymbolGlyph($r('sys.symbol.bookmark'))
+          .fontSize(34)
+          .fontColor([this.getSubTextColor()])
+        Text('暂无书签')
+          .fontSize(15)
+          .fontColor(this.getSubTextColor())
+        Text('可使用底栏最右侧按钮添加当前阅读位置')
+          .fontSize(12)
+          .fontColor(this.getSubTextColor())
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center)
+    } else {
+      List({ space: 0, scroller: this.bookmarkScroller }) {
+        ForEach(this.bookmarks, (bookmark: Bookmark) => {
+          ListItem() {
+            Column({ space: 5 }) {
+              Row() {
+                SymbolGlyph($r('sys.symbol.bookmark'))
+                  .fontSize(18)
+                  .fontColor([this.accentColor()])
+                  .width(26)
+                Text(bookmark.chapterName || `第 ${bookmark.chapterIndex + 1} 章`)
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(this.getTextColor())
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+                Text(`第 ${bookmark.pageIndex + 1} 页`)
+                  .fontSize(11)
+                  .fontColor(this.getSubTextColor())
+                if (this.bookmarkMultiSelectMode) {
+                  if (this.isBookmarkSelected(bookmark.id)) {
+                    SymbolGlyph($r('sys.symbol.checkmark_circle'))
+                      .fontSize(21)
+                      .fontColor([this.accentColor()])
+                      .margin({ left: 10 })
+                  } else {
+                    Circle()
+                      .width(19)
+                      .height(19)
+                      .fill(Color.Transparent)
+                      .stroke(this.getSubTextColor())
+                      .strokeWidth(1.5)
+                      .margin({ left: 10 })
+                  }
+                }
+              }
+              .width('100%')
+
+              Text(bookmark.content || '已保存阅读位置')
+                .fontSize(12)
+                .fontColor(this.getSubTextColor())
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%')
+              Text(this.formatBookmarkTime(bookmark.createTime))
+                .fontSize(10)
+                .fontColor(this.getSubTextColor())
+                .width('100%')
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+            .backgroundColor(this.isBookmarkSelected(bookmark.id) ? this.tocSelectedBackgroundColor() : Color.Transparent)
+            .border({ width: { bottom: 0.5 }, color: this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000' })
+            .onClick(() => {
+              if (this.bookmarkMultiSelectMode) {
+                this.toggleBookmarkSelection(bookmark.id);
+              } else {
+                this.jumpToBookmark(bookmark);
+              }
+            })
+            .gesture(
+              LongPressGesture({ repeat: false })
+                .onAction((event: GestureEvent) => {
+                  if (!this.bookmarkMultiSelectMode) {
+                    this.showBookmarkActions(bookmark, event);
+                  }
+                })
+            )
+          }
+          .swipeAction({
+            start: {
+              builder: this.bookmarkMultiSelectAction.bind(this, bookmark),
+              actionAreaDistance: 64,
+              onAction: () => {
+                this.enterBookmarkMultiSelect(bookmark.id);
+              }
+            },
+            end: {
+              builder: this.bookmarkDeleteAction.bind(this, bookmark),
+              actionAreaDistance: 64,
+              onAction: () => {
+                this.deleteBookmark(bookmark);
+              }
+            },
+            edgeEffect: SwipeEdgeEffect.Spring
+          })
+        }, (bookmark: Bookmark) => `${bookmark.id}`)
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .scrollBar(BarState.Auto)
+      .scrollBarColor(this.isReaderThemeDark() ? '#668A8F98' : '#667A6F63')
+    }
+  }
+
+  @Builder
+  bookmarkDeleteAction(bookmark: Bookmark) {
+    Column({ space: 4 }) {
+      SymbolGlyph($r('sys.symbol.trash'))
+        .fontSize(22)
+        .fontColor(['#FFFFFF'])
+      Text('删除')
+        .fontSize(11)
+        .fontColor('#FFFFFF')
+    }
+    .width(72)
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#D94841')
+    .onClick(() => {
+      this.deleteBookmark(bookmark);
+    })
+  }
+
+  @Builder
+  readerTtsQuickActionButton() {
+    Stack({ alignContent: Alignment.Center }) {
+      ImmersiveBackButton({
+        icon: $r('sys.symbol.play'),
+        iconColor: this.getTextColor(),
+        darkMode: this.isReaderThemeDark(),
+        buttonSize: 48,
+        containerWidth: 56,
+        containerHeight: 56,
+        startInset: 0,
+        accessibilityLabel: this.isTtsSpeaking ? '展开朗读控制' : '开始朗读',
+        onBack: () => {
+          if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
+            this.ttsMediaControlsExpanded = !this.ttsMediaControlsExpanded;
+            this.syncTtsSystemMediaControls();
+          } else {
+            this.toggleTtsReading();
+          }
+        }
+      })
+
+      if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
+        Circle()
+          .width(9)
+          .height(9)
+          .fill(this.accentColor())
+          .stroke(this.readerContentLayerColor())
+          .strokeWidth(2)
+          .position({ x: 47, y: 6 })
+          .hitTestBehavior(HitTestMode.None)
+      }
+    }
+    .width(64)
+    .height(56)
+    .position({ x: '100%', y: '100%' })
+    .translate({ x: -76, y: -(this.readerBottomMenuOverlayHeight() + 66) })
+  }
+
+  @Builder
+  bookmarkMultiSelectAction(bookmark: Bookmark) {
+    Column({ space: 4 }) {
+      SymbolGlyph($r('sys.symbol.checkmark_circle'))
+        .fontSize(22)
+        .fontColor(['#FFFFFF'])
+      Text('多选')
+        .fontSize(11)
+        .fontColor('#FFFFFF')
+    }
+    .width(72)
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor(this.accentColor())
+    .onClick(() => {
+      this.enterBookmarkMultiSelect(bookmark.id);
+    })
+  }
+
+  showBookmarkActions(bookmark: Bookmark, event: GestureEvent): void {
+    if (event.fingerList.length > 0) {
+      const finger = event.fingerList[0];
+      this.bookmarkActionMenuX = finger.globalX;
+      this.bookmarkActionMenuY = finger.globalY;
+    }
+    this.pendingBookmarkAction = bookmark;
+    this.showBookmarkActionMenu = true;
+  }
+
+  closeBookmarkActionMenu(): void {
+    this.showBookmarkActionMenu = false;
+    this.pendingBookmarkAction = null;
+  }
+
+  bookmarkActionMenuLeft(menuWidth: number): number {
+    const viewportWidth = this.pageViewWidth > 0 ? this.pageViewWidth : 360;
+    return Math.max(12, Math.min(this.bookmarkActionMenuX - 18, viewportWidth - menuWidth - 12));
+  }
+
+  bookmarkActionMenuTop(menuHeight: number): number {
+    const viewportHeight = this.pageViewHeight > 0 ? this.pageViewHeight : 720;
+    const below = this.bookmarkActionMenuY + 12;
+    if (below + menuHeight <= viewportHeight - 12) {
+      return below;
+    }
+    return Math.max(this.getReaderTopSafePadding() + 8, this.bookmarkActionMenuY - menuHeight - 12);
+  }
+
+  @Builder
+  bookmarkActionMenu() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.isReaderThemeDark() ? '#52000000' : '#26FFFFFF')
+        .backdropBlur(18)
+        .onClick(() => {
+          this.closeBookmarkActionMenu();
+        })
+
+      Column() {
+        this.bookmarkContextActionItem($r('sys.symbol.checkmark_circle'), '多选', this.getTextColor(), () => {
+          if (this.pendingBookmarkAction) {
+            const bookmarkId = this.pendingBookmarkAction.id;
+            this.closeBookmarkActionMenu();
+            this.enterBookmarkMultiSelect(bookmarkId);
+          }
+        })
+        this.bookmarkContextActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => {
+          if (this.pendingBookmarkAction) {
+            const bookmark = this.pendingBookmarkAction;
+            this.closeBookmarkActionMenu();
+            this.deleteBookmark(bookmark);
+          }
+        })
+      }
+      .width(148)
+      .padding({ top: 6, bottom: 6 })
+      .backgroundColor(this.readerGlassPanelColor())
+      .borderRadius(14)
+      .border({ width: 1, color: this.readerGlassBorderColor() })
+      .shadow({ radius: 18, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 7 })
+      .position({ x: this.bookmarkActionMenuLeft(148), y: this.bookmarkActionMenuTop(100) })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  bookmarkContextActionItem(icon: Resource, label: string, color: string, action: () => void) {
+    Row({ space: 12 }) {
+      SymbolGlyph(icon)
+        .fontSize(21)
+        .fontColor([color])
+        .width(26)
+      Text(label)
+        .fontSize(15)
+        .fontColor(color)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(44)
+    .padding({ left: 14, right: 14 })
+    .alignItems(VerticalAlign.Center)
+    .onClick(action)
+  }
+
+  getTocCover(): string {
+    return this.book ? this.book.getDisplayCover() : '';
+  }
+
+  getTocBookInitial(): string {
+    const name = (this.book?.name || '书').trim();
+    return name.length > 0 ? name.substring(0, 1) : '书';
   }
 
   getChapterTitle(chapterIndex: number = this.currentChapterIndex): string {
@@ -2046,16 +2901,261 @@ struct ReadBookPage {
   }
 
   openTocPanel(): void {
+    this.tocPanelTab = 0;
+    this.cancelBookmarkMultiSelect();
     this.showToc = true;
     this.showMenu = false;
     this.scrollTocToCurrentChapter(false);
+    this.loadBookmarks();
+  }
+
+  async refreshTocFromPanel(): Promise<void> {
+    await this.retryFetchChapters();
+    this.scrollTocToCurrentChapter(false);
+    promptAction.showToast({ message: '目录已刷新' });
+  }
+
+  async loadBookmarks(): Promise<void> {
+    const bookUrl = this.book?.bookUrl || this.bookUrl;
+    if (!bookUrl) {
+      this.bookmarks = [];
+      return;
+    }
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      this.bookmarks = await db.getBookmarks(bookUrl);
+    } catch (e) {
+      console.warn('加载书签失败:', e);
+      this.bookmarks = [];
+    }
+  }
+
+  currentPageBookmark(): Bookmark | undefined {
+    return this.bookmarks.find((bookmark: Bookmark) =>
+      bookmark.chapterIndex === this.currentChapterIndex && bookmark.pageIndex === this.currentPageIndex);
+  }
+
+  isCurrentPageBookmarked(): boolean {
+    return this.currentPageBookmark() !== undefined;
+  }
+
+  async toggleCurrentPageBookmark(): Promise<void> {
+    const existing = this.currentPageBookmark();
+    if (existing) {
+      await this.deleteBookmark(existing);
+      return;
+    }
+    await this.addCurrentBookmark();
+  }
+
+  bookmarkPullHintText(): string {
+    if (this.isCurrentPageBookmarked()) {
+      return this.bookmarkPullReady ? '松开删除书签' : '下拉删除书签';
+    }
+    return this.bookmarkPullReady ? '松开添加书签' : '下拉添加书签';
+  }
+
+  bookmarkPullHintColor(): string {
+    return this.bookmarkPullReady ? this.accentColor() : this.getTextColor();
+  }
+
+  @Builder
+  readerCurrentPageBookmarkMarker() {
+    Stack({ alignContent: Alignment.Center }) {
+      SymbolGlyph($r('sys.symbol.bookmark'))
+        .fontSize(30)
+        .fontWeight(FontWeight.Bold)
+        .fontColor([this.accentColor()])
+    }
+    .width(46)
+    .height(46)
+    .position({ x: '100%', y: 0 })
+    .translate({
+      x: -62,
+      y: this.readerBookmarkMarkerTopOffset() + this.bookmarkPullOffsetY
+    })
+    .hitTestBehavior(HitTestMode.None)
+  }
+
+  readerBookmarkMarkerTopOffset(): number {
+    const desiredScreenTop = this.readerExtendToStatusBar ? 0 : this.statusBarSafeHeight;
+    return Math.max(0, desiredScreenTop - this.getReaderTopSafePadding());
+  }
+
+  @Builder
+  readerBookmarkPullHint() {
+    Row({ space: 8 }) {
+      SymbolGlyph($r('sys.symbol.bookmark'))
+        .fontSize(19)
+        .fontColor([this.bookmarkPullHintColor()])
+      Text(this.bookmarkPullHintText())
+        .fontSize(14)
+        .fontWeight(this.bookmarkPullReady ? FontWeight.Bold : FontWeight.Medium)
+        .fontColor(this.bookmarkPullHintColor())
+    }
+    .height(40)
+    .padding({ left: 14, right: 14 })
+    .borderRadius(20)
+    .backgroundColor(this.readerGlassPanelColor())
+    .border({ width: 0.5, color: this.readerGlassBorderColor() })
+    .shadow({ radius: 12, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 3 })
+    .position({ x: '50%', y: 0 })
+    .translate({ x: -90, y: this.getTopControlSafePadding() + 8 })
+    .opacity(Math.min(1, this.bookmarkPullOffsetY / 36))
+    .hitTestBehavior(HitTestMode.None)
+  }
+
+  async addCurrentBookmark(): Promise<void> {
+    if (!this.book || this.chapters.length === 0) {
+      promptAction.showToast({ message: '当前没有可添加的阅读位置' });
+      return;
+    }
+    const pageIndex = Math.max(0, this.currentPageIndex);
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const existing = await db.getBookmarkAt(this.book.bookUrl, this.currentChapterIndex, pageIndex);
+      if (existing) {
+        promptAction.showToast({ message: '当前阅读位置已添加书签' });
+        return;
+      }
+      const bookmark = new Bookmark();
+      bookmark.bookUrl = this.book.bookUrl;
+      bookmark.bookName = this.book.name;
+      bookmark.bookAuthor = this.book.author;
+      bookmark.chapterIndex = this.currentChapterIndex;
+      bookmark.chapterName = this.getChapterTitle(this.currentChapterIndex);
+      bookmark.pageIndex = pageIndex;
+      bookmark.startPos = this.getPageStartOffset(pageIndex);
+      bookmark.endPos = this.getPageEndOffset(pageIndex);
+      bookmark.content = this.bookmarkContentPreview(pageIndex);
+      bookmark.createTime = Date.now();
+      bookmark.id = await db.insertBookmark(bookmark);
+      await this.loadBookmarks();
+      promptAction.showToast({ message: '书签已添加' });
+    } catch (e) {
+      console.error('添加书签失败:', e);
+      promptAction.showToast({ message: '添加书签失败' });
+    }
+  }
+
+  bookmarkContentPreview(pageIndex: number): string {
+    const text = this.getPageText(pageIndex).replace(/\s+/g, ' ').trim();
+    return text.length > 90 ? `${text.substring(0, 90)}…` : text;
+  }
+
+  async deleteBookmark(bookmark: Bookmark): Promise<void> {
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      await db.deleteBookmark(bookmark.id);
+      this.bookmarks = this.bookmarks.filter((item: Bookmark) => item.id !== bookmark.id);
+      this.selectedBookmarkIds = this.selectedBookmarkIds.filter((id: number) => id !== bookmark.id);
+      if (this.bookmarkMultiSelectMode && this.bookmarks.length === 0) {
+        this.cancelBookmarkMultiSelect();
+      }
+      promptAction.showToast({ message: '书签已删除' });
+    } catch (e) {
+      console.error('删除书签失败:', e);
+      promptAction.showToast({ message: '删除书签失败' });
+    }
+  }
+
+  enterBookmarkMultiSelect(bookmarkId: number): void {
+    this.bookmarkMultiSelectMode = true;
+    if (!this.selectedBookmarkIds.includes(bookmarkId)) {
+      this.selectedBookmarkIds = [...this.selectedBookmarkIds, bookmarkId];
+    }
+    setTimeout(() => {
+      try {
+        this.bookmarkScroller.closeAllSwipeActions();
+      } catch (error) {
+        console.warn('关闭书签滑动操作失败:', error);
+      }
+    }, 0);
+  }
+
+  isBookmarkSelected(bookmarkId: number): boolean {
+    return this.selectedBookmarkIds.includes(bookmarkId);
+  }
+
+  toggleBookmarkSelection(bookmarkId: number): void {
+    if (this.selectedBookmarkIds.includes(bookmarkId)) {
+      this.selectedBookmarkIds = this.selectedBookmarkIds.filter((id: number) => id !== bookmarkId);
+    } else {
+      this.selectedBookmarkIds = [...this.selectedBookmarkIds, bookmarkId];
+    }
+  }
+
+  toggleSelectAllBookmarks(): void {
+    if (this.selectedBookmarkIds.length === this.bookmarks.length) {
+      this.selectedBookmarkIds = [];
+    } else {
+      this.selectedBookmarkIds = this.bookmarks.map((bookmark: Bookmark) => bookmark.id);
+    }
+  }
+
+  cancelBookmarkMultiSelect(): void {
+    this.bookmarkMultiSelectMode = false;
+    this.selectedBookmarkIds = [];
+  }
+
+  async deleteSelectedBookmarks(): Promise<void> {
+    const ids = [...this.selectedBookmarkIds];
+    if (ids.length === 0) return;
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      await db.deleteBookmarks(ids);
+      this.bookmarks = this.bookmarks.filter((bookmark: Bookmark) => !ids.includes(bookmark.id));
+      this.cancelBookmarkMultiSelect();
+      promptAction.showToast({ message: `已删除 ${ids.length} 条书签` });
+    } catch (e) {
+      console.error('批量删除书签失败:', e);
+      promptAction.showToast({ message: '批量删除书签失败' });
+    }
+  }
+
+  async jumpToBookmark(bookmark: Bookmark): Promise<void> {
+    const targetChapterIndex = this.clampChapterIndex(bookmark.chapterIndex);
+    this.currentPageIndex = Math.max(0, bookmark.pageIndex);
+    this.pendingRestorePageIndex = this.currentPageIndex;
+    this.showToc = false;
+    this.showMenu = false;
+    await this.loadContent(false, targetChapterIndex);
+    await this.saveReadingProgress();
+  }
+
+  formatBookmarkTime(timestamp: number): string {
+    if (timestamp <= 0) return '';
+    const date = new Date(timestamp);
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    const hour = `${date.getHours()}`.padStart(2, '0');
+    const minute = `${date.getMinutes()}`.padStart(2, '0');
+    return `${month}-${day} ${hour}:${minute}`;
   }
 
   openSettingsPanel(): void {
     this.settingsPanelTab = 0;
+    this.showToc = false;
+    this.showSettings = true;
+    this.showMenu = false;
+  }
+
+  openTtsSettingsPanel(): void {
+    this.settingsPanelTab = 1;
+    this.showToc = false;
     this.showSettings = true;
     this.showMenu = false;
     this.loadTtsSettingsAndVoices();
+  }
+
+  closeSettingsPanelKeepMenu(): void {
+    this.showSettings = false;
+    this.showQuickTypographyValueInput = false;
+    this.showMenu = true;
   }
 
   static defaultTtsVoice(): TtsVoiceOption {
@@ -2466,7 +3566,15 @@ struct ReadBookPage {
   }
 
   readerGlassPanelColor(): string {
-    return this.readerSolidPanelColor();
+    return this.isReaderThemeDark() ? '#D9222428' : '#E8FFFFFF';
+  }
+
+  readerGlassBorderColor(): string {
+    return this.isReaderThemeDark() ? '#30FFFFFF' : '#BFFFFFFF';
+  }
+
+  readerGlassShadowColor(): string {
+    return this.isReaderThemeDark() ? '#66000000' : '#26000000';
   }
 
   readerSolidPanelColor(): string {
@@ -2500,6 +3608,23 @@ struct ReadBookPage {
 
   getReaderBottomInfoBarHeight(): number {
     return 24;
+  }
+
+  readerFloatingBarBottomMargin(): number {
+    return this.navBarHeight > 0 ? this.navBarHeight : 8;
+  }
+
+  readerFloatingBarWidth(): number {
+    const viewportWidth = this.pageViewWidth > 0 ? this.pageViewWidth : 360;
+    return Math.max(240, viewportWidth * 0.88);
+  }
+
+  readerBottomMenuOverlayHeight(): number {
+    return 120 + this.readerFloatingBarBottomMargin();
+  }
+
+  readerBottomActionOverlayHeight(): number {
+    return 56 + this.readerFloatingBarBottomMargin();
   }
 
   getReaderContentBottomPadding(): number {
@@ -2662,6 +3787,52 @@ struct ReadBookPage {
   clampChapterIndex(index: number): number {
     if (this.chapters.length === 0) return 0;
     return Math.max(0, Math.min(index, this.chapters.length - 1));
+  }
+
+  getMenuChapterDisplayIndex(): number {
+    return this.menuChapterSliderActive ? this.menuChapterPreviewIndex : this.currentChapterIndex;
+  }
+
+  handleMenuChapterSliderChange(value: number, mode: SliderChangeMode): void {
+    this.menuChapterPreviewIndex = this.clampChapterIndex(Math.round(value));
+    this.menuChapterSliderActive = true;
+    this.menuChapterTooltipVisible = mode === SliderChangeMode.Begin || mode === SliderChangeMode.Moving;
+    if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
+      this.menuChapterTooltipVisible = false;
+      this.jumpToMenuChapter(this.menuChapterPreviewIndex).catch((error: Error) => {
+        console.error('菜单滑块跳转章节失败:', error);
+        this.menuChapterPreviewIndex = this.currentChapterIndex;
+        this.menuChapterSliderActive = false;
+        this.menuChapterTooltipVisible = false;
+      });
+    }
+  }
+
+  async jumpToMenuChapter(targetIndex: number): Promise<void> {
+    const normalizedIndex = this.clampChapterIndex(targetIndex);
+    if (normalizedIndex === this.currentChapterIndex) {
+      this.menuChapterPreviewIndex = this.currentChapterIndex;
+      this.menuChapterSliderActive = false;
+      this.menuChapterTooltipVisible = false;
+      return;
+    }
+    this.currentPageIndex = 0;
+    this.pendingRestorePageIndex = 0;
+    try {
+      await this.loadContent(false, normalizedIndex);
+      await this.saveReadingProgress();
+    } finally {
+      this.menuChapterPreviewIndex = this.currentChapterIndex;
+      this.menuChapterSliderActive = false;
+      this.menuChapterTooltipVisible = false;
+    }
+  }
+
+  async jumpToAdjacentChapterFromMenu(direction: number): Promise<void> {
+    await this.jumpToAdjacentChapterFirstPage(direction);
+    this.menuChapterPreviewIndex = this.currentChapterIndex;
+    this.menuChapterSliderActive = false;
+    this.menuChapterTooltipVisible = false;
   }
 
   restorePendingPageIndex(): void {
@@ -3238,20 +4409,28 @@ struct ReadBookPage {
   @Builder
   ttsCollapsedMediaControlButton() {
     Row() {
+      SymbolGlyph($r('sys.symbol.speaker_wave_3'))
+        .fontSize(17)
+        .fontColor(['#FFFFFF'])
+
       Text('朗读')
         .fontSize(13)
         .fontWeight(FontWeight.Bold)
         .fontColor('#FFFFFF')
         .textAlign(TextAlign.Center)
-      Text(this.ttsSpeed.toFixed(1) + 'x')
-        .fontSize(11)
-        .fontColor('#EAF2FF')
-        .margin({ left: 6 })
+
+      if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
+        Text(this.ttsSpeed.toFixed(1) + 'x')
+          .fontSize(11)
+          .fontColor('#EAF2FF')
+          .margin({ left: 4 })
+      }
     }
-    .height(38)
-    .padding({ left: 14, right: 14 })
-    .borderRadius(19)
+    .height(44)
+    .padding({ left: 12, right: 12 })
+    .borderRadius(22)
     .backgroundColor(this.accentColor())
+    .alignItems(VerticalAlign.Center)
     .shadow({
       radius: 10,
       color: this.isReaderThemeDark() ? '#66000000' : '#26000000',
@@ -3259,91 +4438,174 @@ struct ReadBookPage {
       offsetY: 3
     })
     .position({ x: '100%', y: '100%' })
-    .translate({ x: -94, y: -92 })
+    .translate({ x: -104, y: -96 })
     .onClick(() => {
-      this.ttsMediaControlsExpanded = true;
-      this.syncTtsSystemMediaControls();
+      if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
+        this.ttsMediaControlsExpanded = true;
+        this.syncTtsSystemMediaControls();
+      } else {
+        this.toggleTtsReading();
+      }
     })
   }
 
   @Builder
   ttsExpandedMediaControlsBar() {
-    Column({ space: 8 }) {
-      Row() {
-        Column({ space: 2 }) {
-          Text(this.book?.name || '朗读')
-            .fontSize(14)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.getTextColor())
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(`${this.getChapterTitle()} · ${this.ttsSpeed.toFixed(1)}x`)
-            .fontSize(12)
-            .fontColor(this.getSubTextColor())
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .layoutWeight(1)
-
-        Button('上一章')
-          .height(34)
-          .fontSize(13)
-          .backgroundColor(this.canPlayPreviousTtsChapter() ? this.buttonColor() : this.disabledButtonColor())
-          .fontColor('#FFFFFF')
-          .enabled(this.canPlayPreviousTtsChapter())
-          .onClick(() => {
-            this.playPreviousChapterFromMediaSession();
-          })
-
-        Button(this.isTtsSpeaking ? '停止' : '朗读')
-          .height(34)
-          .fontSize(13)
-          .margin({ left: 8 })
-          .backgroundColor(this.isTtsSpeaking ? '#E53935' : this.buttonColor())
-          .fontColor('#FFFFFF')
-          .onClick(() => {
-            this.toggleTtsReading();
-          })
-
-        Button('下一章')
-          .height(34)
-          .fontSize(13)
-          .margin({ left: 8 })
-          .backgroundColor(this.canPlayNextTtsChapter() ? this.buttonColor() : this.disabledButtonColor())
-          .fontColor('#FFFFFF')
-          .enabled(this.canPlayNextTtsChapter())
-          .onClick(() => {
-            this.playNextChapterFromMediaSession();
-          })
-
-        Button('收起')
-          .height(34)
-          .fontSize(13)
-          .margin({ left: 8 })
-          .backgroundColor(this.isReaderThemeDark() ? '#343941' : '#EEF0F3')
-          .fontColor(this.getTextColor())
-          .onClick(() => {
-            this.ttsMediaControlsExpanded = false;
-            this.syncTtsSystemMediaControls();
-          })
+    HdsTabs({ barPosition: BarPosition.End, index: 0 }) {
+      TabContent() {
+        Column()
       }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
+      .height(56)
+      .tabBar(this.ttsMediaCoverControl())
+
+      TabContent() {
+        Column()
+      }
+      .height(56)
+      .tabBar(this.ttsMediaSymbolControl($r('sys.symbol.arrow_left'),
+        this.canPlayPreviousTtsChapter(), '上一章'))
+
+      TabContent() {
+        Column()
+      }
+      .height(56)
+      .tabBar(this.ttsMediaSymbolControl($r('sys.symbol.pause'), true, '停止朗读', true))
+
+      TabContent() {
+        Column()
+      }
+      .height(56)
+      .tabBar(this.ttsMediaSymbolControl($r('sys.symbol.arrow_right'),
+        this.canPlayNextTtsChapter(), '下一章'))
+
+      TabContent() {
+        Column()
+      }
+      .height(56)
+      .tabBar(this.ttsMediaSpeedControl())
+
+      TabContent() {
+        Column()
+      }
+      .height(56)
+      .tabBar(this.ttsMediaSymbolControl($r('sys.symbol.xmark'), true, '关闭朗读控制'))
+    }
+    .barMode(BarMode.Fixed)
+    .barHeight(56)
+    .barOverlap(true)
+    .barFloatingStyle({
+      barWidth: {
+        smallWidth: this.readerTtsExpandedControlWidth(),
+        mediumWidth: this.readerTtsExpandedControlWidth(),
+        largeWidth: this.readerTtsExpandedControlWidth()
+      },
+      systemMaterialEffect: {
+        materialType: hdsMaterial.MaterialType.IMMERSIVE,
+        materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+      },
+      barSideMargin: 0,
+      barBottomMargin: 4,
+      gradientMask: {
+        maskColor: '#00000000',
+        maskHeight: 60
+      },
+      adaptToHandedness: false,
+      thermoCtrl: true,
+      barOpacity: 1
+    })
+    .scrollable(false)
+    .onContentWillChange(() => false)
+    .onTabBarClick((index: number) => {
+      this.handleTtsExpandedControl(index);
+    })
+    .width(this.readerTtsExpandedControlWidth())
+    .height(64)
+    .position({ x: '100%', y: '100%' })
+    .translate({
+      x: -(this.readerTtsExpandedControlWidth() + 84),
+      y: -(this.readerBottomMenuOverlayHeight() + 70)
+    })
+  }
+
+  @Builder
+  ttsMediaCoverControl() {
+    Stack({ alignContent: Alignment.Center }) {
+      if (this.ttsMediaImage) {
+        Image(this.ttsMediaImage)
+          .width(38)
+          .height(38)
+          .borderRadius(10)
+          .objectFit(ImageFit.Cover)
+      } else {
+        SymbolGlyph($r('sys.symbol.book'))
+          .fontSize(24)
+          .fontColor([this.getSubTextColor()])
+      }
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    .backgroundColor(this.readerSolidPanelColor())
-    .border({
-      width: { top: 1 },
-      color: this.isReaderThemeDark() ? '#33404752' : '#22000000'
-    })
-    .position({ x: 0, y: '100%' })
-    .translate({ y: -98 })
+    .height(48)
+    .hitTestBehavior(HitTestMode.None)
+  }
+
+  @Builder
+  ttsMediaSymbolControl(icon: Resource, enabled: boolean, accessibilityLabel: string,
+    active: boolean = false) {
+    Stack({ alignContent: Alignment.Center }) {
+      SymbolGlyph(icon)
+        .fontSize(active ? 24 : 22)
+        .fontColor([enabled ? (active ? this.accentColor() : this.getTextColor()) : this.getSubTextColor()])
+    }
+    .width('100%')
+    .height(48)
+    .opacity(enabled ? 1 : 0.45)
+    .accessibilityText(accessibilityLabel)
+  }
+
+  @Builder
+  ttsMediaSpeedControl() {
+    Text(`${this.ttsSpeed.toFixed(1)}x`)
+      .fontSize(13)
+      .fontWeight(FontWeight.Bold)
+      .fontColor(this.accentColor())
+      .textAlign(TextAlign.Center)
+      .width('100%')
+      .height(48)
+  }
+
+  readerTtsExpandedControlWidth(): number {
+    return 264;
+  }
+
+  handleTtsExpandedControl(index: number): void {
+    if (index === 1 && this.canPlayPreviousTtsChapter()) {
+      this.playPreviousChapterFromMediaSession();
+    } else if (index === 2) {
+      this.toggleTtsReading();
+      this.showMenu = true;
+    } else if (index === 3 && this.canPlayNextTtsChapter()) {
+      this.playNextChapterFromMediaSession();
+    } else if (index === 4) {
+      this.cycleTtsSpeed();
+    } else if (index === 5) {
+      this.ttsMediaControlsExpanded = false;
+      this.showMenu = true;
+      this.syncTtsSystemMediaControls();
+    }
+  }
+
+  cycleTtsSpeed(): void {
+    const speeds: number[] = [0.8, 1.0, 1.2, 1.5, 2.0];
+    let nextIndex = speeds.findIndex((speed: number) => speed > this.ttsSpeed + 0.01);
+    if (nextIndex < 0) {
+      nextIndex = 0;
+    }
+    this.applyTtsSpeed(speeds[nextIndex]);
+    promptAction.showToast({ message: `朗读倍速 ${speeds[nextIndex].toFixed(1)}x` });
   }
 
   shouldShowTtsMediaControls(): boolean {
-    return !this.showMenu && !this.showToc && !this.showSettings &&
-      !this.shouldBlockReaderInteraction() && (this.isTtsSpeaking || this.ttsReader.isSpeaking());
+    return this.ttsMediaControlsExpanded && (this.isTtsSpeaking || this.ttsReader.isSpeaking()) &&
+      this.showMenu && !this.showToc && !this.showSettings && !this.shouldBlockReaderInteraction();
   }
 
   canPlayPreviousTtsChapter(): boolean {
@@ -3387,7 +4649,7 @@ struct ReadBookPage {
         this.handleReaderTouch(event);
       })
       .parallelGesture(
-        PanGesture({ direction: PanDirection.Horizontal, distance: 1 })
+        PanGesture({ direction: PanDirection.All, distance: 1 })
           .onActionStart((event: GestureEvent) => {
             this.handleReaderPanStart(event);
           })
@@ -3493,7 +4755,7 @@ struct ReadBookPage {
           this.handleReaderTouch(event);
         })
         .parallelGesture(
-          PanGesture({ direction: PanDirection.Horizontal, distance: 1 })
+          PanGesture({ direction: PanDirection.All, distance: 1 })
             .onActionStart((event: GestureEvent) => {
               this.handleReaderPanStart(event);
             })
@@ -3525,6 +4787,34 @@ struct ReadBookPage {
     this.slideResetSerial++;
   }
 
+  canHandleBookmarkPull(offsetX: number, offsetY: number): boolean {
+    return this.readerPageTurnMode !== 0 && offsetY > 0 &&
+      Math.abs(offsetY) > Math.abs(offsetX) * 1.25;
+  }
+
+  updateBookmarkPullEffect(offsetY: number): void {
+    this.bookmarkPullActive = true;
+    this.bookmarkPullOffsetY = Math.min(128, Math.max(0, offsetY * 0.52));
+    this.bookmarkPullReady = offsetY >= 112;
+    this.readerTouchMoved = true;
+    this.suppressReaderTapClick = true;
+    this.pageSlideOffsetX = 0;
+    this.pageSlideOffsetY = 0;
+    this.pageSlideDirection = 0;
+  }
+
+  finishBookmarkPull(commit: boolean): void {
+    const shouldToggle = commit && this.bookmarkPullReady;
+    this.bookmarkPullReady = false;
+    this.bookmarkPullActive = false;
+    animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+      this.bookmarkPullOffsetY = 0;
+    });
+    if (shouldToggle) {
+      this.toggleCurrentPageBookmark();
+    }
+  }
+
   handleReaderPanUpdate(event: GestureEvent): void {
     if (!this.canHandleReaderPageTurnPan()) {
       return;
@@ -3534,6 +4824,10 @@ struct ReadBookPage {
     }
     const offsetX = event.offsetX;
     const offsetY = event.offsetY;
+    if (this.bookmarkPullActive || this.canHandleBookmarkPull(offsetX, offsetY)) {
+      this.updateBookmarkPullEffect(offsetY);
+      return;
+    }
     if (!this.isPageTurnAnimationEnabled()) {
       return;
     }
@@ -3549,6 +4843,12 @@ struct ReadBookPage {
       return;
     }
     this.readerPanActive = false;
+    if (this.bookmarkPullActive) {
+      this.readerTouchMoved = true;
+      this.suppressReaderTapClick = true;
+      this.finishBookmarkPull(true);
+      return;
+    }
     const offsetX = event.offsetX;
     const offsetY = event.offsetY;
     if (this.isReaderPageTurnCommitGesture(offsetX, offsetY)) {
@@ -3570,6 +4870,11 @@ struct ReadBookPage {
       return;
     }
     this.readerPanActive = false;
+    if (this.bookmarkPullActive) {
+      this.suppressReaderTapClick = true;
+      this.finishBookmarkPull(false);
+      return;
+    }
     if (Math.abs(this.getPageSlideAxisOffset()) > 0.5) {
       this.suppressReaderTapClick = true;
       this.rollbackSlidePageEffect();
@@ -3858,9 +5163,29 @@ struct ReadBookPage {
   settingsPanel() {
     Column({ space: 12 }) {
       Row() {
-        this.settingsTabToggle()
+        Text(this.settingsPanelTab === 0 ? '阅读设置' : '朗读设置')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.getTextColor())
+
+        Blank()
+          .layoutWeight(1)
+
+        Text('×')
+          .fontSize(28)
+          .fontColor(this.getTextColor())
+          .textAlign(TextAlign.Center)
+          .width(46)
+          .height(46)
+          .borderRadius(23)
+          .backgroundColor(this.isReaderThemeDark() ? '#24FFFFFF' : '#0D000000')
+          .accessibilityText('关闭设置')
+          .onClick(() => {
+            this.closeSettingsPanelKeepMenu();
+          })
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
 
       Scroll() {
         Column({ space: 14 }) {
@@ -3873,15 +5198,20 @@ struct ReadBookPage {
         .width('100%')
       }
       .width('100%')
-      .height(430)
+      .layoutWeight(1)
       .scrollBar(BarState.Auto)
       .scrollBarColor(this.isReaderThemeDark() ? '#668A8F98' : '#667A6F63')
     }
-    .width('100%')
+    .width('94%')
+    .height(520)
     .padding({ left: 20, right: 20, top: 16, bottom: 22 })
-    .backgroundColor(this.readerSolidPanelColor())
-    .position({ x: 0, y: '100%' })
-    .translate({ y: '-100%' })
+    .borderRadius(28)
+    .backgroundColor(this.readerGlassPanelColor())
+    .backdropBlur(22)
+    .border({ width: 0.5, color: this.readerGlassBorderColor() })
+    .shadow({ radius: 22, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 6 })
+    .position({ x: '3%', y: '100%' })
+    .translate({ y: -(524 + this.readerBottomActionOverlayHeight()) })
   }
 
   @Builder
@@ -5025,7 +6355,7 @@ struct ReadBookPage {
       promptAction.showToast({ message: '已停止朗读' });
       return;
     }
-    this.ttsMediaControlsExpanded = false;
+    this.ttsMediaControlsExpanded = true;
     await this.startTtsReadingFromCurrentPosition(true);
   }
 
@@ -6516,7 +7846,7 @@ struct ReadBookPage {
     .padding({ top: this.getReaderPageContentTopPadding() })
     .id(`reader_current_${this.currentChapterIndex}_${this.currentPageIndex}_${this.displayPageRenderKey}_${renderVersion}_${ttsRenderVersion}`)
     .backgroundColor(this.readerContentLayerColor())
-    .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() })
+    .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() + this.bookmarkPullOffsetY })
     .opacity(this.getCurrentPageTurnOpacity())
   }
 
@@ -6530,7 +7860,7 @@ struct ReadBookPage {
     .padding({ top: this.getReaderPageContentTopPadding() })
     .id(`reader_current_alt_${this.currentChapterIndex}_${this.currentPageIndex}_${this.displayPageRenderKey}_${renderVersion}_${ttsRenderVersion}`)
     .backgroundColor(this.readerContentLayerColor())
-    .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() })
+    .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() + this.bookmarkPullOffsetY })
     .opacity(this.getCurrentPageTurnOpacity())
   }
 
@@ -7386,7 +8716,7 @@ struct ReadBookPage {
         .width('100%')
         .layoutWeight(1)
         .onClick(() => {
-          this.showSettings = false;
+          this.closeSettingsPanelKeepMenu();
         })
       Blank()
         .width('100%')
@@ -7398,6 +8728,9 @@ struct ReadBookPage {
   }
 
   hideReaderPanels() {
+    this.menuChapterPreviewIndex = this.currentChapterIndex;
+    this.menuChapterSliderActive = false;
+    this.menuChapterTooltipVisible = false;
     this.showMenu = false;
     this.showSettings = false;
     this.showQuickTypographyValueInput = false;
@@ -8290,9 +9623,9 @@ struct ReadBookPage {
     if (this.book.origin !== 'local') {
       this.updatePendingVerification();
       if (this.verificationUrl) {
-        text += '\n\n当前书源需要先完成网页验证。请点击标题栏的「验证」按钮，完成后返回并点击「重试」。';
+        text += '\n\n当前书源需要先完成网页验证。请点击右上角盾牌对勾 Logo（验证），完成后返回，再点击旁边橙色感叹号圆形 Logo（重试）。';
       } else {
-        text += '\n\n当前书源暂未解析出目录，可以尝试点击标题栏的「重试」按钮重新获取，或在书源管理中为该书源补充目录规则。';
+        text += '\n\n当前书源暂未解析出目录。请点击右上角橙色感叹号圆形 Logo（重试）重新获取，或在书源管理中为该书源补充目录规则。';
       }
     }
     return text;

@@ -4,6 +4,7 @@ import { SearchExploreSettings, SearchExploreSettingsStore } from '../utils/Sear
 import { BookSource } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 
 @Entry
 @Component
@@ -45,6 +46,7 @@ struct SearchExploreSettingsPage {
       Scroll() {
         Column() {
           this.sectionTitle('结果展示')
+          Column() {
           this.switchItem('显示结果封面', '开启后搜索和发现结果展示书籍封面',
             this.searchExploreShowResultCover, (value: boolean) => {
               this.searchExploreShowResultCover = value;
@@ -62,15 +64,29 @@ struct SearchExploreSettingsPage {
               this.searchExploreShowResultTags = value;
               this.onSettingChanged();
             })
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
 
           this.sectionTitle('书架提示')
-          this.switchItem('返回提示加入书架', '从搜索或发现详情点击阅读后，返回时询问是否加入书架',
-            this.searchExplorePromptAddToShelfOnBack, (value: boolean) => {
-              this.searchExplorePromptAddToShelfOnBack = value;
-              this.onSettingChanged();
-            })
+          Column() {
+            this.switchItem('返回提示加入书架', '从搜索或发现详情点击阅读后，返回时询问是否加入书架',
+              this.searchExplorePromptAddToShelfOnBack, (value: boolean) => {
+                this.searchExplorePromptAddToShelfOnBack = value;
+                this.onSettingChanged();
+              })
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
 
           this.sectionTitle('搜索设置')
+          Column() {
           this.switchItem('精准搜索', '开启后仅保留书名与关键词完全匹配的搜索结果',
             this.searchExploreExactSearch, (value: boolean) => {
               this.searchExploreExactSearch = value;
@@ -92,9 +108,22 @@ struct SearchExploreSettingsPage {
               this.onSettingChanged();
             })
           this.sourceGroupSettings()
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
 
           this.sectionTitle('发现设置')
-          this.navItem('书源排序', '调整发现页书源下拉列表顺序', 'pages/ExploreSourceSort')
+          Column() {
+            this.navItem('书源排序', '调整发现页书源下拉列表顺序', 'pages/ExploreSourceSort')
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
         }
         .width('100%')
         .padding({ bottom: 32 })
@@ -267,15 +296,8 @@ struct SearchExploreSettingsPage {
   @Builder
   titleBar() {
     Row() {
-      Text('<')
-        .fontSize(24)
-        .fontColor(this.primaryTextColor())
-        .width(40)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          router.back();
-        })
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        onBack: () => router.back() })
       Text('搜索/发现配置')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
@@ -318,10 +340,12 @@ struct SearchExploreSettingsPage {
           onChange(checked);
         })
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .constraintSize({ minHeight: 64 })
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    .backgroundColor(this.cardColor())
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
     .alignItems(VerticalAlign.Center)
   }
 
@@ -370,10 +394,12 @@ struct SearchExploreSettingsPage {
       .height(30)
       .alignItems(VerticalAlign.Center)
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .constraintSize({ minHeight: 64 })
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    .backgroundColor(this.cardColor())
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
     .alignItems(VerticalAlign.Center)
   }
 
@@ -392,14 +418,16 @@ struct SearchExploreSettingsPage {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      Text('>')
+      SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(18)
-        .fontColor(this.subTextColor())
+        .fontColor([this.subTextColor()])
     }
-    .width('100%')
+    .width('calc(100% - 32vp)')
     .height(64)
-    .padding({ left: 16, right: 16 })
-    .backgroundColor(this.cardColor())
+    .padding({ left: 0, right: 0 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
       router.pushUrl({ url: url });
