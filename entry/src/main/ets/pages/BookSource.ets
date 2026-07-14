@@ -40,6 +40,10 @@ struct BookSourcePage {
   @State showSourceActionDialog: boolean = false;
   @State showSourceDeleteDialog: boolean = false;
   @State actionSourceUrl: string = '';
+  @State contextMenuX: number = 16;
+  @State contextMenuY: number = 96;
+  @State contextViewportWidth: number = 360;
+  @State contextViewportHeight: number = 720;
   @State groupNameInput: string = '';
   @State importUrl: string = '';
   @State isImporting: boolean = false;
@@ -326,9 +330,9 @@ struct BookSourcePage {
                 .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
                 .gesture(
                   LongPressGesture({ repeat: false })
-                    .onAction(() => {
+                    .onAction((event: GestureEvent) => {
                       if (!this.selectionMode && !this.isBatchOperating) {
-                        this.openSourceActions(source);
+                        this.openSourceActions(source, event);
                       }
                     })
                 )
@@ -976,6 +980,7 @@ struct BookSourcePage {
     .width('100%')
     .height('100%')
     .backgroundColor(this.pageColor())
+    .onAreaChange((_oldValue: Area, newValue: Area) => this.updateContextViewport(newValue))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -1073,86 +1078,59 @@ struct BookSourcePage {
 
   @Builder
   sourceActionDialog() {
-    Column() {
-      Column({ space: 10 }) {
-        Text(this.actionSourceName())
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
+        .backdropBlur(18)
+        .onClick(() => this.closeSourceActions())
+      Column() {
         if (this.actionSourceNeedsLogin()) {
-          Text(this.actionSourceLoggedIn() ? '当前状态：已登录' : '当前状态：未登录')
-            .fontSize(13)
-            .fontColor(this.actionSourceLoggedIn() ? '#1E8E3E' : '#C62828')
-            .width('100%')
-            .textAlign(TextAlign.Center)
-            .margin({ bottom: 4 })
-
-          Button(this.actionSourceLoggedIn() ? '重新登录' : '登录')
-            .width('100%')
-            .height(44)
-            .backgroundColor(this.buttonColor())
-            .fontColor('#FFFFFF')
-            .onClick(() => {
-              this.openActionSourceLogin();
-            })
+          this.contextActionItem('↗', this.actionSourceLoggedIn() ? '重新登录' : '登录',
+            this.primaryTextColor(), () => this.openActionSourceLogin())
         }
-
-        Button('修改')
-          .width('100%')
-          .height(44)
-          .backgroundColor(this.inputColor())
-          .fontColor(this.primaryTextColor())
-          .onClick(() => {
-            this.openActionSourceEdit();
-          })
-
-        Button(this.actionSourceEnabled() ? '禁用' : '启用')
-          .width('100%')
-          .height(44)
-          .backgroundColor(this.inputColor())
-          .fontColor(this.primaryTextColor())
-          .onClick(() => {
-            this.toggleActionSourceEnabled();
-          })
-
-        Button('删除')
-          .width('100%')
-          .height(44)
-          .backgroundColor('#B71C1C')
-          .fontColor('#FFFFFF')
-          .onClick(() => {
+        this.contextActionItem('✎', '修改', this.primaryTextColor(), () => this.openActionSourceEdit())
+        this.contextActionItem('◉', this.actionSourceEnabled() ? '禁用' : '启用', this.primaryTextColor(),
+          () => this.toggleActionSourceEnabled())
+        this.contextActionItem('⌫', '删除', '#E53935', () => {
             this.showSourceActionDialog = false;
             this.showSourceDeleteDialog = true;
           })
-
-        Button('取消')
-          .width('100%')
-          .height(44)
-          .backgroundColor(this.inputColor())
-          .fontColor(this.primaryTextColor())
-          .onClick(() => {
-            this.closeSourceActions();
-          })
       }
-      .width('86%')
-      .padding(22)
+      .width(158)
+      .padding({ top: 6, bottom: 6 })
       .backgroundColor(this.cardColor())
-      .borderRadius(12)
-      .onClick(() => {
+      .borderRadius(14)
+      .border({ width: 1, color: this.glassBorderColor() })
+      .shadow({ radius: 18, color: this.appDarkMode ? '#80000000' : '#33000000', offsetX: 0, offsetY: 7 })
+      .position({
+        x: this.contextMenuLeft(158),
+        y: this.contextMenuTop(this.actionSourceNeedsLogin() ? 188 : 144)
       })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#80000000')
-    .justifyContent(FlexAlign.Center)
-    .onClick(() => {
-      this.closeSourceActions();
-    })
+  }
+
+  @Builder
+  contextActionItem(icon: string, label: string, color: string, action: () => void) {
+    Row({ space: 10 }) {
+      Text(icon)
+        .fontSize(18)
+        .fontColor(color)
+        .width(24)
+        .textAlign(TextAlign.Center)
+      Text(label)
+        .fontSize(15)
+        .fontColor(color)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(44)
+    .padding({ left: 12, right: 12 })
+    .alignItems(VerticalAlign.Center)
+    .onClick(action)
   }
 
   @Builder
@@ -1328,10 +1306,32 @@ struct BookSourcePage {
     return match && match[1] ? match[1] : '';
   }
 
-  openSourceActions(source: BookSource): void {
+  openSourceActions(source: BookSource, event?: GestureEvent): void {
+    const finger = event && event.fingerList.length > 0 ? event.fingerList[0] : undefined;
+    if (finger) {
+      this.contextMenuX = finger.globalX;
+      this.contextMenuY = finger.globalY;
+    }
     this.actionSourceUrl = source.bookSourceUrl;
     this.showSourceDeleteDialog = false;
     this.showSourceActionDialog = true;
+  }
+
+  updateContextViewport(area: Area): void {
+    const width = Number(area.width);
+    const height = Number(area.height);
+    if (Number.isFinite(width) && width > 0) this.contextViewportWidth = width;
+    if (Number.isFinite(height) && height > 0) this.contextViewportHeight = height;
+  }
+
+  contextMenuLeft(menuWidth: number): number {
+    return Math.max(12, Math.min(this.contextMenuX - 18, this.contextViewportWidth - menuWidth - 12));
+  }
+
+  contextMenuTop(menuHeight: number): number {
+    const below = this.contextMenuY + 12;
+    if (below + menuHeight <= this.contextViewportHeight - 12) return below;
+    return Math.max(this.statusBarHeight + 8, this.contextMenuY - menuHeight - 12);
   }
 
   closeSourceActions(): void {

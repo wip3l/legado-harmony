@@ -493,6 +493,10 @@ struct BookshelfPage {
   @State showChapterCacheDialog: boolean = false;
   @State pendingDeleteBook: Book | null = null;
   @State pendingActionBook: Book | null = null;
+  @State contextMenuX: number = 16;
+  @State contextMenuY: number = 96;
+  @State contextViewportWidth: number = 360;
+  @State contextViewportHeight: number = 720;
   @State cacheTargetBook: Book | null = null;
   @State cacheChapters: BookChapter[] = [];
   @State cacheStatus: string = '';
@@ -640,7 +644,8 @@ struct BookshelfPage {
     this.showDeleteDialog = true;
   }
 
-  showBookActions(book: Book): void {
+  showBookActions(book: Book, event?: GestureEvent): void {
+    this.captureContextMenuAnchor(event);
     this.pendingActionBook = book;
     this.showActionDialog = true;
   }
@@ -648,6 +653,31 @@ struct BookshelfPage {
   closeBookActions(): void {
     this.showActionDialog = false;
     this.pendingActionBook = null;
+  }
+
+  captureContextMenuAnchor(event?: GestureEvent): void {
+    const finger = event && event.fingerList.length > 0 ? event.fingerList[0] : undefined;
+    if (finger) {
+      this.contextMenuX = finger.globalX;
+      this.contextMenuY = finger.globalY;
+    }
+  }
+
+  updateContextViewport(area: Area): void {
+    const width = Number(area.width);
+    const height = Number(area.height);
+    if (Number.isFinite(width) && width > 0) this.contextViewportWidth = width;
+    if (Number.isFinite(height) && height > 0) this.contextViewportHeight = height;
+  }
+
+  contextMenuLeft(menuWidth: number): number {
+    return Math.max(12, Math.min(this.contextMenuX - 18, this.contextViewportWidth - menuWidth - 12));
+  }
+
+  contextMenuTop(menuHeight: number): number {
+    const below = this.contextMenuY + 12;
+    if (below + menuHeight <= this.contextViewportHeight - 12) return below;
+    return Math.max(this.statusBarHeight + 8, this.contextMenuY - menuHeight - 12);
   }
 
   deleteBookCoverCache(book: Book): void {
@@ -834,9 +864,9 @@ struct BookshelfPage {
                     .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
                     .gesture(
                       LongPressGesture({ repeat: false })
-                        .onAction(() => {
+                        .onAction((event: GestureEvent) => {
                           if (!this.isBookMultiSelect) {
-                            this.showBookActions(book);
+                            this.showBookActions(book, event);
                           }
                         })
                     )
@@ -889,25 +919,16 @@ struct BookshelfPage {
       }
 
       if (this.showActionDialog && this.pendingActionBook) {
-        Column() {
-          Blank()
-            .layoutWeight(1)
-            .onClick(() => {
-              this.closeBookActions();
-            })
+        Stack({ alignContent: Alignment.TopStart }) {
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
+            .backdropBlur(18)
+            .onClick(() => this.closeBookActions())
 
           Column() {
-            Text(this.pendingActionBook.name)
-              .fontSize(17)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 12 })
-
-            this.actionItem('移出书架', '#E53935', () => {
+            this.contextActionItem('⌫', '移出书架', '#E53935', () => {
               if (this.pendingActionBook) {
                 const book = this.pendingActionBook;
                 this.closeBookActions();
@@ -915,7 +936,7 @@ struct BookshelfPage {
               }
             })
             if (!LocalBookService.isLocalBook(this.pendingActionBook)) {
-              this.actionItem('缓存', this.primaryTextColor(), () => {
+              this.contextActionItem('⇩', '缓存', this.primaryTextColor(), () => {
                 if (this.pendingActionBook) {
                   const book = this.pendingActionBook;
                   this.showActionDialog = false;
@@ -925,7 +946,7 @@ struct BookshelfPage {
                 }
               })
             }
-            this.actionItem('自定义标签', this.primaryTextColor(), () => {
+            this.contextActionItem('◇', '自定义标签', this.primaryTextColor(), () => {
               if (this.pendingActionBook) {
                 this.editingTags = BookDisplayHelper.getBookTags(this.pendingActionBook);
                 this.tagInput = '';
@@ -933,33 +954,27 @@ struct BookshelfPage {
               this.showActionDialog = false;
               this.showTagDialog = true;
             })
-            this.actionItem('多选', this.primaryTextColor(), () => {
+            this.contextActionItem('☑', '多选', this.primaryTextColor(), () => {
               if (this.pendingActionBook) {
                 const bookUrl = this.pendingActionBook.bookUrl;
                 this.closeBookActions();
                 this.enterBookMultiSelect(bookUrl);
               }
             })
-
-            Button('取消')
-              .width('100%')
-              .height(44)
-              .margin({ top: 10 })
-              .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
-              .fontColor(this.primaryTextColor())
-              .onClick(() => {
-                this.closeBookActions();
-              })
           }
-          .width('100%')
-          .padding({ left: 18, right: 18, top: 18, bottom: 18 })
+          .width(158)
+          .padding({ top: 6, bottom: 6 })
           .backgroundColor(this.cardColor())
-          .borderRadius({ topLeft: 18, topRight: 18 })
-          .margin({ bottom: this.actionSheetBottomMargin() })
+          .borderRadius(14)
+          .border({ width: 1, color: this.glassBorderColor() })
+          .shadow({ radius: 18, color: this.appDarkMode ? '#80000000' : '#33000000', offsetX: 0, offsetY: 7 })
+          .position({
+            x: this.contextMenuLeft(158),
+            y: this.contextMenuTop(LocalBookService.isLocalBook(this.pendingActionBook) ? 144 : 188)
+          })
         }
         .width('100%')
         .height('100%')
-        .backgroundColor('#66000000')
       }
 
       if (this.showCacheDialog && this.cacheTargetBook) {
@@ -1288,6 +1303,7 @@ struct BookshelfPage {
     }
     .width('100%')
     .height('100%')
+    .onAreaChange((_oldValue: Area, newValue: Area) => this.updateContextViewport(newValue))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -1309,7 +1325,8 @@ struct BookshelfPage {
             })
             .gesture(
               LongPressGesture({ repeat: false })
-                .onAction(() => {
+                .onAction((event: GestureEvent) => {
+                  this.captureContextMenuAnchor(event);
                   this.pendingBookGroup = group;
                   this.showBookGroupActionMenu = true;
                 })
@@ -1485,36 +1502,30 @@ struct BookshelfPage {
 
   @Builder
   bookGroupActionMenu() {
-    Column() {
-      Blank().layoutWeight(1).onClick(() => this.closeBookGroupActionMenu())
-      Column({ space: 6 }) {
-        Text(this.pendingBookGroup?.groupName || '')
-          .fontSize(17).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor()).margin({ bottom: 8 })
-        Button('重命名', { type: ButtonType.Normal })
-          .width('100%').height(42).borderRadius(10)
-          .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
-          .onClick(() => {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%').height('100%')
+        .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
+        .backdropBlur(18)
+        .onClick(() => this.closeBookGroupActionMenu())
+      Column() {
+        this.contextActionItem('✎', '重命名', this.primaryTextColor(), () => {
             this.renameBookGroupName = this.pendingBookGroup?.groupName || '';
             this.showBookGroupActionMenu = false;
             this.showRenameBookGroupDialog = true;
           })
-        Button('删除', { type: ButtonType.Normal })
-          .width('100%').height(42).borderRadius(10)
-          .backgroundColor('#E53935').fontColor('#FFFFFF')
-          .onClick(() => {
+        this.contextActionItem('⌫', '删除', '#E53935', () => {
             this.pendingDeleteBookGroup = this.pendingBookGroup;
             this.showBookGroupActionMenu = false;
             this.showDeleteBookGroupDialog = true;
           })
-        Button('取消', { type: ButtonType.Normal })
-          .width('100%').height(42).borderRadius(10).margin({ top: 6 })
-          .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
-          .onClick(() => this.closeBookGroupActionMenu())
       }
-      .width('100%').padding(18).backgroundColor(this.cardColor())
-      .borderRadius({ topLeft: 18, topRight: 18 }).margin({ bottom: this.actionSheetBottomMargin() })
+      .width(148).padding({ top: 6, bottom: 6 }).backgroundColor(this.cardColor())
+      .borderRadius(14).border({ width: 1, color: this.glassBorderColor() })
+      .shadow({ radius: 18, color: this.appDarkMode ? '#80000000' : '#33000000', offsetX: 0, offsetY: 7 })
+      .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(100) })
     }
-    .width('100%').height('100%').backgroundColor('#66000000')
+    .width('100%').height('100%')
   }
 
   @Builder
@@ -1995,6 +2006,26 @@ struct BookshelfPage {
       .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
       .fontColor(color)
       .onClick(action)
+  }
+
+  @Builder
+  contextActionItem(icon: string, label: string, color: string, action: () => void) {
+    Row({ space: 10 }) {
+      Text(icon)
+        .fontSize(18)
+        .fontColor(color)
+        .width(24)
+        .textAlign(TextAlign.Center)
+      Text(label)
+        .fontSize(15)
+        .fontColor(color)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(44)
+    .padding({ left: 12, right: 12 })
+    .alignItems(VerticalAlign.Center)
+    .onClick(action)
   }
 
   actionSheetBottomMargin(): number {
