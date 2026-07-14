@@ -28,6 +28,7 @@ import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
+import { ChangeSourceResultCache } from '../utils/ChangeSourceResultCache';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
 import { BookCoverCache } from '../utils/BookCoverCache';
 import { CoverGallerySettings } from '../utils/CoverGallerySettings';
@@ -1470,7 +1471,7 @@ struct ReadBookPage {
 
   updatePagedReaderArea(area: Area): void {
     const width = this.parseAreaDimension(area.width);
-    const height = this.parseAreaDimension(area.height);
+    const height = Math.max(1, this.parseAreaDimension(area.height) - this.getReaderPageContentTopPadding());
     if (width <= 0 || height <= 0) {
       return;
     }
@@ -2473,12 +2474,16 @@ struct ReadBookPage {
   }
 
   getReaderSafeAreaEdges(): SafeAreaEdge[] {
-    return this.readerExtendToStatusBar || this.hasBackgroundImage() ?
+    return this.readerExtendToStatusBar || this.hasBackgroundImage() || this.isStackPageTurnAnimation() ?
       [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM] : [SafeAreaEdge.BOTTOM];
   }
 
   getReaderTopSafePadding(): number {
-    return this.readerExtendToStatusBar ? 0 : this.statusBarSafeHeight;
+    return this.readerExtendToStatusBar || this.isStackPageTurnAnimation() ? 0 : this.statusBarSafeHeight;
+  }
+
+  getReaderPageContentTopPadding(): number {
+    return !this.readerExtendToStatusBar && this.isStackPageTurnAnimation() ? this.statusBarSafeHeight : 0;
   }
 
   getTopControlSafePadding(): number {
@@ -2688,6 +2693,26 @@ struct ReadBookPage {
             .fontColor(this.getTextColor())
             .layoutWeight(1)
 
+          if (this.isChangingSource) {
+            LoadingProgress()
+              .width(24)
+              .height(24)
+              .margin({ right: 8 })
+          } else {
+            Text('↻')
+              .fontSize(24)
+              .fontColor(this.buttonColor())
+              .width(36)
+              .height(36)
+              .textAlign(TextAlign.Center)
+              .borderRadius(18)
+              .backgroundColor(this.readerSolidPanelColor())
+              .margin({ right: 4 })
+              .onClick(() => {
+                this.refreshChangeSourceResults();
+              })
+          }
+
           Text('×')
             .fontSize(24)
             .fontColor(this.getSubTextColor())
@@ -2806,7 +2831,7 @@ struct ReadBookPage {
     .justifyContent(FlexAlign.Center)
   }
 
-  openChangeSourceDialog(): void {
+  async openChangeSourceDialog(): Promise<void> {
     if (!this.book || !this.book.name) {
       promptAction.showToast({ message: '当前书籍信息不完整' });
       return;
@@ -2818,7 +2843,38 @@ struct ReadBookPage {
     this.showToc = false;
     this.showSettings = false;
     this.changeSourceResults = [];
+    this.changeSourceStatus = '正在读取历史换源结果...';
+    this.isChangingSource = true;
     this.isSwitchingSource = false;
+    try {
+      const cachedResults = await ChangeSourceResultCache.load(getContext(this), this.book.name);
+      if (!this.isChangeSourceSessionActive(sessionId) || !this.book) {
+        return;
+      }
+      this.changeSourceResults = this.filterChangeSourceResults(
+        cachedResults, this.book.bookUrl, this.book.origin
+      );
+      if (this.changeSourceResults.length > 0) {
+        this.isChangingSource = false;
+        this.changeSourceStatus = `已显示历史结果，共 ${this.changeSourceResults.length} 个；点击刷新可重新搜索`;
+        return;
+      }
+    } catch (e) {
+      console.warn('读取换源历史结果失败:', e);
+    }
+    if (this.isChangeSourceSessionActive(sessionId)) {
+      this.searchChangeSource(sessionId);
+    }
+  }
+
+  refreshChangeSourceResults(): void {
+    if (!this.book || this.isSwitchingSource) {
+      return;
+    }
+    this.cancelActiveChangeSourceSearch();
+    const sessionId = ++this.changeSourceSessionId;
+    this.changeSourceStatus = '正在刷新可用书源...';
+    this.isChangingSource = true;
     this.searchChangeSource(sessionId);
   }
 
@@ -2836,6 +2892,7 @@ struct ReadBookPage {
     if (!this.book) {
       return;
     }
+    const cacheBookName = this.book.name;
     this.isChangingSource = true;
     this.changeSourceStatus = '正在搜索可用书源...';
     const coordinator = new SearchCoordinator(SearchExploreSettingsStore.getSearchConcurrency());
@@ -2867,6 +2924,12 @@ struct ReadBookPage {
       this.changeSourceResults = this.filterChangeSourceResults(results, currentBookUrl, currentOrigin);
       this.changeSourceStatus = this.changeSourceResults.length > 0 ?
         `搜索完成，找到 ${this.changeSourceResults.length} 个可切换书源` : '搜索完成，未找到可切换书源';
+      try {
+        // 缓存完整搜索结果；展示时再排除当前书源，确保切换后仍可换回原书源。
+        await ChangeSourceResultCache.save(getContext(this), cacheBookName, results);
+      } catch (e) {
+        console.warn('保存换源结果缓存失败:', e);
+      }
     } catch (e) {
       if (!this.isChangeSourceSessionActive(sessionId)) {
         return;
@@ -3768,9 +3831,6 @@ struct ReadBookPage {
       this.chapters.length === 0) {
       return;
     }
-    if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
-      this.stopTtsReading();
-    }
     if (offsetY < -48) {
       this.runPageTurnAnimation(1, 'gesture');
     } else if (offsetY > 48) {
@@ -3784,9 +3844,6 @@ struct ReadBookPage {
     if ((this.readerPageTurnMode !== 1 && this.readerPageTurnMode !== 2) || this.showToc || this.showSettings ||
       this.chapters.length === 0) {
       return;
-    }
-    if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
-      this.stopTtsReading();
     }
     if (offsetX < -48) {
       this.runPageTurnAnimation(1, 'gesture');
@@ -6456,6 +6513,7 @@ struct ReadBookPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.getReaderPageContentTopPadding() })
     .id(`reader_current_${this.currentChapterIndex}_${this.currentPageIndex}_${this.displayPageRenderKey}_${renderVersion}_${ttsRenderVersion}`)
     .backgroundColor(this.readerContentLayerColor())
     .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() })
@@ -6469,6 +6527,7 @@ struct ReadBookPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.getReaderPageContentTopPadding() })
     .id(`reader_current_alt_${this.currentChapterIndex}_${this.currentPageIndex}_${this.displayPageRenderKey}_${renderVersion}_${ttsRenderVersion}`)
     .backgroundColor(this.readerContentLayerColor())
     .translate({ x: this.getCurrentPageTurnX(), y: this.getCurrentPageTurnY() })
@@ -6486,6 +6545,7 @@ struct ReadBookPage {
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.getReaderPageContentTopPadding() })
     }
     .width('100%')
     .height('100%')
@@ -7509,16 +7569,10 @@ struct ReadBookPage {
   }
 
   async turnNext() {
-    if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
-      this.stopTtsReading();
-    }
     await this.runPageTurnAnimation(1, this.readerPageTurnMode === 1 ? 'slide' : 'tap');
   }
 
   async turnPrev() {
-    if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
-      this.stopTtsReading();
-    }
     await this.runPageTurnAnimation(-1, this.readerPageTurnMode === 1 ? 'slide' : 'tap');
   }
 
@@ -7554,7 +7608,6 @@ struct ReadBookPage {
 
   async applyPageTurn(direction: number, targetPreview: PageTurnPreview | null = null,
     commitText: boolean = true): Promise<void> {
-    this.stopTtsReading();
     const localPageIndex = this.getLocalPageTurnTargetPageIndex(direction);
     if (direction > 0) {
       if (localPageIndex >= 0) {
@@ -7637,7 +7690,13 @@ struct ReadBookPage {
       }
       return;
     }
+    const resumeTtsAfterTurn = this.isTtsSpeaking || this.ttsReader.isSpeaking();
+    if (resumeTtsAfterTurn) {
+      this.stopTtsReading();
+      await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_BUFFERING);
+    }
     this.isPageTurning = true;
+    let turnCompleted = false;
     try {
       if (!this.isPageTurnAnimationEnabled()) {
         await this.runNoAnimationPageTurn(direction);
@@ -7646,8 +7705,12 @@ struct ReadBookPage {
       } else {
         await this.runTapPageTurn(direction);
       }
+      turnCompleted = true;
     } finally {
       this.isPageTurning = false;
+    }
+    if (resumeTtsAfterTurn && turnCompleted) {
+      await this.startTtsReadingFromCurrentPosition(false);
     }
   }
 
@@ -7655,8 +7718,6 @@ struct ReadBookPage {
     this.readerTouchActive = false;
     this.readerPanActive = false;
     this.resetSlidePageState();
-    this.stopTtsReading();
-
     const localPageIndex = this.getLocalPageTurnTargetPageIndex(direction);
     if (localPageIndex >= 0) {
       this.currentPageIndex = localPageIndex;
@@ -8072,7 +8133,8 @@ struct ReadBookPage {
   }
 
   getPageTurnHeight(): number {
-    return Math.max(1, this.pageViewHeight > 0 ? this.pageViewHeight : 640);
+    const contentHeight = this.pageViewHeight > 0 ? this.pageViewHeight : 640;
+    return Math.max(1, contentHeight + this.getReaderPageContentTopPadding());
   }
 
   isVerticalPageTurnAnimation(): boolean {

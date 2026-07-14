@@ -465,6 +465,19 @@ export class AppDatabase {
     return group;
   }
 
+  async renameBookGroup(groupId: number, groupName: string): Promise<boolean> {
+    if (!this.store || groupId <= 0 || !groupName.trim()) return false;
+    const name = groupName.trim();
+    const duplicate = await this.store.querySql(
+      'SELECT groupId FROM book_groups WHERE groupName = ? AND groupId != ?', [name, groupId]
+    );
+    if (duplicate.rowCount > 0) return false;
+    const predicates = new relationalStore.RdbPredicates('book_groups');
+    predicates.equalTo('groupId', groupId);
+    await this.store.update({ groupName: name }, predicates);
+    return true;
+  }
+
   async updateBooksGroup(bookUrls: string[], groupId: number): Promise<void> {
     if (!this.store) return;
     for (const bookUrl of bookUrls) {
@@ -947,6 +960,13 @@ export class AppDatabase {
   async clearSearchKeywords(): Promise<void> {
     if (!this.store) return;
     await this.store.executeSql('DELETE FROM search_keywords');
+  }
+
+  async deleteSearchKeyword(keyword: string): Promise<void> {
+    if (!this.store) return;
+    const predicates = new relationalStore.RdbPredicates('search_keywords');
+    predicates.equalTo('keyword', keyword);
+    await this.store.delete(predicates);
   }
 }
 

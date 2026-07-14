@@ -478,6 +478,10 @@ struct BookshelfPage {
   @State showBookGroupPicker: boolean = false;
   @State showAddBookGroupDialog: boolean = false;
   @State newBookGroupName: string = '';
+  @State showBookGroupActionMenu: boolean = false;
+  @State showRenameBookGroupDialog: boolean = false;
+  @State renameBookGroupName: string = '';
+  @State pendingBookGroup: BookGroup | null = null;
   @State showDeleteBookGroupDialog: boolean = false;
   @State pendingDeleteBookGroup: BookGroup | null = null;
   @State showBatchDeleteDialog: boolean = false;
@@ -725,39 +729,50 @@ struct BookshelfPage {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.primaryTextColor())
 
-          this.shelfScopeSegment()
-
-          Blank()
-
-          if (this.books.length > 0) {
-            this.shelfSortButton()
-          }
-
-          Row({ space: 4 }) {
-            Text(this.books.length > 0 ? `${this.books.length}本` : '')
-              .fontSize(14)
-              .fontColor('#999')
-            Text(this.showShelfGroups ? '⌃' : '⌄')
+          if (this.isBookMultiSelect) {
+            Blank()
+            Text('取消')
               .fontSize(15)
-              .fontColor(this.secondaryTextColor())
+              .fontColor(this.primaryTextColor())
+              .width(52)
+              .height(56)
+              .textAlign(TextAlign.Center)
+              .onClick(() => this.exitBookMultiSelect())
+          } else {
+            this.shelfScopeSegment()
+
+            Blank()
+
+            if (this.books.length > 0) {
+              this.shelfSortButton()
+            }
+
+            Row({ space: 4 }) {
+              Text(this.books.length > 0 ? `${this.books.length}本` : '')
+                .fontSize(14)
+                .fontColor('#999')
+              Text(this.showShelfGroups ? '⌃' : '⌄')
+                .fontSize(15)
+                .fontColor(this.secondaryTextColor())
+            }
+            .height(36)
+            .alignItems(VerticalAlign.Center)
+            .onClick(() => {
+              this.showShelfGroups = !this.showShelfGroups;
+              this.showShelfSortMenu = false;
+            })
           }
-          .height(36)
-          .alignItems(VerticalAlign.Center)
-          .onClick(() => {
-            this.showShelfGroups = !this.showShelfGroups;
-            this.showShelfSortMenu = false;
-          })
         }
         .width('100%')
         .height(56)
         .padding({ left: 16, right: 16 })
         .alignItems(VerticalAlign.Center)
 
-        if (this.showShelfSortMenu && this.books.length > 0) {
-          this.shelfSortDropdown()
+        if (this.isBookMultiSelect) {
+          this.bookSelectionStatusBar()
         }
 
-        if (this.showShelfGroups) {
+        if (this.showShelfGroups && !this.isBookMultiSelect) {
           this.shelfGroupBar()
         }
 
@@ -795,7 +810,15 @@ struct BookshelfPage {
             List({ space: 8 }) {
               ForEach(this.books, (book: Book) => {
                 ListItem() {
-                  Stack({ alignContent: Alignment.TopEnd }) {
+                  Row() {
+                    if (this.isBookMultiSelect) {
+                      Toggle({ type: ToggleType.Checkbox, isOn: this.isBookSelected(book.bookUrl) })
+                        .selectedColor(this.buttonColor())
+                        .margin({ right: 12 })
+                        .onChange((isOn: boolean) => {
+                          this.setBookSelected(book.bookUrl, isOn);
+                        })
+                    }
                     Column() {
                       if (this.isCompactLayout()) {
                         this.compactBookContent(book)
@@ -803,7 +826,7 @@ struct BookshelfPage {
                         this.looseBookContent(book)
                       }
                     }
-                    .width('100%')
+                    .layoutWeight(1)
                     .alignItems(HorizontalAlign.Start)
                     .backgroundColor(this.glassCardColor())
                     .borderRadius(8)
@@ -827,11 +850,9 @@ struct BookshelfPage {
                         params: { bookUrl: book.bookUrl }
                       });
                     })
-                    if (this.isBookMultiSelect) {
-                      this.bookSelectionMark(book)
-                    }
                   }
                   .width('100%')
+                  .alignItems(VerticalAlign.Center)
                 }
               })
 
@@ -862,6 +883,10 @@ struct BookshelfPage {
       .padding({ top: this.statusBarHeight })
       .backgroundColor(this.pageColor())
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+
+      if (this.showShelfSortMenu && this.books.length > 0) {
+        this.shelfSortFloatingMenu()
+      }
 
       if (this.showActionDialog && this.pendingActionBook) {
         Column() {
@@ -1248,6 +1273,12 @@ struct BookshelfPage {
       if (this.showAddBookGroupDialog) {
         this.addBookGroupDialog()
       }
+      if (this.showBookGroupActionMenu && this.pendingBookGroup) {
+        this.bookGroupActionMenu()
+      }
+      if (this.showRenameBookGroupDialog && this.pendingBookGroup) {
+        this.renameBookGroupDialog()
+      }
       if (this.showDeleteBookGroupDialog && this.pendingDeleteBookGroup) {
         this.deleteBookGroupDialog()
       }
@@ -1279,8 +1310,8 @@ struct BookshelfPage {
             .gesture(
               LongPressGesture({ repeat: false })
                 .onAction(() => {
-                  this.pendingDeleteBookGroup = group;
-                  this.showDeleteBookGroupDialog = true;
+                  this.pendingBookGroup = group;
+                  this.showBookGroupActionMenu = true;
                 })
             )
         }, (group: BookGroup) => `${group.groupId}_${group.groupName}`)
@@ -1321,65 +1352,63 @@ struct BookshelfPage {
   }
 
   @Builder
-  bookSelectionMark(book: Book) {
-    Text(this.selectedBookUrls.includes(book.bookUrl) ? '✓' : '')
-      .fontSize(16)
-      .fontWeight(FontWeight.Bold)
-      .fontColor('#FFFFFF')
-      .width(28)
-      .height(28)
-      .textAlign(TextAlign.Center)
-      .borderRadius(14)
-      .backgroundColor(this.selectedBookUrls.includes(book.bookUrl) ? this.accentColor() : '#66000000')
-      .border({ width: 1, color: '#CCFFFFFF' })
-      .margin({ top: 8, right: 8 })
+  bookSelectionStatusBar() {
+    Row() {
+      Text(this.areAllBooksSelected() ? '☑' : '☐')
+        .fontSize(20)
+        .fontColor(this.accentColor())
+        .width(28)
+        .textAlign(TextAlign.Center)
+        .onClick(() => this.toggleAllBooks())
+
+      Text(`已选择 ${this.selectedBookUrls.length}/${this.books.length}`)
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+        .margin({ left: 8 })
+        .layoutWeight(1)
+
+      Text(this.areAllBooksSelected() ? '取消全选' : '全选')
+        .fontSize(14)
+        .fontColor(this.accentColor())
+        .padding({ left: 12, right: 4, top: 8, bottom: 8 })
+        .onClick(() => this.toggleAllBooks())
+    }
+    .width('100%')
+    .height(42)
+    .padding({ left: 16, right: 16 })
+    .alignItems(VerticalAlign.Center)
   }
 
   @Builder
   bookMultiSelectBar() {
-    Column() {
-      Text(`已选择 ${this.selectedBookUrls.length} 本`)
-        .fontSize(13)
-        .fontColor(this.secondaryTextColor())
-        .margin({ bottom: 8 })
-      Row({ space: 10 }) {
-        Button('取消', { type: ButtonType.Normal })
-          .layoutWeight(1)
-          .height(42)
-          .fontSize(14)
-          .borderRadius(10)
-          .backgroundColor(this.glassCardColor())
-          .fontColor(this.primaryTextColor())
-          .onClick(() => this.exitBookMultiSelect())
-        Button('删除', { type: ButtonType.Normal })
-          .layoutWeight(1)
-          .height(42)
-          .fontSize(14)
-          .borderRadius(10)
-          .backgroundColor('#E53935')
-          .fontColor('#FFFFFF')
-          .enabled(this.selectedBookUrls.length > 0)
-          .onClick(() => {
-            if (this.selectedBookUrls.length > 0) this.showBatchDeleteDialog = true;
-          })
-        Button('分组', { type: ButtonType.Normal })
-          .layoutWeight(1)
-          .height(42)
-          .fontSize(14)
-          .borderRadius(10)
-          .backgroundColor(this.buttonColor())
-          .fontColor('#FFFFFF')
-          .enabled(this.selectedBookUrls.length > 0)
-          .onClick(() => {
-            if (this.selectedBookUrls.length > 0) this.showBookGroupPicker = true;
-          })
-      }
-      .width('100%')
+    Row({ space: 10 }) {
+      Button('删除', { type: ButtonType.Normal })
+        .layoutWeight(1)
+        .height(42)
+        .fontSize(14)
+        .borderRadius(10)
+        .backgroundColor('#E53935')
+        .fontColor('#FFFFFF')
+        .enabled(this.selectedBookUrls.length > 0)
+        .onClick(() => {
+          if (this.selectedBookUrls.length > 0) this.showBatchDeleteDialog = true;
+        })
+      Button('分组', { type: ButtonType.Normal })
+        .layoutWeight(1)
+        .height(42)
+        .fontSize(14)
+        .borderRadius(10)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .enabled(this.selectedBookUrls.length > 0)
+        .onClick(() => {
+          if (this.selectedBookUrls.length > 0) this.showBookGroupPicker = true;
+        })
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 10, bottom: this.multiSelectBottomPadding() })
-    .backgroundColor(this.cardColor())
-    .borderRadius({ topLeft: 18, topRight: 18 })
+    .backgroundColor(this.glassCardColor())
+    .border({ width: 1, color: this.glassBorderColor() })
     .alignSelf(ItemAlign.End)
   }
 
@@ -1455,6 +1484,63 @@ struct BookshelfPage {
   }
 
   @Builder
+  bookGroupActionMenu() {
+    Column() {
+      Blank().layoutWeight(1).onClick(() => this.closeBookGroupActionMenu())
+      Column({ space: 6 }) {
+        Text(this.pendingBookGroup?.groupName || '')
+          .fontSize(17).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor()).margin({ bottom: 8 })
+        Button('重命名', { type: ButtonType.Normal })
+          .width('100%').height(42).borderRadius(10)
+          .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.renameBookGroupName = this.pendingBookGroup?.groupName || '';
+            this.showBookGroupActionMenu = false;
+            this.showRenameBookGroupDialog = true;
+          })
+        Button('删除', { type: ButtonType.Normal })
+          .width('100%').height(42).borderRadius(10)
+          .backgroundColor('#E53935').fontColor('#FFFFFF')
+          .onClick(() => {
+            this.pendingDeleteBookGroup = this.pendingBookGroup;
+            this.showBookGroupActionMenu = false;
+            this.showDeleteBookGroupDialog = true;
+          })
+        Button('取消', { type: ButtonType.Normal })
+          .width('100%').height(42).borderRadius(10).margin({ top: 6 })
+          .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
+          .onClick(() => this.closeBookGroupActionMenu())
+      }
+      .width('100%').padding(18).backgroundColor(this.cardColor())
+      .borderRadius({ topLeft: 18, topRight: 18 }).margin({ bottom: this.actionSheetBottomMargin() })
+    }
+    .width('100%').height('100%').backgroundColor('#66000000')
+  }
+
+  @Builder
+  renameBookGroupDialog() {
+    Column() {
+      Column({ space: 16 }) {
+        Text('重命名分组').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
+        TextInput({ placeholder: '输入分组名称', text: this.renameBookGroupName })
+          .width('100%').height(42).backgroundColor(this.inputColor()).fontColor(this.primaryTextColor())
+          .borderRadius(10).onChange((value: string) => this.renameBookGroupName = value)
+        Row({ space: 12 }) {
+          Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+            .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
+            .onClick(() => this.closeRenameBookGroupDialog())
+          Button('保存', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+            .backgroundColor(this.buttonColor()).fontColor('#FFFFFF').enabled(!!this.renameBookGroupName.trim())
+            .onClick(() => this.renameShelfBookGroup())
+        }.width('100%')
+      }
+      .width('85%').padding(22).borderRadius(14).backgroundColor(this.cardColor())
+    }
+    .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor('#80000000')
+  }
+
+  @Builder
   deleteBookGroupDialog() {
     Column() {
       Column({ space: 16 }) {
@@ -1505,6 +1591,7 @@ struct BookshelfPage {
     this.isBookMultiSelect = true;
     this.selectedBookUrls = initialBookUrl ? [initialBookUrl] : [];
     this.showShelfSortMenu = false;
+    this.showShelfGroups = false;
   }
 
   exitBookMultiSelect(): void {
@@ -1515,8 +1602,34 @@ struct BookshelfPage {
   }
 
   toggleSelectedBook(bookUrl: string): void {
-    this.selectedBookUrls = this.selectedBookUrls.includes(bookUrl) ?
-      this.selectedBookUrls.filter((url: string) => url !== bookUrl) : [...this.selectedBookUrls, bookUrl];
+    this.setBookSelected(bookUrl, !this.isBookSelected(bookUrl));
+  }
+
+  isBookSelected(bookUrl: string): boolean {
+    return this.selectedBookUrls.includes(bookUrl);
+  }
+
+  setBookSelected(bookUrl: string, selected: boolean): void {
+    if (selected) {
+      if (!this.isBookSelected(bookUrl)) {
+        this.selectedBookUrls = this.selectedBookUrls.concat([bookUrl]);
+      }
+      return;
+    }
+    this.selectedBookUrls = this.selectedBookUrls.filter((url: string) => url !== bookUrl);
+  }
+
+  areAllBooksSelected(): boolean {
+    return this.books.length > 0 && this.books.every((book: Book) => this.isBookSelected(book.bookUrl));
+  }
+
+  toggleAllBooks(): void {
+    if (this.areAllBooksSelected()) {
+      const visibleUrls = this.books.map((book: Book) => book.bookUrl);
+      this.selectedBookUrls = this.selectedBookUrls.filter((url: string) => !visibleUrls.includes(url));
+      return;
+    }
+    this.selectedBookUrls = this.books.map((book: Book) => book.bookUrl);
   }
 
   async addShelfBookGroup(): Promise<void> {
@@ -1534,9 +1647,35 @@ struct BookshelfPage {
     this.selectShelfGroup(group.groupId);
   }
 
+  closeBookGroupActionMenu(): void {
+    this.showBookGroupActionMenu = false;
+    this.pendingBookGroup = null;
+  }
+
+  closeRenameBookGroupDialog(): void {
+    this.showRenameBookGroupDialog = false;
+    this.renameBookGroupName = '';
+    this.pendingBookGroup = null;
+  }
+
+  async renameShelfBookGroup(): Promise<void> {
+    const group = this.pendingBookGroup;
+    const name = this.renameBookGroupName.trim();
+    if (!group || !name) return;
+    const renamed = await AppDatabase.getInstance().renameBookGroup(group.groupId, name);
+    if (!renamed) {
+      promptAction.showToast({ message: '分组名称已存在' });
+      return;
+    }
+    this.closeRenameBookGroupDialog();
+    await this.loadBooks();
+    promptAction.showToast({ message: '分组已重命名' });
+  }
+
   closeDeleteBookGroupDialog(): void {
     this.showDeleteBookGroupDialog = false;
     this.pendingDeleteBookGroup = null;
+    this.pendingBookGroup = null;
   }
 
   async deleteShelfBookGroup(): Promise<void> {
@@ -3050,6 +3189,18 @@ struct BookshelfPage {
   }
 
   @Builder
+  shelfSortFloatingMenu() {
+    Row() {
+      Blank()
+      this.shelfSortDropdown()
+    }
+    .width('100%')
+    .padding({ right: 56 })
+    .position({ x: 0, y: this.statusBarHeight + 52 })
+    .zIndex(10)
+  }
+
+  @Builder
   shelfSortDropdown() {
     Column({ space: 4 }) {
       this.sortDropdownItem('新阅读', 'recentRead')
@@ -3058,8 +3209,6 @@ struct BookshelfPage {
     }
     .width(116)
     .padding(6)
-    .margin({ left: 16, right: 56, bottom: 6 })
-    .alignSelf(ItemAlign.End)
     .borderRadius(14)
     .backgroundColor(this.cardColor())
     .border({ width: 1, color: this.glassBorderColor() })
@@ -4200,6 +4349,10 @@ struct SearchPage {
   @State shelfBookKeys: string[] = [];
   @State addingShelfBookKeys: string[] = [];
   @State isSearching: boolean = false;
+  @State searchHistory: string[] = [];
+  @State searchHistoryExpanded: boolean = false;
+  @State searchHistoryEditing: boolean = false;
+  @State showSearchHistoryDropdown: boolean = false;
   @State showResult: boolean = false;
   @State statusMessage: string = '';
   @State verificationUrl: string = '';
@@ -4250,6 +4403,8 @@ struct SearchPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
+      const keywords = await db.getSearchKeywords();
+      this.searchHistory = keywords.map(k => k.keyword);
       await this.loadSourceGroups(db);
     } catch (e) {
       console.error('初始化搜索页失败:', e);
@@ -4268,8 +4423,12 @@ struct SearchPage {
               .fontColor(this.primaryTextColor())
               .placeholderColor(this.subTextColor())
               .padding({ left: 16, right: 4 })
+              .onFocus(() => {
+                this.showSearchHistoryDropdown = this.searchHistory.length > 0;
+              })
               .onChange((value: string) => {
                 this.keyword = value;
+                this.showSearchHistoryDropdown = this.searchHistory.length > 0;
               })
 
             this.searchSettingIcon()
@@ -4291,12 +4450,14 @@ struct SearchPage {
             .fontColor('#FFFFFF')
             .onClick(() => {
               if (this.isSearching) {
+                this.showSearchHistoryDropdown = false;
                 this.searchSessionId++;
                 this.coordinator?.cancel();
                 this.coordinator = null;
                 this.isSearching = false;
                 this.statusMessage = '搜索已停止';
               } else {
+                this.showSearchHistoryDropdown = false;
                 this.hideKeyboard();
                 this.doSearch();
               }
@@ -4383,13 +4544,21 @@ struct SearchPage {
           .justifyContent(FlexAlign.Center)
         } else {
           Column() {
-            Text('输入关键词搜索书籍')
-              .fontSize(16)
-              .fontColor(this.subTextColor())
+            if (this.searchHistory.length > 0) {
+              this.searchHistorySection()
+            } else {
+              Column() {
+                Text('输入关键词搜索书籍')
+                  .fontSize(16)
+                  .fontColor(this.subTextColor())
+              }
+              .width('100%')
+              .layoutWeight(1)
+              .justifyContent(FlexAlign.Center)
+            }
           }
           .width('100%')
           .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
         }
       }
       .width('100%')
@@ -4398,12 +4567,226 @@ struct SearchPage {
       .backgroundColor(this.pageColor())
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
 
+      if (this.showSearchHistoryDropdown && this.searchHistory.length > 0) {
+        this.searchHistoryDropdown()
+      }
+
       if (this.showSearchSettingsDialog) {
         this.searchSettingsDialog()
       }
     }
     .width('100%')
     .height('100%')
+  }
+
+  @Builder
+  searchHistoryDropdown() {
+    Column() {
+      Row() {
+        Text('搜索历史')
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.primaryTextColor())
+          .layoutWeight(1)
+
+        Text('收起')
+          .fontSize(13)
+          .fontColor(this.buttonColor())
+          .padding({ left: 10, top: 6, bottom: 6 })
+          .onClick(() => {
+            this.showSearchHistoryDropdown = false;
+          })
+      }
+      .width('100%')
+      .height(38)
+      .padding({ left: 12, right: 8 })
+      .alignItems(VerticalAlign.Center)
+
+      Scroll() {
+        Column() {
+          ForEach(this.searchHistory, (keyword: string, index: number) => {
+            Column() {
+              Row() {
+                Text('◷')
+                  .fontSize(16)
+                  .fontColor(this.subTextColor())
+                  .margin({ right: 10 })
+
+                Text(keyword)
+                  .fontSize(14)
+                  .fontColor(this.secondaryTextColor())
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+              }
+              .width('100%')
+              .height(42)
+              .padding({ left: 12, right: 12 })
+              .alignItems(VerticalAlign.Center)
+              .onClick(() => {
+                this.showSearchHistoryDropdown = false;
+                this.searchFromHistory(keyword);
+              })
+
+              if (index < this.searchHistory.length - 1) {
+                Divider()
+                  .color(this.glassBorderColor())
+                  .margin({ left: 38, right: 12 })
+              }
+            }
+            .width('100%')
+          }, (keyword: string) => keyword)
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .constraintSize({ maxHeight: 220 })
+    }
+    .width('calc(100% - 112vp)')
+    .backgroundColor(this.cardColor())
+    .border({ width: 1, color: this.glassBorderColor() })
+    .borderRadius(12)
+    .shadow({ radius: 12, color: this.glassShadowColor(), offsetX: 0, offsetY: 5 })
+    .position({ x: 16, y: this.statusBarHeight + 52 })
+    .zIndex(10)
+  }
+
+  @Builder
+  searchHistorySection() {
+    Column() {
+      Row() {
+        Text('搜索历史')
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .layoutWeight(1)
+
+        if (this.searchHistoryEditing) {
+          Text('全部删除')
+            .fontSize(14)
+            .fontColor('#E53935')
+            .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.clearSearchHistory();
+            })
+          Text('完成')
+            .fontSize(14)
+            .fontColor(this.buttonColor())
+            .padding({ left: 8, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.searchHistoryEditing = false;
+            })
+        } else {
+          SymbolGlyph($r('sys.symbol.ohos_trash'))
+            .fontSize(20)
+            .fontColor([this.secondaryTextColor()])
+            .width(36)
+            .height(32)
+            .onClick(() => {
+              this.searchHistoryExpanded = true;
+              this.searchHistoryEditing = true;
+            })
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Flex({ wrap: FlexWrap.Wrap }) {
+        ForEach(this.visibleSearchHistory(), (keyword: string) => {
+          Row() {
+            Text(keyword)
+              .fontSize(14)
+              .fontColor(this.secondaryTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+            if (this.searchHistoryEditing) {
+              Text('×')
+                .fontSize(16)
+                .fontColor(this.subTextColor())
+                .margin({ left: 6 })
+            }
+          }
+          .constraintSize({ maxWidth: '72%' })
+          .height(32)
+          .padding({ left: 12, right: 12 })
+          .backgroundColor(this.buttonBackgroundColor())
+          .borderRadius(16)
+          .margin({ right: 8, bottom: 8 })
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            if (this.searchHistoryEditing) {
+              this.deleteSearchHistoryItem(keyword);
+            } else {
+              this.searchFromHistory(keyword);
+            }
+          })
+        }, (keyword: string) => keyword)
+
+        if (!this.searchHistoryEditing && this.searchHistory.length > 5) {
+          Text(this.searchHistoryExpanded ? '⌃' : '⌄')
+            .fontSize(18)
+            .fontColor(this.secondaryTextColor())
+            .width(36)
+            .height(32)
+            .textAlign(TextAlign.Center)
+            .backgroundColor(this.buttonBackgroundColor())
+            .borderRadius(16)
+            .margin({ right: 8, bottom: 8 })
+            .onClick(() => {
+              this.searchHistoryExpanded = !this.searchHistoryExpanded;
+            })
+        }
+      }
+      .width('100%')
+      .margin({ top: 12 })
+    }
+    .width('100%')
+    .padding(16)
+    .backgroundColor(this.cardColor())
+    .borderRadius(8)
+    .margin({ left: 16, right: 16, top: 16 })
+  }
+
+  visibleSearchHistory(): string[] {
+    if (this.searchHistoryExpanded || this.searchHistoryEditing) {
+      return this.searchHistory;
+    }
+    return this.searchHistory.slice(0, 5);
+  }
+
+  searchFromHistory(keyword: string): void {
+    this.keyword = keyword;
+    this.hideKeyboard();
+    this.doSearch();
+  }
+
+  async deleteSearchHistoryItem(keyword: string): Promise<void> {
+    try {
+      await AppDatabase.getInstance().deleteSearchKeyword(keyword);
+      this.searchHistory = this.searchHistory.filter((item: string) => item !== keyword);
+      if (this.searchHistory.length === 0) {
+        this.searchHistoryEditing = false;
+        this.searchHistoryExpanded = false;
+        this.showSearchHistoryDropdown = false;
+      }
+    } catch (e) {
+      console.error('删除搜索历史失败:', e);
+      promptAction.showToast({ message: '删除失败' });
+    }
+  }
+
+  async clearSearchHistory(): Promise<void> {
+    try {
+      await AppDatabase.getInstance().clearSearchKeywords();
+      this.searchHistory = [];
+      this.searchHistoryEditing = false;
+      this.searchHistoryExpanded = false;
+      this.showSearchHistoryDropdown = false;
+    } catch (e) {
+      console.error('清空搜索历史失败:', e);
+      promptAction.showToast({ message: '清空失败' });
+    }
   }
 
   async doSearch() {
@@ -4418,6 +4801,11 @@ struct SearchPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
+
+      // 点击搜索后立即保存，不再等待搜索任务完成。
+      await db.saveSearchKeyword(keyword);
+      const keywords = await db.getSearchKeywords();
+      this.searchHistory = keywords.map(k => k.keyword);
 
       this.isSearching = true;
       this.showResult = true;
@@ -4470,7 +4858,6 @@ struct SearchPage {
         const resultText = allBooks.length > 0 ? `搜索完成，共找到 ${allBooks.length} 本书` : '搜索完成，未找到相关书籍';
         this.statusMessage = verifyUrl ? `${resultText}；有书源需要网页验证` : resultText;
       }
-      await db.saveSearchKeyword(keyword);
     } catch (e) {
       if (sessionId !== this.searchSessionId || this.coordinator !== activeCoordinator) {
         return;
@@ -4881,6 +5268,7 @@ struct SearchPage {
       .borderRadius(18)
       .margin({ right: 2 })
       .onClick(() => {
+        this.showSearchHistoryDropdown = false;
         this.hideKeyboard();
         this.loadSourceGroups().catch((e: Error) => {
           console.warn('加载搜索书源分组失败:', e);

@@ -6,7 +6,6 @@
     "pages/SearchBookDetail",
     "pages/BookSource",
     "pages/BookSourceEdit",
-    "pages/Search",
     "pages/Settings",
     "pages/CustomFontManager",
     "pages/TtsSettings",
