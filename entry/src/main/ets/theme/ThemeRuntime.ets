@@ -160,6 +160,26 @@ export class ThemeRuntime {
     return `#${darkMode ? '33' : '1F'}${accent.substring(1)}`;
   }
 
+  static glassPanelColor(darkMode: boolean, baseColor: string = ''): string {
+    const fallback = ThemeRuntime.cardColor(darkMode);
+    const color = ThemeRuntime.normalizeColor(baseColor || fallback, fallback);
+    return `#${darkMode ? 'C7' : 'D9'}${color.substring(1)}`;
+  }
+
+  static dropdownPanelColor(darkMode: boolean, baseColor: string = ''): string {
+    const fallback = ThemeRuntime.cardColor(darkMode);
+    const color = ThemeRuntime.normalizeColor(baseColor || fallback, fallback);
+    return `#${darkMode ? '52' : '66'}${color.substring(1)}`;
+  }
+
+  static glassBorderColor(darkMode: boolean): string {
+    return darkMode ? '#38FFFFFF' : '#A6FFFFFF';
+  }
+
+  static glassShadowColor(darkMode: boolean): string {
+    return darkMode ? '#70000000' : '#2B000000';
+  }
+
   static buttonColor(darkMode: boolean): string {
     const fallback = ThemeRuntime.fallbackVariant(darkMode).colors.buttonColor;
     return ThemeRuntime.colorFromStorage(darkMode ? ThemeRuntime.KEY_DARK_BUTTON_COLOR :

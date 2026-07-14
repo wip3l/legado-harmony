@@ -1,5 +1,5 @@
 import { router, window, promptAction, MeasureOptions } from '@kit.ArkUI';
-import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
+import { common, ConfigurationConstant, WantAgent, wantAgent } from '@kit.AbilityKit';
 import { inputConsumer, KeyCode, Action, KeyEvent } from '@kit.InputKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { avSession } from '@kit.AVSessionKit';
@@ -9,12 +9,13 @@ import fs from '@ohos.file.fs';
 import graphicsText from '@ohos.graphics.text';
 import deviceInfo from '@ohos.deviceInfo';
 import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
-import { Book, BookChapter, Bookmark, SearchBook, HttpTTS } from '../model/data/Book';
+import { Book, BookChapter, Bookmark, BookSource, SearchBook, HttpTTS } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
 import { LocalBookService } from '../core/book/LocalBookService';
 import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
 import { WebBookService } from '../core/book/WebBookService';
+import { VerificationSupport } from '../core/http/VerificationSupport';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { SystemTtsReader, TtsChunk, TtsVoiceOption } from '../utils/SystemTtsReader';
@@ -35,6 +36,7 @@ import { ChangeSourceResultCache } from '../utils/ChangeSourceResultCache';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
 import { BookCoverCache } from '../utils/BookCoverCache';
 import { CoverGallerySettings } from '../utils/CoverGallerySettings';
+import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import {
   ReaderRegexBubbleStyleResolver,
   ReaderRegexEmphasisContext,
@@ -104,9 +106,11 @@ struct ReadBookPage {
   @State menuChapterPreviewIndex: number = 0;
   @State menuChapterSliderActive: boolean = false;
   @State menuChapterTooltipVisible: boolean = false;
+  @State menuChapterConfirming: boolean = false;
   @State content: string = '';
   @State isLoading: boolean = true;
   @State showMenu: boolean = false;
+  @State showReaderActionMenu: boolean = false;
   @State showToc: boolean = false;
   @State tocPanelTab: number = 0;
   @State bookmarks: Bookmark[] = [];
@@ -151,6 +155,8 @@ struct ReadBookPage {
   @State ttsHighlightStart: number = -1;
   @State ttsHighlightEnd: number = -1;
   @State ttsHighlightRenderVersion: number = 0;
+  @State ttsSleepTimerMinutes: number = 0;
+  @State ttsSleepTimerRemainingSeconds: number = 0;
   private pendingRestorePageIndex: number = -1;
   private tocScroller: Scroller = new Scroller();
   private bookmarkScroller: ListScroller = new ListScroller();
@@ -174,6 +180,8 @@ struct ReadBookPage {
   private ttsAvSessionRequesting: boolean = false;
   private ttsSpeedSaveTimerId: number = -1;
   private ttsSpeedAvSessionTimerId: number = -1;
+  private ttsSleepTimerId: number = -1;
+  private ttsSleepTimerEndAt: number = 0;
   private ttsMediaImageRefreshSerial: number = 0;
   private ttsMediaImageRaw: string = '';
   private ttsMediaPixelMap: image.PixelMap | null = null;
@@ -264,6 +272,7 @@ struct ReadBookPage {
   @State readerFontRegistered: boolean = false;
   @State readerFontRenderReady: boolean = false;
   @StorageLink('appDarkMode') @Watch('onReaderThemeChanged') appDarkMode: boolean = false;
+  @StorageLink('appThemeMode') appThemeMode: string = 'system';
   @StorageLink('themeRevision') @Watch('onReaderThemeChanged') themeRevision: number = 0;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
@@ -309,12 +318,28 @@ struct ReadBookPage {
   private readerExitProgressSaved: boolean = false;
   private readerEntryInitializing: boolean = true;
   private readerSettingsReloadSerial: number = 0;
+  @State shelfOpeningEntryOpacity: number = 1;
+  @State shelfOpeningEntryScale: number = 1;
+  private shelfOpeningEntryTimer: number = -1;
+  private openedWithShelfAnimation: boolean = false;
 
   async aboutToAppear() {
     this.readerEntryInitializing = true;
     this.enterReaderImmersive();
     this.updateVolumeKeySubscription();
     const params = router.getParams() as Record<string, string>;
+    this.openedWithShelfAnimation = !!params && params['shelfBookOpening'] === 'true';
+    if (this.openedWithShelfAnimation) {
+      this.shelfOpeningEntryOpacity = 0.86;
+      this.shelfOpeningEntryScale = 0.985;
+      this.shelfOpeningEntryTimer = setTimeout(() => {
+        this.shelfOpeningEntryTimer = -1;
+        animateTo({ duration: 260, curve: Curve.EaseOut }, () => {
+          this.shelfOpeningEntryOpacity = 1;
+          this.shelfOpeningEntryScale = 1;
+        });
+      }, 20);
+    }
     if (params && params['bookUrl']) {
       this.bookUrl = params['bookUrl'];
       this.isLoading = true;
@@ -392,6 +417,10 @@ struct ReadBookPage {
   }
 
   aboutToDisappear() {
+    if (this.shelfOpeningEntryTimer >= 0) {
+      clearTimeout(this.shelfOpeningEntryTimer);
+      this.shelfOpeningEntryTimer = -1;
+    }
     this.flushPendingTtsSpeedSettings();
     this.stopTtsReading();
     this.ttsReader.shutdown();
@@ -524,7 +553,7 @@ struct ReadBookPage {
       }
     } catch (e) {
       console.error('加载书籍失败:', e);
-      this.setReaderContent('书籍或目录加载失败。请点击右上角橙色感叹号圆形 Logo（重试）重新加载。');
+      this.setReaderContent('书籍或目录加载失败。请点击右上角“更多操作”，选择“重试”重新加载。');
       this.isLoading = false;
     } finally {
       this.updatePendingVerification();
@@ -625,9 +654,9 @@ struct ReadBookPage {
       } else {
         this.updatePendingVerification();
         const c = this.chapters[chapterIndex];
-        loadedContent = this.verificationUrl ? `${c ? c.title : '当前章节'}\n\n该书源需要先完成网页验证。请点击右上角盾牌对勾 Logo（验证），完成后返回，再点击旁边橙色感叹号圆形 Logo（重试）。` :
-          (c ? `${c.title}\n\n章节正文加载失败。请点击右上角环形箭头 Logo（刷新本章），或点击双向箭头 Logo（换源）。` :
-            '章节正文加载失败。请点击右上角橙色感叹号圆形 Logo（重试）。');
+        loadedContent = this.verificationUrl ? `${c ? c.title : '当前章节'}\n\n该书源需要先完成网页验证。请点击右上角“更多操作”，选择“登录”，完成后返回，再从该菜单选择“重试”。` :
+          (c ? `${c.title}\n\n章节正文加载失败。请点击右上角“刷新本章”或“换源”。` :
+            '章节正文加载失败。请点击右上角“更多操作”，选择“重试”。');
         this.content = loadedContent;
       }
       this.paginateContent(loadedContent, chapterIndex);
@@ -665,9 +694,9 @@ struct ReadBookPage {
       } else {
         this.updatePendingVerification();
         const chapter = this.chapters[this.currentChapterIndex];
-        const loadedContent = this.verificationUrl ? `${chapter ? chapter.title : '当前章节'}\n\n该书源需要先完成网页验证。请点击右上角盾牌对勾 Logo（验证），完成后返回，再点击旁边橙色感叹号圆形 Logo（重试）。` :
-          (chapter ? `${chapter.title}\n\n章节正文刷新失败。请再次点击右上角环形箭头 Logo（刷新本章），或点击双向箭头 Logo（换源）。` :
-            '章节正文刷新失败。请点击右上角橙色感叹号圆形 Logo（重试）。');
+        const loadedContent = this.verificationUrl ? `${chapter ? chapter.title : '当前章节'}\n\n该书源需要先完成网页验证。请点击右上角“更多操作”，选择“登录”，完成后返回，再从该菜单选择“重试”。` :
+          (chapter ? `${chapter.title}\n\n章节正文刷新失败。请再次点击右上角“刷新本章”或“换源”。` :
+            '章节正文刷新失败。请点击右上角“更多操作”，选择“重试”。');
         this.content = loadedContent;
         this.paginateContent(loadedContent);
         promptAction.showToast({ message: '刷新本章失败' });
@@ -1077,13 +1106,19 @@ struct ReadBookPage {
         this.readerFloatingTopMenu()
       }
 
+      if (this.showMenu && this.showReaderActionMenu && !this.showToc && !this.showSettings) {
+        this.readerActionMenu()
+      }
+
       if (this.showMenu && !this.showToc && !this.showSettings && this.chapters.length > 0) {
         if (this.supportsReaderImmersiveMaterial()) {
           this.readerHdsFloatingBottomMenu()
         } else {
           this.readerFloatingBottomMenu()
         }
-        this.readerTtsQuickActionButton()
+        if (!this.ttsMediaControlsExpanded) {
+          this.readerTtsQuickActionButton()
+        }
         if (this.shouldShowTtsMediaControls()) {
           this.ttsExpandedMediaControlsBar()
         }
@@ -1118,6 +1153,8 @@ struct ReadBookPage {
     .width('100%')
     .height('100%')
     .backgroundColor(this.readerContentLayerColor())
+    .opacity(this.shelfOpeningEntryOpacity)
+    .scale({ x: this.shelfOpeningEntryScale, y: this.shelfOpeningEntryScale })
     .expandSafeArea([SafeAreaType.SYSTEM], this.getReaderSafeAreaEdges())
   }
 
@@ -1137,7 +1174,7 @@ struct ReadBookPage {
       Blank()
         .layoutWeight(1)
 
-      Row({ space: 2 }) {
+      Row({ space: -6 }) {
         if (this.chapters.length > 0) {
           this.readerRoundMenuButton($r('sys.symbol.arrow_clockwise'), '刷新本章', () => {
             this.hideReaderPanels();
@@ -1149,21 +1186,9 @@ struct ReadBookPage {
             this.openChangeSourceDialog();
           })
         }
-        if (this.verificationUrl) {
-          this.readerRoundMenuButton($r('sys.symbol.checkmark_shield'), '验证', () => {
-            this.openVerificationPage();
-          })
-        }
-        if ((this.chapters.length === 0 && this.book?.origin !== 'local') || this.verificationUrl) {
-          this.readerRoundMenuButton($r('sys.symbol.exclamationmark_circle'), '重试', () => {
-            this.hideReaderPanels();
-            if (this.chapters.length === 0) {
-              this.retryFetchChapters();
-            } else {
-              this.loadContent();
-            }
-          }, true)
-        }
+        this.readerRoundMenuButton($r('sys.symbol.more'), '更多操作', () => {
+          this.showReaderActionMenu = !this.showReaderActionMenu;
+        })
       }
     }
     .width('100%')
@@ -1173,11 +1198,10 @@ struct ReadBookPage {
   }
 
   @Builder
-  readerRoundMenuButton(icon: Resource, accessibilityText: string, action: () => void,
-    emphasized: boolean = false) {
+  readerRoundMenuButton(icon: Resource, accessibilityText: string, action: () => void) {
     ImmersiveBackButton({
       icon: icon,
-      iconColor: emphasized ? this.accentColor() : this.getTextColor(),
+      iconColor: this.getTextColor(),
       darkMode: this.isReaderThemeDark(),
       buttonSize: 46,
       containerWidth: 46,
@@ -1291,14 +1315,14 @@ struct ReadBookPage {
         min: 0,
         max: Math.max(0, this.chapters.length - 1),
         step: 1,
-        style: SliderStyle.OutSet
+        style: SliderStyle.InSet
       })
         .layoutWeight(1)
         .height(48)
         .trackThickness(30)
         .blockSize({ width: 30, height: 30 })
         .selectedColor(this.accentColor())
-        .trackColor(this.isReaderThemeDark() ? '#55FFFFFF' : '#2E000000')
+        .trackColor(this.readerChapterTrackColor())
         .blockColor(this.readerSolidPanelColor())
         .showSteps(false)
         .onChange((value: number, mode: SliderChangeMode) => {
@@ -1322,6 +1346,7 @@ struct ReadBookPage {
     .height(48)
     .padding({ left: 4, right: 4 })
     .alignItems(VerticalAlign.Center)
+    .translate({ y: -2 })
   }
 
   @Builder
@@ -1364,7 +1389,7 @@ struct ReadBookPage {
         Column()
       }
       .height(56)
-      .tabBar(this.readerHdsMenuItem($r('sys.symbol.bookmark'), false, true))
+      .tabBar(this.readerHdsMenuItem(this.readerDayNightIcon(), false))
     }
     .barMode(BarMode.Fixed)
     .barHeight(48)
@@ -1404,13 +1429,13 @@ struct ReadBookPage {
       Stack({ alignContent: Alignment.Center }) {
         SymbolGlyph(icon)
           .fontSize(24)
-          .fontColor([active ? this.accentColor() : this.getSubTextColor()])
+          .fontColor([this.getSubTextColor()])
 
         if (showAddBadge) {
           SymbolGlyph($r('sys.symbol.plus'))
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
-            .fontColor([this.accentColor()])
+            .fontColor([this.getSubTextColor()])
             .position({ x: 20, y: 0 })
         }
       }
@@ -1419,6 +1444,7 @@ struct ReadBookPage {
     }
     .width('100%')
     .height(48)
+    .translate({ y: -2 })
   }
 
   handleReaderHdsAction(index: number, fromToc: boolean, fromSettings: boolean = false): void {
@@ -1436,7 +1462,7 @@ struct ReadBookPage {
       return;
     }
     if (index === 3) {
-      this.addCurrentBookmark();
+      this.toggleReaderDayNightMode();
       return;
     }
     if (fromToc) {
@@ -1458,6 +1484,37 @@ struct ReadBookPage {
       }
       return;
     }
+  }
+
+  readerDayNightIcon(): Resource {
+    const mode = AppThemeModeStore.normalizeMode(this.appThemeMode);
+    if (mode === 'system') {
+      return $r('sys.symbol.circle_lefthalf_inset_filled');
+    }
+    return mode === 'dark' ? $r('sys.symbol.moon') : $r('sys.symbol.sun_max');
+  }
+
+  toggleReaderDayNightMode(): void {
+    const currentMode = AppThemeModeStore.normalizeMode(this.appThemeMode);
+    const nextMode = currentMode === 'light' ? 'dark' : (currentMode === 'dark' ? 'system' : 'light');
+    this.appThemeMode = nextMode;
+    if (nextMode === 'dark') {
+      this.appDarkMode = true;
+      getContext(this).getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
+    } else if (nextMode === 'light') {
+      this.appDarkMode = false;
+      getContext(this).getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
+    } else {
+      getContext(this).getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+    }
+    AppThemeModeStore.save(getContext(this), nextMode).catch((e: Error) => {
+      console.warn('保存日间/夜间/自动模式失败:', e);
+    });
+    this.saveReaderThemeSettings();
+    promptAction.showToast({
+      message: nextMode === 'light' ? '已切换至日间模式' :
+        (nextMode === 'dark' ? '已切换至夜间模式' : '已切换至自动模式')
+    });
   }
 
   @Builder
@@ -1495,12 +1552,12 @@ struct ReadBookPage {
             min: 0,
             max: Math.max(0, this.chapters.length - 1),
             step: 1,
-            style: SliderStyle.OutSet
+            style: SliderStyle.InSet
           })
             .width('100%')
             .height(24)
             .selectedColor(this.accentColor())
-            .trackColor(this.isReaderThemeDark() ? '#4DFFFFFF' : '#26000000')
+            .trackColor(this.readerChapterTrackColor())
             .blockColor(this.readerSolidPanelColor())
             .showSteps(false)
             .onChange((value: number, mode: SliderChangeMode) => {
@@ -1544,9 +1601,9 @@ struct ReadBookPage {
         this.readerFloatingIconMenuItem($r('sys.symbol.speaker_wave_3'), this.isTtsSpeaking, () => {
           this.openTtsSettingsPanel();
         })
-        this.readerFloatingIconMenuItem($r('sys.symbol.bookmark'), false, () => {
-          this.addCurrentBookmark();
-        }, true)
+        this.readerFloatingIconMenuItem(this.readerDayNightIcon(), false, () => {
+          this.toggleReaderDayNightMode();
+        })
       }
       .width('100%')
       .height(56)
@@ -1574,13 +1631,13 @@ struct ReadBookPage {
       Stack({ alignContent: Alignment.Center }) {
         SymbolGlyph(icon)
           .fontSize(24)
-          .fontColor([active ? this.accentColor() : this.getSubTextColor()])
+          .fontColor([this.getSubTextColor()])
 
         if (showAddBadge) {
           SymbolGlyph($r('sys.symbol.plus'))
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
-            .fontColor([this.accentColor()])
+            .fontColor([this.getSubTextColor()])
             .position({ x: 20, y: 0 })
         }
       }
@@ -1731,9 +1788,9 @@ struct ReadBookPage {
             this.showToc = false;
             this.openTtsSettingsPanel();
           })
-          this.readerFloatingIconMenuItem($r('sys.symbol.bookmark'), false, () => {
-            this.addCurrentBookmark();
-          }, true)
+          this.readerFloatingIconMenuItem(this.readerDayNightIcon(), false, () => {
+            this.toggleReaderDayNightMode();
+          })
         }
         .width('94%')
         .height(56)
@@ -1762,22 +1819,49 @@ struct ReadBookPage {
         .fontSize(14)
         .fontColor(this.getSubTextColor())
         .layoutWeight(1)
+      SymbolGlyph($r('sys.symbol.chevron_up'))
+        .fontSize(20)
+        .fontColor([this.getTextColor()])
+        .width(32)
+        .height(36)
+        .accessibilityText('跳到目录开头')
+        .onClick(() => {
+          this.scrollTocToChapter(0, ScrollAlign.START);
+        })
+      SymbolGlyph($r('sys.symbol.chevron_down'))
+        .fontSize(20)
+        .fontColor([this.getTextColor()])
+        .width(32)
+        .height(36)
+        .accessibilityText('跳到目录末尾')
+        .onClick(() => {
+          this.scrollTocToChapter(this.chapters.length - 1, ScrollAlign.END);
+        })
       Text(`当前 ${Math.min(this.currentChapterIndex + 1, this.chapters.length)}/${this.chapters.length}`)
         .fontSize(12)
         .fontColor(this.getTextColor())
         .padding({ left: 12, right: 12, top: 7, bottom: 7 })
         .borderRadius(16)
         .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
-      SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-        .fontSize(20)
-        .fontColor([this.getTextColor()])
-        .width(36)
-        .height(36)
-        .margin({ left: 8 })
-        .accessibilityText('刷新目录')
+        .accessibilityText('回到当前章节')
         .onClick(() => {
-          this.refreshTocFromPanel();
+          this.scrollTocToCurrentChapter();
         })
+      ImmersiveBackButton({
+        icon: $r('sys.symbol.arrow_clockwise'),
+        iconColor: this.getTextColor(),
+        darkMode: this.isReaderThemeDark(),
+        buttonSize: 34,
+        containerWidth: 44,
+        containerHeight: 44,
+        startInset: 0,
+        materialScale: 0.72,
+        accessibilityLabel: '刷新目录',
+        onBack: () => {
+          this.refreshTocFromPanel();
+        }
+      })
+        .margin({ left: 8 })
     }
     .width('100%')
     .padding({ left: 20, right: 16, top: 18, bottom: 10 })
@@ -2014,6 +2098,173 @@ struct ReadBookPage {
   }
 
   @Builder
+  readerActionMenu() {
+    Column() {
+      this.readerActionMenuItem(
+        $r('sys.symbol.bookmark'),
+        this.isCurrentPageBookmarked() ? '删除书签' : '添加书签',
+        () => this.toggleCurrentPageBookmark()
+      )
+      this.readerActionMenuItem(
+        this.isTtsSpeaking ? $r('sys.symbol.pause') : $r('sys.symbol.play'),
+        this.isTtsSpeaking ? '停止朗读' : '开始朗读',
+        () => this.toggleTtsReading()
+      )
+      this.readerActionMenuItem(
+        $r('sys.symbol.arrow_clockwise'),
+        '刷新本章',
+        () => this.refreshCurrentChapter(),
+        this.chapters.length > 0
+      )
+      this.readerActionMenuItem(
+        $r('sys.symbol.arrow_left_arrow_right'),
+        '换源',
+        () => this.openChangeSourceDialog(),
+        this.book !== null && this.book.origin !== 'local'
+      )
+      if (this.readerSourceNeedsLogin()) {
+        this.readerActionMenuItem(
+          $r('sys.symbol.checkmark_shield'),
+          '登录',
+          () => this.openReaderSourceLogin()
+        )
+      }
+      if (this.readerCanRetry()) {
+        this.readerActionMenuItem(
+          $r('sys.symbol.exclamationmark_circle'),
+          '重试',
+          () => this.retryReaderContent()
+        )
+      }
+      this.readerActionMenuItem(
+        $r('sys.symbol.textformat'),
+        '阅读设置',
+        () => this.openSettingsPanel()
+      )
+      this.readerActionMenuItem(
+        $r('sys.symbol.speaker_wave_3'),
+        '朗读设置',
+        () => this.openTtsSettingsPanel(),
+        true,
+        false
+      )
+    }
+    .width(220)
+    .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+    .backgroundColor(this.readerGlassPanelColor())
+    .borderRadius(22)
+    .backdropBlur(22)
+    .border({ width: 0.5, color: this.readerGlassBorderColor() })
+    .shadow({ radius: 18, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 6 })
+    .position({ x: '100%', y: 0 })
+    .translate({ x: -232, y: this.getTopControlSafePadding() + 72 })
+    .onClick(() => {
+    })
+  }
+
+  @Builder
+  readerActionMenuItem(icon: Resource, label: string, action: () => void,
+    enabled: boolean = true, showDivider: boolean = true) {
+    Column() {
+      Row({ space: 12 }) {
+        SymbolGlyph(icon)
+          .fontSize(21)
+          .fontColor([this.getTextColor()])
+          .width(24)
+
+        Text(label)
+          .fontSize(16)
+          .fontColor(this.getTextColor())
+          .maxLines(1)
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .height(46)
+      .padding({ left: 10, right: 10 })
+
+      if (showDivider) {
+        Divider()
+          .strokeWidth(0.5)
+          .color(this.readerGlassBorderColor())
+          .margin({ left: 46, right: 8 })
+      }
+    }
+    .width('100%')
+    .opacity(enabled ? 1 : 0.38)
+    .enabled(enabled)
+    .onClick(() => {
+      if (!enabled) return;
+      this.showReaderActionMenu = false;
+      action();
+    })
+  }
+
+  currentReaderSource(): BookSource | null {
+    return ReadBookEngine.get().source;
+  }
+
+  readerSourceNeedsLogin(): boolean {
+    const source = this.currentReaderSource();
+    if (!source) return false;
+    if (this.verificationUrl) return true;
+    const loginUrl = String(source.loginUrl || '').trim();
+    const loginUi = String(source.loginUi || '').trim();
+    const loginCheckJs = String(source.loginCheckJs || '').trim();
+    const loginHeader = String(source.loginHeader || '').trim();
+    if (loginUrl || loginUi || loginCheckJs || loginHeader) return true;
+    const rules = `${source.jsLib || ''}\n${source.searchUrl || ''}\n${source.exploreUrl || ''}\n` +
+      `${source.bookInfoRule?.init || ''}\n${source.tocRule?.chapterList || ''}\n${source.contentRule?.content || ''}`;
+    return /loginCheck|loginUrl|loginUi|book-source-login|请先登[录陆]|需要登[录陆]|账号登[录陆]|网页登录|登[录陆]后/i.test(rules);
+  }
+
+  readerSourceUsesEditorLogin(source: BookSource): boolean {
+    const raw = `${source.bookSourceName || ''}\n${source.bookSourceUrl || ''}\n${source.loginUrl || ''}\n${source.jsLib || ''}`.toLowerCase();
+    return raw.includes('书山') || raw.includes('shushan');
+  }
+
+  openReaderSourceLogin(): void {
+    const source = this.currentReaderSource();
+    if (!source || !this.readerSourceNeedsLogin()) return;
+    this.showReaderActionMenu = false;
+    this.showMenu = false;
+    if (this.readerSourceUsesEditorLogin(source)) {
+      router.pushUrl({
+        url: 'pages/BookSourceEdit',
+        params: { bookSourceUrl: source.bookSourceUrl }
+      });
+      return;
+    }
+    const loginEntryUrl = this.verificationUrl || VerificationSupport.resolveBookSourceLoginUrl(source) ||
+      VerificationSupport.pickVerificationUrl(source, source.bookSourceUrl);
+    if (!loginEntryUrl || !/^https?:\/\//i.test(loginEntryUrl)) {
+      promptAction.showToast({ message: '未找到可用的网页登录地址，请检查书源登录配置' });
+      return;
+    }
+    VerificationSupport.requestVerification(loginEntryUrl, `${source.bookSourceName || '书源'} 登录`, source);
+    router.pushUrl({
+      url: 'pages/VerifyWeb',
+      params: {
+        url: loginEntryUrl,
+        title: `${source.bookSourceName || '书源'} 登录`,
+        requireLoginCookie: 'true'
+      }
+    });
+  }
+
+  readerCanRetry(): boolean {
+    return (this.chapters.length === 0 && this.book?.origin !== 'local') || !!this.verificationUrl;
+  }
+
+  retryReaderContent(): void {
+    this.hideReaderPanels();
+    if (this.chapters.length === 0) {
+      this.retryFetchChapters();
+    } else {
+      this.loadContent();
+    }
+  }
+
+  @Builder
   readerTtsQuickActionButton() {
     Stack({ alignContent: Alignment.Center }) {
       ImmersiveBackButton({
@@ -2022,7 +2273,7 @@ struct ReadBookPage {
         darkMode: this.isReaderThemeDark(),
         buttonSize: 48,
         containerWidth: 56,
-        containerHeight: 56,
+        containerHeight: 48,
         startInset: 0,
         accessibilityLabel: this.isTtsSpeaking ? '展开朗读控制' : '开始朗读',
         onBack: () => {
@@ -2047,9 +2298,12 @@ struct ReadBookPage {
       }
     }
     .width(64)
-    .height(56)
+    .height(48)
     .position({ x: '100%', y: '100%' })
-    .translate({ x: -76, y: -(this.readerBottomMenuOverlayHeight() + 66) })
+    .translate({
+      x: -(64 + this.readerFloatingBarSideInset()),
+      y: -(this.readerBottomMenuOverlayHeight() + 62)
+    })
   }
 
   @Builder
@@ -2133,6 +2387,7 @@ struct ReadBookPage {
       .padding({ top: 6, bottom: 6 })
       .backgroundColor(this.readerGlassPanelColor())
       .borderRadius(14)
+      .backdropBlur(22)
       .border({ width: 1, color: this.readerGlassBorderColor() })
       .shadow({ radius: 18, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 7 })
       .position({ x: this.bookmarkActionMenuLeft(148), y: this.bookmarkActionMenuTop(100) })
@@ -2962,14 +3217,13 @@ struct ReadBookPage {
 
   @Builder
   readerCurrentPageBookmarkMarker() {
-    Stack({ alignContent: Alignment.Center }) {
-      SymbolGlyph($r('sys.symbol.bookmark'))
-        .fontSize(30)
-        .fontWeight(FontWeight.Bold)
+    Stack({ alignContent: Alignment.Top }) {
+      SymbolGlyph($r('sys.symbol.bookmark_fill'))
+        .fontSize(32)
         .fontColor([this.accentColor()])
     }
     .width(46)
-    .height(46)
+    .height(40)
     .position({ x: '100%', y: 0 })
     .translate({
       x: -62,
@@ -2979,8 +3233,8 @@ struct ReadBookPage {
   }
 
   readerBookmarkMarkerTopOffset(): number {
-    const desiredScreenTop = this.readerExtendToStatusBar ? 0 : this.statusBarSafeHeight;
-    return Math.max(0, desiredScreenTop - this.getReaderTopSafePadding());
+    if (this.readerExtendToStatusBar) return 0;
+    return this.hasBackgroundImage() || this.isStackPageTurnAnimation() ? this.statusBarSafeHeight : 0;
   }
 
   @Builder
@@ -3138,6 +3392,7 @@ struct ReadBookPage {
   }
 
   openSettingsPanel(): void {
+    this.showReaderActionMenu = false;
     this.settingsPanelTab = 0;
     this.showToc = false;
     this.showSettings = true;
@@ -3145,6 +3400,7 @@ struct ReadBookPage {
   }
 
   openTtsSettingsPanel(): void {
+    this.showReaderActionMenu = false;
     this.settingsPanelTab = 1;
     this.showToc = false;
     this.showSettings = true;
@@ -3536,11 +3792,19 @@ struct ReadBookPage {
       return;
     }
     const index = Math.max(0, Math.min(this.currentChapterIndex, this.chapters.length - 1));
+    this.scrollTocToChapter(index, ScrollAlign.CENTER, smooth);
+  }
+
+  scrollTocToChapter(index: number, align: ScrollAlign, smooth: boolean = true): void {
+    if (this.chapters.length === 0) {
+      return;
+    }
+    const targetIndex = Math.max(0, Math.min(index, this.chapters.length - 1));
     setTimeout(() => {
       try {
-        this.tocScroller.scrollToIndex(index, smooth, ScrollAlign.CENTER);
+        this.tocScroller.scrollToIndex(targetIndex, smooth, align);
       } catch (e) {
-        console.warn('定位目录当前章节失败:', e);
+        console.warn('定位目录章节失败:', e);
       }
     }, 50);
   }
@@ -3566,15 +3830,15 @@ struct ReadBookPage {
   }
 
   readerGlassPanelColor(): string {
-    return this.isReaderThemeDark() ? '#D9222428' : '#E8FFFFFF';
+    return ThemeRuntime.glassPanelColor(this.isReaderThemeDark(), this.getBackgroundColor());
   }
 
   readerGlassBorderColor(): string {
-    return this.isReaderThemeDark() ? '#30FFFFFF' : '#BFFFFFFF';
+    return ThemeRuntime.glassBorderColor(this.isReaderThemeDark());
   }
 
   readerGlassShadowColor(): string {
-    return this.isReaderThemeDark() ? '#66000000' : '#26000000';
+    return ThemeRuntime.glassShadowColor(this.isReaderThemeDark());
   }
 
   readerSolidPanelColor(): string {
@@ -3617,6 +3881,15 @@ struct ReadBookPage {
   readerFloatingBarWidth(): number {
     const viewportWidth = this.pageViewWidth > 0 ? this.pageViewWidth : 360;
     return Math.max(240, viewportWidth * 0.88);
+  }
+
+  readerChapterTrackColor(): string {
+    return this.isReaderThemeDark() ? '#2EFFFFFF' : '#1F000000';
+  }
+
+  readerFloatingBarSideInset(): number {
+    const viewportWidth = this.pageViewWidth > 0 ? this.pageViewWidth : 360;
+    return Math.max(0, (viewportWidth - this.readerFloatingBarWidth()) / 2);
   }
 
   readerBottomMenuOverlayHeight(): number {
@@ -3799,13 +4072,46 @@ struct ReadBookPage {
     this.menuChapterTooltipVisible = mode === SliderChangeMode.Begin || mode === SliderChangeMode.Moving;
     if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
       this.menuChapterTooltipVisible = false;
-      this.jumpToMenuChapter(this.menuChapterPreviewIndex).catch((error: Error) => {
-        console.error('菜单滑块跳转章节失败:', error);
-        this.menuChapterPreviewIndex = this.currentChapterIndex;
-        this.menuChapterSliderActive = false;
-        this.menuChapterTooltipVisible = false;
-      });
+      this.confirmMenuChapterJump(this.menuChapterPreviewIndex);
     }
+  }
+
+  async confirmMenuChapterJump(targetIndex: number): Promise<void> {
+    if (this.menuChapterConfirming) {
+      return;
+    }
+    const normalizedIndex = this.clampChapterIndex(targetIndex);
+    if (normalizedIndex === this.currentChapterIndex) {
+      this.resetMenuChapterPreview();
+      return;
+    }
+    this.menuChapterConfirming = true;
+    try {
+      const result = await promptAction.showDialog({
+        title: '确认跳转章节',
+        message: `是否跳转到「${this.getChapterTitle(normalizedIndex)}」？`,
+        buttons: [
+          { text: '取消', color: this.getSubTextColor() },
+          { text: '跳转', color: this.accentColor() }
+        ]
+      });
+      if (result.index === 1) {
+        await this.jumpToMenuChapter(normalizedIndex);
+      } else {
+        this.resetMenuChapterPreview();
+      }
+    } catch (error) {
+      console.error('确认跳转章节失败:', error);
+      this.resetMenuChapterPreview();
+    } finally {
+      this.menuChapterConfirming = false;
+    }
+  }
+
+  resetMenuChapterPreview(): void {
+    this.menuChapterPreviewIndex = this.currentChapterIndex;
+    this.menuChapterSliderActive = false;
+    this.menuChapterTooltipVisible = false;
   }
 
   async jumpToMenuChapter(targetIndex: number): Promise<void> {
@@ -3870,18 +4176,21 @@ struct ReadBookPage {
               .height(24)
               .margin({ right: 8 })
           } else {
-            Text('↻')
-              .fontSize(24)
-              .fontColor(this.buttonColor())
-              .width(36)
-              .height(36)
-              .textAlign(TextAlign.Center)
-              .borderRadius(18)
-              .backgroundColor(this.readerSolidPanelColor())
-              .margin({ right: 4 })
-              .onClick(() => {
+            ImmersiveBackButton({
+              icon: $r('sys.symbol.arrow_clockwise'),
+              iconColor: this.getTextColor(),
+              darkMode: this.isReaderThemeDark(),
+              buttonSize: 34,
+              containerWidth: 44,
+              containerHeight: 44,
+              startInset: 0,
+              materialScale: 0.72,
+              accessibilityLabel: '刷新书源',
+              onBack: () => {
                 this.refreshChangeSourceResults();
-              })
+              }
+            })
+              .margin({ right: 2 })
           }
 
           Text('×')
@@ -3993,8 +4302,12 @@ struct ReadBookPage {
       }
       .width('90%')
       .padding(20)
-      .backgroundColor(this.getBackgroundColor())
       .borderRadius(12)
+      .clip(true)
+      .backgroundColor(this.readerGlassPanelColor())
+      .backdropBlur(22)
+      .border({ width: 0.5, color: this.readerGlassBorderColor() })
+      .shadow({ radius: 22, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 8 })
     }
     .width('100%')
     .height('100%')
@@ -4455,43 +4768,43 @@ struct ReadBookPage {
       TabContent() {
         Column()
       }
-      .height(56)
-      .tabBar(this.ttsMediaCoverControl())
+      .height(48)
+      .tabBar(this.ttsMediaTimerControl())
 
       TabContent() {
         Column()
       }
-      .height(56)
+      .height(48)
       .tabBar(this.ttsMediaSymbolControl($r('sys.symbol.arrow_left'),
         this.canPlayPreviousTtsChapter(), '上一章'))
 
       TabContent() {
         Column()
       }
-      .height(56)
-      .tabBar(this.ttsMediaSymbolControl($r('sys.symbol.pause'), true, '停止朗读', true))
+      .height(48)
+      .tabBar(this.ttsMediaSymbolControl($r('sys.symbol.pause'), true, '停止朗读'))
 
       TabContent() {
         Column()
       }
-      .height(56)
+      .height(48)
       .tabBar(this.ttsMediaSymbolControl($r('sys.symbol.arrow_right'),
         this.canPlayNextTtsChapter(), '下一章'))
 
       TabContent() {
         Column()
       }
-      .height(56)
+      .height(48)
       .tabBar(this.ttsMediaSpeedControl())
 
       TabContent() {
         Column()
       }
-      .height(56)
+      .height(48)
       .tabBar(this.ttsMediaSymbolControl($r('sys.symbol.xmark'), true, '关闭朗读控制'))
     }
     .barMode(BarMode.Fixed)
-    .barHeight(56)
+    .barHeight(48)
     .barOverlap(true)
     .barFloatingStyle({
       barWidth: {
@@ -4507,7 +4820,7 @@ struct ReadBookPage {
       barBottomMargin: 4,
       gradientMask: {
         maskColor: '#00000000',
-        maskHeight: 60
+        maskHeight: 56
       },
       adaptToHandedness: false,
       thermoCtrl: true,
@@ -4519,46 +4832,53 @@ struct ReadBookPage {
       this.handleTtsExpandedControl(index);
     })
     .width(this.readerTtsExpandedControlWidth())
-    .height(64)
+    .height(56)
     .position({ x: '100%', y: '100%' })
     .translate({
-      x: -(this.readerTtsExpandedControlWidth() + 84),
-      y: -(this.readerBottomMenuOverlayHeight() + 70)
+      x: -(this.readerTtsExpandedControlWidth() + this.readerFloatingBarSideInset()),
+      y: -(this.readerBottomMenuOverlayHeight() + 66)
     })
   }
 
   @Builder
-  ttsMediaCoverControl() {
+  ttsMediaTimerControl() {
     Stack({ alignContent: Alignment.Center }) {
-      if (this.ttsMediaImage) {
-        Image(this.ttsMediaImage)
-          .width(38)
-          .height(38)
-          .borderRadius(10)
-          .objectFit(ImageFit.Cover)
-      } else {
-        SymbolGlyph($r('sys.symbol.book'))
-          .fontSize(24)
-          .fontColor([this.getSubTextColor()])
+      SymbolGlyph($r('sys.symbol.timer'))
+        .fontSize(22)
+        .fontColor([this.getTextColor()])
+
+      if (this.ttsSleepTimerMinutes > 0) {
+        Text(`${Math.max(1, Math.ceil(this.ttsSleepTimerRemainingSeconds / 60))}`)
+          .fontSize(8)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#FFFFFF')
+          .textAlign(TextAlign.Center)
+          .width(16)
+          .height(16)
+          .borderRadius(8)
+          .backgroundColor(this.accentColor())
+          .position({ x: 25, y: 2 })
       }
     }
     .width('100%')
     .height(48)
-    .hitTestBehavior(HitTestMode.None)
+    .accessibilityText(this.ttsSleepTimerMinutes > 0 ?
+      `朗读定时剩余 ${Math.max(1, Math.ceil(this.ttsSleepTimerRemainingSeconds / 60))} 分钟` : '设置朗读定时')
+    .translate({ y: -2 })
   }
 
   @Builder
-  ttsMediaSymbolControl(icon: Resource, enabled: boolean, accessibilityLabel: string,
-    active: boolean = false) {
+  ttsMediaSymbolControl(icon: Resource, enabled: boolean, accessibilityLabel: string) {
     Stack({ alignContent: Alignment.Center }) {
       SymbolGlyph(icon)
-        .fontSize(active ? 24 : 22)
-        .fontColor([enabled ? (active ? this.accentColor() : this.getTextColor()) : this.getSubTextColor()])
+        .fontSize(22)
+        .fontColor([enabled ? this.getTextColor() : this.getSubTextColor()])
     }
     .width('100%')
     .height(48)
     .opacity(enabled ? 1 : 0.45)
     .accessibilityText(accessibilityLabel)
+    .translate({ y: -2 })
   }
 
   @Builder
@@ -4566,10 +4886,11 @@ struct ReadBookPage {
     Text(`${this.ttsSpeed.toFixed(1)}x`)
       .fontSize(13)
       .fontWeight(FontWeight.Bold)
-      .fontColor(this.accentColor())
+      .fontColor(this.getTextColor())
       .textAlign(TextAlign.Center)
       .width('100%')
       .height(48)
+      .translate({ y: -2 })
   }
 
   readerTtsExpandedControlWidth(): number {
@@ -4577,7 +4898,9 @@ struct ReadBookPage {
   }
 
   handleTtsExpandedControl(index: number): void {
-    if (index === 1 && this.canPlayPreviousTtsChapter()) {
+    if (index === 0) {
+      this.cycleTtsSleepTimer();
+    } else if (index === 1 && this.canPlayPreviousTtsChapter()) {
       this.playPreviousChapterFromMediaSession();
     } else if (index === 2) {
       this.toggleTtsReading();
@@ -4591,6 +4914,44 @@ struct ReadBookPage {
       this.showMenu = true;
       this.syncTtsSystemMediaControls();
     }
+  }
+
+  cycleTtsSleepTimer(): void {
+    const options: number[] = [0, 15, 30, 60, 90, 120];
+    const currentIndex = options.indexOf(this.ttsSleepTimerMinutes);
+    const nextMinutes = options[(currentIndex + 1) % options.length];
+    this.setTtsSleepTimer(nextMinutes);
+  }
+
+  setTtsSleepTimer(minutes: number): void {
+    this.clearTtsSleepTimer();
+    if (minutes <= 0) {
+      promptAction.showToast({ message: '已关闭朗读定时' });
+      return;
+    }
+    this.ttsSleepTimerMinutes = minutes;
+    this.ttsSleepTimerRemainingSeconds = minutes * 60;
+    this.ttsSleepTimerEndAt = Date.now() + minutes * 60 * 1000;
+    this.ttsSleepTimerId = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((this.ttsSleepTimerEndAt - Date.now()) / 1000));
+      this.ttsSleepTimerRemainingSeconds = remaining;
+      if (remaining <= 0) {
+        this.clearTtsSleepTimer();
+        this.stopTtsReading();
+        promptAction.showToast({ message: '朗读定时结束，已停止朗读' });
+      }
+    }, 1000);
+    promptAction.showToast({ message: `将在 ${minutes} 分钟后停止朗读` });
+  }
+
+  clearTtsSleepTimer(): void {
+    if (this.ttsSleepTimerId >= 0) {
+      clearInterval(this.ttsSleepTimerId);
+      this.ttsSleepTimerId = -1;
+    }
+    this.ttsSleepTimerEndAt = 0;
+    this.ttsSleepTimerMinutes = 0;
+    this.ttsSleepTimerRemainingSeconds = 0;
   }
 
   cycleTtsSpeed(): void {
@@ -5255,11 +5616,17 @@ struct ReadBookPage {
       Select(this.quickTypographySettingOptions())
         .selected(this.quickTypographySettingIndex)
         .value(this.quickTypographySettingTitle())
-        .font({ size: 14 })
-        .fontColor(this.getTextColor())
-        .backgroundColor(this.isReaderThemeDark() ? '#24272D' : '#EEF0F3')
-        .borderRadius(8)
-        .constraintSize({ minWidth: 126, maxWidth: 160 })
+        .font({ size: 15 })
+        .fontColor(this.getSubTextColor())
+        .backgroundColor(Color.Transparent)
+        .arrowPosition(ArrowPosition.START)
+        .padding({ left: 0, right: 0 })
+        .borderRadius(0)
+        .border({ width: 0 })
+        .optionBgColor(Color.Transparent)
+        .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()))
+        .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()))
+        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
         .onSelect((index: number) => {
           this.showQuickTypographyValueInput = false;
           this.quickTypographySettingIndex = Math.max(0,
@@ -5386,6 +5753,10 @@ struct ReadBookPage {
               .fontColor(this.getTextColor())
               .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
               .layoutWeight(1)
+              .optionBgColor(Color.Transparent)
+              .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()))
+              .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()))
+              .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
               .onSelect((index: number) => {
                 this.selectCustomTheme(index);
               })
@@ -5434,6 +5805,10 @@ struct ReadBookPage {
               .font({ size: 14 })
               .fontColor(this.getTextColor())
               .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
+              .optionBgColor(Color.Transparent)
+              .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()))
+              .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()))
+              .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
               .onSelect((index: number) => {
                 this.setCurrentCustomThemeBackgroundType(index);
               })
@@ -5476,6 +5851,10 @@ struct ReadBookPage {
                   .fontColor(this.getTextColor())
                   .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
                   .layoutWeight(1)
+                  .optionBgColor(Color.Transparent)
+                  .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()))
+                  .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()))
+                  .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
                   .onSelect((index: number) => {
                     this.setCurrentCustomThemeImageFit(index);
                   })
@@ -5855,12 +6234,17 @@ struct ReadBookPage {
       Select(options)
         .selected(selected)
         .value(this.readerSelectOptionValue(options, selected))
-        .font({ size: 13 })
-        .fontColor(this.getTextColor())
-        .backgroundColor(this.isReaderThemeDark() ? '#202329' : '#EEF0F3')
-        .borderRadius(8)
-        .constraintSize({ minWidth: 118, maxWidth: 156 })
-        .margin({ left: 12 })
+        .font({ size: 14 })
+        .fontColor(this.getSubTextColor())
+        .backgroundColor(Color.Transparent)
+        .arrowPosition(ArrowPosition.END)
+        .padding({ left: 0, right: 0 })
+        .borderRadius(0)
+        .border({ width: 0 })
+        .optionBgColor(Color.Transparent)
+        .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()))
+        .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()))
+        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
         .onSelect((index: number) => {
           onSelect(index);
         })
@@ -6429,6 +6813,7 @@ struct ReadBookPage {
   }
 
   stopTtsReading(userCancelled: boolean = true): void {
+    this.clearTtsSleepTimer();
     if (userCancelled) {
       this.ttsAutoContinue = false;
       this.ttsReadToken++;
@@ -6510,6 +6895,7 @@ struct ReadBookPage {
   }
 
   finishTtsReading(): void {
+    this.clearTtsSleepTimer();
     this.ttsAutoContinue = false;
     this.isTtsSpeaking = false;
     this.ttsMediaControlsExpanded = false;
@@ -8731,6 +9117,7 @@ struct ReadBookPage {
     this.menuChapterPreviewIndex = this.currentChapterIndex;
     this.menuChapterSliderActive = false;
     this.menuChapterTooltipVisible = false;
+    this.showReaderActionMenu = false;
     this.showMenu = false;
     this.showSettings = false;
     this.showQuickTypographyValueInput = false;
@@ -8747,6 +9134,10 @@ struct ReadBookPage {
       this.readerExitProgressSaved = true;
     } catch (e) {
       console.error('返回阅读页时保存进度失败:', e);
+    }
+    if (this.openedWithShelfAnimation) {
+      AppStorage.setOrCreate('shelfBookCloseAnimationUrl', this.bookUrl);
+      AppStorage.setOrCreate('shelfBookCloseAnimationNonce', Date.now());
     }
     router.back();
   }
@@ -9623,9 +10014,9 @@ struct ReadBookPage {
     if (this.book.origin !== 'local') {
       this.updatePendingVerification();
       if (this.verificationUrl) {
-        text += '\n\n当前书源需要先完成网页验证。请点击右上角盾牌对勾 Logo（验证），完成后返回，再点击旁边橙色感叹号圆形 Logo（重试）。';
+        text += '\n\n当前书源需要先完成网页验证。请点击右上角“更多操作”，选择“登录”，完成后返回，再从该菜单选择“重试”。';
       } else {
-        text += '\n\n当前书源暂未解析出目录。请点击右上角橙色感叹号圆形 Logo（重试）重新获取，或在书源管理中为该书源补充目录规则。';
+        text += '\n\n当前书源暂未解析出目录。请点击右上角“更多操作”，选择“重试”重新获取，或在书源管理中为该书源补充目录规则。';
       }
     }
     return text;

@@ -202,7 +202,7 @@ struct SettingsPage {
               .width('100%')
               .margin({ top: 10 })
           }
-          .width('100%')
+          .width('calc(100% - 24vp)')
           .padding({
             left: this.readerMarginLeft,
             right: this.readerMarginRight,
@@ -212,8 +212,9 @@ struct SettingsPage {
           .backgroundColor(this.previewBackgroundColor())
           .backgroundImage(this.previewBackgroundImage(), ImageRepeat.NoRepeat)
           .backgroundImageSize(this.previewBackgroundImageSize())
-          .borderRadius(10)
-          .margin({ left: 16, right: 16, top: 12, bottom: 32 })
+          .borderRadius(16)
+          .clip(true)
+          .margin({ left: 12, right: 12, bottom: 32 })
         }
         .width('100%')
       }
@@ -1465,11 +1466,16 @@ struct SettingsPage {
         .selected(this.readerFontSelectedIndex())
         .value(this.readerFontValue())
         .font({ size: 14 })
-        .fontColor(this.primaryTextColor())
-        .backgroundColor(this.inputColor())
-        .borderRadius(8)
-        .constraintSize({ minWidth: 156, maxWidth: 220 })
-        .margin({ left: 12 })
+        .fontColor(this.subTextColor())
+        .backgroundColor(Color.Transparent)
+        .arrowPosition(ArrowPosition.END)
+        .padding({ left: 0, right: 0 })
+        .borderRadius(0)
+        .border({ width: 0 })
+        .optionBgColor(Color.Transparent)
+        .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+        .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
         .onSelect((index: number) => {
           this.selectReaderFontByIndex(index);
         })
@@ -1748,9 +1754,15 @@ struct SettingsPage {
               .selected(this.currentCustomThemeSelectedIndex())
               .value(this.currentCustomThemeScheme().name)
               .font({ size: 14 })
-              .fontColor(this.primaryTextColor())
-              .backgroundColor(this.inputColor())
+              .fontColor(this.subTextColor())
+              .backgroundColor(Color.Transparent)
+              .arrowPosition(ArrowPosition.START)
+              .padding({ left: 0, right: 0 })
               .layoutWeight(1)
+              .optionBgColor(Color.Transparent)
+              .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+              .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+              .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
               .onSelect((index: number) => {
                 this.selectCustomTheme(index);
               })
@@ -1797,8 +1809,14 @@ struct SettingsPage {
               .selected(this.currentCustomThemeBackgroundTypeIndex())
               .value(this.currentCustomThemeBackgroundTypeIndex() === 1 ? '背景图片' : '背景色')
               .font({ size: 14 })
-              .fontColor(this.primaryTextColor())
-              .backgroundColor(this.inputColor())
+              .fontColor(this.subTextColor())
+              .backgroundColor(Color.Transparent)
+              .arrowPosition(ArrowPosition.END)
+              .padding({ left: 0, right: 0 })
+              .optionBgColor(Color.Transparent)
+              .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+              .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+              .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
               .onSelect((index: number) => {
                 this.setCurrentCustomThemeBackgroundType(index);
               })
@@ -1838,9 +1856,15 @@ struct SettingsPage {
                   .selected(this.customThemeFitSelectedIndex())
                   .value(['裁剪填充', '完整显示', '拉伸铺满'][this.customThemeFitSelectedIndex()])
                   .font({ size: 13 })
-                  .fontColor(this.primaryTextColor())
-                  .backgroundColor(this.inputColor())
+                  .fontColor(this.subTextColor())
+                  .backgroundColor(Color.Transparent)
+                  .arrowPosition(ArrowPosition.END)
+                  .padding({ left: 0, right: 0 })
                   .layoutWeight(1)
+                  .optionBgColor(Color.Transparent)
+                  .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+                  .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+                  .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
                   .onSelect((index: number) => {
                     this.setCurrentCustomThemeImageFit(index);
                   })
@@ -1874,10 +1898,16 @@ struct SettingsPage {
         .selected(this.typographySettingIndex)
         .value(this.typographySettingTitle())
         .font({ size: 15 })
-        .fontColor(this.primaryTextColor())
-        .backgroundColor(this.inputColor())
-        .borderRadius(8)
-        .constraintSize({ minWidth: 130, maxWidth: 170 })
+        .fontColor(this.subTextColor())
+        .backgroundColor(Color.Transparent)
+        .arrowPosition(ArrowPosition.START)
+        .padding({ left: 0, right: 0 })
+        .borderRadius(0)
+        .border({ width: 0 })
+        .optionBgColor(Color.Transparent)
+        .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+        .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
         .onSelect((index: number) => {
           this.showTypographyValueInput = false;
           this.typographySettingIndex = Math.max(0, Math.min(index, this.typographySettingOptions().length - 1));
@@ -2010,11 +2040,16 @@ struct SettingsPage {
         .selected(selected)
         .value(this.optionValue(options, selected))
         .font({ size: 14 })
-        .fontColor(this.primaryTextColor())
-        .backgroundColor(this.inputColor())
-        .borderRadius(8)
-        .constraintSize({ minWidth: 136, maxWidth: 180 })
-        .margin({ left: 12 })
+        .fontColor(this.subTextColor())
+        .backgroundColor(Color.Transparent)
+        .arrowPosition(ArrowPosition.END)
+        .padding({ left: 0, right: 0 })
+        .borderRadius(0)
+        .border({ width: 0 })
+        .optionBgColor(Color.Transparent)
+        .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+        .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
         .onSelect((index: number) => {
           onSelect(index);
         })

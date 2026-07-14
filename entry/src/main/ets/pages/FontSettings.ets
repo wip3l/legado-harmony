@@ -17,6 +17,10 @@ class ReaderCustomFontData {
   fonts: ReaderCustomFontItem[] = [];
 }
 
+interface PopupVisibilityEvent {
+  isVisible: boolean;
+}
+
 @Entry
 @Component
 struct FontSettingsPage {
@@ -34,6 +38,7 @@ struct FontSettingsPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State customFonts: ReaderCustomFontItem[] = [];
+  @State showGlobalFontDropdown: boolean = false;
 
   aboutToAppear(): void {
     this.refreshSystemFontFamily();
@@ -484,18 +489,45 @@ struct FontSettingsPage {
         .fontColor(this.primaryTextColor())
         .layoutWeight(1)
 
-      Select(this.readerFontOptions())
-        .selected(this.readerFontSelectedIndex())
-        .value(this.readerFontValue())
-        .font({ size: 14 })
-        .fontColor(this.primaryTextColor())
-        .backgroundColor(this.inputColor())
-        .borderRadius(8)
-        .constraintSize({ minWidth: 156, maxWidth: 220 })
-        .margin({ left: 12 })
-        .onSelect((index: number) => {
-          this.selectReaderFontByIndex(index);
-        })
+      Row({ space: 6 }) {
+        Text(this.readerFontValue())
+          .fontSize(14)
+          .fontColor(this.subTextColor())
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        SymbolGlyph(this.showGlobalFontDropdown ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
+          .fontSize(15)
+          .fontColor([this.subTextColor()])
+      }
+      .constraintSize({ minWidth: 120, maxWidth: 190 })
+      .height(40)
+      .justifyContent(FlexAlign.End)
+      .alignItems(VerticalAlign.Center)
+      .onClick(() => {
+        this.showGlobalFontDropdown = !this.showGlobalFontDropdown;
+      })
+      .bindPopup(this.showGlobalFontDropdown, {
+        builder: this.globalFontDropdownBuilder,
+        placement: Placement.BottomRight,
+        popupColor: ThemeRuntime.dropdownPanelColor(this.appDarkMode),
+        backgroundBlurStyle: BlurStyle.BACKGROUND_THIN,
+        enableArrow: false,
+        autoCancel: true,
+        mask: false,
+        showInSubWindow: false,
+        targetSpace: 6,
+        width: 220,
+        radius: 16,
+        shadow: {
+          radius: 18,
+          color: ThemeRuntime.glassShadowColor(this.appDarkMode),
+          offsetX: 0,
+          offsetY: 6
+        },
+        onStateChange: (event: PopupVisibilityEvent) => {
+          this.showGlobalFontDropdown = event.isVisible;
+        }
+      })
     }
     .width('calc(100% - 32vp)')
     .constraintSize({ minHeight: 56 })
@@ -504,6 +536,46 @@ struct FontSettingsPage {
     .backgroundColor(Color.Transparent)
     .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
     .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  globalFontDropdownBuilder() {
+    Scroll() {
+      Column({ space: 3 }) {
+        ForEach(this.readerFontOptions(), (option: SelectOption, index: number) => {
+          Row() {
+            Text(option.value)
+              .fontSize(14)
+              .fontColor(this.primaryTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+
+            if (index === this.readerFontSelectedIndex()) {
+              SymbolGlyph($r('sys.symbol.checkmark'))
+                .fontSize(15)
+                .fontColor([this.accentColor()])
+            }
+          }
+          .width('100%')
+          .height(44)
+          .padding({ left: 13, right: 13 })
+          .borderRadius(11)
+          .backgroundColor(index === this.readerFontSelectedIndex() ?
+            ThemeRuntime.accentSurfaceColor(this.appDarkMode) : Color.Transparent)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.selectReaderFontByIndex(index);
+            this.showGlobalFontDropdown = false;
+          })
+        }, (_option: SelectOption, index: number) => `${index}`)
+      }
+      .width('100%')
+      .padding(6)
+    }
+    .width('100%')
+    .constraintSize({ maxHeight: 320 })
+    .scrollBar(BarState.Auto)
   }
 
   @Builder

@@ -1,3 +1,5 @@
+import { ThemeRuntime } from '../theme/ThemeRuntime';
+
 class HsvColor {
   hue: number = 0;
   saturation: number = 0;
@@ -263,10 +265,15 @@ export struct ColorCodePicker {
             .selected(this.colorModeIndex())
             .value(this.colorModeLabel())
             .font({ size: 13 })
-            .fontColor(this.primaryTextColor())
-            .backgroundColor(this.inputColor())
-            .borderRadius(8)
+            .fontColor(this.subTextColor())
+            .backgroundColor(Color.Transparent)
+            .arrowPosition(ArrowPosition.END)
+            .padding({ left: 0, right: 0 })
             .constraintSize({ minWidth: 112, maxWidth: 140 })
+            .optionBgColor(Color.Transparent)
+            .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+            .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+            .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
             .onSelect((index: number) => {
               if (index === 2) {
                 this.openPicker();

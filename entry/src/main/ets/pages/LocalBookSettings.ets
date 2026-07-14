@@ -38,9 +38,6 @@ struct LocalBookSettingsPage {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.primaryTextColor())
             .layoutWeight(1)
-          Text('多选导入')
-            .fontSize(12)
-            .fontColor(this.subTextColor())
         }
         .width('100%')
 

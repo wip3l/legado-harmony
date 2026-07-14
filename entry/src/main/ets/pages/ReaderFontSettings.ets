@@ -488,10 +488,15 @@ struct ReaderFontSettingsPage {
         .selected(this.selectedFontIndex(mode, family))
         .value(this.selectedFontValue(mode, family))
         .font({ size: 14 })
-        .fontColor(this.primaryTextColor())
-        .backgroundColor(this.inputColor())
-        .borderRadius(8)
+        .fontColor(this.subTextColor())
+        .backgroundColor(Color.Transparent)
+        .arrowPosition(ArrowPosition.END)
+        .padding({ left: 0, right: 0 })
         .constraintSize({ minWidth: 140, maxWidth: 180 })
+        .optionBgColor(Color.Transparent)
+        .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+        .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
         .onSelect((index: number) => {
           const result = this.modeAndFamilyByIndex(index);
           onChange(result[0], result[1]);
@@ -1078,11 +1083,16 @@ struct ReaderFontSettingsPage {
           .selected(this.emphasisModeIndex(this.regexRuleAt(index).emphasisMode))
           .value(this.emphasisModeLabel(this.regexRuleAt(index).emphasisMode))
           .font({ size: 13 })
-          .fontColor(this.primaryTextColor())
-          .backgroundColor(this.inputColor())
-          .borderRadius(8)
+          .fontColor(this.subTextColor())
+          .backgroundColor(Color.Transparent)
+          .arrowPosition(ArrowPosition.END)
+          .padding({ left: 0, right: 0 })
           .constraintSize({ minWidth: 126, maxWidth: 160 })
           .opacity(refreshKey >= 0 ? 1 : 1)
+          .optionBgColor(Color.Transparent)
+          .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+          .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+          .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
           .onSelect((selectedIndex: number) => {
             this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
               target.emphasisMode = this.emphasisModeByIndex(selectedIndex);
@@ -1160,10 +1170,15 @@ struct ReaderFontSettingsPage {
               .selected(this.bubbleStyleIndex(this.regexRuleAt(index).bubbleStyleId))
               .value(this.bubbleStyleLabel(this.regexRuleAt(index).bubbleStyleId))
               .font({ size: 13 })
-              .fontColor(this.primaryTextColor())
-              .backgroundColor(this.inputColor())
-              .borderRadius(8)
+              .fontColor(this.subTextColor())
+              .backgroundColor(Color.Transparent)
+              .arrowPosition(ArrowPosition.END)
+              .padding({ left: 0, right: 0 })
               .constraintSize({ minWidth: 126, maxWidth: 160 })
+              .optionBgColor(Color.Transparent)
+              .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+              .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+              .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
               .onSelect((selectedIndex: number) => {
                 this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
                   target.bubbleStyleId = this.bubbleStyleByIndex(selectedIndex);
@@ -1218,10 +1233,15 @@ struct ReaderFontSettingsPage {
         .selected(this.selectedFontIndex(mode, family))
         .value(this.selectedFontValue(mode, family))
         .font({ size: 13 })
-        .fontColor(this.primaryTextColor())
-        .backgroundColor(this.inputColor())
-        .borderRadius(8)
+        .fontColor(this.subTextColor())
+        .backgroundColor(Color.Transparent)
+        .arrowPosition(ArrowPosition.END)
+        .padding({ left: 0, right: 0 })
         .constraintSize({ minWidth: 140, maxWidth: 180 })
+        .optionBgColor(Color.Transparent)
+        .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+        .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
         .onSelect((index: number) => {
           const result = this.modeAndFamilyByIndex(index);
           onChange(result[0], result[1]);

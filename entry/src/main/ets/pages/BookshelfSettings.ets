@@ -104,9 +104,9 @@ struct BookshelfSettingsPage {
             })
           }
           this.itemDivider()
-          this.selectItem('书架布局', '切换书架卡片的信息排布密度',
+          this.selectItem('书架布局', '切换列表信息密度或封面平铺展示',
             this.bookshelfLayoutOptions(), this.bookshelfLayoutSelectedIndex(), (index: number) => {
-              this.bookshelfLayoutMode = index === 1 ? 'loose' : 'compact';
+              this.bookshelfLayoutMode = index === 2 ? 'tile' : (index === 1 ? 'loose' : 'compact');
               this.onDisplaySettingChanged();
             })
 
@@ -140,15 +140,9 @@ struct BookshelfSettingsPage {
               this.onCoverSettingChanged();
             })
           this.itemDivider()
-          this.selectItem('浅色配色图集', '浅色模式下使用的封面图集',
-            this.albumOptions(), this.albumSelectedIndex(false), (index: number) => {
-              this.setThemeAlbum(false, this.albumIdByIndex(index));
-            })
+          this.albumSelectItem('浅色配色图集', '浅色模式下使用的封面图集', false)
           this.itemDivider()
-          this.selectItem('深色配色图集', '深色模式下使用的封面图集',
-            this.albumOptions(), this.albumSelectedIndex(true), (index: number) => {
-              this.setThemeAlbum(true, this.albumIdByIndex(index));
-            })
+          this.albumSelectItem('深色配色图集', '深色模式下使用的封面图集', true)
           this.itemDivider()
           this.selectItem('图集应用范围', '选择图集作用于全部书籍或指定书籍',
             this.scopeOptions(), this.scopeSelectedIndex(), (index: number) => {
@@ -396,6 +390,16 @@ struct BookshelfSettingsPage {
     this.albumSelectOptions = options;
   }
 
+  refreshAlbumOptionsForMenu(): void {
+    const latestRaw = AppStorage.get<string>('bookshelfCoverAlbums');
+    const raw = latestRaw !== undefined ? latestRaw : this.bookshelfCoverAlbums;
+    if (raw !== this.bookshelfCoverAlbums) {
+      this.bookshelfCoverAlbums = raw;
+    }
+    this.syncAlbums(raw);
+    this.bumpSettingsRender();
+  }
+
   hasAlbumPayload(raw: string): boolean {
     return (raw || '').trim().length > 0;
   }
@@ -422,11 +426,11 @@ struct BookshelfSettingsPage {
   }
 
   bookshelfLayoutOptions(): SelectOption[] {
-    return [{ value: '紧凑' }, { value: '宽松' }];
+    return [{ value: '紧凑' }, { value: '宽松' }, { value: '平铺' }];
   }
 
   bookshelfLayoutSelectedIndex(): number {
-    return this.bookshelfLayoutMode === 'loose' ? 1 : 0;
+    return this.bookshelfLayoutMode === 'tile' ? 2 : (this.bookshelfLayoutMode === 'loose' ? 1 : 0);
   }
 
   scopeSelectedIndex(): number {
@@ -550,11 +554,64 @@ struct BookshelfSettingsPage {
         .selected(selected)
         .value(this.optionValue(options, selected))
         .font({ size: 14 })
-        .fontColor(this.primaryTextColor())
-        .backgroundColor(this.inputColor())
-        .borderRadius(8)
+        .fontColor(this.subTextColor())
+        .backgroundColor(Color.Transparent)
+        .arrowPosition(ArrowPosition.END)
+        .padding({ left: 0, right: 0 })
+        .borderRadius(0)
+        .border({ width: 0 })
+        .optionBgColor(Color.Transparent)
+        .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+        .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
         .onSelect((index: number) => {
           onSelect(index);
+        })
+    }
+    .width('calc(100% - 32vp)')
+    .constraintSize({ minHeight: 66 })
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  albumSelectItem(title: string, desc: string, dark: boolean) {
+    Row() {
+      Column() {
+        Text(title)
+          .fontSize(16)
+          .fontColor(this.primaryTextColor())
+        Text(desc)
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+          .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Select(this.albumOptions())
+        .selected(this.albumSelectedIndex(dark))
+        .value(this.optionValue(this.albumOptions(), this.albumSelectedIndex(dark)))
+        .font({ size: 14 })
+        .fontColor(this.subTextColor())
+        .backgroundColor(Color.Transparent)
+        .arrowPosition(ArrowPosition.END)
+        .padding({ left: 0, right: 0 })
+        .borderRadius(0)
+        .border({ width: 0 })
+        .optionBgColor(Color.Transparent)
+        .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
+        .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+        .onTouch((event: TouchEvent) => {
+          if (event.type === TouchType.Down) {
+            this.refreshAlbumOptionsForMenu();
+          }
+        })
+        .onSelect((index: number) => {
+          this.setThemeAlbum(dark, this.albumIdByIndex(index));
         })
     }
     .width('calc(100% - 32vp)')

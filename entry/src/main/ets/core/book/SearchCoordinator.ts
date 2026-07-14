@@ -38,6 +38,7 @@ export interface SearchOptions {
   exactMatch?: boolean;
   exactMatchAuthor?: boolean;
   sourceGroups?: string[];
+  targetSources?: BookSource[];
   onSourceComplete?: (source: BookSource, books: SearchBook[]) => Promise<void>;
   validationOnly?: boolean;
 }
@@ -72,7 +73,12 @@ export class SearchCoordinator {
         console.error('[SC] search progress callback failed:', e);
       }
     };
-    const enabledSources = await appDb.getEnabledBookSources();
+    let enabledSources: BookSource[];
+    if (options.targetSources && options.targetSources.length > 0) {
+      enabledSources = options.targetSources.slice();
+    } else {
+      enabledSources = await appDb.getEnabledBookSources();
+    }
     const selectedGroups = this.normalizeSelectedGroups(options.sourceGroups || []);
     const sources = selectedGroups.length > 0 ?
       enabledSources.filter((source: BookSource) => selectedGroups.includes(this.normalizeGroupName(source.bookSourceGroup))) :

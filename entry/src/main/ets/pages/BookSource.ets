@@ -12,6 +12,7 @@ import { util } from '@kit.ArkTS';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { VerificationSupport } from '../core/http/VerificationSupport';
 import { CookieStore } from '../core/http/CookieStore';
+import { BookSourceGroupStore } from '../utils/BookSourceGroupStore';
 
 const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const BOOK_SOURCE_IMPORT_TIMEOUT_MS = 20000;
@@ -28,9 +29,12 @@ struct BookSourcePage {
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
+  @State allSources: BookSource[] = [];
   @State sources: BookSource[] = [];
+  @State sourceGroups: string[] = [];
   @State isLoading: boolean = false;
   @State searchText: string = '';
+  @State activeSourceGroup: string = '__all__';
   @State showAddDialog: boolean = false;
   @State showImportUrlDialog: boolean = false;
   @State selectionMode: boolean = false;
@@ -40,6 +44,13 @@ struct BookSourcePage {
   @State showMoreActionDialog: boolean = false;
   @State showSourceActionDialog: boolean = false;
   @State showSourceDeleteDialog: boolean = false;
+  @State showSourceGroupActionMenu: boolean = false;
+  @State showRenameSourceGroupDialog: boolean = false;
+  @State showDeleteSourceGroupDialog: boolean = false;
+  @State showAddSourceGroupDialog: boolean = false;
+  @State pendingSourceGroup: string = '';
+  @State renameSourceGroupInput: string = '';
+  @State newSourceGroupInput: string = '';
   @State actionSourceUrl: string = '';
   @State contextMenuX: number = 16;
   @State contextMenuY: number = 96;
@@ -78,11 +89,7 @@ struct BookSourcePage {
   }
 
   async refreshSources(): Promise<void> {
-    if (this.searchText) {
-      await this.searchSources();
-    } else {
-      await this.loadSources();
-    }
+    await this.loadSources();
   }
 
   async loadSources() {
@@ -90,8 +97,10 @@ struct BookSourcePage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      this.sources = await db.getAllBookSources();
-      this.pruneSelectedSources();
+      this.allSources = await db.getAllBookSources();
+      this.sourceGroups = await BookSourceGroupStore.load(getContext(this), this.sourceGroupsFromSources());
+      this.ensureActiveSourceGroup();
+      this.applySourceFilters();
     } catch (e) {
       console.error('加载书源失败:', e);
     } finally {
@@ -147,7 +156,7 @@ struct BookSourcePage {
               .height(56)
               .textAlign(TextAlign.Center)
               .onClick(() => {
-                this.showAddDialog = true;
+                this.showAddDialog = !this.showAddDialog;
               })
           }
         }
@@ -175,6 +184,10 @@ struct BookSourcePage {
         }
         .width('100%')
         .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+
+        if (!this.selectionMode) {
+          this.sourceGroupBar()
+        }
 
         if (this.selectionMode) {
           Row() {
@@ -226,10 +239,10 @@ struct BookSourcePage {
           .justifyContent(FlexAlign.Center)
         } else if (this.sources.length === 0) {
           Column() {
-            Text('暂无书源')
+            Text(this.emptySourceTitle())
               .fontSize(16)
               .fontColor(this.subTextColor())
-            Text('点击右上角"+"添加书源')
+            Text(this.emptySourceDescription())
               .fontSize(14)
               .fontColor(this.subTextColor())
               .margin({ top: 8 })
@@ -295,16 +308,8 @@ struct BookSourcePage {
                   .layoutWeight(1)
                   .alignItems(HorizontalAlign.Start)
 
-                  Column() {
-                    if (!this.selectionMode) {
-                      Toggle({ type: ToggleType.Switch, isOn: source.enabled })
-                        .selectedColor(this.buttonColor())
-                        .onChange((isOn: boolean) => {
-                          source.enabled = isOn;
-                          this.updateSource(source);
-                        })
-
-                    } else {
+                  if (this.selectionMode) {
+                    Column() {
                       Text(source.enabled ? '已启用' : '已禁用')
                         .fontSize(12)
                         .fontColor(source.enabled ? '#1E8E3E' : this.subTextColor())
@@ -313,8 +318,8 @@ struct BookSourcePage {
                         .fontColor(source.enabledExplore ? '#1E8E3E' : this.subTextColor())
                         .margin({ top: 4 })
                     }
+                    .alignItems(HorizontalAlign.End)
                   }
-                  .alignItems(HorizontalAlign.End)
                 }
                 .width('100%')
                 .padding(12)
@@ -322,6 +327,7 @@ struct BookSourcePage {
                 .borderRadius(8)
                 .border({ width: 1, color: this.glassBorderColor() })
                 .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
+                .opacity(source.enabled ? 1 : 0.45)
                 .gesture(
                   LongPressGesture({ repeat: false })
                     .onAction((event: GestureEvent) => {
@@ -339,6 +345,27 @@ struct BookSourcePage {
                   }
                 })
               }
+              .swipeAction({
+                start: {
+                  builder: () => {
+                    this.sourceDisableSwipeAction(source)
+                  },
+                  actionAreaDistance: 64,
+                  onAction: () => {
+                    if (!this.selectionMode && !this.isBatchOperating) this.toggleSourceEnabled(source);
+                  }
+                },
+                end: {
+                  builder: () => {
+                    this.sourceDeleteSwipeAction(source)
+                  },
+                  actionAreaDistance: 64,
+                  onAction: () => {
+                    if (!this.selectionMode && !this.isBatchOperating) this.deleteSourceFromSwipe(source);
+                  }
+                },
+                edgeEffect: SwipeEdgeEffect.Spring
+              })
             }, (source: BookSource) => this.sourceListItemKey(source))
           }
           .width('100%')
@@ -404,73 +431,7 @@ struct BookSourcePage {
       .backgroundColor(this.pageColor())
 
       if (this.showAddDialog) {
-        Column() {
-          Column() {
-            Text('添加书源')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 16 })
-
-            Button('新建书源')
-              .width('100%')
-              .height(48)
-              .margin({ bottom: 8 })
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.showAddDialog = false;
-                router.pushUrl({
-                  url: 'pages/BookSourceEdit',
-                  params: { bookSourceUrl: '' }
-                });
-              })
-
-            Button('从URL导入')
-              .width('100%')
-              .height(48)
-              .margin({ bottom: 8 })
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.showAddDialog = false;
-                this.showImportUrlDialog = true;
-              })
-
-            Button('从文件导入')
-              .width('100%')
-              .height(48)
-              .margin({ bottom: 8 })
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .onClick(() => {
-                this.showAddDialog = false;
-                this.importFromFile();
-              })
-
-            Button('取消')
-              .width('100%')
-              .height(48)
-              .backgroundColor(this.inputColor())
-              .fontColor(this.primaryTextColor())
-              .onClick(() => {
-                this.showAddDialog = false;
-              })
-          }
-          .width('90%')
-          .padding(24)
-          .backgroundColor(this.cardColor())
-          .borderRadius(12)
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .justifyContent(FlexAlign.Center)
-        .onClick(() => {
-          this.showAddDialog = false;
-        })
+        this.addSourceDropdown()
       }
 
       if (this.showImportUrlDialog) {
@@ -674,90 +635,23 @@ struct BookSourcePage {
       }
 
       if (this.showMoreActionDialog) {
-        Column() {
-          Column() {
-            Text('更多操作')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 8 })
+        this.batchMorePopupMenu()
+      }
 
-            Text(`已选择 ${this.selectedSourceUrls.length} 个书源`)
-              .fontSize(13)
-              .fontColor(this.subTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 16 })
+      if (this.showSourceGroupActionMenu) {
+        this.sourceGroupActionMenu()
+      }
 
-            Button('启用发现')
-              .width('100%')
-              .height(44)
-              .backgroundColor(this.buttonColor())
-              .fontColor('#FFFFFF')
-              .margin({ bottom: 10 })
-              .onClick(() => {
-                this.showMoreActionDialog = false;
-                this.batchSetExploreEnabled(true);
-              })
+      if (this.showRenameSourceGroupDialog) {
+        this.renameSourceGroupDialog()
+      }
 
-            Button('禁用发现')
-              .width('100%')
-              .height(44)
-              .backgroundColor(this.inputColor())
-              .fontColor(this.primaryTextColor())
-              .margin({ bottom: 10 })
-              .onClick(() => {
-                this.showMoreActionDialog = false;
-                this.batchSetExploreEnabled(false);
-              })
+      if (this.showDeleteSourceGroupDialog) {
+        this.deleteSourceGroupDialog()
+      }
 
-            Button('导出 JSON')
-              .width('100%')
-              .height(44)
-              .backgroundColor(this.inputColor())
-              .fontColor(this.primaryTextColor())
-              .margin({ bottom: 10 })
-              .onClick(() => {
-                this.showMoreActionDialog = false;
-                this.exportSelectedSources();
-              })
-
-            Button('删除')
-              .width('100%')
-              .height(44)
-              .backgroundColor('#E53935')
-              .fontColor('#FFFFFF')
-              .margin({ bottom: 10 })
-              .onClick(() => {
-                this.showMoreActionDialog = false;
-                this.showBatchDeleteDialog = true;
-              })
-
-            Button('取消')
-              .width('100%')
-              .height(44)
-              .backgroundColor(this.inputColor())
-              .fontColor(this.primaryTextColor())
-              .onClick(() => {
-                this.showMoreActionDialog = false;
-              })
-          }
-          .width('88%')
-          .padding(24)
-          .backgroundColor(this.cardColor())
-          .borderRadius(12)
-          .onClick(() => {
-          })
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .justifyContent(FlexAlign.Center)
-        .onClick(() => {
-          this.showMoreActionDialog = false;
-        })
+      if (this.showAddSourceGroupDialog) {
+        this.addSourceGroupDialog()
       }
 
       if (this.showCheckOptionsDialog) {
@@ -849,9 +743,9 @@ struct BookSourcePage {
                     .layoutWeight(1)
                     .height(42)
                     .borderRadius(10)
-                    .fontSize(13)
+                    .fontSize(11)
                     .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
-                    .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#E53935' : this.inputColor())
+                    .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#F57C00' : this.inputColor())
                     .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
                     .onClick(() => {
                       this.disableFailedCheckedSources();
@@ -861,9 +755,9 @@ struct BookSourcePage {
                     .layoutWeight(1)
                     .height(42)
                     .borderRadius(10)
-                    .fontSize(13)
+                    .fontSize(11)
                     .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
-                    .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#B71C1C' : this.inputColor())
+                    .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#E53935' : this.inputColor())
                     .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
                     .onClick(() => {
                       this.deleteFailedCheckedSources();
@@ -874,7 +768,7 @@ struct BookSourcePage {
                   .layoutWeight(1)
                   .height(42)
                   .borderRadius(10)
-                  .fontSize(13)
+                  .fontSize(11)
                   .backgroundColor(this.inputColor())
                   .fontColor(this.primaryTextColor())
                   .onClick(() => {
@@ -979,8 +873,137 @@ struct BookSourcePage {
   }
 
   @Builder
-  checkOptionsDialog() {
+  addSourceDropdown() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .onClick(() => {
+          this.showAddDialog = false;
+        })
+
+      Column() {
+        this.popupActionItem($r('sys.symbol.plus'), '新建书源', this.primaryTextColor(), () => {
+          this.showAddDialog = false;
+          router.pushUrl({
+            url: 'pages/BookSourceEdit',
+            params: { bookSourceUrl: '' }
+          });
+        })
+        this.popupActionItem($r('sys.symbol.arrow_right_up_and_square'), '从 URL 导入', this.primaryTextColor(), () => {
+          this.showAddDialog = false;
+          this.showImportUrlDialog = true;
+        })
+        this.popupActionItem($r('sys.symbol.download'), '从文件导入', this.primaryTextColor(), () => {
+          this.showAddDialog = false;
+          this.importFromFile();
+        }, false)
+      }
+      .width(188)
+      .padding({ left: 6, right: 6, top: 6, bottom: 6 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
+      .borderRadius(16)
+      .backdropBlur(22)
+      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .position({ x: '100%', y: 0 })
+      .translate({ x: -200, y: this.statusBarHeight + 52 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  batchMorePopupMenu() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .onClick(() => {
+          this.showMoreActionDialog = false;
+        })
+
+      Column() {
+        Text(`已选择 ${this.selectedSourceUrls.length} 个书源`)
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+          .width('100%')
+          .height(34)
+          .padding({ left: 12, right: 12 })
+          .textAlign(TextAlign.Start)
+
+        this.popupActionItem($r('sys.symbol.checkmark_circle'), '启用发现', this.primaryTextColor(), () => {
+          this.showMoreActionDialog = false;
+          this.batchSetExploreEnabled(true);
+        })
+        this.popupActionItem($r('sys.symbol.minus_circle'), '禁用发现', this.primaryTextColor(), () => {
+          this.showMoreActionDialog = false;
+          this.batchSetExploreEnabled(false);
+        })
+        this.popupActionItem($r('sys.symbol.download'), '导出 JSON', this.primaryTextColor(), () => {
+          this.showMoreActionDialog = false;
+          this.exportSelectedSources();
+        })
+        this.popupActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => {
+          this.showMoreActionDialog = false;
+          this.showBatchDeleteDialog = true;
+        }, false)
+      }
+      .width(188)
+      .padding({ left: 6, right: 6, top: 4, bottom: 6 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
+      .borderRadius(16)
+      .backdropBlur(22)
+      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .position({ x: '100%', y: '100%' })
+      .translate({ x: -200, y: -(244 + Math.max(this.navBarHeight, 8)) })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  popupActionItem(icon: Resource, label: string, color: string, action: () => void,
+    showDivider: boolean = true) {
     Column() {
+      Row({ space: 10 }) {
+        SymbolGlyph(icon)
+          .fontSize(19)
+          .fontColor([color])
+          .width(24)
+        Text(label)
+          .fontSize(15)
+          .fontColor(color)
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .height(44)
+      .padding({ left: 10, right: 10 })
+
+      if (showDivider) {
+        Divider()
+          .strokeWidth(0.5)
+          .color(ThemeRuntime.glassBorderColor(this.appDarkMode))
+          .margin({ left: 44, right: 8 })
+      }
+    }
+    .width('100%')
+    .onClick(action)
+  }
+
+  @Builder
+  checkOptionsDialog() {
+    Stack({ alignContent: Alignment.TopEnd }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.appDarkMode ? '#38000000' : '#14FFFFFF')
+        .backdropBlur(10)
+        .onClick(() => {
+          this.showCheckOptionsDialog = false;
+        })
+
       Column({ space: 12 }) {
         Text('校验设置')
           .fontSize(18)
@@ -1019,20 +1042,20 @@ struct BookSourcePage {
         .width('100%')
         .margin({ top: 4 })
       }
-      .width('88%')
-      .padding(22)
-      .backgroundColor(this.cardColor())
+      .width('calc(100% - 24vp)')
+      .constraintSize({ maxWidth: 360 })
+      .padding(18)
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
       .borderRadius(14)
+      .backdropBlur(22)
+      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .margin({ top: this.statusBarHeight + 62, right: 12 })
       .onClick(() => {
       })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#80000000')
-    .justifyContent(FlexAlign.Center)
-    .onClick(() => {
-      this.showCheckOptionsDialog = false;
-    })
   }
 
   @Builder
@@ -1085,11 +1108,17 @@ struct BookSourcePage {
             this.actionSourceLoggedIn() ? '重新登录' : '登录',
             this.primaryTextColor(), () => this.openActionSourceLogin())
         }
+        this.contextActionItem($r('sys.symbol.magnifyingglass'), '搜索', this.primaryTextColor(),
+          () => this.openActionSourceSearch())
+        this.contextActionItem($r('sys.symbol.checkmark_shield'), '校验', this.primaryTextColor(),
+          () => this.checkActionSource())
         this.contextActionItem($r('sys.symbol.square_and_pencil'), '修改', this.primaryTextColor(),
           () => this.openActionSourceEdit())
         this.contextActionItem(this.actionSourceEnabled() ? $r('sys.symbol.minus_circle') :
           $r('sys.symbol.checkmark_circle'), this.actionSourceEnabled() ? '禁用' : '启用', this.primaryTextColor(),
           () => this.toggleActionSourceEnabled())
+        this.contextActionItem($r('sys.symbol.list_bullet'), '多选', this.primaryTextColor(),
+          () => this.enterActionSourceSelection())
         this.contextActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => {
             this.showSourceActionDialog = false;
             this.showSourceDeleteDialog = true;
@@ -1097,13 +1126,14 @@ struct BookSourcePage {
       }
       .width(158)
       .padding({ top: 6, bottom: 6 })
-      .backgroundColor(this.cardColor())
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
       .borderRadius(14)
-      .border({ width: 1, color: this.glassBorderColor() })
-      .shadow({ radius: 18, color: this.appDarkMode ? '#80000000' : '#33000000', offsetX: 0, offsetY: 7 })
+      .backdropBlur(22)
+      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
       .position({
         x: this.contextMenuLeft(158),
-        y: this.contextMenuTop(this.actionSourceNeedsLogin() ? 188 : 144)
+        y: this.contextMenuTop(this.actionSourceNeedsLogin() ? 320 : 276)
       })
     }
     .width('100%')
@@ -1127,6 +1157,46 @@ struct BookSourcePage {
     .padding({ left: 12, right: 12 })
     .alignItems(VerticalAlign.Center)
     .onClick(action)
+  }
+
+  @Builder
+  sourceDisableSwipeAction(source: BookSource) {
+    Column({ space: 4 }) {
+      SymbolGlyph(source.enabled ? $r('sys.symbol.minus_circle') : $r('sys.symbol.checkmark_circle'))
+        .fontSize(22)
+        .fontColor(['#FFFFFF'])
+      Text(source.enabled ? '禁用' : '启用')
+        .fontSize(11)
+        .fontColor('#FFFFFF')
+    }
+    .width(72)
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor(source.enabled ? '#F39C3D' : '#1E8E3E')
+    .onClick(() => {
+      if (!this.selectionMode && !this.isBatchOperating) this.toggleSourceEnabled(source);
+    })
+  }
+
+  @Builder
+  sourceDeleteSwipeAction(source: BookSource) {
+    Column({ space: 4 }) {
+      SymbolGlyph($r('sys.symbol.trash'))
+        .fontSize(22)
+        .fontColor(['#FFFFFF'])
+      Text('删除')
+        .fontSize(11)
+        .fontColor('#FFFFFF')
+    }
+    .width(72)
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#E53935')
+    .onClick(() => {
+      if (!this.selectionMode && !this.isBatchOperating) this.deleteSourceFromSwipe(source);
+    })
   }
 
   @Builder
@@ -1186,6 +1256,232 @@ struct BookSourcePage {
     })
   }
 
+  @Builder
+  sourceGroupBar() {
+    Scroll() {
+      Row({ space: 8 }) {
+        this.sourceGroupChip('全部', '__all__')
+        ForEach(this.getSourceGroups(), (group: string) => {
+          this.sourceGroupChip(group, group, true)
+        }, (group: string) => group)
+        this.sourceGroupChip('未分组', '__ungrouped__')
+        Text('＋')
+          .fontSize(20)
+          .fontColor(this.accentColor())
+          .width(34)
+          .height(34)
+          .textAlign(TextAlign.Center)
+          .borderRadius(17)
+          .backgroundColor(this.glassCardColor())
+          .border({ width: 1, color: this.glassBorderColor() })
+          .onClick(() => {
+            this.newSourceGroupInput = '';
+            this.showAddSourceGroupDialog = true;
+          })
+      }
+      .padding({ left: 16, right: 16, bottom: 8 })
+    }
+    .width('100%')
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
+  }
+
+  @Builder
+  sourceGroupChip(label: string, groupKey: string, editable: boolean = false) {
+    Text(label)
+      .fontSize(13)
+      .fontColor(this.activeSourceGroup === groupKey ? '#FFFFFF' : this.primaryTextColor())
+      .maxLines(1)
+      .padding({ left: 13, right: 13, top: 7, bottom: 7 })
+      .borderRadius(16)
+      .backgroundColor(this.activeSourceGroup === groupKey ? this.accentColor() : this.glassCardColor())
+      .border({ width: this.activeSourceGroup === groupKey ? 0 : 1, color: this.glassBorderColor() })
+      .onClick(() => {
+        this.selectSourceGroup(groupKey);
+      })
+      .gesture(
+        LongPressGesture({ repeat: false })
+          .onAction((event: GestureEvent) => {
+            if (editable) {
+              this.openSourceGroupActions(groupKey, event);
+            }
+          })
+      )
+  }
+
+  @Builder
+  sourceGroupActionMenu() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
+        .backdropBlur(18)
+        .onClick(() => this.closeSourceGroupActions())
+
+      Column() {
+        this.contextActionItem($r('sys.symbol.square_and_pencil'), '重命名', this.primaryTextColor(), () => {
+            this.renameSourceGroupInput = this.pendingSourceGroup;
+            this.showSourceGroupActionMenu = false;
+            this.showRenameSourceGroupDialog = true;
+          })
+        this.contextActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => {
+            this.showSourceGroupActionMenu = false;
+            this.showDeleteSourceGroupDialog = true;
+          })
+      }
+      .width(148)
+      .padding({ top: 6, bottom: 6 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
+      .borderRadius(14)
+      .backdropBlur(22)
+      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(100) })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  addSourceGroupDialog() {
+    Column() {
+      Column({ space: 16 }) {
+        Text('新增书源分组')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+
+        TextInput({ placeholder: '输入分组名称', text: this.newSourceGroupInput })
+          .width('100%')
+          .height(42)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .borderRadius(10)
+          .onChange((value: string) => this.newSourceGroupInput = value)
+
+        Row({ space: 12 }) {
+          Button('取消', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor(this.glassCardColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => this.closeAddSourceGroupDialog())
+          Button('新增', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor(this.buttonColor())
+            .fontColor('#FFFFFF')
+            .enabled(!!this.newSourceGroupInput.trim() && !this.isBatchOperating)
+            .onClick(() => this.addSourceGroup())
+        }
+        .width('100%')
+      }
+      .width('85%')
+      .padding(22)
+      .borderRadius(14)
+      .backgroundColor(this.cardColor())
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#80000000')
+  }
+
+  @Builder
+  renameSourceGroupDialog() {
+    Column() {
+      Column({ space: 16 }) {
+        Text('重命名书源分组')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+
+        TextInput({ placeholder: '输入分组名称', text: this.renameSourceGroupInput })
+          .width('100%')
+          .height(42)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .borderRadius(10)
+          .onChange((value: string) => this.renameSourceGroupInput = value)
+
+        Row({ space: 12 }) {
+          Button('取消', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor(this.glassCardColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => this.closeRenameSourceGroupDialog())
+          Button('保存', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor(this.buttonColor())
+            .fontColor('#FFFFFF')
+            .enabled(!!this.renameSourceGroupInput.trim() && !this.isBatchOperating)
+            .onClick(() => this.renameSourceGroup())
+        }
+        .width('100%')
+      }
+      .width('85%')
+      .padding(22)
+      .borderRadius(14)
+      .backgroundColor(this.cardColor())
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#80000000')
+  }
+
+  @Builder
+  deleteSourceGroupDialog() {
+    Column() {
+      Column({ space: 16 }) {
+        Text('删除书源分组')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+        Text(`删除“${this.pendingSourceGroup}”后，分组内书源将移到未分组，书源本身不会删除。`)
+          .fontSize(14)
+          .fontColor(this.secondaryTextColor())
+          .textAlign(TextAlign.Center)
+        Row({ space: 12 }) {
+          Button('取消', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor(this.glassCardColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => this.closeDeleteSourceGroupDialog())
+          Button('删除', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor('#E53935')
+            .fontColor('#FFFFFF')
+            .enabled(!this.isBatchOperating)
+            .onClick(() => this.deleteSourceGroup())
+        }
+        .width('100%')
+      }
+      .width('85%')
+      .padding(22)
+      .borderRadius(14)
+      .backgroundColor(this.cardColor())
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#80000000')
+  }
+
   syncBars(): void {
     syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
@@ -1242,19 +1538,202 @@ struct BookSourcePage {
     return ThemeRuntime.buttonColor(this.appDarkMode);
   }
 
-  async searchSources() {
-    if (!this.searchText) {
-      await this.loadSources();
+  searchSources(): void {
+    this.applySourceFilters();
+  }
+
+  selectSourceGroup(groupKey: string): void {
+    if (this.activeSourceGroup === groupKey) {
+      return;
+    }
+    this.activeSourceGroup = groupKey;
+    this.applySourceFilters();
+  }
+
+  openSourceGroupActions(group: string, event?: GestureEvent): void {
+    const finger = event && event.fingerList.length > 0 ? event.fingerList[0] : undefined;
+    if (finger) {
+      this.contextMenuX = finger.globalX;
+      this.contextMenuY = finger.globalY;
+    }
+    this.pendingSourceGroup = group;
+    this.showSourceGroupActionMenu = true;
+  }
+
+  closeSourceGroupActions(): void {
+    this.showSourceGroupActionMenu = false;
+    this.pendingSourceGroup = '';
+  }
+
+  closeRenameSourceGroupDialog(): void {
+    this.showRenameSourceGroupDialog = false;
+    this.renameSourceGroupInput = '';
+    this.pendingSourceGroup = '';
+  }
+
+  closeDeleteSourceGroupDialog(): void {
+    this.showDeleteSourceGroupDialog = false;
+    this.pendingSourceGroup = '';
+  }
+
+  closeAddSourceGroupDialog(): void {
+    this.showAddSourceGroupDialog = false;
+    this.newSourceGroupInput = '';
+  }
+
+  async addSourceGroup(): Promise<void> {
+    const groupName = this.newSourceGroupInput.trim();
+    if (!groupName || this.isBatchOperating) {
+      return;
+    }
+    if (this.getSourceGroups().includes(groupName)) {
+      promptAction.showToast({ message: '分组名称已存在' });
+      return;
+    }
+    this.isBatchOperating = true;
+    try {
+      this.sourceGroups = await BookSourceGroupStore.add(getContext(this), groupName, this.sourceGroups);
+      this.activeSourceGroup = groupName;
+      this.applySourceFilters();
+      this.closeAddSourceGroupDialog();
+      promptAction.showToast({ message: '书源分组已新增' });
+    } catch (e) {
+      console.error('新增书源分组失败:', e);
+      promptAction.showToast({ message: '新增分组失败' });
+    } finally {
+      this.isBatchOperating = false;
+    }
+  }
+
+  async renameSourceGroup(): Promise<void> {
+    const oldName = this.pendingSourceGroup;
+    const newName = this.renameSourceGroupInput.trim();
+    if (!oldName || !newName || this.isBatchOperating) {
+      return;
+    }
+    if (oldName === newName) {
+      this.closeRenameSourceGroupDialog();
+      return;
+    }
+    if (this.getSourceGroups().includes(newName)) {
+      promptAction.showToast({ message: '分组名称已存在' });
       return;
     }
 
+    this.isBatchOperating = true;
+    this.batchOperationText = '正在重命名书源分组...';
     try {
       const db = AppDatabase.getInstance();
-      this.sources = await db.searchBookSources(this.searchText);
-      this.pruneSelectedSources();
+      const groupedSources = this.allSources.filter((source: BookSource) =>
+        (source.bookSourceGroup || '').trim() === oldName);
+      for (const source of groupedSources) {
+        source.bookSourceGroup = newName;
+        source.lastUpdateTime = Date.now();
+        await db.updateBookSource(source);
+      }
+      this.sourceGroups = await BookSourceGroupStore.rename(
+        getContext(this), oldName, newName, this.sourceGroups);
+      if (this.activeSourceGroup === oldName) {
+        this.activeSourceGroup = newName;
+      }
+      this.showRenameSourceGroupDialog = false;
+      this.renameSourceGroupInput = '';
+      this.pendingSourceGroup = '';
+      await this.loadSources();
+      promptAction.showToast({ message: '书源分组已重命名' });
     } catch (e) {
-      console.error('搜索书源失败:', e);
+      console.error('重命名书源分组失败:', e);
+      promptAction.showToast({ message: '重命名失败' });
+    } finally {
+      this.isBatchOperating = false;
     }
+  }
+
+  async deleteSourceGroup(): Promise<void> {
+    const groupName = this.pendingSourceGroup;
+    if (!groupName || this.isBatchOperating) {
+      return;
+    }
+    this.isBatchOperating = true;
+    this.batchOperationText = '正在删除书源分组...';
+    try {
+      const db = AppDatabase.getInstance();
+      const groupedSources = this.allSources.filter((source: BookSource) =>
+        (source.bookSourceGroup || '').trim() === groupName);
+      for (const source of groupedSources) {
+        source.bookSourceGroup = '';
+        source.lastUpdateTime = Date.now();
+        await db.updateBookSource(source);
+      }
+      this.sourceGroups = await BookSourceGroupStore.remove(getContext(this), groupName, this.sourceGroups);
+      if (this.activeSourceGroup === groupName) {
+        this.activeSourceGroup = '__ungrouped__';
+      }
+      this.showDeleteSourceGroupDialog = false;
+      this.pendingSourceGroup = '';
+      await this.loadSources();
+      promptAction.showToast({ message: '分组已删除，书源已移到未分组' });
+    } catch (e) {
+      console.error('删除书源分组失败:', e);
+      promptAction.showToast({ message: '删除分组失败' });
+    } finally {
+      this.isBatchOperating = false;
+    }
+  }
+
+  applySourceFilters(): void {
+    const keyword = this.searchText.trim().toLowerCase();
+    let filtered: BookSource[] = this.allSources;
+    if (this.activeSourceGroup === '__ungrouped__') {
+      filtered = filtered.filter((source: BookSource) => !(source.bookSourceGroup || '').trim());
+    } else if (this.activeSourceGroup !== '__all__') {
+      filtered = filtered.filter((source: BookSource) =>
+        (source.bookSourceGroup || '').trim() === this.activeSourceGroup);
+    }
+    if (keyword) {
+      filtered = filtered.filter((source: BookSource) => {
+        const searchable = `${source.bookSourceName || ''}\n${source.bookSourceUrl || ''}\n${source.bookSourceGroup || ''}`;
+        return searchable.toLowerCase().includes(keyword);
+      });
+    }
+    this.sources = filtered.slice();
+    this.pruneSelectedSources();
+  }
+
+  ensureActiveSourceGroup(): void {
+    if (this.activeSourceGroup === '__all__') {
+      return;
+    }
+    if (this.activeSourceGroup === '__ungrouped__') {
+      return;
+    }
+    if (!this.getSourceGroups().includes(this.activeSourceGroup)) {
+      this.activeSourceGroup = '__all__';
+    }
+  }
+
+  hasUngroupedSources(): boolean {
+    return this.allSources.some((source: BookSource) => !(source.bookSourceGroup || '').trim());
+  }
+
+  emptySourceTitle(): string {
+    if (this.searchText.trim()) {
+      return '未找到匹配书源';
+    }
+    if (this.activeSourceGroup !== '__all__') {
+      return '当前分组暂无书源';
+    }
+    return '暂无书源';
+  }
+
+  emptySourceDescription(): string {
+    if (this.searchText.trim()) {
+      return '请尝试其他关键词';
+    }
+    if (this.activeSourceGroup !== '__all__') {
+      return '可切换其他分组查看';
+    }
+    return '点击右上角"+"添加书源';
   }
 
   sourceNeedsLogin(source: BookSource): boolean {
@@ -1335,6 +1814,19 @@ struct BookSourcePage {
     this.actionSourceUrl = '';
   }
 
+  enterActionSourceSelection(): void {
+    const sourceUrl = this.actionSourceUrl;
+    if (!sourceUrl) {
+      return;
+    }
+    this.showSourceActionDialog = false;
+    this.actionSourceUrl = '';
+    this.showAddDialog = false;
+    this.showMoreActionDialog = false;
+    this.selectionMode = true;
+    this.selectedSourceUrls = [sourceUrl];
+  }
+
   actionSource(): BookSource | null {
     return this.sources.find((source: BookSource) => source.bookSourceUrl === this.actionSourceUrl) || null;
   }
@@ -1357,6 +1849,21 @@ struct BookSourcePage {
   actionSourceEnabled(): boolean {
     const source = this.actionSource();
     return source ? source.enabled : false;
+  }
+
+  openActionSourceSearch(): void {
+    const source = this.actionSource();
+    if (!source) {
+      this.closeSourceActions();
+      promptAction.showToast({ message: '书源不存在' });
+      return;
+    }
+    const nonce = AppStorage.get<number>('singleSourceSearchNonce') || 0;
+    AppStorage.setOrCreate('singleSourceSearchUrl', source.bookSourceUrl);
+    AppStorage.setOrCreate('singleSourceSearchName', source.bookSourceName || source.bookSourceUrl);
+    AppStorage.setOrCreate('singleSourceSearchNonce', nonce + 1);
+    this.closeSourceActions();
+    router.back();
   }
 
   openActionSourceLogin(): void {
@@ -1418,12 +1925,42 @@ struct BookSourcePage {
     if (!source) {
       return;
     }
-    source.enabled = !source.enabled;
+    this.closeSourceActions();
+    await this.toggleSourceEnabled(source);
+  }
+
+  async toggleSourceEnabled(source: BookSource): Promise<void> {
+    if (this.isBatchOperating) {
+      return;
+    }
+    const enabled = !source.enabled;
+    source.enabled = enabled;
     await this.updateSource(source);
     this.sources = this.sources.map((item: BookSource) =>
       item.bookSourceUrl === source.bookSourceUrl ? source : item);
-    this.closeSourceActions();
-    promptAction.showToast({ message: source.enabled ? '书源已启用' : '书源已禁用' });
+    this.allSources = this.allSources.map((item: BookSource) =>
+      item.bookSourceUrl === source.bookSourceUrl ? source : item);
+    promptAction.showToast({ message: enabled ? '书源已启用' : '书源已禁用' });
+  }
+
+  async deleteSourceFromSwipe(source: BookSource): Promise<void> {
+    if (this.isBatchOperating) {
+      return;
+    }
+    this.isBatchOperating = true;
+    this.batchOperationText = '正在删除书源...';
+    try {
+      await AppDatabase.getInstance().deleteBookSource(source.bookSourceUrl);
+      this.sources = this.sources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
+      this.allSources = this.allSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
+      this.selectedSourceUrls = this.selectedSourceUrls.filter((url: string) => url !== source.bookSourceUrl);
+      promptAction.showToast({ message: '书源已删除' });
+    } catch (e) {
+      console.error('滑动删除书源失败:', e);
+      promptAction.showToast({ message: '删除书源失败' });
+    } finally {
+      this.isBatchOperating = false;
+    }
   }
 
   async deleteActionSource(): Promise<void> {
@@ -1449,6 +1986,7 @@ struct BookSourcePage {
   }
 
   enterSelectionMode(): void {
+    this.showAddDialog = false;
     this.selectionMode = true;
     this.selectedSourceUrls = [];
   }
@@ -1516,8 +2054,12 @@ struct BookSourcePage {
   }
 
   getSourceGroups(): string[] {
+    return [...this.sourceGroups].sort((a: string, b: string) => a.localeCompare(b));
+  }
+
+  sourceGroupsFromSources(): string[] {
     const groups: string[] = [];
-    for (const source of this.sources) {
+    for (const source of this.allSources) {
       const group = (source.bookSourceGroup || '').trim();
       if (group && !groups.includes(group)) {
         groups.push(group);
@@ -1560,12 +2102,17 @@ struct BookSourcePage {
         source.lastUpdateTime = Date.now();
         await db.updateBookSource(source);
       }
+      if (groupName) {
+        this.sourceGroups = await BookSourceGroupStore.add(getContext(this), groupName, this.sourceGroups);
+      }
       this.sources = this.sources.map((source: BookSource) => {
         if (this.isSourceSelected(source.bookSourceUrl)) {
           source.bookSourceGroup = groupName;
         }
         return source;
       });
+      this.ensureActiveSourceGroup();
+      this.applySourceFilters();
       this.showGroupDialog = false;
       promptAction.showToast({ message: groupName ? `已加入分组：${groupName}` : '已移出分组' });
     } catch (e) {
@@ -1712,15 +2259,39 @@ struct BookSourcePage {
       return;
     }
 
+    await this.startCheckSources(enabledSources, action);
+  }
+
+  async checkActionSource(): Promise<void> {
+    const source = this.actionSource();
+    this.closeSourceActions();
+    if (!source) {
+      promptAction.showToast({ message: '书源不存在' });
+      return;
+    }
+    if (this.isCheckingSources) {
+      promptAction.showToast({ message: '正在校验中' });
+      return;
+    }
+    await this.startCheckSources([source], 'none');
+  }
+
+  async startCheckSources(targetSources: BookSource[], action: string = 'none'): Promise<void> {
+    if (targetSources.length === 0) {
+      return;
+    }
+
+    this.checkInvalidAction = action === 'disable' || action === 'delete' ? action : 'none';
+    this.showCheckOptionsDialog = false;
     this.showCheckDialog = true;
     this.isCheckingSources = true;
     this.checkDone = 0;
-    this.checkTotal = enabledSources.length;
+    this.checkTotal = targetSources.length;
     this.checkOkCount = 0;
     this.checkBadUrls = [];
     this.checkBadNames = [];
     this.checkAutoHandledCount = 0;
-    this.checkStatus = `准备校验 ${enabledSources.length} 个启用书源`;
+    this.checkStatus = `准备校验 ${targetSources.length} 个书源`;
     const availableUrls = new Set<string>();
 
     try {
@@ -1736,15 +2307,16 @@ struct BookSourcePage {
           }
           await this.handleCheckedSourceCompletion(source, books.length > 0);
         },
+        targetSources: targetSources,
         validationOnly: true
       });
 
-      const badSources = enabledSources.filter((source: BookSource) => !availableUrls.has(source.bookSourceUrl));
-      this.checkOkCount = Math.max(0, enabledSources.length - badSources.length);
+      const badSources = targetSources.filter((source: BookSource) => !availableUrls.has(source.bookSourceUrl));
+      this.checkOkCount = Math.max(0, targetSources.length - badSources.length);
       this.checkBadUrls = badSources.map((source: BookSource) => source.bookSourceUrl);
       this.checkBadNames = badSources.map((source: BookSource) => source.bookSourceName || source.bookSourceUrl);
-      this.checkDone = enabledSources.length;
-      this.checkTotal = enabledSources.length;
+      this.checkDone = targetSources.length;
+      this.checkTotal = targetSources.length;
       this.checkStatus = this.checkSummaryText();
     } catch (e) {
       console.error('校验书源失败:', e);
@@ -1790,7 +2362,7 @@ struct BookSourcePage {
   }
 
   checkSummaryText(): string {
-    return `已校验 ${this.checkTotal} 个启用书源${this.checkAutoActionSummary()}`;
+    return `已校验 ${this.checkTotal} 个书源${this.checkAutoActionSummary()}`;
   }
 
   formatCheckProgressStatus(progress: SearchProgress): string {
@@ -1810,7 +2382,7 @@ struct BookSourcePage {
 
   checkResultText(): string {
     if (this.checkTotal === 0) {
-      return '没有需要校验的启用书源';
+      return '没有需要校验的书源';
     }
     if (this.checkBadUrls.length === 0) {
       return `全部可用，共 ${this.checkOkCount} 个书源通过校验`;

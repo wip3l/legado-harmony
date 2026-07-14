@@ -111,7 +111,10 @@ export class BookshelfDisplaySettingsStore {
   }
 
   private static normalizeLayoutMode(value: string): string {
-    return value === 'loose' ? 'loose' : 'compact';
+    if (value === 'loose' || value === 'tile') {
+      return value;
+    }
+    return 'compact';
   }
 
   private static clone(source: BookshelfDisplaySettings): BookshelfDisplaySettings {

@@ -13,6 +13,7 @@ export struct ImmersiveBackButton {
   @Prop containerWidth: number = 52;
   @Prop containerHeight: number = 56;
   @Prop startInset: number = 16;
+  @Prop materialScale: number = 1;
   @Prop accessibilityLabel: string = '返回';
   onBack: () => void = () => {};
 
@@ -52,8 +53,9 @@ export struct ImmersiveBackButton {
         .titleMode(HdsNavigationTitleMode.MINI)
         .hideBackButton(false)
         .hideToolBar(true)
-        .width(this.effectiveContainerWidth())
-        .height(this.containerHeight)
+        .width(this.materialContainerWidth())
+        .height(this.materialContainerHeight())
+        .scale({ x: this.normalizedMaterialScale(), y: this.normalizedMaterialScale() })
 
         if (this.labelText) {
           Stack({ alignContent: Alignment.Center }) {
@@ -94,6 +96,19 @@ export struct ImmersiveBackButton {
 
   effectiveContainerWidth(): number {
     // HdsNavigation 的原生按钮包含系统点击热区与材质外沿，不能压缩到旧版 52vp 容器中。
-    return Math.max(this.containerWidth, 64);
+    return Math.max(this.containerWidth, 64 * this.normalizedMaterialScale());
+  }
+
+  normalizedMaterialScale(): number {
+    return Math.max(0.6, Math.min(this.materialScale, 1));
+  }
+
+  materialContainerWidth(): number {
+    return this.effectiveContainerWidth() / this.normalizedMaterialScale();
+  }
+
+  materialContainerHeight(): number {
+    // 原生 MINI 标题栏至少需要 56vp 高度；外层保持紧凑尺寸并将其居中，避免圆形材质底部被裁切。
+    return Math.max(56, this.containerHeight / this.normalizedMaterialScale());
   }
 }

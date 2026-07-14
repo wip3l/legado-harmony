@@ -53,6 +53,12 @@ struct CustomTtsVoiceManagerPage {
   @State editJsLib: string = '';
   @State editJsEngine: string = '';
   @State editEnabledCookieJar: boolean = false;
+  @State showVoiceActionMenu: boolean = false;
+  @State actionVoiceId: string = '';
+  @State contextMenuX: number = 16;
+  @State contextMenuY: number = 96;
+  @State contextViewportWidth: number = 360;
+  @State contextViewportHeight: number = 720;
 
   aboutToAppear(): void {
     this.syncBars();
@@ -92,6 +98,27 @@ struct CustomTtsVoiceManagerPage {
               ListItem() {
                 this.voiceListItem(voice)
               }
+              .swipeAction({
+                start: {
+                  builder: () => {
+                    this.voiceDisableSwipeAction(voice)
+                  },
+                  actionAreaDistance: 64,
+                  onAction: () => {
+                    if (!this.selectionMode) this.toggleVoiceState(voice);
+                  }
+                },
+                end: {
+                  builder: () => {
+                    this.voiceDeleteSwipeAction(voice)
+                  },
+                  actionAreaDistance: 64,
+                  onAction: () => {
+                    if (!this.selectionMode) this.deleteVoice(voice);
+                  }
+                },
+                edgeEffect: SwipeEdgeEffect.Spring
+              })
             }, (voice: HttpTTS) => this.voiceKey(voice))
           }
           .width('100%')
@@ -119,9 +146,19 @@ struct CustomTtsVoiceManagerPage {
       if (this.showEditDialog) {
         this.editVoiceDialog()
       }
+
+      if (this.showVoiceActionMenu) {
+        this.voiceActionMenu()
+      }
     }
     .width('100%')
     .height('100%')
+    .onAreaChange((_oldValue: Area, newValue: Area) => {
+      const width = Number(newValue.width);
+      const height = Number(newValue.height);
+      if (Number.isFinite(width) && width > 0) this.contextViewportWidth = width;
+      if (Number.isFinite(height) && height > 0) this.contextViewportHeight = height;
+    })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -183,6 +220,31 @@ struct CustomTtsVoiceManagerPage {
     this.saveSettings();
   }
 
+  disableVoice(voice: HttpTTS): void {
+    if (!voice.enabled) {
+      return;
+    }
+    this.toggleVoiceEnabled(voice, false);
+    promptAction.showToast({ message: '音色已禁用' });
+  }
+
+  toggleVoiceState(voice: HttpTTS): void {
+    const enabled = !voice.enabled;
+    this.toggleVoiceEnabled(voice, enabled);
+    promptAction.showToast({ message: enabled ? '音色已启用' : '音色已禁用' });
+  }
+
+  deleteVoice(voice: HttpTTS): void {
+    const id = String(voice.id);
+    if (this.isCurrentVoice(voice)) {
+      this.clearCustomVoiceSelection();
+    }
+    this.voices = this.voices.filter((item: HttpTTS) => String(item.id) !== id);
+    this.selectedVoiceIds = this.selectedVoiceIds.filter((selectedId: string) => selectedId !== id);
+    this.saveSettings();
+    promptAction.showToast({ message: '音色已删除' });
+  }
+
   clearCustomVoiceSelection(): void {
     this.ttsCustomVoiceId = '';
     this.ttsPerson = 0;
@@ -192,6 +254,7 @@ struct CustomTtsVoiceManagerPage {
   }
 
   enterSelectionMode(): void {
+    this.showAddDialog = false;
     this.selectionMode = true;
     this.selectedVoiceIds = [];
   }
@@ -463,7 +526,66 @@ struct CustomTtsVoiceManagerPage {
   }
 
   voiceKey(voice: HttpTTS): string {
-    return `${voice.id}_${voice.name || ''}`;
+    return `${voice.id}_${voice.name || ''}_${voice.enabled ? '1' : '0'}`;
+  }
+
+  openVoiceActions(voice: HttpTTS, event?: GestureEvent): void {
+    const finger = event && event.fingerList.length > 0 ? event.fingerList[0] : undefined;
+    if (finger) {
+      this.contextMenuX = finger.globalX;
+      this.contextMenuY = finger.globalY;
+    }
+    this.actionVoiceId = String(voice.id);
+    this.showVoiceActionMenu = true;
+  }
+
+  closeVoiceActions(): void {
+    this.showVoiceActionMenu = false;
+    this.actionVoiceId = '';
+  }
+
+  actionVoice(): HttpTTS | null {
+    return this.voices.find((voice: HttpTTS) => String(voice.id) === this.actionVoiceId) || null;
+  }
+
+  openActionVoiceEdit(): void {
+    const voice = this.actionVoice();
+    if (!voice) return;
+    this.closeVoiceActions();
+    this.openEditDialog(voice);
+  }
+
+  toggleActionVoiceEnabled(): void {
+    const voice = this.actionVoice();
+    if (!voice) return;
+    this.closeVoiceActions();
+    this.toggleVoiceState(voice);
+  }
+
+  deleteActionVoice(): void {
+    const voice = this.actionVoice();
+    if (!voice) return;
+    this.closeVoiceActions();
+    this.deleteVoice(voice);
+  }
+
+  enterActionVoiceSelection(): void {
+    const id = this.actionVoiceId;
+    if (!id) return;
+    this.closeVoiceActions();
+    this.showAddDialog = false;
+    this.selectionMode = true;
+    this.selectedVoiceIds = [id];
+  }
+
+  contextMenuLeft(menuWidth: number): number {
+    return Math.max(12, Math.min(this.contextMenuX - 18, this.contextViewportWidth - menuWidth - 12));
+  }
+
+  contextMenuTop(menuHeight: number): number {
+    const below = this.contextMenuY + 12;
+    if (below + menuHeight <= this.contextViewportHeight - 12) return below;
+    return Math.max(this.statusBarHeight + 8, this.contextMenuY - menuHeight - 12);
   }
 
   syncBars(): void {
@@ -528,7 +650,7 @@ struct CustomTtsVoiceManagerPage {
           .height(56)
           .textAlign(TextAlign.Center)
           .onClick(() => {
-            this.showAddDialog = true;
+            this.showAddDialog = !this.showAddDialog;
           })
       }
     }
@@ -618,34 +740,116 @@ struct CustomTtsVoiceManagerPage {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-
-      if (!this.selectionMode) {
-        Column() {
-          Toggle({ type: ToggleType.Switch, isOn: voice.enabled })
-            .selectedColor(this.buttonColor())
-            .onChange((isOn: boolean) => {
-              this.toggleVoiceEnabled(voice, isOn);
-            })
-          Text('编辑')
-            .fontSize(12)
-            .fontColor(this.accentColor())
-            .margin({ top: 8 })
-            .onClick(() => {
-              this.openEditDialog(voice);
-            })
-        }
-        .alignItems(HorizontalAlign.End)
-      }
     }
     .width('100%')
     .padding(12)
     .backgroundColor(this.cardColor())
     .borderRadius(8)
+    .opacity(voice.enabled ? 1 : 0.45)
+    .gesture(
+      LongPressGesture({ repeat: false })
+        .onAction((event: GestureEvent) => {
+          if (!this.selectionMode && !this.isBatchOperating) {
+            this.openVoiceActions(voice, event);
+          }
+        })
+    )
     .onClick(() => {
       if (this.selectionMode) {
         this.toggleVoiceSelected(voice);
       }
     })
+  }
+
+  @Builder
+  voiceDisableSwipeAction(voice: HttpTTS) {
+    Column({ space: 4 }) {
+      SymbolGlyph(voice.enabled ? $r('sys.symbol.minus_circle') : $r('sys.symbol.checkmark_circle'))
+        .fontSize(22)
+        .fontColor(['#FFFFFF'])
+      Text(voice.enabled ? '禁用' : '启用')
+        .fontSize(11)
+        .fontColor('#FFFFFF')
+    }
+    .width(72)
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor(voice.enabled ? '#F39C3D' : '#1E8E3E')
+    .onClick(() => {
+      if (!this.selectionMode) this.toggleVoiceState(voice);
+    })
+  }
+
+  @Builder
+  voiceDeleteSwipeAction(voice: HttpTTS) {
+    Column({ space: 4 }) {
+      SymbolGlyph($r('sys.symbol.trash'))
+        .fontSize(22)
+        .fontColor(['#FFFFFF'])
+      Text('删除')
+        .fontSize(11)
+        .fontColor('#FFFFFF')
+    }
+    .width(72)
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#E53935')
+    .onClick(() => {
+      if (!this.selectionMode) this.deleteVoice(voice);
+    })
+  }
+
+  @Builder
+  voiceActionMenu() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.appDarkMode ? '#38000000' : '#18FFFFFF')
+        .backdropBlur(12)
+        .onClick(() => this.closeVoiceActions())
+      Column() {
+        this.voiceContextActionItem($r('sys.symbol.square_and_pencil'), '编辑', this.primaryTextColor(),
+          () => this.openActionVoiceEdit())
+        this.voiceContextActionItem(this.actionVoice()?.enabled ? $r('sys.symbol.minus_circle') :
+          $r('sys.symbol.checkmark_circle'), this.actionVoice()?.enabled ? '禁用' : '启用', this.primaryTextColor(),
+          () => this.toggleActionVoiceEnabled())
+        this.voiceContextActionItem($r('sys.symbol.list_bullet'), '多选', this.primaryTextColor(),
+          () => this.enterActionVoiceSelection())
+        this.voiceContextActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => this.deleteActionVoice())
+      }
+      .width(148)
+      .padding({ top: 6, bottom: 6 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
+      .borderRadius(14)
+      .backdropBlur(22)
+      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(188) })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  voiceContextActionItem(icon: Resource, label: string, color: string, action: () => void) {
+    Row({ space: 10 }) {
+      SymbolGlyph(icon)
+        .fontSize(18)
+        .fontColor([color])
+        .width(24)
+      Text(label)
+        .fontSize(15)
+        .fontColor(color)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(44)
+    .padding({ left: 12, right: 12 })
+    .alignItems(VerticalAlign.Center)
+    .onClick(action)
   }
 
   @Builder
@@ -688,52 +892,58 @@ struct CustomTtsVoiceManagerPage {
 
   @Builder
   addDialog() {
-    Column() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .onClick(() => {
+          this.showAddDialog = false;
+        })
+
       Column() {
-        Text('添加自定义音色')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 16 })
-        Button('从URL导入')
-          .width('100%')
-          .height(48)
-          .margin({ bottom: 8 })
-          .backgroundColor(this.buttonColor())
-          .fontColor('#FFFFFF')
-          .onClick(() => {
-            this.importUrl = '';
-            this.showImportUrlDialog = true;
-          })
-        Button('从文件导入')
-          .width('100%')
-          .height(48)
-          .backgroundColor(this.buttonColor())
-          .fontColor('#FFFFFF')
-          .onClick(() => {
-            this.importFromFile();
-          })
-        Button('取消')
-          .width('100%')
-          .height(44)
-          .margin({ top: 12 })
-          .backgroundColor(this.inputColor())
-          .fontColor(this.primaryTextColor())
-          .onClick(() => {
-            this.showAddDialog = false;
-          })
+        this.addVoiceMenuItem('从 URL 导入', () => {
+          this.showAddDialog = false;
+          this.importUrl = '';
+          this.showImportUrlDialog = true;
+        })
+        this.addVoiceMenuItem('从文件导入', () => {
+          this.showAddDialog = false;
+          this.importFromFile();
+        }, false)
       }
-      .width('82%')
-      .padding(20)
-      .backgroundColor(this.cardColor())
-      .borderRadius(12)
+      .width(176)
+      .padding(6)
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
+      .borderRadius(16)
+      .backdropBlur(22)
+      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .position({ x: '100%', y: 0 })
+      .translate({ x: -188, y: this.statusBarHeight + 52 })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#66000000')
-    .justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  addVoiceMenuItem(label: string, action: () => void, showDivider: boolean = true) {
+    Column() {
+      Text(label)
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .height(44)
+        .padding({ left: 12, right: 12 })
+        .textAlign(TextAlign.Start)
+      if (showDivider) {
+        Divider()
+          .strokeWidth(0.5)
+          .color(ThemeRuntime.glassBorderColor(this.appDarkMode))
+          .margin({ left: 12, right: 12 })
+      }
+    }
+    .width('100%')
+    .onClick(action)
   }
 
   @Builder

@@ -21,8 +21,8 @@ struct TtsSettingsPage {
   @StorageLink('ttsLanguage') ttsLanguage: string = 'zh-CN';
   @StorageLink('ttsSpeed') ttsSpeed: number = 1;
   @StorageLink('ttsInstalledVoiceKeys') ttsInstalledVoiceKeys: string = '';
-  @StorageLink('ttsCustomVoiceId') ttsCustomVoiceId: string = '';
-  @StorageLink('ttsCustomVoices') ttsCustomVoices: string = '';
+  @StorageLink('ttsCustomVoiceId') @Watch('onCustomVoiceSelectionChanged') ttsCustomVoiceId: string = '';
+  @StorageLink('ttsCustomVoices') @Watch('onCustomVoicesStorageChanged') ttsCustomVoices: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
@@ -40,6 +40,7 @@ struct TtsSettingsPage {
   @State downloadingVoiceKey: string = '';
   @State downloadProgressText: string = '';
   @State customVoices: HttpTTS[] = [];
+  @State showVoiceDropdown: boolean = false;
   @State customVoiceImportUrl: string = '';
   @State isImportingCustomVoices: boolean = false;
   private speedSaveTimerId: number = -1;
@@ -61,33 +62,14 @@ struct TtsSettingsPage {
   }
 
   build() {
-    Column() {
-      this.titleBar()
+    Stack() {
+      Column() {
+        this.titleBar()
 
-      Scroll() {
-        Column() {
-          this.sectionTitle('朗读音色')
+        Scroll() {
           Column() {
-            ForEach(this.customVoices, (voice: HttpTTS) => {
-              this.customVoiceSelectRow(voice)
-            }, (voice: HttpTTS) => this.customVoiceKey(voice))
-            ForEach(this.voices, (voice: TtsVoiceOption) => {
-              this.voiceRow(voice)
-            }, (voice: TtsVoiceOption) => this.voiceKey(voice))
-            if (this.isLoadingVoices) {
-              Text('正在加载系统音色...')
-                .fontSize(12)
-                .fontColor(this.subTextColor())
-                .width('100%')
-                .padding({ top: 4, bottom: 4 })
-            }
-          }
-          .width('calc(100% - 24vp)')
-          .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-          .margin({ left: 12, right: 12 })
-          .borderRadius(16)
-          .clip(true)
-          .backgroundColor(this.cardColor())
+            this.sectionTitle('朗读音色')
+            this.voiceDropdownSelector()
 
           this.sectionTitle('自定义音色')
           Row() {
@@ -183,15 +165,22 @@ struct TtsSettingsPage {
           .borderRadius(16)
           .clip(true)
           .backgroundColor(this.cardColor())
+          }
+          .width('100%')
         }
-        .width('100%')
+        .layoutWeight(1)
       }
-      .layoutWeight(1)
+      .width('100%')
+      .height('100%')
+      .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
+      .backgroundColor(this.pageColor())
+
+      if (this.showVoiceDropdown) {
+        this.voiceDropdownMenu()
+      }
     }
     .width('100%')
     .height('100%')
-    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
-    .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -225,6 +214,187 @@ struct TtsSettingsPage {
 
   syncBars(): void {
     syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
+  }
+
+  onCustomVoicesStorageChanged(): void {
+    this.customVoices = SystemTtsReader.parseCustomVoices(this.ttsCustomVoices);
+    this.selectedVoiceKey = this.currentVoiceKey();
+  }
+
+  onCustomVoiceSelectionChanged(): void {
+    this.selectedVoiceKey = this.currentVoiceKey();
+  }
+
+  enabledCustomVoices(): HttpTTS[] {
+    return this.customVoices.filter((voice: HttpTTS) => voice.enabled !== false);
+  }
+
+  disabledCustomVoices(): HttpTTS[] {
+    return this.customVoices.filter((voice: HttpTTS) => voice.enabled === false);
+  }
+
+  selectedVoiceTitle(): string {
+    const customVoice = this.findCurrentCustomVoice();
+    if (customVoice && customVoice.enabled !== false) {
+      return this.customVoiceTitle(customVoice);
+    }
+    const systemVoice = this.findCurrentVoice();
+    if (systemVoice) {
+      return this.voiceTitle(systemVoice);
+    }
+    return this.isLoadingVoices ? '正在加载音色...' : '默认音色';
+  }
+
+  @Builder
+  voiceDropdownSelector() {
+    Row() {
+      Text(this.selectedVoiceTitle())
+        .fontSize(16)
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+      SymbolGlyph(this.showVoiceDropdown ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
+        .fontSize(18)
+        .fontColor([this.subTextColor()])
+        .width(18)
+    }
+    .width('calc(100% - 24vp)')
+    .height(54)
+    .padding({ left: 16, right: 16 })
+    .margin({ left: 12, right: 12 })
+    .borderRadius(14)
+    .backgroundColor(this.cardColor())
+    .onClick(() => {
+      this.showVoiceDropdown = !this.showVoiceDropdown;
+    })
+  }
+
+  @Builder
+  voiceDropdownMenu() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .onClick(() => {
+          this.showVoiceDropdown = false;
+        })
+
+      Column() {
+        Scroll() {
+          Column() {
+            if (this.enabledCustomVoices().length > 0) {
+              this.voiceDropdownSectionTitle('自定义音色')
+              ForEach(this.enabledCustomVoices(), (voice: HttpTTS) => {
+                this.customVoiceDropdownOption(voice, false)
+              }, (voice: HttpTTS) => `${this.customVoiceKey(voice)}_enabled`)
+            }
+
+            this.voiceDropdownSectionTitle('系统音色')
+            ForEach(this.voices, (voice: TtsVoiceOption) => {
+              this.systemVoiceDropdownOption(voice)
+            }, (voice: TtsVoiceOption) => this.voiceKey(voice))
+
+            if (this.disabledCustomVoices().length > 0) {
+              this.voiceDropdownSectionTitle('已禁用')
+              ForEach(this.disabledCustomVoices(), (voice: HttpTTS) => {
+                this.customVoiceDropdownOption(voice, true)
+              }, (voice: HttpTTS) => `${this.customVoiceKey(voice)}_disabled`)
+            }
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .constraintSize({ maxHeight: 420 })
+      }
+      .width('calc(100% - 24vp)')
+      .constraintSize({ maxWidth: 560 })
+      .padding({ top: 6, bottom: 6 })
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+      .borderRadius(16)
+      .backdropBlur(28)
+      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .position({ x: 12, y: this.statusBarHeight + 108 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  voiceDropdownSectionTitle(title: string) {
+    Text(title)
+      .fontSize(12)
+      .fontColor(this.subTextColor())
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 8, bottom: 5 })
+  }
+
+  @Builder
+  customVoiceDropdownOption(voice: HttpTTS, disabled: boolean) {
+    Row() {
+      Text(this.customVoiceTitle(voice))
+        .fontSize(15)
+        .fontColor(disabled ? this.subTextColor() : this.primaryTextColor())
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+      if (!disabled && this.isCustomVoiceSelected(voice)) {
+        SymbolGlyph($r('sys.symbol.checkmark'))
+          .fontSize(18)
+          .fontColor([this.accentColor()])
+      }
+    }
+    .width('100%')
+    .height(46)
+    .padding({ left: 14, right: 14 })
+    .opacity(disabled ? 0.5 : 1)
+    .onClick(() => {
+      if (disabled) {
+        return;
+      }
+      this.showVoiceDropdown = false;
+      this.applyCustomVoice(voice);
+    })
+  }
+
+  @Builder
+  systemVoiceDropdownOption(voice: TtsVoiceOption) {
+    Row() {
+      Text(this.voiceTitle(voice))
+        .fontSize(15)
+        .fontColor((voice.available || voice.downloadable) ? this.primaryTextColor() : this.subTextColor())
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+      if (this.isVoiceDownloading(voice)) {
+        Text(this.downloadProgressText || '下载中')
+          .fontSize(11)
+          .fontColor(this.accentColor())
+      } else if (this.isVoiceSelected(voice)) {
+        SymbolGlyph($r('sys.symbol.checkmark'))
+          .fontSize(18)
+          .fontColor([this.accentColor()])
+      } else if (!voice.available && voice.downloadable) {
+        Text('下载')
+          .fontSize(12)
+          .fontColor(this.accentColor())
+      }
+    }
+    .width('100%')
+    .height(46)
+    .padding({ left: 14, right: 14 })
+    .opacity((voice.available || voice.downloadable) ? 1 : 0.5)
+    .onClick(() => {
+      if (!voice.available && !voice.downloadable) {
+        return;
+      }
+      this.showVoiceDropdown = false;
+      this.selectVoice(voice);
+    })
   }
 
   normalizeDefaultOnlineVoice(): void {
@@ -850,35 +1020,31 @@ struct TtsSettingsPage {
 
   @Builder
   voiceRow(voice: TtsVoiceOption) {
-    Row() {
-      Text(this.voiceTitle(voice))
-        .fontSize(16)
-        .fontColor((voice.available || this.isVoiceDownloading(voice)) ? this.primaryTextColor() : this.subTextColor())
-        .layoutWeight(1)
+    Column() {
+      Row() {
+        Text(this.voiceTitle(voice))
+          .fontSize(16)
+          .fontColor((voice.available || this.isVoiceDownloading(voice)) ? this.primaryTextColor() : this.subTextColor())
+          .layoutWeight(1)
 
-      Text(this.voiceTrailingText(voice))
-        .fontSize(this.voiceTrailingFontSize(voice))
-      .fontColor(this.accentColor())
-      .width(48)
-      .textAlign(TextAlign.Center)
+        Text(this.voiceTrailingText(voice))
+          .fontSize(this.voiceTrailingFontSize(voice))
+          .fontColor(this.accentColor())
+          .width(48)
+          .textAlign(TextAlign.Center)
+      }
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+
+      Divider()
+        .width('calc(100% - 24vp)')
+        .strokeWidth(0.5)
+        .color(this.voiceDividerColor())
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-    .backgroundColor(this.voiceRowColor(voice))
-    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
     .onClick(() => {
       this.selectVoice(voice);
     })
-  }
-
-  voiceRowColor(voice: TtsVoiceOption): string {
-    if (this.isVoiceDownloading(voice)) {
-      return ThemeRuntime.accentSurfaceColor(this.appDarkMode);
-    }
-    if (!voice.available) {
-      return this.inputColor();
-    }
-    return this.isVoiceSelected(voice) ? ThemeRuntime.accentSurfaceColor(this.appDarkMode) : this.inputColor();
   }
 
   @Builder
@@ -899,66 +1065,80 @@ struct TtsSettingsPage {
 
   @Builder
   customVoiceRow(voice: HttpTTS) {
-    Row() {
-      Text(this.customVoiceTitle(voice))
-        .fontSize(16)
-        .fontColor(this.primaryTextColor())
-        .layoutWeight(1)
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .onClick(() => {
-          this.applyCustomVoice(voice);
-        })
+    Column() {
+      Row() {
+        Text(this.customVoiceTitle(voice))
+          .fontSize(16)
+          .fontColor(this.primaryTextColor())
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .onClick(() => {
+            this.applyCustomVoice(voice);
+          })
 
-      Text(this.isCustomVoiceSelected(voice) ? '✓' : '')
-        .fontSize(18)
-        .fontColor(this.accentColor())
-        .width(36)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          this.applyCustomVoice(voice);
-        })
+        Text(this.isCustomVoiceSelected(voice) ? '✓' : '')
+          .fontSize(18)
+          .fontColor(this.accentColor())
+          .width(36)
+          .textAlign(TextAlign.Center)
+          .onClick(() => {
+            this.applyCustomVoice(voice);
+          })
 
-      Text('删除')
-        .fontSize(14)
-        .fontColor('#E53935')
-        .width(46)
-        .textAlign(TextAlign.Center)
-        .onClick(() => {
-          this.deleteCustomVoice(voice);
-        })
+        Text('删除')
+          .fontSize(14)
+          .fontColor('#E53935')
+          .width(46)
+          .textAlign(TextAlign.Center)
+          .onClick(() => {
+            this.deleteCustomVoice(voice);
+          })
+      }
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+
+      Divider()
+        .width('calc(100% - 24vp)')
+        .strokeWidth(0.5)
+        .color(this.voiceDividerColor())
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-    .backgroundColor(this.isCustomVoiceSelected(voice) ? ThemeRuntime.accentSurfaceColor(this.appDarkMode) :
-      this.inputColor())
-    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
   }
 
   @Builder
   customVoiceSelectRow(voice: HttpTTS) {
-    Row() {
-      Text(this.customVoiceTitle(voice))
-        .fontSize(16)
-        .fontColor(voice.enabled === false ? this.subTextColor() : this.primaryTextColor())
-        .layoutWeight(1)
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    Column() {
+      Row() {
+        Text(this.customVoiceTitle(voice))
+          .fontSize(16)
+          .fontColor(voice.enabled === false ? this.subTextColor() : this.primaryTextColor())
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-      Text(this.isCustomVoiceSelected(voice) ? '✓' : '')
-        .fontSize(18)
-        .fontColor(this.accentColor())
-        .width(48)
-        .textAlign(TextAlign.Center)
+        Text(this.isCustomVoiceSelected(voice) ? '✓' : '')
+          .fontSize(18)
+          .fontColor(this.accentColor())
+          .width(48)
+          .textAlign(TextAlign.Center)
+      }
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+
+      Divider()
+        .width('calc(100% - 24vp)')
+        .strokeWidth(0.5)
+        .color(this.voiceDividerColor())
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-    .borderRadius(8)
-    .backgroundColor(this.isCustomVoiceSelected(voice) ? ThemeRuntime.accentSurfaceColor(this.appDarkMode) :
-      this.inputColor())
     .onClick(() => {
       this.applyCustomVoice(voice);
     })
+  }
+
+  voiceDividerColor(): string {
+    return this.appDarkMode ? '#3DFFFFFF' : '#1F000000';
   }
 
   applySpeed(value: number): void {
