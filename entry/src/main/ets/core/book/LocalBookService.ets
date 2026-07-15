@@ -56,6 +56,7 @@ class DecodedLocalText {
 class LocalTxtImportResult {
   chapterCount: number = 0;
   latestTitle: string = '';
+  intro: string = '';
 }
 
 export class LocalBookService {
@@ -67,6 +68,7 @@ export class LocalBookService {
   private static readonly TXT_READ_CHUNK_BYTES: number = 256 * 1024;
   private static readonly TXT_MAX_CHAPTER_CHARS: number = 32 * 1024;
   private static readonly TXT_DB_BATCH_SIZE: number = 16;
+  private static readonly LOCAL_INTRO_TARGET_LENGTH: number = 96;
   private static readonly TXT_RULE_TOP_LEVEL: string =
     '^(?:扉页|[序引前楔][言子]?|(内容|文章|书籍)?简介|作品相关|卷[首尾末](语|总结|感言)|([^-·.–—_*＊~～=\\s\\n\\r](?!(者[：:]))|[-·.–—_*＊~～=](?!(\\s*[-·.–—_*＊~～=]))).*(?!.)|最?[上中下序引终末][章卷篇幕回节册季话集]|[\\dO零一两二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟萬]+?\\s{0,4}[｜、_|：:；;–.·\\s—-]|[第章卷篇节幕回册]\\s{0,4}[\\dO零一两二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟萬]+?\\s{0,4}[章卷页回幕册话段季篇节集部]?|[\\dO零一两二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟萬]+?\\s{0,4}[章卷页季回幕册话段篇节集部]).{0,35}$';
 
@@ -186,6 +188,14 @@ export class LocalBookService {
     book.totalChapterNum = chapters.length;
     book.latestChapterTitle = chapters[chapters.length - 1].title;
     book.latestChapterTime = Date.now();
+    book.intro = '';
+    const introChapterCount = Math.min(chapters.length, 100);
+    for (let i = 0; i < introChapterCount &&
+      book.intro.length < LocalBookService.LOCAL_INTRO_TARGET_LENGTH; i++) {
+      book.intro = LocalBookService.appendContentIntro(
+        book.intro, chapters[i].content, chapters[i].title, book.name, book.author);
+    }
+    book.putVariable('localContentIntroVersion', '5');
     if (book.durChapterIndex >= chapters.length) {
       book.durChapterIndex = 0;
       book.durChapterPos = 0;
@@ -230,14 +240,39 @@ export class LocalBookService {
     return true;
   }
 
+  static async ensureContentIntro(book: Book): Promise<boolean> {
+    if (!LocalBookService.isLocalBook(book) ||
+      (book.getVariable('localContentIntroVersion') === '5' && !!book.intro.trim())) {
+      return false;
+    }
+    const chapters = await appDb.getBookChapters(book.bookUrl);
+    let intro = '';
+    const inspectCount = Math.min(chapters.length, 100);
+    for (let i = 0; i < inspectCount && intro.length < LocalBookService.LOCAL_INTRO_TARGET_LENGTH; i++) {
+      const content = await appDb.getCachedChapterContent(book.bookUrl, chapters[i].index);
+      intro = LocalBookService.appendContentIntro(
+        intro, content, chapters[i].title, book.name, book.author);
+    }
+    if (!intro) {
+      return false;
+    }
+    book.intro = intro;
+    book.putVariable('localContentIntroVersion', '5');
+    await appDb.updateBook(book);
+    return true;
+  }
+
   private static async rebuildTxtBook(book: Book, localPath: string): Promise<void> {
     book.charset = await LocalBookService.detectTextFileCharset(localPath);
     await appDb.deleteBookChapters(book.bookUrl);
     await appDb.deleteBookCachedContent(book.bookUrl);
-    const imported = await LocalBookService.importTxtChapters(book.bookUrl, localPath, book.charset);
+    const imported = await LocalBookService.importTxtChapters(
+      book.bookUrl, localPath, book.charset, book.name, book.author);
     book.totalChapterNum = imported.chapterCount;
     book.latestChapterTitle = imported.latestTitle;
     book.latestChapterTime = Date.now();
+    book.intro = imported.intro;
+    book.putVariable('localContentIntroVersion', '5');
     if (book.durChapterIndex >= imported.chapterCount) {
       book.durChapterIndex = 0;
       book.durChapterPos = 0;
@@ -248,7 +283,7 @@ export class LocalBookService {
   }
 
   private static async importTxtChapters(bookUrl: string, path: string,
-    charset: string): Promise<LocalTxtImportResult> {
+    charset: string, bookName: string, bookAuthor: string): Promise<LocalTxtImportResult> {
     const result = new LocalTxtImportResult();
     const titleRegex = new RegExp(LocalBookService.TXT_RULE_TOP_LEVEL);
     let currentTitle = '';
@@ -287,6 +322,10 @@ export class LocalBookService {
       dbChapter.resourceUrl = path;
       chapterBatch.push(dbChapter);
       contentBatch.push(chapter.content);
+      if (result.intro.length < LocalBookService.LOCAL_INTRO_TARGET_LENGTH) {
+        result.intro = LocalBookService.appendContentIntro(
+          result.intro, chapter.content, chapter.title, bookName, bookAuthor);
+      }
       result.chapterCount++;
       result.latestTitle = chapter.title;
       currentHasPersisted = true;
@@ -376,6 +415,37 @@ export class LocalBookService {
       await fs.close(file);
     }
     return result;
+  }
+
+  private static appendContentIntro(currentIntro: string, content: string, chapterTitle: string = '',
+    bookName: string = '', bookAuthor: string = ''): string {
+    let intro = currentIntro.trim();
+    const normalizedTitle = chapterTitle.replace(/\s+/g, ' ').trim();
+    const normalizedBookName = bookName.replace(/\s+/g, ' ').trim();
+    const normalizedAuthor = bookAuthor.replace(/\s+/g, ' ').trim();
+    const paragraphs = content.replace(/\r\n?/g, '\n').split(/\n+/);
+    for (const paragraph of paragraphs) {
+      const text = paragraph.replace(/[\uFEFF\u200B-\u200D\u2060]/g, '').replace(/\s+/g, ' ').trim();
+      if (!text || text === normalizedTitle || text === normalizedBookName || text === normalizedAuthor) continue;
+      if (/^[【\[（(\s]*(?:书\s*名|作\s*者|作者名|内容简介|简介|文案|标签|分类|状态|来源|网址|更新|版权)\s*[】\]）)]?\s*[：:：\-—]/.test(text)) {
+        continue;
+      }
+      if (/^(?:前言|序言|序|引言|楔子|目录|正文|内容简介|作品简介|作者简介|版权信息|书籍信息|出版说明|编辑推荐|文案)[！!。.]?$/.test(text)) {
+        continue;
+      }
+      if (/^(?:第\s*)?[零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟\d]+[章节卷部篇回册集幕]\s*.{0,24}$/.test(text) ||
+        /^[零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟\d]+\s+.{1,24}$/.test(text)) {
+        continue;
+      }
+      if (text.length < 20 && !/[。！？!?，,；;：:]/.test(text)) {
+        continue;
+      }
+      intro = intro ? `${intro} ${text}` : text;
+      if (intro.length >= LocalBookService.LOCAL_INTRO_TARGET_LENGTH) {
+        break;
+      }
+    }
+    return intro.length > 240 ? `${intro.substring(0, 240).trim()}…` : intro;
   }
 
   private static async detectTextFileCharset(path: string): Promise<string> {

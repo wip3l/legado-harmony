@@ -71,7 +71,7 @@ struct CustomTtsVoiceManagerPage {
   }
 
   build() {
-    Stack() {
+    Stack({ alignContent: Alignment.BottomEnd }) {
       Column() {
         this.titleBar()
         this.searchBar()
@@ -84,7 +84,7 @@ struct CustomTtsVoiceManagerPage {
             Text(this.searchText ? '未找到匹配音色' : '暂无自定义音色')
               .fontSize(16)
               .fontColor(this.subTextColor())
-            Text('点击右上角"+"导入原版 HttpTTS JSON')
+            Text('点击右下角“+”导入原版 HttpTTS JSON')
               .fontSize(14)
               .fontColor(this.subTextColor())
               .margin({ top: 8 })
@@ -98,7 +98,7 @@ struct CustomTtsVoiceManagerPage {
               ListItem() {
                 this.voiceListItem(voice)
               }
-              .swipeAction({
+              .swipeAction(this.selectionMode ? {} : {
                 start: {
                   builder: () => {
                     this.voiceDisableSwipeAction(voice)
@@ -134,6 +134,10 @@ struct CustomTtsVoiceManagerPage {
       .height('100%')
       .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
       .backgroundColor(this.pageColor())
+
+      if (!this.selectionMode && !this.showAddDialog && !this.isImporting && !this.isBatchOperating) {
+        this.addVoiceFloatingButton()
+      }
 
       if (this.showAddDialog) {
         this.addDialog()
@@ -526,7 +530,7 @@ struct CustomTtsVoiceManagerPage {
   }
 
   voiceKey(voice: HttpTTS): string {
-    return `${voice.id}_${voice.name || ''}_${voice.enabled ? '1' : '0'}`;
+    return `${voice.id}_${voice.name || ''}_${voice.enabled ? '1' : '0'}_${this.selectionMode ? 'select' : 'normal'}`;
   }
 
   openVoiceActions(voice: HttpTTS, event?: GestureEvent): void {
@@ -642,22 +646,36 @@ struct CustomTtsVoiceManagerPage {
           this.selectionMode ? this.exitSelectionMode() : this.enterSelectionMode();
         })
 
-      if (!this.selectionMode) {
-        Text('+')
-          .fontSize(24)
-          .fontColor(this.primaryTextColor())
-          .width(40)
-          .height(56)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            this.showAddDialog = !this.showAddDialog;
-          })
-      }
     }
     .width('100%')
     .height(56)
+    .padding({ right: 16 })
     .backgroundColor(this.cardColor())
     .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  addVoiceFloatingButton() {
+    Button({ type: ButtonType.Circle, stateEffect: true }) {
+      SymbolGlyph($r('sys.symbol.plus'))
+        .fontSize(25)
+        .fontColor([this.accentColor()])
+    }
+    .width(52)
+    .height(52)
+    .margin({ right: 22, bottom: this.navBarHeight + 22 })
+    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor()))
+    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
+      colorMode: this.appDarkMode ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+      adaptiveColor: AdaptiveColor.AVERAGE,
+      scale: 1
+    })
+    .border({ width: 0.5, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+    .shadow({ radius: 12, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 4 })
+    .accessibilityText('新增自定义音色')
+    .onClick(() => {
+      this.showAddDialog = true;
+    })
   }
 
   @Builder
@@ -892,7 +910,7 @@ struct CustomTtsVoiceManagerPage {
 
   @Builder
   addDialog() {
-    Stack({ alignContent: Alignment.TopStart }) {
+    Stack({ alignContent: Alignment.BottomEnd }) {
       Column()
         .width('100%')
         .height('100%')
@@ -918,8 +936,7 @@ struct CustomTtsVoiceManagerPage {
       .backdropBlur(22)
       .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
       .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
-      .position({ x: '100%', y: 0 })
-      .translate({ x: -188, y: this.statusBarHeight + 52 })
+      .margin({ right: 22, bottom: this.navBarHeight + 82 })
     }
     .width('100%')
     .height('100%')

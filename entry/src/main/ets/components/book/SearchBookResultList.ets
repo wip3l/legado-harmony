@@ -1,4 +1,5 @@
 import { Book, SearchBook } from '../../model/data/Book';
+import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { BookDisplayHelper } from '../../utils/BookDisplayHelper';
 import { CoverGallerySettings } from '../../utils/CoverGallerySettings';
 import { SearchBookShelfHelper } from '../../utils/SearchBookShelfHelper';
@@ -79,18 +80,7 @@ export struct SearchBookResultList {
             .margin({ left: this.showResultCover ? 12 : 0 })
             .alignItems(HorizontalAlign.Start)
 
-            Button(SearchBookShelfHelper.buttonText(book, this.shelfBookKeys, this.busyBookKeys))
-              .enabled(!SearchBookShelfHelper.isBusy(book, this.busyBookKeys))
-              .width(64)
-              .height(32)
-              .fontSize(13)
-              .borderRadius(16)
-              .backgroundColor(SearchBookShelfHelper.buttonColor(book, this.shelfBookKeys, this.busyBookKeys))
-              .fontColor('#FFFFFF')
-              .margin({ left: 12 })
-              .onClick(() => {
-                this.onToggleShelf(book);
-              })
+            this.shelfActionButton(book)
           }
           .width('100%')
           .padding(12)
@@ -131,6 +121,61 @@ export struct SearchBookResultList {
     .padding({ left: 16, right: 16 })
     .backgroundColor(this.pageColor)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  shelfActionButton(book: SearchBook) {
+    Button({ type: ButtonType.Capsule, stateEffect: true }) {
+      this.shelfActionGlyph(book)
+    }
+      .enabled(!SearchBookShelfHelper.isBusy(book, this.busyBookKeys))
+      .width(64)
+      .height(36)
+      .borderRadius(18)
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.isDarkMode(), this.cardColor))
+      .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
+        colorMode: this.isDarkMode() ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+        adaptiveColor: AdaptiveColor.AVERAGE,
+        scale: 1
+      })
+      .border({ width: 0.5, color: ThemeRuntime.glassBorderColor(this.isDarkMode()) })
+      .shadow({ radius: 9, color: ThemeRuntime.glassShadowColor(this.isDarkMode()), offsetX: 0, offsetY: 3 })
+      .accessibilityText(SearchBookShelfHelper.buttonText(book, this.shelfBookKeys, this.busyBookKeys))
+      .margin({ left: 12 })
+      .opacity(SearchBookShelfHelper.isBusy(book, this.busyBookKeys) ? 0.58 : 1)
+      .onClick(() => {
+        this.onToggleShelf(book);
+      })
+  }
+
+  @Builder
+  shelfActionGlyph(book: SearchBook) {
+    if (SearchBookShelfHelper.isBusy(book, this.busyBookKeys)) {
+      SymbolGlyph($r('sys.symbol.hourglass'))
+        .fontSize(21)
+        .fontWeight(FontWeight.Medium)
+        .fontColor([SearchBookShelfHelper.buttonColor(book, this.shelfBookKeys, this.busyBookKeys)])
+    } else if (SearchBookShelfHelper.isInShelf(book, this.shelfBookKeys)) {
+      Stack({ alignContent: Alignment.Center }) {
+        SymbolGlyph($r('sys.symbol.bookshelf'))
+          .fontSize(22)
+          .fontWeight(FontWeight.Medium)
+          .fontColor([SearchBookShelfHelper.buttonColor(book, this.shelfBookKeys, this.busyBookKeys)])
+
+        SymbolGlyph($r('sys.symbol.minus_circle_fill'))
+          .fontSize(11)
+          .fontWeight(FontWeight.Bold)
+          .fontColor([SearchBookShelfHelper.buttonColor(book, this.shelfBookKeys, this.busyBookKeys)])
+          .position({ x: 17, y: 0 })
+      }
+      .width(28)
+      .height(24)
+    } else {
+      SymbolGlyph($r('sys.symbol.bookshelf_badge_plus'))
+        .fontSize(21)
+        .fontWeight(FontWeight.Medium)
+        .fontColor([SearchBookShelfHelper.buttonColor(book, this.shelfBookKeys, this.busyBookKeys)])
+    }
   }
 
   sourceLine(book: SearchBook): string {

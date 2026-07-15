@@ -521,6 +521,7 @@ struct BookshelfPage {
   @State openingBookCoverAngle: number = 0;
   @State selectedBookUrls: string[] = [];
   @State showBookGroupPicker: boolean = false;
+  @State groupPickerSingleBookUrl: string = '';
   @State showAddBookGroupDialog: boolean = false;
   @State newBookGroupName: string = '';
   @State showBookGroupActionMenu: boolean = false;
@@ -677,7 +678,16 @@ struct BookshelfPage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      this.allBooks = SearchExplorePendingBook.filterShelfBooks(await db.getAllBooks());
+      const loadedBooks = SearchExplorePendingBook.filterShelfBooks(await db.getAllBooks());
+      for (const book of loadedBooks) {
+        if (!LocalBookService.isLocalBook(book)) continue;
+        try {
+          await LocalBookService.ensureContentIntro(book);
+        } catch (e) {
+          console.warn('生成本地书籍简介失败:', book.name, e);
+        }
+      }
+      this.allBooks = loadedBooks;
       this.shelfGroups = await db.getCustomBookGroups();
       if (this.activeShelfGroupId > 0 && !this.shelfGroups.some((group: BookGroup) => group.groupId === this.activeShelfGroupId)) {
         this.activeShelfGroupId = 0;
@@ -1050,13 +1060,6 @@ struct BookshelfPage {
             .onClick(() => this.closeBookActions())
 
           Column() {
-            this.contextActionItem($r('sys.symbol.trash'), '移出书架', '#E53935', () => {
-              if (this.pendingActionBook) {
-                const book = this.pendingActionBook;
-                this.closeBookActions();
-                this.showDeleteConfirm(book);
-              }
-            })
             if (!LocalBookService.isLocalBook(this.pendingActionBook)) {
               this.contextActionItem($r('sys.symbol.download'), '缓存', this.primaryTextColor(), () => {
                 if (this.pendingActionBook) {
@@ -1068,6 +1071,15 @@ struct BookshelfPage {
                 }
               })
             }
+            this.contextActionItem($r('sys.symbol.folder'), '移动分组', this.primaryTextColor(), () => {
+              if (this.pendingActionBook) {
+                const bookUrl = this.pendingActionBook.bookUrl;
+                this.showActionDialog = false;
+                this.pendingActionBook = null;
+                this.groupPickerSingleBookUrl = bookUrl;
+                this.showBookGroupPicker = true;
+              }
+            })
             this.contextActionItem($r('sys.symbol.bookmark'), '自定义标签', this.primaryTextColor(), () => {
               if (this.pendingActionBook) {
                 this.editingTags = BookDisplayHelper.getBookTags(this.pendingActionBook);
@@ -1083,6 +1095,13 @@ struct BookshelfPage {
                 this.enterBookMultiSelect(bookUrl);
               }
             })
+            this.contextActionItem($r('sys.symbol.trash'), '移出书架', '#E53935', () => {
+              if (this.pendingActionBook) {
+                const book = this.pendingActionBook;
+                this.closeBookActions();
+                this.showDeleteConfirm(book);
+              }
+            })
           }
           .width(158)
           .padding({ top: 6, bottom: 6 })
@@ -1093,7 +1112,7 @@ struct BookshelfPage {
           .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
           .position({
             x: this.contextMenuLeft(158),
-            y: this.contextMenuTop(LocalBookService.isLocalBook(this.pendingActionBook) ? 144 : 188)
+            y: this.contextMenuTop(LocalBookService.isLocalBook(this.pendingActionBook) ? 188 : 232)
           })
         }
         .width('100%')
@@ -1292,10 +1311,12 @@ struct BookshelfPage {
               TextInput({ placeholder: '输入标签', text: this.tagInput })
                 .height(40)
                 .layoutWeight(1)
-                .backgroundColor(this.inputColor())
+                .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
+                .backdropBlur(18)
+                .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
                 .fontColor(this.primaryTextColor())
                 .placeholderColor(this.subTextColor())
-                .borderRadius(8)
+                .borderRadius(12)
                 .onChange((value: string) => {
                   this.tagInput = value;
                 })
@@ -1314,7 +1335,9 @@ struct BookshelfPage {
               Button('取消')
                 .width('45%')
                 .height(44)
-                .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
+                .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
+                .backdropBlur(18)
+                .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
                 .fontColor(this.primaryTextColor())
                 .onClick(() => {
                   this.showTagDialog = false;
@@ -1332,13 +1355,16 @@ struct BookshelfPage {
             .justifyContent(FlexAlign.SpaceBetween)
           }
           .width('85%')
-          .padding(22)
-          .backgroundColor(this.cardColor())
-          .borderRadius(12)
+          .padding(18)
+          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+          .backdropBlur(28)
+          .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+          .shadow({ radius: 16, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 6 })
+          .borderRadius(16)
         }
         .width('100%')
         .height('100%')
-        .backgroundColor('#80000000')
+        .backgroundColor('#00000000')
         .justifyContent(FlexAlign.Center)
       }
 
@@ -1545,7 +1571,10 @@ struct BookshelfPage {
         .fontColor('#FFFFFF')
         .enabled(this.selectedBookUrls.length > 0)
         .onClick(() => {
-          if (this.selectedBookUrls.length > 0) this.showBookGroupPicker = true;
+          if (this.selectedBookUrls.length > 0) {
+            this.groupPickerSingleBookUrl = '';
+            this.showBookGroupPicker = true;
+          }
         })
     }
     .width('100%')
@@ -1562,7 +1591,7 @@ struct BookshelfPage {
         .width('100%')
         .height('100%')
         .backgroundColor(this.appDarkMode ? '#36000000' : '#18000000')
-        .onClick(() => this.showBookGroupPicker = false)
+        .onClick(() => this.closeBookGroupPicker())
 
       Column({ space: 6 }) {
         Text('移动到分组')
@@ -1773,7 +1802,13 @@ struct BookshelfPage {
     this.isBookMultiSelect = false;
     this.selectedBookUrls = [];
     this.showBookGroupPicker = false;
+    this.groupPickerSingleBookUrl = '';
     this.showBatchDeleteDialog = false;
+  }
+
+  closeBookGroupPicker(): void {
+    this.showBookGroupPicker = false;
+    this.groupPickerSingleBookUrl = '';
   }
 
   toggleSelectedBook(bookUrl: string): void {
@@ -1865,13 +1900,23 @@ struct BookshelfPage {
   }
 
   async assignSelectedBooksToGroup(groupId: number): Promise<void> {
-    if (this.selectedBookUrls.length === 0) return;
-    const count = this.selectedBookUrls.length;
+    const singleBookUrl = this.groupPickerSingleBookUrl;
+    const targetUrls = singleBookUrl ? [singleBookUrl] : [...this.selectedBookUrls];
+    if (targetUrls.length === 0) return;
+    const count = targetUrls.length;
     const db = AppDatabase.getInstance();
-    await db.updateBooksGroup(this.selectedBookUrls, groupId);
-    this.exitBookMultiSelect();
+    await db.updateBooksGroup(targetUrls, groupId);
+    if (this.isBookMultiSelect) {
+      this.exitBookMultiSelect();
+    } else {
+      this.closeBookGroupPicker();
+    }
     await this.loadBooks();
-    promptAction.showToast({ message: `已为 ${count} 本书设置分组` });
+    const groupName = groupId === 0 ? '未分组' :
+      (this.shelfGroups.find((group: BookGroup) => group.groupId === groupId)?.groupName || '指定分组');
+    promptAction.showToast({
+      message: count === 1 ? `已移动到“${groupName}”` : `已将 ${count} 本书移动到“${groupName}”`
+    });
   }
 
   async deleteSelectedBooks(): Promise<void> {
@@ -1944,14 +1989,19 @@ struct BookshelfPage {
   getLatestReadTileBook(): Book | null {
     let latest: Book | null = null;
     let latestReadTime = 0;
-    this.books.forEach((book: Book) => {
-      const readTime = Number(book.durChapterTime) || 0;
+    this.booksForShelfScope(this.shelfScope).forEach((book: Book) => {
+      const readTime = this.getBookReadTime(book);
       if (readTime > latestReadTime) {
         latest = book;
         latestReadTime = readTime;
       }
     });
     return latest;
+  }
+
+  getLatestReadTileBooks(): Book[] {
+    const latest = this.getLatestReadTileBook();
+    return latest ? [latest] : [];
   }
 
   shouldShowLatestExpandedTileBook(): boolean {
@@ -2064,12 +2114,14 @@ struct BookshelfPage {
   @Builder
   shelfTileGrid() {
     Grid() {
-      if (this.shouldShowLatestExpandedTileBook() && this.getLatestReadTileBook()) {
+      if (this.shouldShowLatestExpandedTileBook()) {
+        ForEach(this.getLatestReadTileBooks(), (book: Book) => {
         GridItem() {
-          this.shelfTileExpandedBook(this.getLatestReadTileBook() as Book)
+          this.shelfTileExpandedBook(book)
         }
         .columnStart(0)
         .columnEnd(1)
+        }, (book: Book) => `${this.shelfScope}_${book.bookUrl}`)
       }
 
       if (this.shouldUseTileGroupFolders()) {
@@ -2731,8 +2783,10 @@ struct BookshelfPage {
         .fontSize(12)
         .fontColor(this.subTextColor())
         .lineHeight(18)
-        .maxLines(this.bookshelfShowFullIntro ? 999 : 2)
+        .maxLines(LocalBookService.isLocalBook(book) ? 2 : (this.bookshelfShowFullIntro ? 999 : 2))
         .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .constraintSize({ maxHeight: LocalBookService.isLocalBook(book) ? 36 : 10000 })
+        .clip(true)
         .width('100%')
     }
 
@@ -2755,9 +2809,14 @@ struct BookshelfPage {
   }
 
   getBookIntroText(book: Book): string {
-    return (book.getDisplayIntro() || '')
+    const rawIntro = LocalBookService.isLocalBook(book) ? book.intro : book.getDisplayIntro();
+    const intro = (rawIntro || '')
       .replace(/\s+/g, ' ')
       .trim();
+    if (LocalBookService.isLocalBook(book) && intro.length > 52) {
+      return `${intro.substring(0, 52).trim()}…`;
+    }
+    return intro;
   }
 
   @Builder
@@ -2930,16 +2989,20 @@ struct BookshelfPage {
   }
 
   applyShelfScope(): void {
-    const local = this.shelfScope === 'local';
-    this.books = this.sortBooks(this.allBooks.filter((book: Book) => {
+    this.books = this.sortBooks(this.booksForShelfScope(this.shelfScope));
+    if (this.books.length === 0) {
+      this.showShelfSortMenu = false;
+    }
+  }
+
+  booksForShelfScope(scope: string): Book[] {
+    const local = scope === 'local';
+    return this.allBooks.filter((book: Book) => {
       const scopeMatches = local ? LocalBookService.isLocalBook(book) : !LocalBookService.isLocalBook(book);
       const groupMatches = this.activeShelfGroupId === 0 ||
         (this.activeShelfGroupId === -1 ? book.group <= 0 : book.group === this.activeShelfGroupId);
       return scopeMatches && groupMatches;
-    }));
-    if (this.books.length === 0) {
-      this.showShelfSortMenu = false;
-    }
+    });
   }
 
   setShelfScope(scope: string): void {
@@ -4029,6 +4092,20 @@ struct BookshelfPage {
   }
 
   @Builder
+  scopeSegmentItem(label: string, scope: string) {
+    Text(label)
+      .fontSize(13)
+      .fontWeight(this.shelfScope === scope ? FontWeight.Medium : FontWeight.Regular)
+      .fontColor(this.shelfScope === scope ? '#FFFFFF' : this.secondaryTextColor())
+      .height(26)
+      .padding({ left: 12, right: 12 })
+      .textAlign(TextAlign.Center)
+      .borderRadius(13)
+      .backgroundColor(this.shelfScope === scope ? this.accentColor() : '#00000000')
+      .onClick(() => this.setShelfScope(scope))
+  }
+
+  @Builder
   shelfLayoutButton() {
     Row() {
       SymbolGlyph($r('sys.symbol.square_grid_2x2'))
@@ -4115,22 +4192,6 @@ struct BookshelfPage {
       console.warn('保存书架布局失败:', e);
       promptAction.showToast({ message: '布局保存失败' });
     });
-  }
-
-  @Builder
-  scopeSegmentItem(label: string, scope: string) {
-    Text(label)
-      .fontSize(13)
-      .fontWeight(this.shelfScope === scope ? FontWeight.Medium : FontWeight.Regular)
-      .fontColor(this.shelfScope === scope ? '#FFFFFF' : this.secondaryTextColor())
-      .height(26)
-      .padding({ left: 12, right: 12 })
-      .textAlign(TextAlign.Center)
-      .borderRadius(13)
-      .backgroundColor(this.shelfScope === scope ? this.accentColor() : '#00000000')
-      .onClick(() => {
-        this.setShelfScope(scope);
-      })
   }
 
   @Builder

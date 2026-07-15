@@ -20,6 +20,7 @@ import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { SystemTtsReader, TtsChunk, TtsVoiceOption } from '../utils/SystemTtsReader';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
+import { ReaderReplaceRule, ReaderReplaceRuleStore } from '../utils/ReaderReplaceRuleStore';
 import { ReaderThemeHelper, ReaderThemeItem } from '../utils/ReaderThemeHelper';
 import { ReaderCustomThemeData, ReaderCustomThemeHelper, ReaderCustomThemeScheme } from '../utils/ReaderCustomThemeHelper';
 import { ReaderBackgroundImageStore } from '../utils/ReaderBackgroundImageStore';
@@ -108,6 +109,7 @@ struct ReadBookPage {
   @State menuChapterTooltipVisible: boolean = false;
   @State menuChapterConfirming: boolean = false;
   @State content: string = '';
+  @State readerReplaceRules: ReaderReplaceRule[] = [];
   @State isLoading: boolean = true;
   @State showMenu: boolean = false;
   @State showReaderActionMenu: boolean = false;
@@ -251,6 +253,7 @@ struct ReadBookPage {
   @StorageLink('readerExtendToStatusBar') @Watch('onReaderExtendToStatusBarChanged') readerExtendToStatusBar: boolean = false;
   @StorageLink('readerPreloadEnabled') @Watch('onReaderPreloadChanged') readerPreloadEnabled: boolean = true;
   @StorageLink('readerPreloadChapterCount') @Watch('onReaderPreloadChanged') readerPreloadChapterCount: number = 1;
+  @StorageLink('readerReplaceRulesUpdateTime') @Watch('onReaderReplaceRulesChanged') readerReplaceRulesUpdateTime: number = 0;
   @StorageLink('readerFontFamily') @Watch('onReaderFontChanged') readerFontFamily: string = '';
   @StorageLink('readerFontFilePath') @Watch('onReaderFontChanged') readerFontFilePath: string = '';
   @StorageLink('readerSystemFontFamily') @Watch('onReaderActiveFontChanged') readerSystemFontFamily: string = '';
@@ -348,6 +351,7 @@ struct ReadBookPage {
     }
     try {
       await this.loadReaderSettings();
+      this.readerReplaceRules = await ReaderReplaceRuleStore.load(getContext(this), true);
       this.loadTtsSettingsAndVoices();
       if (this.bookUrl) {
         await this.loadBook();
@@ -362,6 +366,9 @@ struct ReadBookPage {
     if (!this.readerEntryInitializing) {
       this.reloadReaderSettingsAfterPageShow().catch((error: Error) => {
         console.warn('恢复阅读设置失败:', error);
+      });
+      this.reloadReaderReplaceRules(true).catch((error: Error) => {
+        console.warn('恢复替换净化规则失败:', error);
       });
     }
     this.reregisterReaderFontAfterShow(0);
@@ -647,9 +654,9 @@ struct ReadBookPage {
         return;
       }
       this.currentChapterIndex = chapterIndex;
-      let loadedContent = body;
+      let loadedContent = this.applyReaderContentRules(body);
       if (body) {
-        this.content = body;
+        this.content = loadedContent;
         this.chapters = [...engine.chapters];
       } else {
         this.updatePendingVerification();
@@ -683,11 +690,12 @@ struct ReadBookPage {
     try {
       const body = await engine.reloadContent(this.currentChapterIndex);
       if (body) {
-        this.content = body;
+        const processedBody = this.applyReaderContentRules(body);
+        this.content = processedBody;
         this.chapters = [...engine.chapters];
         this.pendingRestorePageIndex = 0;
         this.currentPageIndex = 0;
-        this.paginateContent(body);
+        this.paginateContent(processedBody);
         this.preloadReaderContent();
         await this.saveReadingProgress();
         promptAction.showToast({ message: '本章已刷新' });
@@ -1880,7 +1888,7 @@ struct ReadBookPage {
               .width(18)
               .textAlign(TextAlign.Center)
 
-            Text(this.cleanChapterTitle(chapter.title))
+            Text(this.getChapterTitle(index))
               .fontSize(15)
               .fontWeight(index === this.currentChapterIndex ? FontWeight.Medium : FontWeight.Regular)
               .fontColor(this.getTocTitleColor(chapter, index))
@@ -2427,7 +2435,40 @@ struct ReadBookPage {
   getChapterTitle(chapterIndex: number = this.currentChapterIndex): string {
     if (this.chapters.length === 0) return '暂无目录';
     const chapter = this.chapters[this.clampChapterIndex(chapterIndex)];
-    return chapter ? this.cleanChapterTitle(chapter.title) : '';
+    const title = chapter ? this.cleanChapterTitle(chapter.title) : '';
+    return ReaderReplaceRuleStore.applyTitle(title, this.readerReplaceRules, this.book);
+  }
+
+  applyReaderContentRules(content: string): string {
+    return ReaderReplaceRuleStore.applyContent(content, this.readerReplaceRules, this.book);
+  }
+
+  onReaderReplaceRulesChanged(): void {
+    if (this.readerEntryInitializing) {
+      return;
+    }
+    this.reloadReaderReplaceRules(true).catch((error: Error) => {
+      console.warn('更新替换净化规则失败:', error);
+    });
+  }
+
+  async reloadReaderReplaceRules(repaginate: boolean): Promise<void> {
+    this.readerReplaceRules = await ReaderReplaceRuleStore.load(getContext(this), true);
+    this.readerPaginationCache.clear();
+    this.adjacentPaginationPreloadSerial++;
+    this.pageTurnPreviewKey = '';
+    this.pageTurnPreviewLoadingKey = '';
+    if (!repaginate || !this.book || this.chapters.length === 0) {
+      return;
+    }
+    const raw = ReadBookEngine.get().getCachedContent(this.currentChapterIndex);
+    if (!raw) {
+      return;
+    }
+    const processed = this.applyReaderContentRules(raw);
+    this.content = processed;
+    this.paginateContent(processed, this.currentChapterIndex);
+    this.refreshReaderTextRender();
   }
 
   cleanChapterTitle(title: string): string {
@@ -2474,7 +2515,7 @@ struct ReadBookPage {
     }
     const index = this.clampChapterIndex(this.currentChapterIndex);
     const chapter = this.chapters[index];
-    return `${index + 1}/${this.chapters.length} ${chapter?.title || this.getChapterTitle()}`;
+    return `${index + 1}/${this.chapters.length} ${chapter ? this.getChapterTitle(index) : this.getChapterTitle()}`;
   }
 
   getPageInfoText(): string {
@@ -5695,6 +5736,8 @@ struct ReadBookPage {
 
       this.readerFontEntryItem()
 
+      this.readerReplaceRulesEntryItem()
+
       this.readerSelectSettingItem('翻页方式', '选择滚动、滑动或点击翻页',
         this.pageTurnModeOptions(), this.pageTurnModeSelectedIndex(), (index: number) => {
           this.switchPageTurnMode(index);
@@ -5889,23 +5932,53 @@ struct ReadBookPage {
   @Builder
   readerFontEntryItem() {
     Row() {
-      Text('阅读字体')
-        .fontSize(15)
-        .fontColor(this.getTextColor())
+      Column() {
+        Text('阅读字体')
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+        Text('正文 / 标题 / 正则样式设置')
+          .fontSize(12)
+          .fontColor(this.getSubTextColor())
+          .margin({ top: 4 })
+      }
         .layoutWeight(1)
-      Text('正文 / 标题 / 正则')
-        .fontSize(13)
-        .fontColor(this.getSubTextColor())
-        .margin({ right: 8 })
-      Text('>')
+        .alignItems(HorizontalAlign.Start)
+      SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(18)
-        .fontColor(this.getSubTextColor())
+        .fontColor([this.getSubTextColor()])
     }
     .width('100%')
-    .height(40)
+    .constraintSize({ minHeight: 56 })
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
       router.pushUrl({ url: 'pages/ReaderFontSettings' });
+    })
+  }
+
+  @Builder
+  readerReplaceRulesEntryItem() {
+    Row() {
+      Column() {
+        Text('替换净化')
+          .fontSize(15)
+          .fontColor(this.getTextColor())
+        Text('管理正文与章节标题的替换规则')
+          .fontSize(12)
+          .fontColor(this.getSubTextColor())
+          .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(18)
+        .fontColor([this.getSubTextColor()])
+    }
+    .width('100%')
+    .constraintSize({ minHeight: 56 })
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      router.pushUrl({ url: 'pages/ReaderReplaceRules' });
     })
   }
 
@@ -9241,7 +9314,7 @@ struct ReadBookPage {
             this.currentChapterIndex !== sourceChapterIndex) {
             return;
           }
-          const source = this.buildPagedSourceText(targetChapterIndex, body);
+          const source = this.buildPagedSourceText(targetChapterIndex, this.applyReaderContentRules(body));
           if (!this.getCachedReaderPagination(targetChapterIndex, source)) {
             this.getOrCreateReaderPagination(targetChapterIndex, source);
           }
@@ -9703,7 +9776,7 @@ struct ReadBookPage {
   }
 
   buildAdjacentPageTurnPreview(direction: number, chapterIndex: number, body: string): PageTurnPreview {
-    const source = this.buildPagedSourceText(chapterIndex, body);
+    const source = this.buildPagedSourceText(chapterIndex, this.applyReaderContentRules(body));
     const result = this.getOrCreateReaderPagination(chapterIndex, source);
     if (result.pages.length === 0) {
       return { text: '', pageIndex: 0, chapterIndex: chapterIndex };

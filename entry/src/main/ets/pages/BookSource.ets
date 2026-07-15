@@ -109,7 +109,7 @@ struct BookSourcePage {
   }
 
   build() {
-    Stack() {
+    Stack({ alignContent: Alignment.BottomEnd }) {
       Column() {
         Row() {
           ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
@@ -124,8 +124,8 @@ struct BookSourcePage {
           Text(this.selectionMode ? '取消' : '选择')
             .fontSize(15)
             .fontColor(this.isBatchOperating ? this.subTextColor() : this.primaryTextColor())
-            .width(52)
-            .height(56)
+            .width(44)
+            .height(40)
             .textAlign(TextAlign.Center)
             .onClick(() => {
               if (this.isBatchOperating) {
@@ -142,26 +142,19 @@ struct BookSourcePage {
             Text('校验')
               .fontSize(15)
               .fontColor(this.isCheckingSources ? this.subTextColor() : this.primaryTextColor())
-              .width(52)
-              .height(56)
+              .width(44)
+              .height(40)
               .textAlign(TextAlign.Center)
+              .margin({ left: 4 })
               .onClick(() => {
                 this.openCheckOptions();
               })
 
-            Text('+')
-              .fontSize(24)
-              .fontColor(this.primaryTextColor())
-              .width(40)
-              .height(56)
-              .textAlign(TextAlign.Center)
-              .onClick(() => {
-                this.showAddDialog = !this.showAddDialog;
-              })
           }
         }
         .width('100%')
         .height(56)
+        .padding({ right: 16 })
         .backgroundColor(this.glassCardColor())
         .border({ width: 1, color: this.glassBorderColor() })
         .alignItems(VerticalAlign.Center)
@@ -345,7 +338,7 @@ struct BookSourcePage {
                   }
                 })
               }
-              .swipeAction({
+              .swipeAction(this.selectionMode ? {} : {
                 start: {
                   builder: () => {
                     this.sourceDisableSwipeAction(source)
@@ -429,6 +422,10 @@ struct BookSourcePage {
       .height('100%')
       .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
       .backgroundColor(this.pageColor())
+
+      if (!this.selectionMode && !this.showAddDialog && !this.isImporting && !this.isBatchOperating) {
+        this.addSourceFloatingButton()
+      }
 
       if (this.showAddDialog) {
         this.addSourceDropdown()
@@ -873,8 +870,32 @@ struct BookSourcePage {
   }
 
   @Builder
+  addSourceFloatingButton() {
+    Button({ type: ButtonType.Circle, stateEffect: true }) {
+      SymbolGlyph($r('sys.symbol.plus'))
+        .fontSize(25)
+        .fontColor([this.accentColor()])
+    }
+    .width(52)
+    .height(52)
+    .margin({ right: 22, bottom: this.navBarHeight + 22 })
+    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor()))
+    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
+      colorMode: this.appDarkMode ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+      adaptiveColor: AdaptiveColor.AVERAGE,
+      scale: 1
+    })
+    .border({ width: 0.5, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+    .shadow({ radius: 12, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 4 })
+    .accessibilityText('新增书源')
+    .onClick(() => {
+      this.showAddDialog = true;
+    })
+  }
+
+  @Builder
   addSourceDropdown() {
-    Stack({ alignContent: Alignment.TopStart }) {
+    Stack({ alignContent: Alignment.BottomEnd }) {
       Column()
         .width('100%')
         .height('100%')
@@ -906,8 +927,7 @@ struct BookSourcePage {
       .backdropBlur(22)
       .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
       .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
-      .position({ x: '100%', y: 0 })
-      .translate({ x: -200, y: this.statusBarHeight + 52 })
+      .margin({ right: 22, bottom: this.navBarHeight + 82 })
     }
     .width('100%')
     .height('100%')
@@ -1103,13 +1123,13 @@ struct BookSourcePage {
         .backdropBlur(18)
         .onClick(() => this.closeSourceActions())
       Column() {
+        this.contextActionItem($r('sys.symbol.magnifyingglass'), '搜索', this.primaryTextColor(),
+          () => this.openActionSourceSearch())
         if (this.actionSourceNeedsLogin()) {
           this.contextActionItem($r('sys.symbol.arrow_right_up_and_square'),
             this.actionSourceLoggedIn() ? '重新登录' : '登录',
             this.primaryTextColor(), () => this.openActionSourceLogin())
         }
-        this.contextActionItem($r('sys.symbol.magnifyingglass'), '搜索', this.primaryTextColor(),
-          () => this.openActionSourceSearch())
         this.contextActionItem($r('sys.symbol.checkmark_shield'), '校验', this.primaryTextColor(),
           () => this.checkActionSource())
         this.contextActionItem($r('sys.symbol.square_and_pencil'), '修改', this.primaryTextColor(),
@@ -2000,7 +2020,7 @@ struct BookSourcePage {
 
   sourceListItemKey(source: BookSource): string {
     const loginStatus = this.sourceNeedsLogin(source) ? (this.sourceLoggedIn(source) ? 'logged' : 'unlogged') : 'none';
-    return `${source.bookSourceUrl}_${source.bookSourceGroup || ''}_${source.enabled ? '1' : '0'}_${source.enabledExplore ? '1' : '0'}_${source.bookSourceName || ''}_${loginStatus}`;
+    return `${source.bookSourceUrl}_${source.bookSourceGroup || ''}_${source.enabled ? '1' : '0'}_${source.enabledExplore ? '1' : '0'}_${source.bookSourceName || ''}_${loginStatus}_${this.selectionMode ? 'select' : 'normal'}`;
   }
 
   isSourceSelected(bookSourceUrl: string): boolean {

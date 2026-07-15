@@ -137,6 +137,7 @@ struct SettingsPage {
           Column() {
             this.typographyStepper()
             this.readerFontEntryItem()
+            this.readerReplaceRulesEntryItem()
           }
           .width('calc(100% - 24vp)')
           .margin({ left: 12, right: 12 })
@@ -1515,26 +1516,58 @@ struct SettingsPage {
   @Builder
   readerFontEntryItem() {
     Row() {
-      Text('阅读字体')
-        .fontColor(this.primaryTextColor())
-        .fontSize(16)
+      Column({ space: 4 }) {
+        Text('阅读字体')
+          .fontColor(this.primaryTextColor())
+          .fontSize(16)
+        Text('正文 / 标题 / 正则样式设置')
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+      }
         .layoutWeight(1)
-      Text('正文 / 标题 / 正则')
-        .fontSize(13)
-        .fontColor(this.subTextColor())
-        .margin({ right: 8 })
+        .alignItems(HorizontalAlign.Start)
       SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(18)
         .fontColor([this.subTextColor()])
     }
     .width('calc(100% - 32vp)')
-    .height(56)
-    .padding({ left: 0, right: 0 })
+    .constraintSize({ minHeight: 62 })
+    .padding({ left: 0, right: 0, top: 8, bottom: 8 })
     .margin({ left: 16, right: 16 })
     .backgroundColor(this.cardColor())
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
       router.pushUrl({ url: 'pages/ReaderFontSettings' });
+    })
+  }
+
+  @Builder
+  readerReplaceRulesEntryItem() {
+    Row() {
+      Column({ space: 4 }) {
+        Text('替换净化')
+          .fontColor(this.primaryTextColor())
+          .fontSize(16)
+        Text('管理正文与章节标题的替换规则')
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(18)
+        .fontColor([this.subTextColor()])
+    }
+    .width('calc(100% - 32vp)')
+    .constraintSize({ minHeight: 62 })
+    .padding({ left: 0, right: 0, top: 8, bottom: 8 })
+    .margin({ left: 16, right: 16 })
+    .border({ width: { top: 0.5 }, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+    .backgroundColor(this.cardColor())
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      router.pushUrl({ url: 'pages/ReaderReplaceRules' });
     })
   }
 

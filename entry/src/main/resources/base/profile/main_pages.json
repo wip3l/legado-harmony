@@ -20,6 +20,7 @@
     "pages/ThemeSettings",
     "pages/FontSettings",
     "pages/ReaderFontSettings",
+    "pages/ReaderReplaceRules",
     "pages/CoverGalleryManager",
     "pages/About",
     "pages/VerifyWeb"
