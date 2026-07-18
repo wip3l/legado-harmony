@@ -32,6 +32,9 @@ struct OtherSettingsPage {
             this.menuItem('主题与外观', '内置主题 / 阅读背景 / 气泡 / 导航图标', true, () => {
               router.pushUrl({ url: 'pages/ThemeSettings' });
             })
+            this.menuItem('磨砂玻璃', '预设 / 模糊 / 透明度 / 边框 / 阴影', true, () => {
+              router.pushUrl({ url: 'pages/GlassSettings' });
+            })
             this.menuItem('字体设置', '全局字体 / 自定义字体', true, () => {
               router.pushUrl({ url: 'pages/FontSettings' });
             })
@@ -49,9 +52,10 @@ struct OtherSettingsPage {
         .padding({ bottom: 32 })
       }
       .layoutWeight(1)
+      .align(Alignment.TopStart)
     }
     .width('100%')
-    .height('100%')
+    .height('100%').justifyContent(FlexAlign.Start)
     .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])

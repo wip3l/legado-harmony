@@ -271,6 +271,8 @@ export struct ColorCodePicker {
             .padding({ left: 0, right: 0 })
             .constraintSize({ minWidth: 112, maxWidth: 140 })
             .optionBgColor(Color.Transparent)
+            .optionFontColor(this.primaryTextColor())
+            .selectedOptionFontColor(this.accentColor)
             .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
             .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
             .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)

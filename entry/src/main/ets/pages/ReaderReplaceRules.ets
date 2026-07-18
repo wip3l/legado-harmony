@@ -81,14 +81,10 @@ struct ReaderReplaceRulesPage {
         .width(52)
         .height(52)
         .margin({ right: 22, bottom: this.navBarHeight + 22 })
-        .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor()))
-        .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
-          colorMode: this.appDarkMode ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-          adaptiveColor: AdaptiveColor.AVERAGE,
-          scale: 1
-        })
-        .border({ width: 0.5, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-        .shadow({ radius: 12, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 4 })
+        .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor(), 'button'))
+        .backdropBlur(ThemeRuntime.glassBlur('button', 12))
+        .border({ width: ThemeRuntime.glassBorderWidth('button'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'button') })
+        .shadow({ radius: ThemeRuntime.glassShadowRadius('button'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'button'), offsetX: ThemeRuntime.glassShadowOffsetX('button'), offsetY: ThemeRuntime.glassShadowOffsetY('button') })
         .accessibilityText('新增替换净化规则')
         .onClick(() => this.openNewRule())
       }
@@ -261,7 +257,7 @@ struct ReaderReplaceRulesPage {
     .padding(14)
     .backgroundColor(this.cardColor())
     .borderRadius(14)
-    .border({ width: 0.5, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+    .border({ width: ThemeRuntime.glassBorderWidth(), color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
     .opacity(rule.enabled ? 1 : 0.5)
     .gesture(
       LongPressGesture({ repeat: false })
@@ -549,7 +545,7 @@ struct ReaderReplaceRulesPage {
         .width('100%')
         .height('100%')
         .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(18)
+        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
         .onClick(() => this.closeRuleActions())
       Column() {
         this.contextActionItem($r('sys.symbol.square_and_pencil'), '修改', this.primaryTextColor(), () => {
@@ -577,11 +573,11 @@ struct ReaderReplaceRulesPage {
       }
       .width(158)
       .padding({ top: 6, bottom: 6 })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-      .borderRadius(14)
-      .backdropBlur(22)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .position({ x: this.contextMenuLeft(158), y: this.contextMenuTop(188) })
     }
     .width('100%')

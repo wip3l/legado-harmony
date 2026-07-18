@@ -169,9 +169,11 @@ struct TtsSettingsPage {
           .width('100%')
         }
         .layoutWeight(1)
+        .align(Alignment.TopStart)
       }
       .width('100%')
       .height('100%')
+      .justifyContent(FlexAlign.Start)
       .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
       .backgroundColor(this.pageColor())
 
@@ -311,11 +313,11 @@ struct TtsSettingsPage {
       .width('calc(100% - 24vp)')
       .constraintSize({ maxWidth: 560 })
       .padding({ top: 6, bottom: 6 })
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-      .borderRadius(16)
-      .backdropBlur(28)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
       .position({ x: 12, y: this.statusBarHeight + 108 })
     }
     .width('100%')

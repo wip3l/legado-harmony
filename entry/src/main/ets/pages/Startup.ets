@@ -19,13 +19,14 @@ struct StartupPage {
     }
     ReaderSystemFontHelper.applyToStorage(this.getUIContext());
     ReaderFontBootstrap.registerFromSettings(getContext(this), this.getUIContext(), 'startup-aboutToAppear');
+    const startupDelay = RecentReadShortcut.isPending() || this.hasPendingBookSourceImport() ? 0 : 650;
     this.jumpTimer = setTimeout(() => {
       this.jumpTimer = -1;
       hilog.info(0x0000, 'testTag', 'StartupTrace replace Index %{public}d', Date.now());
       this.openStartupTarget().catch((e: Error) => {
         console.error('打开启动目标失败:', e);
       });
-    }, 650);
+    }, startupDelay);
   }
 
   aboutToDisappear(): void {
@@ -36,21 +37,27 @@ struct StartupPage {
   }
 
   async openStartupTarget(): Promise<void> {
+    if (this.hasPendingBookSourceImport()) {
+      await router.replaceUrl({ url: 'pages/BookSource' });
+      return;
+    }
     if (!RecentReadShortcut.isPending()) {
       await this.replaceToIndex();
       return;
     }
     try {
       const opened = await RecentReadShortcut.openPending(getContext(this), true);
-      RecentReadShortcut.consume();
       if (!opened) {
         await this.replaceToIndex();
       }
     } catch (e) {
-      RecentReadShortcut.consume();
       console.error('打开最近阅读快捷项失败:', e);
       await this.replaceToIndex();
     }
+  }
+
+  hasPendingBookSourceImport(): boolean {
+    return !!AppStorage.get<string>('pendingBookSourceImportUri');
   }
 
   async replaceToIndex(): Promise<void> {

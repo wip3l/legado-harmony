@@ -252,6 +252,7 @@ export class BookSource {
   customOrder: number = 0;
   enabled: boolean = true;
   enabledExplore: boolean = true;
+  isLocked: boolean = false;
   weight: number = 0;
   concurrentRate: string = '';
 

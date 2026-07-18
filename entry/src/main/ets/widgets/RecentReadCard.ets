@@ -91,28 +91,31 @@ struct RecentReadCard {
   @Builder
   header() {
     Row() {
-      Column() {
+      Row({ space: 6 }) {
         Text('最近阅读')
           .fontSize(17)
           .fontWeight(FontWeight.Bold)
           .fontColor(this.primaryTextColor())
           .maxLines(1)
-        Text(this.updatedAt ? `更新 ${this.updatedAt}` : '轻页书架')
-          .fontSize(11)
+
+        Text(this.updatedAt ? `更新 ${this.updatedAt}` : '')
+          .fontSize(10)
           .fontColor(this.secondaryTextColor())
-          .margin({ top: 2 })
           .maxLines(1)
       }
       .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
+      .alignItems(VerticalAlign.Center)
 
-      Button('刷新', { type: ButtonType.Capsule })
-        .fontSize(12)
-        .fontColor(this.accentColor)
+      Button({ type: ButtonType.Circle, stateEffect: true }) {
+        SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+          .fontSize(20)
+          .fontWeight(FontWeight.Medium)
+          .fontColor([this.accentColor])
+      }
+        .width(30)
         .height(30)
-        .padding({ left: 10, right: 10 })
-        .backgroundColor(this.accentBackgroundColor)
-        .stateEffect(true)
+        .backgroundColor(Color.Transparent)
+        .accessibilityText('刷新最近阅读')
         .onClick(() => {
           postCardAction(this, {
             action: 'message',
@@ -149,33 +152,39 @@ struct RecentReadCard {
 
   @Builder
   bookTile(name: string, progress: string, bookUrl: string, cover: string, accent: string) {
-    Stack({ alignContent: Alignment.BottomStart }) {
-      this.coverBackground(name, cover, accent)
-
-      Column() {
-        Text(name || '未命名书籍')
-          .fontSize(12)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-        Text(progress || '继续阅读')
-          .fontSize(9)
-          .fontColor('#E8EEF7')
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 3 })
+    Column() {
+      Stack() {
+        this.coverBackground(name, cover, accent)
       }
-      .width('100%')
-      .padding({ left: 7, right: 7, top: 7, bottom: 7 })
-      .backgroundColor('#66000000')
-      .alignItems(HorizontalAlign.Start)
+      .width(48)
+      .height(68)
+      .borderRadius(6)
+      .clip(true)
+
+      Text(name || '未命名书籍')
+        .width('100%')
+        .fontSize(11)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.primaryTextColor())
+        .textAlign(TextAlign.Center)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ top: 4 })
+
+      Text(progress || '继续阅读')
+        .width('100%')
+        .fontSize(8)
+        .fontColor(this.secondaryTextColor())
+        .textAlign(TextAlign.Center)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ top: 1 })
     }
     .layoutWeight(1)
     .height(104)
-    .borderRadius(8)
-    .clip(true)
+    .padding({ left: 3, right: 3, top: 3, bottom: 3 })
+    .alignItems(HorizontalAlign.Center)
+    .justifyContent(FlexAlign.Start)
     .onClick(() => {
       postCardAction(this, new CardRouteAction(bookUrl));
     })

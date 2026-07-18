@@ -10,9 +10,12 @@ export const OPEN_BOOK_SHORTCUT_ACTION = 'open_book';
 
 class RecentReadRouteParams {
   bookUrl: string = '';
+  shortcutEntry: string = 'true';
+  shortcutReplace: string = 'false';
 
-  constructor(bookUrl: string) {
+  constructor(bookUrl: string, replace: boolean = false) {
     this.bookUrl = bookUrl;
+    this.shortcutReplace = replace ? 'true' : 'false';
   }
 }
 
@@ -53,9 +56,11 @@ export class RecentReadShortcut {
     const action = AppStorage.get<string>('launchShortcutAction') || '';
     const bookUrl = AppStorage.get<string>('launchShortcutBookUrl') || '';
     if (action === OPEN_BOOK_SHORTCUT_ACTION && bookUrl) {
+      RecentReadShortcut.consume();
       return await RecentReadShortcut.openBook(bookUrl, replaceWhenFallback);
     }
     if (action === RECENT_READ_SHORTCUT_ACTION) {
+      RecentReadShortcut.consume();
       return await RecentReadShortcut.openRecentRead(context, replaceWhenFallback);
     }
     return false;
@@ -70,7 +75,7 @@ export class RecentReadShortcut {
       return false;
     }
 
-    const target = new RouteTarget('pages/ReadBook', new RecentReadRouteParams(book.bookUrl));
+    const target = new RouteTarget('pages/ReadBook', new RecentReadRouteParams(book.bookUrl, replaceWhenFallback));
     return await RecentReadShortcut.navigate(target, replaceWhenFallback);
   }
 
@@ -78,7 +83,7 @@ export class RecentReadShortcut {
     if (!bookUrl) {
       return false;
     }
-    const target = new RouteTarget('pages/ReadBook', new RecentReadRouteParams(bookUrl));
+    const target = new RouteTarget('pages/ReadBook', new RecentReadRouteParams(bookUrl, replaceWhenFallback));
     return await RecentReadShortcut.navigate(target, replaceWhenFallback);
   }
 

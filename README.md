@@ -70,6 +70,8 @@
 
 主题扩展方式、字段优先级和资源规范见 [主题开发指南](docs/theme-development.md)。
 
+书源 JSON 结构、请求格式、解析语法、字段兼容性和调试流程见 [书源开发文档](docs/book-source-development.md)。
+
 ## 架构概览
 
 项目主体位于 `entry` 模块，核心代码在 `entry/src/main/ets` 下。

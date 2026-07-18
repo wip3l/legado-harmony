@@ -49,6 +49,8 @@ import {
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
 
+const TOC_WINDOW_PAGE_SIZE = 72;
+
 interface ReadTextSlice {
   text: string;
   start: number;
@@ -103,6 +105,11 @@ struct ReadBookPage {
   @State bookUrl: string = '';
   @State book: Book | null = null;
   @State chapters: BookChapter[] = [];
+  @State tocVisibleChapters: BookChapter[] = [];
+  @State tocWindowStart: number = 0;
+  @State tocQuickJumpArmed: boolean = false;
+  @State tocQuickJumpInputVisible: boolean = false;
+  @State tocQuickJumpDraft: string = '';
   @State currentChapterIndex: number = 0;
   @State menuChapterPreviewIndex: number = 0;
   @State menuChapterSliderActive: boolean = false;
@@ -161,6 +168,8 @@ struct ReadBookPage {
   @State ttsSleepTimerRemainingSeconds: number = 0;
   private pendingRestorePageIndex: number = -1;
   private tocScroller: Scroller = new Scroller();
+  private tocLoadingPreviousPage: boolean = false;
+  private tocLoadingNextPage: boolean = false;
   private bookmarkScroller: ListScroller = new ListScroller();
   private ttsReader: SystemTtsReader = new SystemTtsReader();
   private ttsAutoContinue: boolean = false;
@@ -193,6 +202,9 @@ struct ReadBookPage {
   private readerPaginationCache: Map<string, ReaderPaginationResult> = new Map();
   private cachedRegexRulesKey: string = '';
   private cachedRegexRules: ReaderRegexFontRule[] = [];
+  private cachedDocumentRegexSource: string = '';
+  private cachedDocumentRegexRulesKey: string = '';
+  private cachedDocumentRegexSlices: ReadTextSlice[] = [];
   private adjacentPaginationPreloadSerial: number = 0;
   private pageTurnPreviewKey: string = '';
   private pageTurnPreviewLoadingKey: string = '';
@@ -319,6 +331,9 @@ struct ReadBookPage {
   private readerFontChangeSerial: number = 0;
   private readingProgressSaveQueue: Promise<void> = Promise.resolve();
   private readerExitProgressSaved: boolean = false;
+  private openedFromShortcut: boolean = false;
+  private shortcutReplacedPreviousPage: boolean = false;
+  private shortcutRoutingActive: boolean = false;
   private readerEntryInitializing: boolean = true;
   private readerSettingsReloadSerial: number = 0;
   @State shelfOpeningEntryOpacity: number = 1;
@@ -327,11 +342,14 @@ struct ReadBookPage {
   private openedWithShelfAnimation: boolean = false;
 
   async aboutToAppear() {
+    this.shortcutRoutingActive = true;
     this.readerEntryInitializing = true;
     this.enterReaderImmersive();
     this.updateVolumeKeySubscription();
     const params = router.getParams() as Record<string, string>;
     this.openedWithShelfAnimation = !!params && params['shelfBookOpening'] === 'true';
+    this.openedFromShortcut = !!params && params['shortcutEntry'] === 'true';
+    this.shortcutReplacedPreviousPage = !!params && params['shortcutReplace'] === 'true';
     if (this.openedWithShelfAnimation) {
       this.shelfOpeningEntryOpacity = 0.86;
       this.shelfOpeningEntryScale = 0.985;
@@ -363,6 +381,7 @@ struct ReadBookPage {
   }
 
   onPageShow(): void {
+    this.shortcutRoutingActive = true;
     if (!this.readerEntryInitializing) {
       this.reloadReaderSettingsAfterPageShow().catch((error: Error) => {
         console.warn('恢复阅读设置失败:', error);
@@ -424,6 +443,7 @@ struct ReadBookPage {
   }
 
   aboutToDisappear() {
+    this.shortcutRoutingActive = false;
     if (this.shelfOpeningEntryTimer >= 0) {
       clearTimeout(this.shelfOpeningEntryTimer);
       this.shelfOpeningEntryTimer = -1;
@@ -441,19 +461,26 @@ struct ReadBookPage {
   }
 
   onLaunchShortcutChanged(): void {
+    if (!this.shortcutRoutingActive) {
+      return;
+    }
     this.openPendingShortcut();
+  }
+
+  onPageHide(): void {
+    this.shortcutRoutingActive = false;
   }
 
   async openPendingShortcut(): Promise<void> {
     if (!RecentReadShortcut.isPending()) {
       return;
     }
-    await this.saveReadingProgress();
+    this.saveReadingProgress().catch((error: Error) => {
+      console.warn('快捷入口切换前保存进度失败:', error);
+    });
     try {
-      await RecentReadShortcut.openPending(getContext(this));
-      RecentReadShortcut.consume();
+      await RecentReadShortcut.openPending(getContext(this), true);
     } catch (e) {
-      RecentReadShortcut.consume();
       console.error('打开最近阅读快捷项失败:', e);
     }
   }
@@ -593,6 +620,8 @@ struct ReadBookPage {
     this.contentLoadSerial++;
     this.content = '';
     this.chapters = [];
+    this.tocVisibleChapters = [];
+    this.tocWindowStart = 0;
     this.currentChapterIndex = 0;
     this.contentPages = [];
     this.contentPageStarts = [];
@@ -1183,13 +1212,13 @@ struct ReadBookPage {
         .layoutWeight(1)
 
       Row({ space: -6 }) {
-        if (this.chapters.length > 0) {
+        if (this.book && !LocalBookService.isLocalBook(this.book) && this.chapters.length > 0) {
           this.readerRoundMenuButton($r('sys.symbol.arrow_clockwise'), '刷新本章', () => {
             this.hideReaderPanels();
             this.refreshCurrentChapter();
           })
         }
-        if (this.book && this.book.origin !== 'local') {
+        if (this.book && !LocalBookService.isLocalBook(this.book)) {
           this.readerRoundMenuButton($r('sys.symbol.arrow_left_arrow_right'), '换源', () => {
             this.openChangeSourceDialog();
           })
@@ -1589,15 +1618,11 @@ struct ReadBookPage {
       .width('100%')
       .height(56)
       .padding({ left: 4, right: 4 })
-      .borderRadius(28)
-      .backgroundColor(Color.Transparent)
-      .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
-        colorMode: this.isReaderThemeDark() ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-        adaptiveColor: AdaptiveColor.AVERAGE,
-        scale: 1
-      })
-      .border({ width: 0.5, color: this.readerGlassBorderColor() })
-      .shadow({ radius: 14, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 4 })
+      .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
+      .backgroundColor(this.readerGlassPanelColor())
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
 
       Row() {
         this.readerFloatingIconMenuItem($r('sys.symbol.list_bullet'), false, () => {
@@ -1616,15 +1641,11 @@ struct ReadBookPage {
       .width('100%')
       .height(56)
       .padding({ left: 8, right: 8 })
-      .borderRadius(28)
-      .backgroundColor(Color.Transparent)
-      .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
-        colorMode: this.isReaderThemeDark() ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-        adaptiveColor: AdaptiveColor.AVERAGE,
-        scale: 1
-      })
-      .border({ width: 0.5, color: this.readerGlassBorderColor() })
-      .shadow({ radius: 14, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 4 })
+      .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
+      .backgroundColor(this.readerGlassPanelColor())
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
     }
     .width('94%')
     .padding({ bottom: 14 })
@@ -1667,7 +1688,7 @@ struct ReadBookPage {
         .width('100%')
         .height('100%')
         .backgroundColor(this.isReaderThemeDark() ? '#52000000' : '#1AFFFFFF')
-        .backdropBlur(12)
+        .backdropBlur(ThemeRuntime.glassBlur('button', 12))
         .onClick(() => {
           this.showToc = false;
         })
@@ -1722,7 +1743,7 @@ struct ReadBookPage {
             })
         }
         .width('100%')
-        .padding({ left: 20, right: 16, top: 20, bottom: 16 })
+        .padding({ left: 20, right: 16, top: 12, bottom: 10 })
         .alignItems(VerticalAlign.Center)
 
         Row() {
@@ -1774,14 +1795,14 @@ struct ReadBookPage {
         }
       }
       .width('92%')
-      .height('84%')
-      .borderRadius(28)
+      .height('81%')
+      .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
       .clip(true)
       .backgroundColor(this.readerGlassPanelColor())
-      .backdropBlur(22)
-      .border({ width: 0.5, color: this.readerGlassBorderColor() })
-      .shadow({ radius: 24, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 8 })
-      .position({ x: '4%', y: '5%' })
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
+      .position({ x: '4%', y: '8%' })
 
       if (!this.supportsReaderImmersiveMaterial()) {
         Row() {
@@ -1803,15 +1824,11 @@ struct ReadBookPage {
         .width('94%')
         .height(56)
         .padding({ left: 8, right: 8 })
-        .borderRadius(28)
-        .backgroundColor(Color.Transparent)
-        .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
-          colorMode: this.isReaderThemeDark() ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-          adaptiveColor: AdaptiveColor.AVERAGE,
-          scale: 1
-        })
-        .border({ width: 0.5, color: this.readerGlassBorderColor() })
-        .shadow({ radius: 14, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 4 })
+        .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
+        .backgroundColor(this.readerGlassPanelColor())
+        .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+        .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
+        .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
         .position({ x: '3%', y: '100%' })
         .translate({ y: -70 })
       }
@@ -1845,16 +1862,39 @@ struct ReadBookPage {
         .onClick(() => {
           this.scrollTocToChapter(this.chapters.length - 1, ScrollAlign.END);
         })
-      Text(`当前 ${Math.min(this.currentChapterIndex + 1, this.chapters.length)}/${this.chapters.length}`)
-        .fontSize(12)
-        .fontColor(this.getTextColor())
-        .padding({ left: 12, right: 12, top: 7, bottom: 7 })
-        .borderRadius(16)
-        .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
-        .accessibilityText('回到当前章节')
-        .onClick(() => {
-          this.scrollTocToCurrentChapter();
-        })
+      if (this.tocQuickJumpInputVisible) {
+        TextInput({ text: this.tocQuickJumpDraft, placeholder: `1-${this.chapters.length}` })
+          .type(InputType.Number)
+          .enterKeyType(EnterKeyType.Go)
+          .key('tocQuickJumpChapterInput')
+          .defaultFocus(true)
+          .fontSize(13)
+          .fontColor(this.getTextColor())
+          .textAlign(TextAlign.Center)
+          .width(92)
+          .height(34)
+          .padding({ left: 8, right: 8 })
+          .borderRadius(17)
+          .backgroundColor(this.isReaderThemeDark() ? '#2BFFFFFF' : '#14000000')
+          .accessibilityText('输入目标章节序号，按回车定位')
+          .onChange((value: string) => {
+            this.tocQuickJumpDraft = value.replace(/[^0-9]/g, '').substring(0, 6);
+          })
+          .onSubmit(() => {
+            this.submitTocQuickJump();
+          })
+      } else {
+        Text(`当前 ${Math.min(this.currentChapterIndex + 1, this.chapters.length)}/${this.chapters.length}`)
+          .fontSize(12)
+          .fontColor(this.getTextColor())
+          .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+          .borderRadius(16)
+          .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
+          .accessibilityText(this.tocQuickJumpArmed ? '再次点击输入目标章节' : '回到当前章节')
+          .onClick(() => {
+            this.handleTocCurrentPositionClick();
+          })
+      }
       ImmersiveBackButton({
         icon: $r('sys.symbol.arrow_clockwise'),
         iconColor: this.getTextColor(),
@@ -1878,20 +1918,22 @@ struct ReadBookPage {
 
   @Builder
   tocChapterList() {
-    List({ space: 0, scroller: this.tocScroller, initialIndex: this.getTocInitialIndex() }) {
-      ForEach(this.chapters, (chapter: BookChapter, index: number) => {
+    List({ space: 0, scroller: this.tocScroller }) {
+      ForEach(this.tocVisibleChapters, (chapter: BookChapter, localIndex: number) => {
         ListItem() {
           Row({ space: 10 }) {
-            Text(index === this.currentChapterIndex ? '•' : '·')
-              .fontSize(index === this.currentChapterIndex ? 22 : 18)
-              .fontColor(index === this.currentChapterIndex ? this.accentColor() : this.getSubTextColor())
+            Text(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ? '•' : '·')
+              .fontSize(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ? 22 : 18)
+              .fontColor(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ?
+                this.accentColor() : this.getSubTextColor())
               .width(18)
               .textAlign(TextAlign.Center)
 
-            Text(this.getChapterTitle(index))
+            Text(this.getChapterTitle(this.tocGlobalIndex(localIndex)))
               .fontSize(15)
-              .fontWeight(index === this.currentChapterIndex ? FontWeight.Medium : FontWeight.Regular)
-              .fontColor(this.getTocTitleColor(chapter, index))
+              .fontWeight(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ?
+                FontWeight.Medium : FontWeight.Regular)
+              .fontColor(this.getTocTitleColor(chapter, this.tocGlobalIndex(localIndex)))
               .maxLines(2)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .layoutWeight(1)
@@ -1907,10 +1949,11 @@ struct ReadBookPage {
           }
           .width('100%')
           .padding({ left: 14, right: 16, top: 14, bottom: 14 })
-          .backgroundColor(index === this.currentChapterIndex ? this.tocSelectedBackgroundColor() : Color.Transparent)
+          .backgroundColor(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ?
+            this.tocSelectedBackgroundColor() : Color.Transparent)
           .border({ width: { bottom: 0.5 }, color: this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000' })
           .onClick(async () => {
-            const targetChapterIndex = index;
+            const targetChapterIndex = this.tocGlobalIndex(localIndex);
             this.currentPageIndex = 0;
             this.pendingRestorePageIndex = 0;
             this.showToc = false;
@@ -1919,12 +1962,15 @@ struct ReadBookPage {
             await this.saveReadingProgress();
           })
         }
-      })
+      }, (chapter: BookChapter, localIndex: number) =>
+        `${this.tocWindowStart + localIndex}_${chapter.url || chapter.title}`)
     }
     .layoutWeight(1)
     .width('100%')
     .scrollBar(BarState.Auto)
     .scrollBarColor(this.isReaderThemeDark() ? '#668A8F98' : '#667A6F63')
+    .onReachStart(() => this.loadPreviousTocPage())
+    .onReachEnd(() => this.loadNextTocPage())
   }
 
   @Builder
@@ -2118,18 +2164,19 @@ struct ReadBookPage {
         this.isTtsSpeaking ? '停止朗读' : '开始朗读',
         () => this.toggleTtsReading()
       )
-      this.readerActionMenuItem(
-        $r('sys.symbol.arrow_clockwise'),
-        '刷新本章',
-        () => this.refreshCurrentChapter(),
-        this.chapters.length > 0
-      )
-      this.readerActionMenuItem(
-        $r('sys.symbol.arrow_left_arrow_right'),
-        '换源',
-        () => this.openChangeSourceDialog(),
-        this.book !== null && this.book.origin !== 'local'
-      )
+      if (this.book && !LocalBookService.isLocalBook(this.book)) {
+        this.readerActionMenuItem(
+          $r('sys.symbol.arrow_clockwise'),
+          '刷新本章',
+          () => this.refreshCurrentChapter(),
+          this.chapters.length > 0
+        )
+        this.readerActionMenuItem(
+          $r('sys.symbol.arrow_left_arrow_right'),
+          '换源',
+          () => this.openChangeSourceDialog()
+        )
+      }
       if (this.readerSourceNeedsLogin()) {
         this.readerActionMenuItem(
           $r('sys.symbol.checkmark_shield'),
@@ -2160,10 +2207,10 @@ struct ReadBookPage {
     .width(220)
     .padding({ left: 8, right: 8, top: 6, bottom: 6 })
     .backgroundColor(this.readerGlassPanelColor())
-    .borderRadius(22)
-    .backdropBlur(22)
-    .border({ width: 0.5, color: this.readerGlassBorderColor() })
-    .shadow({ radius: 18, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 6 })
+    .borderRadius(ThemeRuntime.glassCornerRadius(22, 'panel'))
+    .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+    .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
+    .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
     .position({ x: '100%', y: 0 })
     .translate({ x: -232, y: this.getTopControlSafePadding() + 72 })
     .onClick(() => {
@@ -2370,7 +2417,7 @@ struct ReadBookPage {
         .width('100%')
         .height('100%')
         .backgroundColor(this.isReaderThemeDark() ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(18)
+        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
         .onClick(() => {
           this.closeBookmarkActionMenu();
         })
@@ -2394,10 +2441,10 @@ struct ReadBookPage {
       .width(148)
       .padding({ top: 6, bottom: 6 })
       .backgroundColor(this.readerGlassPanelColor())
-      .borderRadius(14)
-      .backdropBlur(22)
-      .border({ width: 1, color: this.readerGlassBorderColor() })
-      .shadow({ radius: 18, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 7 })
+      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .position({ x: this.bookmarkActionMenuLeft(148), y: this.bookmarkActionMenuTop(100) })
     }
     .width('100%')
@@ -3198,7 +3245,11 @@ struct ReadBookPage {
 
   openTocPanel(): void {
     this.tocPanelTab = 0;
+    this.tocQuickJumpArmed = false;
+    this.tocQuickJumpInputVisible = false;
+    this.tocQuickJumpDraft = '';
     this.cancelBookmarkMultiSelect();
+    this.setTocWindowAround(this.currentChapterIndex, ScrollAlign.CENTER);
     this.showToc = true;
     this.showMenu = false;
     this.scrollTocToCurrentChapter(false);
@@ -3207,6 +3258,7 @@ struct ReadBookPage {
 
   async refreshTocFromPanel(): Promise<void> {
     await this.retryFetchChapters();
+    this.setTocWindowAround(this.currentChapterIndex, ScrollAlign.CENTER);
     this.scrollTocToCurrentChapter(false);
     promptAction.showToast({ message: '目录已刷新' });
   }
@@ -3293,8 +3345,8 @@ struct ReadBookPage {
     .padding({ left: 14, right: 14 })
     .borderRadius(20)
     .backgroundColor(this.readerGlassPanelColor())
-    .border({ width: 0.5, color: this.readerGlassBorderColor() })
-    .shadow({ radius: 12, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 3 })
+    .border({ width: ThemeRuntime.glassBorderWidth(), color: this.readerGlassBorderColor() })
+    .shadow({ radius: ThemeRuntime.glassShadowRadius(), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX(), offsetY: ThemeRuntime.glassShadowOffsetY() })
     .position({ x: '50%', y: 0 })
     .translate({ x: -90, y: this.getTopControlSafePadding() + 8 })
     .opacity(Math.min(1, this.bookmarkPullOffsetY / 36))
@@ -3821,11 +3873,67 @@ struct ReadBookPage {
     return value || 'zh-CN';
   }
 
-  getTocInitialIndex(): number {
+  tocGlobalIndex(localIndex: number): number {
+    return this.tocWindowStart + localIndex;
+  }
+
+  setTocWindowAround(index: number, align: ScrollAlign): number {
+    this.tocLoadingPreviousPage = false;
+    this.tocLoadingNextPage = false;
     if (this.chapters.length === 0) {
+      this.tocWindowStart = 0;
+      this.tocVisibleChapters = [];
       return 0;
     }
-    return Math.max(0, Math.min(this.currentChapterIndex - 4, this.chapters.length - 1));
+    const target = Math.max(0, Math.min(index, this.chapters.length - 1));
+    let start = target - Math.floor(TOC_WINDOW_PAGE_SIZE / 2);
+    if (align === ScrollAlign.START) {
+      start = target;
+    } else if (align === ScrollAlign.END) {
+      start = target - TOC_WINDOW_PAGE_SIZE + 1;
+    }
+    start = Math.max(0, Math.min(start, Math.max(0, this.chapters.length - TOC_WINDOW_PAGE_SIZE)));
+    const end = Math.min(this.chapters.length, start + TOC_WINDOW_PAGE_SIZE);
+    this.tocWindowStart = start;
+    this.tocVisibleChapters = this.chapters.slice(start, end);
+    return target - start;
+  }
+
+  loadNextTocPage(): void {
+    if (this.tocLoadingNextPage) {
+      return;
+    }
+    const loadedEnd = this.tocWindowStart + this.tocVisibleChapters.length;
+    if (loadedEnd >= this.chapters.length) {
+      return;
+    }
+    this.tocLoadingNextPage = true;
+    const nextEnd = Math.min(this.chapters.length, loadedEnd + TOC_WINDOW_PAGE_SIZE);
+    this.tocVisibleChapters = this.tocVisibleChapters.concat(this.chapters.slice(loadedEnd, nextEnd));
+    setTimeout(() => {
+      this.tocLoadingNextPage = false;
+    }, 0);
+  }
+
+  loadPreviousTocPage(): void {
+    if (this.tocLoadingPreviousPage || this.tocWindowStart <= 0) {
+      return;
+    }
+    this.tocLoadingPreviousPage = true;
+    const oldStart = this.tocWindowStart;
+    const nextStart = Math.max(0, oldStart - TOC_WINDOW_PAGE_SIZE);
+    const added = oldStart - nextStart;
+    this.tocWindowStart = nextStart;
+    this.tocVisibleChapters = this.chapters.slice(nextStart, oldStart).concat(this.tocVisibleChapters);
+    setTimeout(() => {
+      try {
+        this.tocScroller.scrollToIndex(added, false, ScrollAlign.START);
+      } catch (e) {
+        console.warn('向前加载目录失败:', e);
+      } finally {
+        this.tocLoadingPreviousPage = false;
+      }
+    }, 0);
   }
 
   scrollTocToCurrentChapter(smooth: boolean = true): void {
@@ -3841,9 +3949,10 @@ struct ReadBookPage {
       return;
     }
     const targetIndex = Math.max(0, Math.min(index, this.chapters.length - 1));
+    const localIndex = this.setTocWindowAround(targetIndex, align);
     setTimeout(() => {
       try {
-        this.tocScroller.scrollToIndex(targetIndex, smooth, align);
+        this.tocScroller.scrollToIndex(localIndex, smooth, align);
       } catch (e) {
         console.warn('定位目录章节失败:', e);
       }
@@ -4343,12 +4452,12 @@ struct ReadBookPage {
       }
       .width('90%')
       .padding(20)
-      .borderRadius(12)
+      .borderRadius(ThemeRuntime.glassCornerRadius(12, 'panel'))
       .clip(true)
       .backgroundColor(this.readerGlassPanelColor())
-      .backdropBlur(22)
-      .border({ width: 0.5, color: this.readerGlassBorderColor() })
-      .shadow({ radius: 22, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 8 })
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
     }
     .width('100%')
     .height('100%')
@@ -5607,11 +5716,11 @@ struct ReadBookPage {
     .width('94%')
     .height(520)
     .padding({ left: 20, right: 20, top: 16, bottom: 22 })
-    .borderRadius(28)
+    .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
     .backgroundColor(this.readerGlassPanelColor())
-    .backdropBlur(22)
-    .border({ width: 0.5, color: this.readerGlassBorderColor() })
-    .shadow({ radius: 22, color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 6 })
+    .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+    .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
+    .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
     .position({ x: '3%', y: '100%' })
     .translate({ y: -(524 + this.readerBottomActionOverlayHeight()) })
   }
@@ -5665,6 +5774,8 @@ struct ReadBookPage {
         .borderRadius(0)
         .border({ width: 0 })
         .optionBgColor(Color.Transparent)
+        .optionFontColor(this.getTextColor())
+        .selectedOptionFontColor(this.accentColor())
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()))
         .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
@@ -5797,6 +5908,8 @@ struct ReadBookPage {
               .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
               .layoutWeight(1)
               .optionBgColor(Color.Transparent)
+              .optionFontColor(this.getTextColor())
+              .selectedOptionFontColor(this.accentColor())
               .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()))
               .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()))
               .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
@@ -5849,6 +5962,8 @@ struct ReadBookPage {
               .fontColor(this.getTextColor())
               .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
               .optionBgColor(Color.Transparent)
+              .optionFontColor(this.getTextColor())
+              .selectedOptionFontColor(this.accentColor())
               .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()))
               .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()))
               .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
@@ -5895,6 +6010,8 @@ struct ReadBookPage {
                   .backgroundColor(this.appDarkMode ? '#24FFFFFF' : '#12000000')
                   .layoutWeight(1)
                   .optionBgColor(Color.Transparent)
+                  .optionFontColor(this.getTextColor())
+                  .selectedOptionFontColor(this.accentColor())
                   .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()))
                   .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()))
                   .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
@@ -6315,6 +6432,8 @@ struct ReadBookPage {
         .borderRadius(0)
         .border({ width: 0 })
         .optionBgColor(Color.Transparent)
+        .optionFontColor(this.getTextColor())
+        .selectedOptionFontColor(this.accentColor())
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()))
         .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
@@ -8368,7 +8487,7 @@ struct ReadBookPage {
         Column() {
           this.styledCurrentReaderText(text, this.getReaderContentBottomPadding(), this.currentChapterIndex,
             ttsRenderVersion, renderVersion,
-            `${this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion)}_left`)
+            `${this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion)}_left`, this.currentPageIndex)
         }
         .layoutWeight(1)
         .height('100%')
@@ -8382,7 +8501,7 @@ struct ReadBookPage {
         Column() {
           this.styledCurrentReaderText(this.getSecondaryPageText(), this.getReaderContentBottomPadding(),
             this.currentChapterIndex, ttsRenderVersion, renderVersion,
-            `${this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion)}_right`)
+            `${this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion)}_right`, this.currentPageIndex + 1)
         }
         .layoutWeight(1)
         .height('100%')
@@ -8395,7 +8514,8 @@ struct ReadBookPage {
       Column() {
         this.styledCurrentReaderText(text, this.getReaderContentBottomPadding(),
           this.currentChapterIndex,
-          ttsRenderVersion, renderVersion, this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion))
+          ttsRenderVersion, renderVersion, this.currentReaderPageRenderIdentity(renderVersion, ttsRenderVersion),
+          this.currentPageIndex)
       }
       .width('100%')
       .height('100%')
@@ -8412,7 +8532,8 @@ struct ReadBookPage {
       Row() {
         Column() {
           this.styledReaderText(text, this.getReaderContentBottomPadding(), this.pageTurnIncomingChapterIndex, 0,
-            renderVersion, `${this.incomingReaderPageRenderIdentity(renderVersion, text)}_left`)
+            renderVersion, `${this.incomingReaderPageRenderIdentity(renderVersion, text)}_left`,
+            this.pageTurnIncomingPageIndex)
         }
         .layoutWeight(1)
         .height('100%')
@@ -8426,7 +8547,7 @@ struct ReadBookPage {
         Column() {
           this.styledReaderText(this.pageTurnIncomingSecondaryText, this.getReaderContentBottomPadding(),
             this.pageTurnIncomingChapterIndex, 0, renderVersion,
-            `${this.incomingReaderPageRenderIdentity(renderVersion, text)}_right`)
+            `${this.incomingReaderPageRenderIdentity(renderVersion, text)}_right`, this.pageTurnIncomingPageIndex + 1)
         }
         .layoutWeight(1)
         .height('100%')
@@ -8439,7 +8560,7 @@ struct ReadBookPage {
       Column() {
         this.styledReaderText(text, this.getReaderContentBottomPadding(),
           this.pageTurnIncomingChapterIndex, 0,
-          renderVersion, this.incomingReaderPageRenderIdentity(renderVersion, text))
+          renderVersion, this.incomingReaderPageRenderIdentity(renderVersion, text), this.pageTurnIncomingPageIndex)
       }
       .width('100%')
       .height('100%')
@@ -8537,11 +8658,12 @@ struct ReadBookPage {
   @Builder
   styledCurrentReaderText(text: string, bottomPadding: number, chapterIndex: number = this.currentChapterIndex,
     ttsRenderVersion: number = this.ttsHighlightRenderVersion, contentRenderVersion: number = this.pageRenderVersion,
-    pageRenderIdentity: string = this.currentReaderPageRenderIdentity(contentRenderVersion, ttsRenderVersion)) {
+    pageRenderIdentity: string = this.currentReaderPageRenderIdentity(contentRenderVersion, ttsRenderVersion),
+    pageIndex: number = this.currentPageIndex) {
     Column() {
       ForEach(this.getReaderTextParagraphs(text), (paragraph: ReaderTextParagraph) => {
         this.styledReaderParagraph(paragraph, chapterIndex, this.hasActiveTtsHighlight(text),
-          ttsRenderVersion, contentRenderVersion, pageRenderIdentity)
+          ttsRenderVersion, contentRenderVersion, pageRenderIdentity, this.getPageStartOffset(pageIndex))
         this.readerParagraphGap(paragraph)
       }, (paragraph: ReaderTextParagraph) =>
         `${pageRenderIdentity}_${paragraph.key}`)
@@ -8560,11 +8682,12 @@ struct ReadBookPage {
   styledReaderText(text: string, bottomPadding: number, chapterIndex: number = this.currentChapterIndex,
     ttsRenderVersion: number = this.ttsHighlightRenderVersion, contentRenderVersion: number = this.pageRenderVersion,
     pageRenderIdentity: string = this.readerPageRenderIdentity('text', chapterIndex, this.currentPageIndex,
-      contentRenderVersion, ttsRenderVersion, text)) {
+      contentRenderVersion, ttsRenderVersion, text), pageIndex: number = this.currentPageIndex) {
     Column() {
       ForEach(this.getReaderTextParagraphs(text), (paragraph: ReaderTextParagraph) => {
         this.styledReaderParagraph(paragraph, chapterIndex, this.hasActiveTtsHighlight(text), ttsRenderVersion,
-          contentRenderVersion, pageRenderIdentity)
+          contentRenderVersion, pageRenderIdentity,
+          chapterIndex === this.currentChapterIndex ? this.getPageStartOffset(pageIndex) : -1)
         this.readerParagraphGap(paragraph)
       }, (paragraph: ReaderTextParagraph) => `${pageRenderIdentity}_${paragraph.key}`)
     }
@@ -8581,7 +8704,7 @@ struct ReadBookPage {
   @Builder
   styledReaderParagraph(paragraph: ReaderTextParagraph, chapterIndex: number = this.currentChapterIndex,
     ttsHighlightActive: boolean = true, ttsRenderVersion: number = this.ttsHighlightRenderVersion,
-    contentRenderVersion: number = this.pageRenderVersion, pageRenderIdentity: string = '') {
+    contentRenderVersion: number = this.pageRenderVersion, pageRenderIdentity: string = '', pageStart: number = -1) {
     if (this.shouldUseTitleStyle(paragraph.text, chapterIndex)) {
       Text() {
         ForEach(this.getTitleTextSlices(paragraph, chapterIndex, ttsHighlightActive), (slice: ReadTextSlice) => {
@@ -8596,7 +8719,8 @@ struct ReadBookPage {
         }, (slice: ReadTextSlice) =>
           `title_${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, chapterIndex, contentRenderVersion,
             ttsRenderVersion, paragraph.text)}_${paragraph.key}_${slice.key}`)
-        ForEach(this.getTitleBodyTextSlices(paragraph, chapterIndex, ttsHighlightActive), (slice: ReadTextSlice) => {
+        ForEach(this.getTitleBodyTextSlices(paragraph, chapterIndex, ttsHighlightActive, pageStart),
+          (slice: ReadTextSlice) => {
           Span(slice.text)
             .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
             .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
@@ -8612,13 +8736,13 @@ struct ReadBookPage {
       .width('100%')
       .id(`reader_title_${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, chapterIndex, contentRenderVersion,
         ttsRenderVersion, paragraph.text)}_${paragraph.key}`)
-    } else if (this.shouldUseRegexStyle(paragraph.text)) {
+    } else if (this.readerRegexFontEnabled) {
       this.regexReaderText(paragraph, ttsHighlightActive, ttsRenderVersion, contentRenderVersion,
         this.effectiveReaderPageRenderIdentity(pageRenderIdentity, chapterIndex, contentRenderVersion,
-          ttsRenderVersion, paragraph.text))
+          ttsRenderVersion, paragraph.text), pageStart)
     } else {
       Text() {
-        ForEach(this.getStyledParagraphTextSlices(paragraph, ttsHighlightActive), (slice: ReadTextSlice) => {
+        ForEach(this.getStyledParagraphTextSlices(paragraph, ttsHighlightActive, pageStart), (slice: ReadTextSlice) => {
           Span(slice.text)
             .fontSize(this.readerFontSize)
             .fontFamily(this.getBodyReaderFontFamily())
@@ -8651,9 +8775,9 @@ struct ReadBookPage {
   @Builder
   regexReaderText(paragraph: ReaderTextParagraph, ttsHighlightActive: boolean = true,
     ttsRenderVersion: number = this.ttsHighlightRenderVersion, contentRenderVersion: number = this.pageRenderVersion,
-    pageRenderIdentity: string = '') {
+    pageRenderIdentity: string = '', pageStart: number = -1) {
     Text() {
-      ForEach(this.getStyledParagraphTextSlices(paragraph, ttsHighlightActive), (slice: ReadTextSlice) => {
+      ForEach(this.getStyledParagraphTextSlices(paragraph, ttsHighlightActive, pageStart), (slice: ReadTextSlice) => {
         Span(slice.text)
           .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
           .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
@@ -8688,15 +8812,52 @@ struct ReadBookPage {
   }
 
   getTitleBodyTextSlices(paragraph: ReaderTextParagraph, chapterIndex: number,
-    ttsHighlightActive: boolean = true): ReadTextSlice[] {
+    ttsHighlightActive: boolean = true, pageStart: number = -1): ReadTextSlice[] {
     const titleLength = Math.min(this.getChapterTitle(chapterIndex).length, paragraph.text.length);
     const bodyText = paragraph.text.substring(titleLength);
-    return this.splitSlicesByTtsHighlight(this.getRegexTextSlices(bodyText), paragraph.start, titleLength,
+    return this.splitSlicesByTtsHighlight(
+      this.getRegexTextSlicesAt(bodyText, pageStart < 0 ? -1 : pageStart + paragraph.start + titleLength),
+      paragraph.start, titleLength,
       ttsHighlightActive);
   }
 
-  getStyledParagraphTextSlices(paragraph: ReaderTextParagraph, ttsHighlightActive: boolean = true): ReadTextSlice[] {
-    return this.splitSlicesByTtsHighlight(this.getRegexTextSlices(paragraph.text), paragraph.start, 0,
+  handleTocCurrentPositionClick(): void {
+    if (this.tocQuickJumpArmed) {
+      this.tocQuickJumpDraft = '';
+      this.tocQuickJumpInputVisible = true;
+      this.tocQuickJumpArmed = false;
+      setTimeout(() => {
+        focusControl.requestFocus('tocQuickJumpChapterInput');
+      }, 50);
+      return;
+    }
+    this.scrollTocToCurrentChapter();
+    this.tocQuickJumpArmed = true;
+  }
+
+  submitTocQuickJump(): void {
+    if (this.chapters.length === 0) {
+      promptAction.showToast({ message: '暂无可定位的章节' });
+      return;
+    }
+    const chapterNumber = Number.parseInt(this.tocQuickJumpDraft, 10);
+    if (!Number.isFinite(chapterNumber) || chapterNumber < 1 || chapterNumber > this.chapters.length) {
+      promptAction.showToast({ message: `章节序号范围为 1～${this.chapters.length}，请重新输入` });
+      setTimeout(() => {
+        focusControl.requestFocus('tocQuickJumpChapterInput');
+      }, 50);
+      return;
+    }
+    this.tocQuickJumpInputVisible = false;
+    this.tocQuickJumpDraft = '';
+    this.tocQuickJumpArmed = false;
+    this.scrollTocToChapter(chapterNumber - 1, ScrollAlign.CENTER);
+  }
+
+  getStyledParagraphTextSlices(paragraph: ReaderTextParagraph, ttsHighlightActive: boolean = true,
+    pageStart: number = -1): ReadTextSlice[] {
+    return this.splitSlicesByTtsHighlight(
+      this.getRegexTextSlicesAt(paragraph.text, pageStart < 0 ? -1 : pageStart + paragraph.start), paragraph.start, 0,
       ttsHighlightActive);
   }
 
@@ -8984,6 +9145,46 @@ struct ReadBookPage {
     }
   }
 
+  /**
+   * 从整章的正则匹配结果中截取当前页面/段落。这样匹配范围即使跨过分页点，
+   * 两页上的可见部分也会保持同一条高亮规则。
+   */
+  getRegexTextSlicesAt(text: string, absoluteStart: number): ReadTextSlice[] {
+    const displayText = text || '';
+    if (absoluteStart < 0 || !this.pagedContentText) {
+      return this.getRegexTextSlices(displayText);
+    }
+    this.getRegexRules();
+    const documentRulesKey = `${this.readerRegexFontEnabled ? '1' : '0'}_${this.cachedRegexRulesKey}`;
+    if (this.cachedDocumentRegexSource !== this.pagedContentText ||
+      this.cachedDocumentRegexRulesKey !== documentRulesKey) {
+      this.cachedDocumentRegexSource = this.pagedContentText;
+      this.cachedDocumentRegexRulesKey = documentRulesKey;
+      this.cachedDocumentRegexSlices = this.getRegexTextSlices(this.pagedContentText);
+    }
+    const absoluteEnd = Math.min(this.pagedContentText.length, absoluteStart + displayText.length);
+    const result: ReadTextSlice[] = [];
+    for (const slice of this.cachedDocumentRegexSlices) {
+      if (slice.end <= absoluteStart) continue;
+      if (slice.start >= absoluteEnd) break;
+      const overlapStart = Math.max(slice.start, absoluteStart);
+      const overlapEnd = Math.min(slice.end, absoluteEnd);
+      if (overlapEnd <= overlapStart) continue;
+      const localStart = overlapStart - absoluteStart;
+      const localEnd = overlapEnd - absoluteStart;
+      const sliceText = displayText.substring(localStart, localEnd);
+      result.push({
+        text: sliceText,
+        start: localStart,
+        end: localEnd,
+        highlighted: slice.highlighted,
+        ruleIndex: slice.ruleIndex,
+        key: `document_regex_${slice.ruleIndex}_${overlapStart}_${overlapEnd}_${this.buildTextSliceKey(sliceText)}`
+      });
+    }
+    return result.length > 0 ? result : this.getRegexTextSlices(displayText);
+  }
+
   hasOverlappedRegexSlice(slices: ReadTextSlice[], start: number, end: number): boolean {
     for (const slice of slices) {
       if (start < slice.end && end > slice.start) {
@@ -9202,6 +9403,22 @@ struct ReadBookPage {
     }
     this.hideReaderPanels();
     this.stopTtsReading();
+    if (this.openedFromShortcut) {
+      this.readerExitProgressSaved = true;
+      this.saveReadingProgress().catch((error: Error) => {
+        console.error('快捷入口返回时保存进度失败:', error);
+      });
+      try {
+        if (this.shortcutReplacedPreviousPage) {
+          await router.replaceUrl({ url: 'pages/Index' });
+        } else {
+          router.back();
+        }
+      } catch (e) {
+        console.error('快捷入口返回书架失败:', e);
+      }
+      return;
+    }
     try {
       await this.saveReadingProgress();
       this.readerExitProgressSaved = true;

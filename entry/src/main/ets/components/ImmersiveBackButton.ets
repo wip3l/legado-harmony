@@ -33,7 +33,7 @@ export struct ImmersiveBackButton {
             backIcon: {
               icon: this.icon,
               label: this.accessibilityLabel,
-                action: () => this.onBack()
+              action: () => this.onBack()
             }
           },
           style: {
@@ -95,7 +95,6 @@ export struct ImmersiveBackButton {
   }
 
   effectiveContainerWidth(): number {
-    // HdsNavigation 的原生按钮包含系统点击热区与材质外沿，不能压缩到旧版 52vp 容器中。
     return Math.max(this.containerWidth, 64 * this.normalizedMaterialScale());
   }
 
@@ -108,7 +107,6 @@ export struct ImmersiveBackButton {
   }
 
   materialContainerHeight(): number {
-    // 原生 MINI 标题栏至少需要 56vp 高度；外层保持紧凑尺寸并将其居中，避免圆形材质底部被裁切。
     return Math.max(56, this.containerHeight / this.normalizedMaterialScale());
   }
 }

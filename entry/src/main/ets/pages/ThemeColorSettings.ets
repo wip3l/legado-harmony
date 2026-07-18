@@ -102,9 +102,10 @@ struct ThemeColorSettingsPage {
         .padding({ bottom: 32 })
       }
       .layoutWeight(1)
+      .align(Alignment.TopStart)
     }
     .width('100%')
-    .height('100%')
+    .height('100%').justifyContent(FlexAlign.Start)
     .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])

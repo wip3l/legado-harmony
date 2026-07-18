@@ -18,6 +18,7 @@ const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const BOOK_SOURCE_IMPORT_TIMEOUT_MS = 20000;
 const BOOK_SOURCE_IMPORT_URL_RETRY_COUNT = 3;
 const BOOK_SOURCE_CHECK_KEYWORD = '斗破苍穹';
+const BOOK_SOURCE_LIST_BATCH_SIZE = 60;
 
 @Entry
 @Component
@@ -29,8 +30,11 @@ struct BookSourcePage {
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
+  @StorageLink('pendingBookSourceImportNonce') @Watch('onPendingBookSourceImportChanged')
+  pendingBookSourceImportNonce: number = 0;
   @State allSources: BookSource[] = [];
   @State sources: BookSource[] = [];
+  @State visibleSources: BookSource[] = [];
   @State sourceGroups: string[] = [];
   @State isLoading: boolean = false;
   @State searchText: string = '';
@@ -52,6 +56,7 @@ struct BookSourcePage {
   @State renameSourceGroupInput: string = '';
   @State newSourceGroupInput: string = '';
   @State actionSourceUrl: string = '';
+  @State actionSourceDetail: BookSource | null = null;
   @State contextMenuX: number = 16;
   @State contextMenuY: number = 96;
   @State contextViewportWidth: number = 360;
@@ -77,6 +82,11 @@ struct BookSourcePage {
   aboutToAppear() {
     this.syncBars();
     this.loadSources();
+    this.handlePendingBookSourceImport();
+  }
+
+  onPendingBookSourceImportChanged(): void {
+    this.handlePendingBookSourceImport();
   }
 
   onPageShow(): void {
@@ -97,7 +107,7 @@ struct BookSourcePage {
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
-      this.allSources = await db.getAllBookSources();
+      this.allSources = await db.getBookSourceSummaries();
       this.sourceGroups = await BookSourceGroupStore.load(getContext(this), this.sourceGroupsFromSources());
       this.ensureActiveSourceGroup();
       this.applySourceFilters();
@@ -156,7 +166,7 @@ struct BookSourcePage {
         .height(56)
         .padding({ right: 16 })
         .backgroundColor(this.glassCardColor())
-        .border({ width: 1, color: this.glassBorderColor() })
+        .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
         .alignItems(VerticalAlign.Center)
 
         Row() {
@@ -165,8 +175,8 @@ struct BookSourcePage {
             .height(40)
             .borderRadius(20)
             .backgroundColor(this.glassInputColor())
-            .border({ width: 1, color: this.glassBorderColor() })
-            .shadow({ radius: 8, color: this.glassShadowColor(), offsetX: 0, offsetY: 3 })
+            .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
+            .shadow({ radius: ThemeRuntime.glassShadowRadius(), color: this.glassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX(), offsetY: ThemeRuntime.glassShadowOffsetY() })
             .fontColor(this.primaryTextColor())
             .placeholderColor(this.placeholderTextColor())
             .padding({ left: 16, right: 16 })
@@ -245,7 +255,7 @@ struct BookSourcePage {
           .justifyContent(FlexAlign.Center)
         } else {
           List({ space: 8 }) {
-            ForEach(this.sources, (source: BookSource) => {
+            ForEach(this.visibleSources, (source: BookSource) => {
               ListItem() {
                 Row() {
                   if (this.selectionMode) {
@@ -276,6 +286,15 @@ struct BookSourcePage {
                           .fontSize(11)
                           .fontColor(this.sourceLoggedIn(source) ? '#1E8E3E' : '#C62828')
                           .backgroundColor(this.sourceLoggedIn(source) ? '#E7F5EA' : '#FDECEC')
+                          .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+                          .borderRadius(4)
+                          .margin({ left: 8 })
+                      }
+                      if (source.isLocked) {
+                        Text('已锁定')
+                          .fontSize(11)
+                          .fontColor(this.accentColor())
+                          .backgroundColor(this.inputColor())
                           .padding({ left: 7, right: 7, top: 3, bottom: 3 })
                           .borderRadius(4)
                           .margin({ left: 8 })
@@ -318,8 +337,8 @@ struct BookSourcePage {
                 .padding(12)
                 .backgroundColor(this.glassCardColor())
                 .borderRadius(8)
-                .border({ width: 1, color: this.glassBorderColor() })
-                .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
+                .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
+                .shadow({ radius: ThemeRuntime.glassShadowRadius(), color: this.glassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX(), offsetY: ThemeRuntime.glassShadowOffsetY() })
                 .opacity(source.enabled ? 1 : 0.45)
                 .gesture(
                   LongPressGesture({ repeat: false })
@@ -338,7 +357,7 @@ struct BookSourcePage {
                   }
                 })
               }
-              .swipeAction(this.selectionMode ? {} : {
+              .swipeAction(this.selectionMode || source.isLocked ? {} : {
                 start: {
                   builder: () => {
                     this.sourceDisableSwipeAction(source)
@@ -364,6 +383,7 @@ struct BookSourcePage {
           .width('100%')
           .layoutWeight(1)
           .padding({ left: 16, right: 16 })
+          .onReachEnd(() => this.loadMoreVisibleSources())
         }
 
         if (this.selectionMode) {
@@ -415,7 +435,7 @@ struct BookSourcePage {
           .width('100%')
           .padding({ left: 16, right: 16, top: 10, bottom: 12 })
           .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
+          .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
         }
       }
       .width('100%')
@@ -879,14 +899,10 @@ struct BookSourcePage {
     .width(52)
     .height(52)
     .margin({ right: 22, bottom: this.navBarHeight + 22 })
-    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor()))
-    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
-      colorMode: this.appDarkMode ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-      adaptiveColor: AdaptiveColor.AVERAGE,
-      scale: 1
-    })
-    .border({ width: 0.5, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-    .shadow({ radius: 12, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 4 })
+    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor(), 'button'))
+    .backdropBlur(ThemeRuntime.glassBlur('button', 12))
+    .border({ width: ThemeRuntime.glassBorderWidth('button'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'button') })
+    .shadow({ radius: ThemeRuntime.glassShadowRadius('button'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'button'), offsetX: ThemeRuntime.glassShadowOffsetX('button'), offsetY: ThemeRuntime.glassShadowOffsetY('button') })
     .accessibilityText('新增书源')
     .onClick(() => {
       this.showAddDialog = true;
@@ -922,11 +938,11 @@ struct BookSourcePage {
       }
       .width(188)
       .padding({ left: 6, right: 6, top: 6, bottom: 6 })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-      .borderRadius(16)
-      .backdropBlur(22)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .margin({ right: 22, bottom: this.navBarHeight + 82 })
     }
     .width('100%')
@@ -971,11 +987,11 @@ struct BookSourcePage {
       }
       .width(188)
       .padding({ left: 6, right: 6, top: 4, bottom: 6 })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-      .borderRadius(16)
-      .backdropBlur(22)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .position({ x: '100%', y: '100%' })
       .translate({ x: -200, y: -(244 + Math.max(this.navBarHeight, 8)) })
     }
@@ -1019,7 +1035,7 @@ struct BookSourcePage {
         .width('100%')
         .height('100%')
         .backgroundColor(this.appDarkMode ? '#38000000' : '#14FFFFFF')
-        .backdropBlur(10)
+        .backdropBlur(ThemeRuntime.glassBlur('menu', 10))
         .onClick(() => {
           this.showCheckOptionsDialog = false;
         })
@@ -1065,11 +1081,11 @@ struct BookSourcePage {
       .width('calc(100% - 24vp)')
       .constraintSize({ maxWidth: 360 })
       .padding(18)
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-      .borderRadius(14)
-      .backdropBlur(22)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .margin({ top: this.statusBarHeight + 62, right: 12 })
       .onClick(() => {
       })
@@ -1120,7 +1136,7 @@ struct BookSourcePage {
         .width('100%')
         .height('100%')
         .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(18)
+        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
         .onClick(() => this.closeSourceActions())
       Column() {
         this.contextActionItem($r('sys.symbol.magnifyingglass'), '搜索', this.primaryTextColor(),
@@ -1132,28 +1148,34 @@ struct BookSourcePage {
         }
         this.contextActionItem($r('sys.symbol.checkmark_shield'), '校验', this.primaryTextColor(),
           () => this.checkActionSource())
-        this.contextActionItem($r('sys.symbol.square_and_pencil'), '修改', this.primaryTextColor(),
-          () => this.openActionSourceEdit())
-        this.contextActionItem(this.actionSourceEnabled() ? $r('sys.symbol.minus_circle') :
-          $r('sys.symbol.checkmark_circle'), this.actionSourceEnabled() ? '禁用' : '启用', this.primaryTextColor(),
-          () => this.toggleActionSourceEnabled())
+        this.contextActionItem($r('sys.symbol.lock'), this.actionSourceLocked() ? '解锁' : '锁定',
+          this.primaryTextColor(), () => this.toggleActionSourceLocked())
+        if (!this.actionSourceLocked()) {
+          this.contextActionItem($r('sys.symbol.square_and_pencil'), '修改', this.primaryTextColor(),
+            () => this.openActionSourceEdit())
+          this.contextActionItem(this.actionSourceEnabled() ? $r('sys.symbol.minus_circle') :
+            $r('sys.symbol.checkmark_circle'), this.actionSourceEnabled() ? '禁用' : '启用', this.primaryTextColor(),
+            () => this.toggleActionSourceEnabled())
+        }
         this.contextActionItem($r('sys.symbol.list_bullet'), '多选', this.primaryTextColor(),
           () => this.enterActionSourceSelection())
-        this.contextActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => {
-            this.showSourceActionDialog = false;
-            this.showSourceDeleteDialog = true;
-          })
+        if (!this.actionSourceLocked()) {
+          this.contextActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => {
+              this.showSourceActionDialog = false;
+              this.showSourceDeleteDialog = true;
+            })
+        }
       }
       .width(158)
       .padding({ top: 6, bottom: 6 })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-      .borderRadius(14)
-      .backdropBlur(22)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .position({
         x: this.contextMenuLeft(158),
-        y: this.contextMenuTop(this.actionSourceNeedsLogin() ? 320 : 276)
+        y: this.contextMenuTop(this.sourceActionMenuHeight())
       })
     }
     .width('100%')
@@ -1293,7 +1315,7 @@ struct BookSourcePage {
           .textAlign(TextAlign.Center)
           .borderRadius(17)
           .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
+          .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
           .onClick(() => {
             this.newSourceGroupInput = '';
             this.showAddSourceGroupDialog = true;
@@ -1336,7 +1358,7 @@ struct BookSourcePage {
         .width('100%')
         .height('100%')
         .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(18)
+        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
         .onClick(() => this.closeSourceGroupActions())
 
       Column() {
@@ -1352,11 +1374,11 @@ struct BookSourcePage {
       }
       .width(148)
       .padding({ top: 6, bottom: 6 })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-      .borderRadius(14)
-      .backdropBlur(22)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(100) })
     }
     .width('100%')
@@ -1648,8 +1670,7 @@ struct BookSourcePage {
         (source.bookSourceGroup || '').trim() === oldName);
       for (const source of groupedSources) {
         source.bookSourceGroup = newName;
-        source.lastUpdateTime = Date.now();
-        await db.updateBookSource(source);
+        await db.updateBookSourceListFields(source.bookSourceUrl, { bookSourceGroup: newName });
       }
       this.sourceGroups = await BookSourceGroupStore.rename(
         getContext(this), oldName, newName, this.sourceGroups);
@@ -1682,8 +1703,7 @@ struct BookSourcePage {
         (source.bookSourceGroup || '').trim() === groupName);
       for (const source of groupedSources) {
         source.bookSourceGroup = '';
-        source.lastUpdateTime = Date.now();
-        await db.updateBookSource(source);
+        await db.updateBookSourceListFields(source.bookSourceUrl, { bookSourceGroup: '' });
       }
       this.sourceGroups = await BookSourceGroupStore.remove(getContext(this), groupName, this.sourceGroups);
       if (this.activeSourceGroup === groupName) {
@@ -1717,7 +1737,16 @@ struct BookSourcePage {
       });
     }
     this.sources = filtered.slice();
+    this.visibleSources = this.sources.slice(0, BOOK_SOURCE_LIST_BATCH_SIZE);
     this.pruneSelectedSources();
+  }
+
+  loadMoreVisibleSources(): void {
+    if (this.visibleSources.length >= this.sources.length) {
+      return;
+    }
+    const nextCount = Math.min(this.sources.length, this.visibleSources.length + BOOK_SOURCE_LIST_BATCH_SIZE);
+    this.visibleSources = this.sources.slice(0, nextCount);
   }
 
   ensureActiveSourceGroup(): void {
@@ -1801,15 +1830,20 @@ struct BookSourcePage {
     return match && match[1] ? match[1] : '';
   }
 
-  openSourceActions(source: BookSource, event?: GestureEvent): void {
+  async openSourceActions(source: BookSource, event?: GestureEvent): Promise<void> {
     const finger = event && event.fingerList.length > 0 ? event.fingerList[0] : undefined;
     if (finger) {
       this.contextMenuX = finger.globalX;
       this.contextMenuY = finger.globalY;
     }
     this.actionSourceUrl = source.bookSourceUrl;
+    this.actionSourceDetail = null;
     this.showSourceDeleteDialog = false;
     this.showSourceActionDialog = true;
+    const detail = await AppDatabase.getInstance().getBookSource(source.bookSourceUrl);
+    if (this.actionSourceUrl === source.bookSourceUrl) {
+      this.actionSourceDetail = detail;
+    }
   }
 
   updateContextViewport(area: Area): void {
@@ -1832,6 +1866,7 @@ struct BookSourcePage {
   closeSourceActions(): void {
     this.showSourceActionDialog = false;
     this.actionSourceUrl = '';
+    this.actionSourceDetail = null;
   }
 
   enterActionSourceSelection(): void {
@@ -1841,6 +1876,7 @@ struct BookSourcePage {
     }
     this.showSourceActionDialog = false;
     this.actionSourceUrl = '';
+    this.actionSourceDetail = null;
     this.showAddDialog = false;
     this.showMoreActionDialog = false;
     this.selectionMode = true;
@@ -1848,6 +1884,9 @@ struct BookSourcePage {
   }
 
   actionSource(): BookSource | null {
+    if (this.actionSourceDetail && this.actionSourceDetail.bookSourceUrl === this.actionSourceUrl) {
+      return this.actionSourceDetail;
+    }
     return this.sources.find((source: BookSource) => source.bookSourceUrl === this.actionSourceUrl) || null;
   }
 
@@ -1871,6 +1910,29 @@ struct BookSourcePage {
     return source ? source.enabled : false;
   }
 
+  actionSourceLocked(): boolean {
+    const source = this.actionSource();
+    return source ? source.isLocked : false;
+  }
+
+  sourceActionMenuHeight(): number {
+    if (this.actionSourceLocked()) {
+      return this.actionSourceNeedsLogin() ? 232 : 188;
+    }
+    return this.actionSourceNeedsLogin() ? 364 : 320;
+  }
+
+  async toggleActionSourceLocked(): Promise<void> {
+    const source = this.actionSource();
+    if (!source || this.isBatchOperating) return;
+    const locked = !source.isLocked;
+    await AppDatabase.getInstance().setBookSourceLocked(source.bookSourceUrl, locked);
+    source.isLocked = locked;
+    this.closeSourceActions();
+    await this.loadSources();
+    promptAction.showToast({ message: locked ? '书源已锁定' : '书源已解锁' });
+  }
+
   openActionSourceSearch(): void {
     const source = this.actionSource();
     if (!source) {
@@ -1886,9 +1948,14 @@ struct BookSourcePage {
     router.back();
   }
 
-  openActionSourceLogin(): void {
-    const source = this.actionSource();
+  async openActionSourceLogin(): Promise<void> {
+    const summary = this.actionSource();
+    if (!summary) {
+      return;
+    }
+    const source = await AppDatabase.getInstance().getBookSource(summary.bookSourceUrl);
     if (!source || !this.sourceNeedsLogin(source)) {
+      promptAction.showToast({ message: '书源不存在' });
       return;
     }
     this.showSourceActionDialog = false;
@@ -1933,6 +2000,11 @@ struct BookSourcePage {
     if (!source) {
       return;
     }
+    if (source.isLocked) {
+      this.closeSourceActions();
+      promptAction.showToast({ message: '请先解锁书源' });
+      return;
+    }
     this.closeSourceActions();
     router.pushUrl({
       url: 'pages/BookSourceEdit',
@@ -1953,12 +2025,18 @@ struct BookSourcePage {
     if (this.isBatchOperating) {
       return;
     }
+    if (source.isLocked) {
+      promptAction.showToast({ message: '锁定的书源不能修改' });
+      return;
+    }
     const enabled = !source.enabled;
     source.enabled = enabled;
     await this.updateSource(source);
     this.sources = this.sources.map((item: BookSource) =>
       item.bookSourceUrl === source.bookSourceUrl ? source : item);
     this.allSources = this.allSources.map((item: BookSource) =>
+      item.bookSourceUrl === source.bookSourceUrl ? source : item);
+    this.visibleSources = this.visibleSources.map((item: BookSource) =>
       item.bookSourceUrl === source.bookSourceUrl ? source : item);
     promptAction.showToast({ message: enabled ? '书源已启用' : '书源已禁用' });
   }
@@ -1967,12 +2045,17 @@ struct BookSourcePage {
     if (this.isBatchOperating) {
       return;
     }
+    if (source.isLocked) {
+      promptAction.showToast({ message: '锁定的书源不能删除' });
+      return;
+    }
     this.isBatchOperating = true;
     this.batchOperationText = '正在删除书源...';
     try {
       await AppDatabase.getInstance().deleteBookSource(source.bookSourceUrl);
       this.sources = this.sources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
       this.allSources = this.allSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
+      this.visibleSources = this.visibleSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
       this.selectedSourceUrls = this.selectedSourceUrls.filter((url: string) => url !== source.bookSourceUrl);
       promptAction.showToast({ message: '书源已删除' });
     } catch (e) {
@@ -1988,6 +2071,11 @@ struct BookSourcePage {
     if (!source || this.isBatchOperating) {
       return;
     }
+    if (source.isLocked) {
+      this.showSourceDeleteDialog = false;
+      promptAction.showToast({ message: '锁定的书源不能删除' });
+      return;
+    }
     this.showSourceDeleteDialog = false;
     this.isBatchOperating = true;
     this.batchOperationText = '正在删除书源...';
@@ -1995,6 +2083,8 @@ struct BookSourcePage {
       const db = AppDatabase.getInstance();
       await db.deleteBookSource(source.bookSourceUrl);
       this.sources = this.sources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
+      this.allSources = this.allSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
+      this.visibleSources = this.visibleSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
       this.actionSourceUrl = '';
       promptAction.showToast({ message: '书源已删除' });
     } catch (e) {
@@ -2020,7 +2110,7 @@ struct BookSourcePage {
 
   sourceListItemKey(source: BookSource): string {
     const loginStatus = this.sourceNeedsLogin(source) ? (this.sourceLoggedIn(source) ? 'logged' : 'unlogged') : 'none';
-    return `${source.bookSourceUrl}_${source.bookSourceGroup || ''}_${source.enabled ? '1' : '0'}_${source.enabledExplore ? '1' : '0'}_${source.bookSourceName || ''}_${loginStatus}_${this.selectionMode ? 'select' : 'normal'}`;
+    return `${source.bookSourceUrl}_${source.bookSourceGroup || ''}_${source.enabled ? '1' : '0'}_${source.enabledExplore ? '1' : '0'}_${source.isLocked ? 'locked' : 'unlocked'}_${source.bookSourceName || ''}_${loginStatus}_${this.selectionMode ? 'select' : 'normal'}`;
   }
 
   isSourceSelected(bookSourceUrl: string): boolean {
@@ -2073,6 +2163,10 @@ struct BookSourcePage {
     return this.sources.filter((source: BookSource) => this.isSourceSelected(source.bookSourceUrl));
   }
 
+  getSelectedMutableSources(): BookSource[] {
+    return this.getSelectedSources().filter((source: BookSource) => !source.isLocked);
+  }
+
   getSourceGroups(): string[] {
     return [...this.sourceGroups].sort((a: string, b: string) => a.localeCompare(b));
   }
@@ -2106,9 +2200,9 @@ struct BookSourcePage {
     if (this.isBatchOperating) {
       return;
     }
-    const selectedSources = this.getSelectedSources();
+    const selectedSources = this.getSelectedMutableSources();
     if (selectedSources.length === 0) {
-      promptAction.showToast({ message: '请先选择书源' });
+      promptAction.showToast({ message: '所选书源均已锁定' });
       return;
     }
 
@@ -2119,14 +2213,13 @@ struct BookSourcePage {
       const db = AppDatabase.getInstance();
       for (const source of selectedSources) {
         source.bookSourceGroup = groupName;
-        source.lastUpdateTime = Date.now();
-        await db.updateBookSource(source);
+        await db.updateBookSourceListFields(source.bookSourceUrl, { bookSourceGroup: groupName });
       }
       if (groupName) {
         this.sourceGroups = await BookSourceGroupStore.add(getContext(this), groupName, this.sourceGroups);
       }
       this.sources = this.sources.map((source: BookSource) => {
-        if (this.isSourceSelected(source.bookSourceUrl)) {
+        if (this.isSourceSelected(source.bookSourceUrl) && !source.isLocked) {
           source.bookSourceGroup = groupName;
         }
         return source;
@@ -2147,9 +2240,9 @@ struct BookSourcePage {
     if (this.isBatchOperating) {
       return;
     }
-    const selectedSources = this.getSelectedSources();
+    const selectedSources = this.getSelectedMutableSources();
     if (selectedSources.length === 0) {
-      promptAction.showToast({ message: '请先选择书源' });
+      promptAction.showToast({ message: '所选书源均已锁定' });
       return;
     }
 
@@ -2159,11 +2252,10 @@ struct BookSourcePage {
       const db = AppDatabase.getInstance();
       for (const source of selectedSources) {
         source.enabled = enabled;
-        source.lastUpdateTime = Date.now();
-        await db.updateBookSource(source);
+        await db.updateBookSourceListFields(source.bookSourceUrl, { enabled: enabled ? 1 : 0 });
       }
       this.sources = this.sources.map((source: BookSource) => {
-        if (this.isSourceSelected(source.bookSourceUrl)) {
+        if (this.isSourceSelected(source.bookSourceUrl) && !source.isLocked) {
           source.enabled = enabled;
         }
         return source;
@@ -2181,9 +2273,9 @@ struct BookSourcePage {
     if (this.isBatchOperating) {
       return;
     }
-    const selectedSources = this.getSelectedSources();
+    const selectedSources = this.getSelectedMutableSources();
     if (selectedSources.length === 0) {
-      promptAction.showToast({ message: '请先选择书源' });
+      promptAction.showToast({ message: '所选书源均已锁定' });
       return;
     }
 
@@ -2193,11 +2285,10 @@ struct BookSourcePage {
       const db = AppDatabase.getInstance();
       for (const source of selectedSources) {
         source.enabledExplore = enabled;
-        source.lastUpdateTime = Date.now();
-        await db.updateBookSource(source);
+        await db.updateBookSourceListFields(source.bookSourceUrl, { enabledExplore: enabled ? 1 : 0 });
       }
       this.sources = this.sources.map((source: BookSource) => {
-        if (this.isSourceSelected(source.bookSourceUrl)) {
+        if (this.isSourceSelected(source.bookSourceUrl) && !source.isLocked) {
           source.enabledExplore = enabled;
         }
         return source;
@@ -2215,9 +2306,9 @@ struct BookSourcePage {
     if (this.isBatchOperating) {
       return;
     }
-    const selectedUrls = this.selectedSourceUrls.slice();
+    const selectedUrls = this.getSelectedMutableSources().map((source: BookSource) => source.bookSourceUrl);
     if (selectedUrls.length === 0) {
-      promptAction.showToast({ message: '请先选择书源' });
+      promptAction.showToast({ message: '所选书源均已锁定' });
       return;
     }
 
@@ -2243,7 +2334,11 @@ struct BookSourcePage {
   async updateSource(source: BookSource) {
     try {
       const db = AppDatabase.getInstance();
-      await db.updateBookSource(source);
+      await db.updateBookSourceListFields(source.bookSourceUrl, {
+        bookSourceGroup: source.bookSourceGroup || '',
+        enabled: source.enabled ? 1 : 0,
+        enabledExplore: source.enabledExplore ? 1 : 0
+      });
     } catch (e) {
       console.error('更新书源失败:', e);
     }
@@ -2283,14 +2378,19 @@ struct BookSourcePage {
   }
 
   async checkActionSource(): Promise<void> {
-    const source = this.actionSource();
+    const summary = this.actionSource();
     this.closeSourceActions();
-    if (!source) {
+    if (!summary) {
       promptAction.showToast({ message: '书源不存在' });
       return;
     }
     if (this.isCheckingSources) {
       promptAction.showToast({ message: '正在校验中' });
+      return;
+    }
+    const source = await AppDatabase.getInstance().getBookSource(summary.bookSourceUrl);
+    if (!source) {
+      promptAction.showToast({ message: '书源不存在' });
       return;
     }
     await this.startCheckSources([source], 'none');
@@ -2362,6 +2462,9 @@ struct BookSourcePage {
     if (this.checkInvalidAction === 'none') {
       return;
     }
+    if (source.isLocked) {
+      return;
+    }
 
     try {
       const db = AppDatabase.getInstance();
@@ -2374,6 +2477,9 @@ struct BookSourcePage {
       } else if (this.checkInvalidAction === 'delete') {
         await db.deleteBookSource(source.bookSourceUrl);
         this.sources = this.sources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
+        this.allSources = this.allSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
+        this.visibleSources = this.visibleSources.filter(
+          (item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
       }
       this.checkAutoHandledCount++;
     } catch (e) {
@@ -2414,7 +2520,11 @@ struct BookSourcePage {
     if (this.isBatchOperating) {
       return;
     }
-    if (this.checkBadUrls.length === 0) {
+    const lockedUrls = new Set(this.allSources.filter((source: BookSource) => source.isLocked)
+      .map((source: BookSource) => source.bookSourceUrl));
+    const failedUrls = this.checkBadUrls.filter((url: string) => !lockedUrls.has(url));
+    if (failedUrls.length === 0) {
+      promptAction.showToast({ message: '异常书源均已锁定，未执行禁用' });
       return;
     }
 
@@ -2422,7 +2532,7 @@ struct BookSourcePage {
     this.batchOperationText = '正在禁用书源...';
     try {
       const db = AppDatabase.getInstance();
-      for (const url of this.checkBadUrls) {
+      for (const url of failedUrls) {
         const source = await db.getBookSource(url);
         if (source) {
           source.enabled = false;
@@ -2430,7 +2540,7 @@ struct BookSourcePage {
           await db.updateBookSource(source);
         }
       }
-      const disabledCount = this.checkBadUrls.length;
+      const disabledCount = failedUrls.length;
       this.showCheckDialog = false;
       await this.loadSources();
       promptAction.showToast({ message: `已禁用 ${disabledCount} 个异常书源` });
@@ -2446,8 +2556,11 @@ struct BookSourcePage {
     if (this.isBatchOperating) {
       return;
     }
-    const failedUrls = this.checkBadUrls.slice();
+    const lockedUrls = new Set(this.allSources.filter((source: BookSource) => source.isLocked)
+      .map((source: BookSource) => source.bookSourceUrl));
+    const failedUrls = this.checkBadUrls.filter((url: string) => !lockedUrls.has(url));
     if (failedUrls.length === 0) {
+      promptAction.showToast({ message: '异常书源均已锁定，未执行删除' });
       return;
     }
 
@@ -2498,14 +2611,39 @@ struct BookSourcePage {
     }
   }
 
+  async handlePendingBookSourceImport(): Promise<void> {
+    if (this.isImporting) return;
+    const uri = AppStorage.get<string>('pendingBookSourceImportUri') || '';
+    if (!uri) return;
+    AppStorage.setOrCreate('pendingBookSourceImportUri', '');
+    this.isImporting = true;
+    try {
+      const content = await this.readTextFile(uri);
+      if (!content.trim()) {
+        promptAction.showToast({ message: '文件内容为空' });
+        return;
+      }
+      await this.importSourcesFromJson(content);
+    } catch (e) {
+      console.error('打开 JSON 书源文件失败:', e);
+      const message = e instanceof Error ? e.message : String(e);
+      promptAction.showToast({ message: `导入失败: ${message}` });
+    } finally {
+      this.isImporting = false;
+      if (AppStorage.get<string>('pendingBookSourceImportUri')) {
+        this.handlePendingBookSourceImport();
+      }
+    }
+  }
+
   async exportSelectedSources(): Promise<void> {
     if (this.selectedSourceUrls.length === 0 || this.isBatchOperating) {
       promptAction.showToast({ message: '请先选择书源' });
       return;
     }
-    const selected = this.sources.filter((source: BookSource) =>
+    const selectedSummaries = this.sources.filter((source: BookSource) =>
       this.selectedSourceUrls.includes(source.bookSourceUrl));
-    if (selected.length === 0) {
+    if (selectedSummaries.length === 0) {
       promptAction.showToast({ message: '未找到可导出的书源' });
       return;
     }
@@ -2522,6 +2660,12 @@ struct BookSourcePage {
 
       this.isBatchOperating = true;
       this.batchOperationText = '正在导出书源...';
+      const selected: BookSource[] = [];
+      const db = AppDatabase.getInstance();
+      for (const summary of selectedSummaries) {
+        const source = await db.getBookSource(summary.bookSourceUrl);
+        if (source) selected.push(source);
+      }
       const json = JSON.stringify(selected, null, 2);
       const bytes = new util.TextEncoder().encodeInto(json);
       file = await fs.open(result[0], fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
@@ -2702,6 +2846,7 @@ struct BookSourcePage {
     source.variableComment = obj['variableComment'] as string || obj['variable'] as string || '';
     source.enabled = obj['enabled'] !== false;
     source.enabledExplore = obj['enabledExplore'] !== false;
+    source.isLocked = obj['isLocked'] === true || obj['locked'] === true;
     source.weight = (obj['weight'] as number) || 0;
     source.lastUpdateTime = Date.now();
 

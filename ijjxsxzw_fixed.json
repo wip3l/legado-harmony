@@ -1,0 +1,59 @@
+[
+  {
+    "bookSourceComment": "适配 legado-harmony；2026-07-14 修复搜索双重编码、发现、详情及目录；目录地址直接从在线阅读链接提取，不依赖 JS",
+    "bookSourceGroup": "修复书源",
+    "bookSourceName": "爱久久小说网手机版（Harmony 修复版）",
+    "bookSourceType": 0,
+    "bookSourceUrl": "https://m.ijjxsxzw.com/",
+    "bookUrlPattern": "https://(?:m\\.)?ijjxsxzw\\.com/txt/\\d+\\.html",
+    "customButton": false,
+    "customOrder": 273,
+    "enabled": true,
+    "enabledCookieJar": true,
+    "enabledExplore": true,
+    "eventListener": false,
+    "exploreUrl": "[\n  {\"title\":\"女生小说\",\"url\":\"/txt/toplist-p_{{page - 1}}-c_1-n_0-l_10-t_6-p_1-s_0-q_0-r_1-m_0.html\",\"style\":{}},\n  {\"title\":\"男生小说\",\"url\":\"/txt/toplist-p_{{page - 1}}-c_2-n_0-l_10-t_6-p_1-s_0-q_0-r_1-m_0.html\",\"style\":{}},\n  {\"title\":\"纯美小说\",\"url\":\"/txt/toplist-p_{{page - 1}}-c_3-n_0-l_10-t_6-p_1-s_0-q_0-r_1-m_0.html\",\"style\":{}},\n  {\"title\":\"悬疑小说\",\"url\":\"/txt/kongbu/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"穿越小说\",\"url\":\"/txt/chuanyue/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"重生小说\",\"url\":\"/txt/chongshengxiaoshuo/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"历史架空\",\"url\":\"/txt/lsjs/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"现代言情\",\"url\":\"/txt/young/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"总裁豪门\",\"url\":\"/txt/qinggan/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"仙侠幻想\",\"url\":\"/txt/wuxia/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"同人衍生\",\"url\":\"/txt/tongrenxiaoshuo/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"耽于纯美\",\"url\":\"/txt/dmtr/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"玄幻魔法\",\"url\":\"/txt/xuanhuan/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"都市异能\",\"url\":\"/txt/dushi/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"历史军事\",\"url\":\"/txt/tiexue/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"网游小说\",\"url\":\"/txt/juben/index_{{page}}.html\",\"style\":{}},\n  {\"title\":\"名著\",\"url\":\"/txt/gdmz/index_{{page}}.html\",\"style\":{}}\n]",
+    "header": "{\"User-Agent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36\"}",
+    "lastUpdateTime": 1784016000000,
+    "respondTime": 0,
+    "ruleBookInfo": {
+      "author": ".jie span:contains(作者) a@text",
+      "coverUrl": ".pic img@src",
+      "intro": ".novelinfo@text",
+      "kind": ".jie span:contains(类别)@text##类别\\s*[:：]\\s*",
+      "name": "h1@text",
+      "tocUrl": "#htmldianjiyuedu@href##^/read/\\d+/(\\d+)/\\d+\\.html.*$##/read/$1/"
+    },
+    "ruleContent": {
+      "content": "#Content@html",
+      "nextContentUrl": ""
+    },
+    "ruleExplore": {
+      "author": ".main span:contains(作者)@text##作者\\s*[:：]\\s*",
+      "bookList": ".list_a",
+      "bookUrl": ".img a@href",
+      "coverUrl": ".img img@src",
+      "intro": ".intro@text",
+      "kind": ".main span:contains(大小) a@text",
+      "name": ".main > a@text",
+      "wordCount": ".main span:contains(大小)@text##.*大小\\s*[:：]\\s*##"
+    },
+    "ruleSearch": {
+      "author": ".main span:contains(作者)@text##作者\\s*[:：]\\s*",
+      "bookList": ".list_a",
+      "bookUrl": ".img a@href",
+      "coverUrl": ".img img@src",
+      "intro": ".intro@text",
+      "kind": ".main span:contains(大小) a@text",
+      "name": ".main > a@text",
+      "wordCount": ".main span:contains(大小)@text##.*大小\\s*[:：]\\s*##"
+    },
+    "ruleToc": {
+      "chapterList": "ul.chapter-list a",
+      "chapterName": "text",
+      "chapterUrl": "href"
+    },
+    "searchUrl": "/e/search/index.php,{\"charset\":\"utf-8\",\"method\":\"POST\",\"body\":\"show=title,writer&keyboard={{searchKeyRaw}}\"}",
+    "weight": 0
+  }
+]

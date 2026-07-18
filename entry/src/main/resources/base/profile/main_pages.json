@@ -18,6 +18,7 @@
     "pages/AppIconSettings",
     "pages/ThemeColorSettings",
     "pages/ThemeSettings",
+    "pages/GlassSettings",
     "pages/FontSettings",
     "pages/ReaderFontSettings",
     "pages/ReaderReplaceRules",

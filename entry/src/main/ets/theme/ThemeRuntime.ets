@@ -8,6 +8,25 @@ import {
 } from './ThemeModels';
 
 export class ThemeRuntime {
+  static readonly KEY_GLASS_ENABLED: string = 'glassEnabled';
+  static readonly KEY_GLASS_PANEL_BLUR: string = 'glassPanelBlur';
+  static readonly KEY_GLASS_POPOVER_BLUR: string = 'glassPopoverBlur';
+  static readonly KEY_GLASS_BUTTON_BLUR: string = 'glassButtonBlur';
+  static readonly KEY_GLASS_OVERLAY_BLUR: string = 'glassOverlayBlur';
+  static readonly KEY_GLASS_MENU_BLUR: string = 'glassMenuBlur';
+  static readonly KEY_GLASS_LIGHT_TINT_OPACITY: string = 'glassLightTintOpacity';
+  static readonly KEY_GLASS_DARK_TINT_OPACITY: string = 'glassDarkTintOpacity';
+  static readonly KEY_GLASS_LIGHT_BORDER_OPACITY: string = 'glassLightBorderOpacity';
+  static readonly KEY_GLASS_DARK_BORDER_OPACITY: string = 'glassDarkBorderOpacity';
+  static readonly KEY_GLASS_BORDER_WIDTH: string = 'glassBorderWidth';
+  static readonly KEY_GLASS_SHADOW_ENABLED: string = 'glassShadowEnabled';
+  static readonly KEY_GLASS_LIGHT_SHADOW_OPACITY: string = 'glassLightShadowOpacity';
+  static readonly KEY_GLASS_DARK_SHADOW_OPACITY: string = 'glassDarkShadowOpacity';
+  static readonly KEY_GLASS_SHADOW_RADIUS: string = 'glassShadowRadius';
+  static readonly KEY_GLASS_SHADOW_OFFSET_X: string = 'glassShadowOffsetX';
+  static readonly KEY_GLASS_SHADOW_OFFSET_Y: string = 'glassShadowOffsetY';
+  static readonly KEY_GLASS_CORNER_RADIUS: string = 'glassCornerRadius';
+  static readonly KEY_GLASS_LOW_PERFORMANCE: string = 'glassLowPerformance';
   static readonly KEY_THEME_ID: string = 'appThemeId';
   static readonly KEY_THEME_REVISION: string = 'themeRevision';
   static readonly KEY_FONT_FAMILY: string = 'themeFontFamily';
@@ -160,24 +179,89 @@ export class ThemeRuntime {
     return `#${darkMode ? '33' : '1F'}${accent.substring(1)}`;
   }
 
-  static glassPanelColor(darkMode: boolean, baseColor: string = ''): string {
+  static glassPanelColor(darkMode: boolean, baseColor: string = '', surface: string = 'panel'): string {
     const fallback = ThemeRuntime.cardColor(darkMode);
     const color = ThemeRuntime.normalizeColor(baseColor || fallback, fallback);
-    return `#${darkMode ? 'C7' : 'D9'}${color.substring(1)}`;
+    if (!ThemeRuntime.glassEnabled()) {
+      return color;
+    }
+    const opacity = ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_TINT_OPACITY :
+      ThemeRuntime.KEY_GLASS_LIGHT_TINT_OPACITY, darkMode ? 78 : 85, 0, 100);
+    return `#${ThemeRuntime.opacityHex(opacity)}${color.substring(1)}`;
   }
 
-  static dropdownPanelColor(darkMode: boolean, baseColor: string = ''): string {
+  static dropdownPanelColor(darkMode: boolean, baseColor: string = '', surface: string = 'popover'): string {
     const fallback = ThemeRuntime.cardColor(darkMode);
     const color = ThemeRuntime.normalizeColor(baseColor || fallback, fallback);
-    return `#${darkMode ? '52' : '66'}${color.substring(1)}`;
+    if (!ThemeRuntime.glassEnabled()) {
+      return color;
+    }
+    const panelOpacity = ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_TINT_OPACITY :
+      ThemeRuntime.KEY_GLASS_LIGHT_TINT_OPACITY, darkMode ? 78 : 85, 0, 100);
+    return `#${ThemeRuntime.opacityHex(Math.round(panelOpacity * 0.47))}${color.substring(1)}`;
   }
 
-  static glassBorderColor(darkMode: boolean): string {
-    return darkMode ? '#38FFFFFF' : '#A6FFFFFF';
+  static glassBorderColor(darkMode: boolean, surface: string = 'panel'): string {
+    const opacity = ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_BORDER_OPACITY :
+      ThemeRuntime.KEY_GLASS_LIGHT_BORDER_OPACITY, darkMode ? 22 : 65, 0, 100);
+    return `#${ThemeRuntime.opacityHex(opacity)}FFFFFF`;
   }
 
-  static glassShadowColor(darkMode: boolean): string {
-    return darkMode ? '#70000000' : '#2B000000';
+  static glassShadowColor(darkMode: boolean, surface: string = 'panel'): string {
+    if (!ThemeRuntime.glassShadowEnabled()) {
+      return '#00000000';
+    }
+    const opacity = ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_SHADOW_OPACITY :
+      ThemeRuntime.KEY_GLASS_LIGHT_SHADOW_OPACITY, darkMode ? 44 : 17, 0, 100);
+    return `#${ThemeRuntime.opacityHex(opacity)}000000`;
+  }
+
+  static glassEnabled(): boolean {
+    return (AppStorage.get<boolean>(ThemeRuntime.KEY_GLASS_ENABLED) ?? true) &&
+      !(AppStorage.get<boolean>(ThemeRuntime.KEY_GLASS_LOW_PERFORMANCE) ?? false);
+  }
+
+  static glassShadowEnabled(surface: string = 'panel'): boolean {
+    return ThemeRuntime.glassEnabled() &&
+      (AppStorage.get<boolean>(ThemeRuntime.KEY_GLASS_SHADOW_ENABLED) ?? true);
+  }
+
+  static glassBlur(surface: string = 'panel', fallback: number = 22): number {
+    if (!ThemeRuntime.glassEnabled()) {
+      return 0;
+    }
+    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_PANEL_BLUR, 22, 0, 40);
+  }
+
+  static glassBorderWidth(surface: string = 'panel'): number {
+    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_BORDER_WIDTH, 1, 0, 2);
+  }
+
+  static glassCornerRadius(fallback: number = 16, surface: string = 'panel'): number {
+    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_CORNER_RADIUS, fallback, 0, 32);
+  }
+
+  static glassShadowRadius(surface: string = 'panel'): number {
+    return ThemeRuntime.glassShadowEnabled() ?
+      ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_SHADOW_RADIUS, 18, 0, 30) : 0;
+  }
+
+  static glassShadowOffsetX(surface: string = 'panel'): number {
+    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_SHADOW_OFFSET_X, 0, -12, 12);
+  }
+
+  static glassShadowOffsetY(surface: string = 'panel'): number {
+    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_SHADOW_OFFSET_Y, 6, -12, 12);
+  }
+
+  private static numberFromStorage(key: string, fallback: number, min: number, max: number): number {
+    const value = AppStorage.get<number>(key) ?? fallback;
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private static opacityHex(opacity: number): string {
+    const value = Math.max(0, Math.min(255, Math.round(opacity * 2.55)));
+    return value.toString(16).padStart(2, '0').toUpperCase();
   }
 
   static buttonColor(darkMode: boolean): string {

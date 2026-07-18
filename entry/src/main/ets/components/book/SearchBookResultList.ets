@@ -131,15 +131,11 @@ export struct SearchBookResultList {
       .enabled(!SearchBookShelfHelper.isBusy(book, this.busyBookKeys))
       .width(64)
       .height(36)
-      .borderRadius(18)
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.isDarkMode(), this.cardColor))
-      .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
-        colorMode: this.isDarkMode() ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-        adaptiveColor: AdaptiveColor.AVERAGE,
-        scale: 1
-      })
-      .border({ width: 0.5, color: ThemeRuntime.glassBorderColor(this.isDarkMode()) })
-      .shadow({ radius: 9, color: ThemeRuntime.glassShadowColor(this.isDarkMode()), offsetX: 0, offsetY: 3 })
+      .borderRadius(ThemeRuntime.glassCornerRadius(18, 'button'))
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.isDarkMode(), this.cardColor, 'button'))
+      .backdropBlur(ThemeRuntime.glassBlur('button', 12))
+      .border({ width: ThemeRuntime.glassBorderWidth('button'), color: ThemeRuntime.glassBorderColor(this.isDarkMode(), 'button') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('button'), color: ThemeRuntime.glassShadowColor(this.isDarkMode(), 'button'), offsetX: ThemeRuntime.glassShadowOffsetX('button'), offsetY: ThemeRuntime.glassShadowOffsetY('button') })
       .accessibilityText(SearchBookShelfHelper.buttonText(book, this.shelfBookKeys, this.busyBookKeys))
       .margin({ left: 12 })
       .opacity(SearchBookShelfHelper.isBusy(book, this.busyBookKeys) ? 0.58 : 1)

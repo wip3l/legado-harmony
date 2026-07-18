@@ -1,6 +1,7 @@
 import {
   ThemeBubbleStyles,
   ThemeColorTokens,
+  ThemeGlassTokens,
   ThemeIds,
   ThemePack,
   ThemeRadiusTokens,
@@ -239,7 +240,7 @@ export class BuiltinThemeRegistry {
   private static theme(id: string, name: string, description: string, fontFamily: string,
     iconPackId: string): ThemePack {
     const theme = new ThemePack();
-    theme.schemaVersion = 1;
+    theme.schemaVersion = 2;
     theme.id = id;
     theme.name = name;
     theme.description = description;
@@ -319,7 +320,37 @@ export class BuiltinThemeRegistry {
     theme.navigation.iconPackId = source.navigation.iconPackId;
     theme.radius = BuiltinThemeRegistry.radius(source.radius.small, source.radius.medium, source.radius.large,
       source.radius.card, source.radius.button, source.radius.bubble);
+    theme.glass = BuiltinThemeRegistry.cloneGlass(source.glass || new ThemeGlassTokens());
     return theme;
+  }
+
+  private static cloneGlass(source: ThemeGlassTokens): ThemeGlassTokens {
+    const glass = new ThemeGlassTokens();
+    glass.enabled = source.enabled;
+    glass.panel.blurRadius = source.panel.blurRadius;
+    glass.panel.cornerRadius = source.panel.cornerRadius;
+    glass.popover.blurRadius = source.popover.blurRadius;
+    glass.popover.cornerRadius = source.popover.cornerRadius;
+    glass.button.blurRadius = source.button.blurRadius;
+    glass.button.cornerRadius = source.button.cornerRadius;
+    glass.overlay.blurRadius = source.overlay.blurRadius;
+    glass.overlay.cornerRadius = source.overlay.cornerRadius;
+    glass.menu.blurRadius = source.menu.blurRadius;
+    glass.menu.cornerRadius = source.menu.cornerRadius;
+    glass.lightTintOpacity = source.lightTintOpacity;
+    glass.darkTintOpacity = source.darkTintOpacity;
+    glass.lightBorderOpacity = source.lightBorderOpacity;
+    glass.darkBorderOpacity = source.darkBorderOpacity;
+    glass.borderWidth = source.borderWidth;
+    glass.shadowEnabled = source.shadowEnabled;
+    glass.lightShadowOpacity = source.lightShadowOpacity;
+    glass.darkShadowOpacity = source.darkShadowOpacity;
+    glass.shadowRadius = source.shadowRadius;
+    glass.shadowOffsetX = source.shadowOffsetX;
+    glass.shadowOffsetY = source.shadowOffsetY;
+    glass.adaptiveColor = source.adaptiveColor;
+    glass.materialScale = source.materialScale;
+    return glass;
   }
 
   private static cloneVariant(source: ThemeVariant): ThemeVariant {

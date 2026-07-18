@@ -14,7 +14,7 @@ export class AppDatabase {
   private initialized: boolean = false;
   private initPromise: Promise<void> | null = null;
   private readonly DATABASE_NAME = 'legado.db';
-  private readonly SCHEMA_VERSION = 5;
+  private readonly SCHEMA_VERSION = 6;
 
   private constructor() {}
 
@@ -123,6 +123,7 @@ export class AppDatabase {
         customOrder INTEGER DEFAULT 0,
         enabled INTEGER DEFAULT 1,
         enabledExplore INTEGER DEFAULT 1,
+        isLocked INTEGER DEFAULT 0,
         weight INTEGER DEFAULT 0,
         concurrentRate TEXT DEFAULT ''
       )
@@ -264,6 +265,7 @@ export class AppDatabase {
       { table: 'book_sources', column: 'exploreUrl', definition: "exploreUrl TEXT DEFAULT ''" },
       { table: 'book_sources', column: 'jsLib', definition: "jsLib TEXT DEFAULT ''" },
       { table: 'book_sources', column: 'loginHeader', definition: "loginHeader TEXT DEFAULT ''" },
+      { table: 'book_sources', column: 'isLocked', definition: 'isLocked INTEGER DEFAULT 0' },
       { table: 'book_chapters', column: 'variable', definition: "variable TEXT DEFAULT ''" }
     ];
 
@@ -682,6 +684,7 @@ export class AppDatabase {
       customOrder: source.customOrder,
       enabled: source.enabled ? 1 : 0,
       enabledExplore: source.enabledExplore ? 1 : 0,
+      isLocked: source.isLocked ? 1 : 0,
       weight: source.weight,
       concurrentRate: source.concurrentRate
     };
@@ -690,6 +693,10 @@ export class AppDatabase {
     predicates.equalTo('bookSourceUrl', source.bookSourceUrl);
     const resultSet = await this.store.query(predicates, []);
     if (resultSet.rowCount > 0) {
+      resultSet.goToFirstRow();
+      if (this.getLongColumn(resultSet, 'isLocked') === 1) {
+        return;
+      }
       await this.store.update(bucket, predicates);
     } else {
       await this.store.insert('book_sources', bucket);
@@ -698,6 +705,7 @@ export class AppDatabase {
 
   async updateBookSource(source: BookSource): Promise<void> {
     if (!this.store) return;
+    if (await this.isBookSourceLocked(source.bookSourceUrl)) return;
     const bucket: relationalStore.ValuesBucket = {
       bookSourceName: source.bookSourceName,
       bookSourceGroup: source.bookSourceGroup,
@@ -722,6 +730,7 @@ export class AppDatabase {
       customOrder: source.customOrder,
       enabled: source.enabled ? 1 : 0,
       enabledExplore: source.enabledExplore ? 1 : 0,
+      isLocked: source.isLocked ? 1 : 0,
       weight: source.weight,
       concurrentRate: source.concurrentRate
     };
@@ -733,6 +742,7 @@ export class AppDatabase {
 
   async deleteBookSource(bookSourceUrl: string): Promise<void> {
     if (!this.store) return;
+    if (await this.isBookSourceLocked(bookSourceUrl)) return;
     const predicates = new relationalStore.RdbPredicates('book_sources');
     predicates.equalTo('bookSourceUrl', bookSourceUrl);
     await this.store.delete(predicates);
@@ -759,6 +769,64 @@ export class AppDatabase {
       sources.push(this.resultSetToBookSource(resultSet));
     }
     return sources;
+  }
+
+  /** 列表只读取轻量字段；规则详情在实际使用时再按主键加载。 */
+  async getBookSourceSummaries(): Promise<BookSource[]> {
+    if (!this.store) return [];
+    const predicates = new relationalStore.RdbPredicates('book_sources');
+    predicates.orderByAsc('customOrder');
+    const columns = [
+      'bookSourceUrl', 'bookSourceName', 'bookSourceGroup', 'loginUrl', 'loginUi',
+      'loginCheckJs', 'loginHeader', 'customOrder', 'enabled', 'enabledExplore', 'isLocked'
+    ];
+    const resultSet = await this.store.query(predicates, columns);
+    const sources: BookSource[] = [];
+    while (resultSet.goToNextRow()) {
+      const source = new BookSource();
+      source.bookSourceUrl = resultSet.getString(resultSet.getColumnIndex('bookSourceUrl'));
+      source.bookSourceName = resultSet.getString(resultSet.getColumnIndex('bookSourceName'));
+      source.bookSourceGroup = resultSet.getString(resultSet.getColumnIndex('bookSourceGroup'));
+      source.loginUrl = resultSet.getString(resultSet.getColumnIndex('loginUrl'));
+      source.loginUi = resultSet.getString(resultSet.getColumnIndex('loginUi'));
+      source.loginCheckJs = resultSet.getString(resultSet.getColumnIndex('loginCheckJs'));
+      source.loginHeader = resultSet.getString(resultSet.getColumnIndex('loginHeader'));
+      source.customOrder = resultSet.getLong(resultSet.getColumnIndex('customOrder'));
+      source.enabled = resultSet.getLong(resultSet.getColumnIndex('enabled')) === 1;
+      source.enabledExplore = resultSet.getLong(resultSet.getColumnIndex('enabledExplore')) === 1;
+      source.isLocked = this.getLongColumn(resultSet, 'isLocked') === 1;
+      sources.push(source);
+    }
+    return sources;
+  }
+
+  async updateBookSourceListFields(bookSourceUrl: string, fields: Record<string, string | number>): Promise<void> {
+    if (!this.store) return;
+    if (await this.isBookSourceLocked(bookSourceUrl)) return;
+    const bucket: relationalStore.ValuesBucket = {};
+    if (fields['bookSourceGroup'] !== undefined) bucket['bookSourceGroup'] = fields['bookSourceGroup'];
+    if (fields['enabled'] !== undefined) bucket['enabled'] = fields['enabled'];
+    if (fields['enabledExplore'] !== undefined) bucket['enabledExplore'] = fields['enabledExplore'];
+    bucket['lastUpdateTime'] = Date.now();
+    const predicates = new relationalStore.RdbPredicates('book_sources');
+    predicates.equalTo('bookSourceUrl', bookSourceUrl);
+    await this.store.update(bucket, predicates);
+  }
+
+  async setBookSourceLocked(bookSourceUrl: string, locked: boolean): Promise<void> {
+    if (!this.store) return;
+    const predicates = new relationalStore.RdbPredicates('book_sources');
+    predicates.equalTo('bookSourceUrl', bookSourceUrl);
+    await this.store.update({ isLocked: locked ? 1 : 0 }, predicates);
+  }
+
+  private async isBookSourceLocked(bookSourceUrl: string): Promise<boolean> {
+    if (!this.store || !bookSourceUrl) return false;
+    const predicates = new relationalStore.RdbPredicates('book_sources');
+    predicates.equalTo('bookSourceUrl', bookSourceUrl);
+    const resultSet = await this.store.query(predicates, ['isLocked']);
+    if (!resultSet.goToFirstRow()) return false;
+    return this.getLongColumn(resultSet, 'isLocked') === 1;
   }
 
   async getEnabledBookSources(): Promise<BookSource[]> {
@@ -828,6 +896,7 @@ export class AppDatabase {
     source.lastUpdateTime = resultSet.getLong(resultSet.getColumnIndex('lastUpdateTime'));
     source.customOrder = resultSet.getLong(resultSet.getColumnIndex('customOrder'));
     source.enabled = resultSet.getLong(resultSet.getColumnIndex('enabled')) === 1;
+    source.isLocked = this.getLongColumn(resultSet, 'isLocked') === 1;
     source.enabledExplore = resultSet.getLong(resultSet.getColumnIndex('enabledExplore')) === 1;
     source.weight = resultSet.getLong(resultSet.getColumnIndex('weight'));
     source.concurrentRate = resultSet.getString(resultSet.getColumnIndex('concurrentRate'));

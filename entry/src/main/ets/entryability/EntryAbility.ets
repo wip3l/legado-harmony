@@ -7,6 +7,7 @@ import { BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettings
 import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
+import { GlassSettingsStore } from '../utils/GlassSettingsStore';
 import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { AppIconSettingsStore } from '../utils/AppIconSettingsStore';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
@@ -17,12 +18,15 @@ import { ThemeRuntime } from '../theme/ThemeRuntime';
 export default class EntryAbility extends UIAbility {
   private appliedColorMode: number = -1;
   private themeBootstrapPromise: Promise<void> = Promise.resolve();
+  private mainWindowStage: window.WindowStage | null = null;
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onCreate');
     AppStorage.setOrCreate('startupT0', Date.now());
     AppStorage.setOrCreate('appCacheDir', this.context.cacheDir);
     AppStorage.setOrCreate('appFilesDir', this.context.filesDir);
+    AppStorage.setOrCreate('pendingBookSourceImportUri', '');
+    AppStorage.setOrCreate('pendingBookSourceImportNonce', 0);
     hilog.info(0x0000, 'testTag', 'StartupTrace onCreate %{public}d', Date.now());
     PersistentStorage.persistProp('appThemeMode', 'system');
     AppThemeModeStore.load(this.context).then((mode: string) => {
@@ -137,6 +141,9 @@ export default class EntryAbility extends UIAbility {
     });
     this.themeBootstrapPromise = AppThemeSettingsStore.load(this.context).then((settings) => {
       AppThemeSettingsStore.applyToStorage(settings);
+      return GlassSettingsStore.load(this.context);
+    }).then((settings) => {
+      GlassSettingsStore.applyToStorage(settings);
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Sync app theme settings failed: %{public}s', JSON.stringify(e));
     }).then(() => {
@@ -159,6 +166,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
+    this.mainWindowStage = windowStage;
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
     hilog.info(0x0000, 'testTag', 'StartupTrace onWindowStageCreate %{public}d', Date.now());
 
@@ -181,6 +189,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageDestroy(): void {
+    this.mainWindowStage = null;
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onWindowStageDestroy');
   }
 
@@ -191,7 +200,14 @@ export default class EntryAbility extends UIAbility {
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(0x0000, 'testTag', 'Ability onNewWant %{public}s', JSON.stringify(launchParam));
-    this.handleLaunchWant(want);
+    const hasBookSourceFile = this.handleLaunchWant(want);
+    if (hasBookSourceFile && this.mainWindowStage) {
+      this.mainWindowStage.getMainWindow().then((mainWindow: window.Window) => {
+        return mainWindow.getUIContext().getRouter().pushUrl({ url: 'pages/BookSource' });
+      }).catch((e: Error) => {
+        hilog.warn(0x0000, 'testTag', 'Open book source import page failed: %{public}s', JSON.stringify(e));
+      });
+    }
   }
 
   onBackground(): void {
@@ -232,7 +248,13 @@ export default class EntryAbility extends UIAbility {
     this.context.getApplicationContext().setColorMode(colorMode);
   }
 
-  private handleLaunchWant(want: Want): void {
+  private handleLaunchWant(want: Want): boolean {
+    if (want.action === 'ohos.want.action.viewData' && want.uri && this.isJsonWant(want)) {
+      AppStorage.setOrCreate('pendingBookSourceImportUri', want.uri);
+      const nonce = AppStorage.get<number>('pendingBookSourceImportNonce') || 0;
+      AppStorage.setOrCreate('pendingBookSourceImportNonce', nonce + 1);
+      return true;
+    }
     const params = this.getLaunchParams(want);
     if (params['cacheAction'] === 'cancelFullTextCache') {
       const nonce = Date.now();
@@ -242,12 +264,12 @@ export default class EntryAbility extends UIAbility {
         bookUrl: params['bookUrl'] || ''
       }));
       AppStorage.setOrCreate('fullTextCacheCancelNonce', nonce);
-      return;
+      return false;
     }
     const action = params['shortcutAction'];
     if (action === RECENT_READ_SHORTCUT_ACTION) {
       RecentReadShortcut.request();
-      return;
+      return false;
     }
     if (action === OPEN_BOOK_SHORTCUT_ACTION) {
       const bookUrl = params['bookUrl'];
@@ -255,6 +277,14 @@ export default class EntryAbility extends UIAbility {
         RecentReadShortcut.requestBook(bookUrl);
       }
     }
+    return false;
+  }
+
+  private isJsonWant(want: Want): boolean {
+    const type = (want.type || '').toLowerCase();
+    if (type === 'application/json' || type === 'general.json') return true;
+    const uri = (want.uri || '').split('?')[0].split('#')[0].toLowerCase();
+    return uri.endsWith('.json');
   }
 
   private getLaunchParams(want: Want): Record<string, string> {

@@ -70,6 +70,7 @@ class ShelfTileSortEntry {
 @Entry
 @Component
 struct Index {
+  private shortcutRoutingActive: boolean = false;
   @State currentIndex: number = 0;
   @State bookshelfMultiSelectActive: boolean = false;
   @State bookshelfActiveGroupId: number = 0;
@@ -83,12 +84,14 @@ struct Index {
   @StorageLink('singleSourceSearchNonce') @Watch('onSingleSourceSearchRequested') singleSourceSearchNonce: number = 0;
 
   aboutToAppear() {
+    this.shortcutRoutingActive = true;
     hilog.info(0x0000, 'testTag', 'StartupTrace Index aboutToAppear %{public}d', Date.now());
     this.syncHomeSystemBars();
     this.openPendingShortcut();
   }
 
   onPageShow(): void {
+    this.shortcutRoutingActive = true;
     hilog.info(0x0000, 'testTag', 'StartupTrace Index onPageShow %{public}d', Date.now());
     this.syncHomeSystemBars();
   }
@@ -98,7 +101,14 @@ struct Index {
   }
 
   onLaunchShortcutChanged(): void {
+    if (!this.shortcutRoutingActive) {
+      return;
+    }
     this.openPendingShortcut();
+  }
+
+  onPageHide(): void {
+    this.shortcutRoutingActive = false;
   }
 
   onSingleSourceSearchRequested(): void {
@@ -129,9 +139,7 @@ struct Index {
     }
     try {
       await RecentReadShortcut.openPending(getContext(this));
-      RecentReadShortcut.consume();
     } catch (e) {
-      RecentReadShortcut.consume();
       console.error('打开最近阅读快捷项失败:', e);
     }
   }
@@ -205,6 +213,7 @@ struct Index {
         }
       }
       .height('100%')
+      .align(Alignment.TopStart)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.bottomTabBar(this.navigationIcon('mine'), '我的'))
     }
@@ -293,6 +302,7 @@ struct Index {
         }
       }
       .height('100%')
+      .align(Alignment.TopStart)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.compatTabBar(this.navigationIcon('mine'), '我的', 3))
     }
@@ -990,8 +1000,8 @@ struct BookshelfPage {
                     .alignItems(HorizontalAlign.Start)
                     .backgroundColor(this.glassCardColor())
                     .borderRadius(8)
-                    .border({ width: 1, color: this.glassBorderColor() })
-                    .shadow({ radius: 10, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
+                    .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
+                    .shadow({ radius: ThemeRuntime.glassShadowRadius(), color: this.glassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX(), offsetY: ThemeRuntime.glassShadowOffsetY() })
                     .gesture(
                       LongPressGesture({ repeat: false })
                         .onAction((event: GestureEvent) => {
@@ -1056,7 +1066,7 @@ struct BookshelfPage {
             .width('100%')
             .height('100%')
             .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-            .backdropBlur(18)
+            .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
             .onClick(() => this.closeBookActions())
 
           Column() {
@@ -1105,11 +1115,11 @@ struct BookshelfPage {
           }
           .width(158)
           .padding({ top: 6, bottom: 6 })
-          .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-          .borderRadius(14)
-          .backdropBlur(22)
-          .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-          .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+          .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+          .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
+          .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+          .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
           .position({
             x: this.contextMenuLeft(158),
             y: this.contextMenuTop(LocalBookService.isLocalBook(this.pendingActionBook) ? 188 : 232)
@@ -1311,9 +1321,9 @@ struct BookshelfPage {
               TextInput({ placeholder: '输入标签', text: this.tagInput })
                 .height(40)
                 .layoutWeight(1)
-                .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-                .backdropBlur(18)
-                .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+                .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'popover'))
+      .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
+                .border({ width: ThemeRuntime.glassBorderWidth('popover'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'popover') })
                 .fontColor(this.primaryTextColor())
                 .placeholderColor(this.subTextColor())
                 .borderRadius(12)
@@ -1335,9 +1345,9 @@ struct BookshelfPage {
               Button('取消')
                 .width('45%')
                 .height(44)
-                .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-                .backdropBlur(18)
-                .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+                .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'popover'))
+      .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
+                .border({ width: ThemeRuntime.glassBorderWidth('popover'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'popover') })
                 .fontColor(this.primaryTextColor())
                 .onClick(() => {
                   this.showTagDialog = false;
@@ -1356,10 +1366,10 @@ struct BookshelfPage {
           }
           .width('85%')
           .padding(18)
-          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-          .backdropBlur(28)
-          .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-          .shadow({ radius: 16, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 6 })
+          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
           .borderRadius(16)
         }
         .width('100%')
@@ -1493,7 +1503,7 @@ struct BookshelfPage {
           .textAlign(TextAlign.Center)
           .borderRadius(17)
           .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
+          .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
           .onClick(() => {
             this.newBookGroupName = '';
             this.showAddBookGroupDialog = true;
@@ -1580,7 +1590,7 @@ struct BookshelfPage {
     .width('100%')
     .padding({ left: 16, right: 16, top: 10, bottom: this.multiSelectBottomPadding() })
     .backgroundColor(this.glassCardColor())
-    .border({ width: 1, color: this.glassBorderColor() })
+    .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
     .alignSelf(ItemAlign.End)
   }
 
@@ -1616,9 +1626,9 @@ struct BookshelfPage {
       }
       .width(230)
       .padding(10)
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-      .backdropBlur(22)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
       .borderRadius(14)
       .shadow({ radius: 18, color: this.appDarkMode ? '#66000000' : '#26000000', offsetY: 6 })
       .margin({ right: 16, bottom: this.bookGroupPickerBottomMargin() })
@@ -1671,7 +1681,7 @@ struct BookshelfPage {
       Column()
         .width('100%').height('100%')
         .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(18)
+        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
         .onClick(() => this.closeBookGroupActionMenu())
       Column() {
         this.contextActionItem($r('sys.symbol.square_and_pencil'), '重命名', this.primaryTextColor(), () => {
@@ -1686,10 +1696,10 @@ struct BookshelfPage {
           })
       }
       .width(148).padding({ top: 6, bottom: 6 })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-      .borderRadius(14).backdropBlur(22)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .borderRadius(14).backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(100) })
     }
     .width('100%').height('100%')
@@ -2217,9 +2227,9 @@ struct BookshelfPage {
         }
         .width('100%')
         .height('100%')
-        .border({ width: 1, color: this.glassBorderColor() })
+        .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
         .borderRadius(7)
-        .shadow({ radius: 9, color: this.glassShadowColor(), offsetX: 0, offsetY: 4 })
+        .shadow({ radius: ThemeRuntime.glassShadowRadius(), color: this.glassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX(), offsetY: ThemeRuntime.glassShadowOffsetY() })
         .clip(true)
 
         if (this.isBookMultiSelect) {
@@ -2321,7 +2331,7 @@ struct BookshelfPage {
       .padding(8)
       .borderRadius(7)
       .backgroundColor(this.glassCardColor())
-      .border({ width: 1, color: this.glassBorderColor() })
+      .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
       .scrollBar(BarState.Off)
 
       Text(group.groupName)
@@ -2623,7 +2633,7 @@ struct BookshelfPage {
         .height(this.openingBookHeight())
         .backgroundColor(this.appDarkMode ? '#202226' : '#FFFDF7')
         .borderRadius(8)
-        .border({ width: 1, color: this.glassBorderColor() })
+        .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
         .shadow({ radius: 24, color: this.appDarkMode ? '#90000000' : '#38000000', offsetX: 8, offsetY: 10 })
 
         Stack({ alignContent: Alignment.Center }) {
@@ -4088,7 +4098,7 @@ struct BookshelfPage {
     .padding(3)
     .borderRadius(18)
     .backgroundColor(this.glassCardColor())
-    .border({ width: 1, color: this.glassBorderColor() })
+    .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
   }
 
   @Builder
@@ -4147,11 +4157,11 @@ struct BookshelfPage {
     }
     .width(132)
     .padding(6)
-    .borderRadius(14)
-    .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-    .backdropBlur(22)
-    .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-    .shadow({ radius: 12, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 5 })
+    .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
+    .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+    .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+    .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
   }
 
   @Builder
@@ -4212,7 +4222,7 @@ struct BookshelfPage {
     .padding({ left: 11, right: 9 })
     .borderRadius(16)
     .backgroundColor(this.glassCardColor())
-    .border({ width: 1, color: this.glassBorderColor() })
+    .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
     .alignItems(VerticalAlign.Center)
     .margin({ right: 10 })
     .onClick(() => {
@@ -4242,11 +4252,11 @@ struct BookshelfPage {
     }
     .width(116)
     .padding(6)
-    .borderRadius(14)
-    .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-    .backdropBlur(22)
-    .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-    .shadow({ radius: 12, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 5 })
+    .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
+    .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+    .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+    .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
   }
 
   @Builder
@@ -4740,8 +4750,8 @@ struct ExplorePage {
           .height(40)
           .borderRadius(20)
           .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
-          .shadow({ radius: 8, color: this.glassShadowColor(), offsetX: 0, offsetY: 3 })
+          .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius(), color: this.glassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX(), offsetY: ThemeRuntime.glassShadowOffsetY() })
           .padding({ left: 16, right: 10 })
           .alignItems(VerticalAlign.Center)
           .onClick(() => {
@@ -5014,11 +5024,11 @@ struct ExplorePage {
     }
     .width('calc(100% - 32vp)')
     .padding(8)
-    .borderRadius(16)
-    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-    .backdropBlur(28)
-    .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-    .shadow({ radius: 16, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 6 })
+    .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+    .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+    .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+    .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     .position({ x: 16, y: this.statusBarHeight + 52 })
     .zIndex(10)
   }
@@ -5500,8 +5510,8 @@ struct SearchPage {
           .height(40)
           .borderRadius(20)
           .backgroundColor(this.glassCardColor())
-          .border({ width: 1, color: this.glassBorderColor() })
-          .shadow({ radius: 8, color: this.glassShadowColor(), offsetX: 0, offsetY: 3 })
+          .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius(), color: this.glassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX(), offsetY: ThemeRuntime.glassShadowOffsetY() })
           .alignItems(VerticalAlign.Center)
 
           ImmersiveBackButton({
@@ -5780,11 +5790,11 @@ struct SearchPage {
       .constraintSize({ maxHeight: 280 })
     }
     .width('calc(100% - 112vp)')
-    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-    .backdropBlur(28)
-    .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+    .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+    .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
     .borderRadius(12)
-    .shadow({ radius: 12, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 5 })
+    .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     .position({ x: 16, y: this.statusBarHeight + (this.singleSourceSearchUrl ? 92 : 52) })
     .zIndex(10)
   }
@@ -6412,11 +6422,11 @@ struct SearchPage {
       .width(this.searchSettingsPanelWidth())
       .constraintSize({ maxHeight: 620 })
       .padding(18)
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-      .borderRadius(16)
-      .backdropBlur(28)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-      .shadow({ radius: 16, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 6 })
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
       .position({
         x: this.searchSettingsPanelLeft(),
         y: this.statusBarHeight + (this.singleSourceSearchUrl ? 92 : 52)
@@ -6629,11 +6639,13 @@ struct SettingsPage {
       }
       .width('100%')
       .layoutWeight(1)
+      .align(Alignment.TopStart)
       .padding({ bottom: 96 })
       .backgroundColor(this.pageColor())
     }
     .width('100%')
     .height('100%')
+    .justifyContent(FlexAlign.Start)
     .padding({ top: this.statusBarHeight })
     .backgroundColor(this.pageColor())
   }

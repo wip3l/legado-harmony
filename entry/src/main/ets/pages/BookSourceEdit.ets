@@ -68,6 +68,10 @@ struct BookSourceEditPage {
   }
 
   async saveSource() {
+    if (this.source.isLocked) {
+      promptAction.showToast({ message: '锁定的书源不能修改，请先在书源管理中解锁' });
+      return;
+    }
     if (!this.source.bookSourceUrl) {
       promptAction.showToast({ message: '请输入书源地址' });
       return;
@@ -836,6 +840,10 @@ struct BookSourceEditPage {
   }
 
   async saveSourceWithoutBack(): Promise<void> {
+    if (this.source.isLocked) {
+      promptAction.showToast({ message: '锁定的书源不能修改，请先在书源管理中解锁' });
+      return;
+    }
     const db = AppDatabase.getInstance();
     await db.initWithContext(getContext(this));
     const existing = await db.getBookSource(this.source.bookSourceUrl);

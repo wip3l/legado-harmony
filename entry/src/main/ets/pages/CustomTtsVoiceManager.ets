@@ -664,14 +664,10 @@ struct CustomTtsVoiceManagerPage {
     .width(52)
     .height(52)
     .margin({ right: 22, bottom: this.navBarHeight + 22 })
-    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor()))
-    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
-      colorMode: this.appDarkMode ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-      adaptiveColor: AdaptiveColor.AVERAGE,
-      scale: 1
-    })
-    .border({ width: 0.5, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-    .shadow({ radius: 12, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 4 })
+    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor(), 'button'))
+    .backdropBlur(ThemeRuntime.glassBlur('button', 12))
+    .border({ width: ThemeRuntime.glassBorderWidth('button'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'button') })
+    .shadow({ radius: ThemeRuntime.glassShadowRadius('button'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'button'), offsetX: ThemeRuntime.glassShadowOffsetX('button'), offsetY: ThemeRuntime.glassShadowOffsetY('button') })
     .accessibilityText('新增自定义音色')
     .onClick(() => {
       this.showAddDialog = true;
@@ -826,7 +822,7 @@ struct CustomTtsVoiceManagerPage {
         .width('100%')
         .height('100%')
         .backgroundColor(this.appDarkMode ? '#38000000' : '#18FFFFFF')
-        .backdropBlur(12)
+        .backdropBlur(ThemeRuntime.glassBlur('button', 12))
         .onClick(() => this.closeVoiceActions())
       Column() {
         this.voiceContextActionItem($r('sys.symbol.square_and_pencil'), '编辑', this.primaryTextColor(),
@@ -840,11 +836,11 @@ struct CustomTtsVoiceManagerPage {
       }
       .width(148)
       .padding({ top: 6, bottom: 6 })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-      .borderRadius(14)
-      .backdropBlur(22)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(188) })
     }
     .width('100%')
@@ -931,11 +927,11 @@ struct CustomTtsVoiceManagerPage {
       }
       .width(176)
       .padding(6)
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode))
-      .borderRadius(16)
-      .backdropBlur(22)
-      .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
-      .shadow({ radius: 18, color: ThemeRuntime.glassShadowColor(this.appDarkMode), offsetX: 0, offsetY: 7 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .margin({ right: 22, bottom: this.navBarHeight + 82 })
     }
     .width('100%')

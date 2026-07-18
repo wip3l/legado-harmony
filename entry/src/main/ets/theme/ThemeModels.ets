@@ -75,8 +75,48 @@ export class ThemeRadiusTokens {
   bubble: number = 6;
 }
 
+export class ThemeGlassSurfaceTokens {
+  blurRadius: number = 22;
+  cornerRadius: number = 16;
+}
+
+export class ThemeGlassTokens {
+  enabled: boolean = true;
+  panel: ThemeGlassSurfaceTokens = new ThemeGlassSurfaceTokens();
+  popover: ThemeGlassSurfaceTokens = new ThemeGlassSurfaceTokens();
+  button: ThemeGlassSurfaceTokens = new ThemeGlassSurfaceTokens();
+  overlay: ThemeGlassSurfaceTokens = new ThemeGlassSurfaceTokens();
+  menu: ThemeGlassSurfaceTokens = new ThemeGlassSurfaceTokens();
+  lightTintOpacity: number = 85;
+  darkTintOpacity: number = 78;
+  lightBorderOpacity: number = 65;
+  darkBorderOpacity: number = 22;
+  borderWidth: number = 1;
+  shadowEnabled: boolean = true;
+  lightShadowOpacity: number = 17;
+  darkShadowOpacity: number = 44;
+  shadowRadius: number = 18;
+  shadowOffsetX: number = 0;
+  shadowOffsetY: number = 6;
+  adaptiveColor: boolean = true;
+  materialScale: number = 1;
+
+  constructor() {
+    this.panel.blurRadius = 22;
+    this.panel.cornerRadius = 16;
+    this.popover.blurRadius = 18;
+    this.popover.cornerRadius = 14;
+    this.button.blurRadius = 12;
+    this.button.cornerRadius = 24;
+    this.overlay.blurRadius = 28;
+    this.overlay.cornerRadius = 20;
+    this.menu.blurRadius = 10;
+    this.menu.cornerRadius = 12;
+  }
+}
+
 export class ThemePack {
-  schemaVersion: number = 1;
+  schemaVersion: number = 2;
   id: string = ThemeIds.CLASSIC_BLUE;
   name: string = '经典蓝';
   description: string = '';
@@ -85,4 +125,5 @@ export class ThemePack {
   typography: ThemeTypographyTokens = new ThemeTypographyTokens();
   navigation: ThemeNavigationTokens = new ThemeNavigationTokens();
   radius: ThemeRadiusTokens = new ThemeRadiusTokens();
+  glass: ThemeGlassTokens = new ThemeGlassTokens();
 }
