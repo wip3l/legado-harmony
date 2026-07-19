@@ -1,6 +1,6 @@
 # 主题开发指南
 
-开源轻页的主题由编译期 `ThemePack`、运行时 `ThemeRuntime` 和持久化兼容层组成。主题选择只保存稳定的 `themeId` 与用户对强调色/按钮色的覆盖值；`Resource`、背景图片和图标由资源注册表解析，不进入 Preferences。
+开源轻页的主题由编译期 `ThemePack`、运行时 `ThemeRuntime` 和持久化兼容层组成。主题选择保存稳定的 `themeId`、主题封面开关与用户颜色覆盖值；`Resource`、背景图片、封面和图标由资源注册表解析，不进入 Preferences。
 
 ## 目录与职责
 
@@ -13,9 +13,14 @@ entry/src/main/ets/theme/
 
 entry/src/main/resources/base/media/
 ├── reader_bg_*                 # 阅读背景 SVG
+├── theme_cover_*               # 主题书籍封面底图
+├── theme_frame_*               # 书架封面装饰边框
+├── theme_folder_art_*          # 平铺模式分组文件夹插画（450 × 660）
 ├── ic_theme_rounded_*          # 圆润导航图标包
 └── ic_theme_ink_*              # 水墨导航图标包
 ```
+
+当前还内置 `strawberry`、`crimson`、`plum`、`rose` 与 `crane` 五组主题专属导航图标，以及对应的浅/深阅读背景和主题标识。
 
 `AppThemeSettingsStore` 是兼容桥：它继续读写原来的浅/深强调色与按钮色，同时保存 `appThemeId`，因此旧版本用户的自定义颜色不会在升级时丢失。
 
@@ -27,8 +32,11 @@ entry/src/main/resources/base/media/
 - 阅读外观：纯色回退、背景资源 ID、正文/辅助文字色、内容明暗。
 - 正则强调：默认强调模式、气泡预设、强调色、气泡文字色。
 - 排版：App 默认字体族。用户选择的自定义字体优先级更高。
+- 阅读排版：推荐字号、行距、段距与四边边距；切换主题时写入该主题的独立阅读配置。
+- 书籍：主题插画封面和书架装饰边框。启用主题封面时跳过原始/图库封面，封面不叠加书名或作者。
 - 导航：悬浮底栏图标包 ID。
 - 形状：小/中/大圆角、卡片、按钮与气泡圆角。
+- 材质：面板、弹层、按钮、遮罩和菜单可分别声明模糊与圆角，并配置明暗色玻璃透明度、边框和阴影。标准玻璃模式使用主题默认值；轻盈、强烈或自定义模式继续优先使用用户设置。
 
 有效值优先级为：
 
@@ -52,6 +60,16 @@ theme.name = '我的主题';
 theme.description = '主题说明';
 theme.typography.appFontFamily = 'sans-serif';
 theme.navigation.iconPackId = 'rounded';
+theme.readerLayout.fontSize = 20;
+theme.readerLayout.lineHeight = 13;
+theme.readerLayout.paragraphSpacing = 11;
+theme.readerLayout.marginLeft = 22;
+theme.readerLayout.marginRight = 22;
+theme.readerLayout.marginTop = 22;
+theme.readerLayout.marginBottom = 22;
+theme.book.coverAssetId = 'my-theme';
+theme.book.shelfFrameAssetId = 'my-theme';
+theme.book.shelfFolderAssetId = 'my-theme';
 
 const light = new ThemeVariant();
 light.colors.pageColor = '#F5F5F5';
@@ -93,6 +111,15 @@ BuiltinThemeRegistry.register(theme);
 4. 即使有图片，也必须提供 `backgroundColor` 作为加载、翻页和系统窗口回退色。
 5. 正确填写 `contentTone`，阅读页据此决定系统栏图标和辅助内容明暗。
 
+## 主题封面与书架边框
+
+封面底图建议使用约 `300 × 440` 的本地 JPG/PNG/SVG。底图直接提供完整主题插画，不叠加书名或作者；同一 `coverAssetId` 可在 `themeBookCovers()` 中映射多张封面，书架会按书籍稳定打乱顺序并使用错开的间隔自动轮播。边框资源需要保持中心透明，只绘制外框、角花或主题纹样。
+
+1. 添加 `theme_cover_<id>.svg`、`theme_frame_<id>.svg` 与 `theme_folder_art_<id>.jpg`；文件夹资源建议使用 `450 × 660`，与主题封面保持一致比例。
+2. 在 `ThemeAssetRegistry.themeBookCover()`、`themeShelfFrame()` 和 `themeShelfFolder()` 中增加资源映射。
+3. 配置 `theme.book.coverAssetId`、`shelfFrameAssetId` 与 `shelfFolderAssetId`。
+4. 切换主题时用户可选择“保留原封面”或“启用主题封面”，此选择由 `appThemeBookCoverEnabled` 持久化。
+
 ## 悬浮底栏图标包
 
 图标包固定包含 `bookshelf`、`explore`、`search`、`mine` 四个 24×24 单色 SVG。路径使用纯黑填充，由 ArkUI 的 `fillColor` 注入主题色。
@@ -104,10 +131,10 @@ BuiltinThemeRegistry.register(theme);
 规则 schema v2 支持：
 
 - `emphasisMode`：`inherit`、`none`、`text`、`highlight`、`bubble`。
-- `bubbleStyleId`：`inherit`、`qq-soft`、`qq-solid`、`capsule`、`paper`、`neon`。
+- `bubbleStyleId`：`inherit`、`qq-soft`、`qq-solid`、`capsule`、`paper`、`neon`，以及十种主题专属样式：`classic-glass`、`warm-scroll`、`forest-dew`、`ink-brush`、`neon-pulse`、`strawberry-ribbon`、`crimson-stamp`、`celadon-slip`、`rose-frame`、`moon-halo`。
 - `emphasisColor`：留空时跟随主题，设置后作为规则级覆盖。
 
-旧的 `highlightColorEnabled` 与 `shadowColor` 仍会读取和输出，用于升级兼容。气泡使用行内 `Span.textBackgroundStyle` 和 `textShadow`，不会改变正文源文本或 TTS 索引；TTS 当前朗读高亮拥有最高显示优先级。
+旧的 `highlightColorEnabled` 与 `shadowColor` 仍会读取和输出，用于升级兼容。所有气泡模式的正则命中统一使用行内 `ContainerSpan`：命中文字、主题背景、多层 `textShadow` 与左右镜像端饰属于同一个行内单元，不再根据匹配是否覆盖整段切换渲染方式。十套端饰分别表达玻璃星芒、卷轴、叶片露珠、墨迹印章、霓虹电路、草莓缎带、赤墨档案章、宋式回纹、玫瑰角花和月色鹤影；主题专属样式不再统一追加下划线。强调效果不会改变正文源文本或 TTS 索引，TTS 当前朗读高亮拥有最高显示优先级。
 
 ## 验证清单
 

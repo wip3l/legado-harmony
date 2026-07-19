@@ -1,6 +1,8 @@
 import { BuiltinThemeRegistry } from './BuiltinThemeRegistry';
 import {
   ThemeBubbleStyles,
+  ThemeGlassSurfaceTokens,
+  ThemeGlassTokens,
   ThemeIds,
   ThemePack,
   ThemeRegexEmphasisModes,
@@ -185,8 +187,11 @@ export class ThemeRuntime {
     if (!ThemeRuntime.glassEnabled()) {
       return color;
     }
-    const opacity = ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_TINT_OPACITY :
-      ThemeRuntime.KEY_GLASS_LIGHT_TINT_OPACITY, darkMode ? 78 : 85, 0, 100);
+    const glass = ThemeRuntime.currentGlass();
+    const opacity = ThemeRuntime.usesThemeGlassDefaults() ?
+      (darkMode ? glass.darkTintOpacity : glass.lightTintOpacity) :
+      ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_TINT_OPACITY :
+        ThemeRuntime.KEY_GLASS_LIGHT_TINT_OPACITY, darkMode ? 78 : 85, 0, 100);
     return `#${ThemeRuntime.opacityHex(opacity)}${color.substring(1)}`;
   }
 
@@ -196,14 +201,20 @@ export class ThemeRuntime {
     if (!ThemeRuntime.glassEnabled()) {
       return color;
     }
-    const panelOpacity = ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_TINT_OPACITY :
-      ThemeRuntime.KEY_GLASS_LIGHT_TINT_OPACITY, darkMode ? 78 : 85, 0, 100);
+    const glass = ThemeRuntime.currentGlass();
+    const panelOpacity = ThemeRuntime.usesThemeGlassDefaults() ?
+      (darkMode ? glass.darkTintOpacity : glass.lightTintOpacity) :
+      ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_TINT_OPACITY :
+        ThemeRuntime.KEY_GLASS_LIGHT_TINT_OPACITY, darkMode ? 78 : 85, 0, 100);
     return `#${ThemeRuntime.opacityHex(Math.round(panelOpacity * 0.47))}${color.substring(1)}`;
   }
 
   static glassBorderColor(darkMode: boolean, surface: string = 'panel'): string {
-    const opacity = ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_BORDER_OPACITY :
-      ThemeRuntime.KEY_GLASS_LIGHT_BORDER_OPACITY, darkMode ? 22 : 65, 0, 100);
+    const glass = ThemeRuntime.currentGlass();
+    const opacity = ThemeRuntime.usesThemeGlassDefaults() ?
+      (darkMode ? glass.darkBorderOpacity : glass.lightBorderOpacity) :
+      ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_BORDER_OPACITY :
+        ThemeRuntime.KEY_GLASS_LIGHT_BORDER_OPACITY, darkMode ? 22 : 65, 0, 100);
     return `#${ThemeRuntime.opacityHex(opacity)}FFFFFF`;
   }
 
@@ -211,18 +222,23 @@ export class ThemeRuntime {
     if (!ThemeRuntime.glassShadowEnabled()) {
       return '#00000000';
     }
-    const opacity = ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_SHADOW_OPACITY :
-      ThemeRuntime.KEY_GLASS_LIGHT_SHADOW_OPACITY, darkMode ? 44 : 17, 0, 100);
+    const glass = ThemeRuntime.currentGlass();
+    const opacity = ThemeRuntime.usesThemeGlassDefaults() ?
+      (darkMode ? glass.darkShadowOpacity : glass.lightShadowOpacity) :
+      ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_SHADOW_OPACITY :
+        ThemeRuntime.KEY_GLASS_LIGHT_SHADOW_OPACITY, darkMode ? 44 : 17, 0, 100);
     return `#${ThemeRuntime.opacityHex(opacity)}000000`;
   }
 
   static glassEnabled(): boolean {
-    return (AppStorage.get<boolean>(ThemeRuntime.KEY_GLASS_ENABLED) ?? true) &&
+    return ThemeRuntime.currentGlass().enabled &&
+      (AppStorage.get<boolean>(ThemeRuntime.KEY_GLASS_ENABLED) ?? true) &&
       !(AppStorage.get<boolean>(ThemeRuntime.KEY_GLASS_LOW_PERFORMANCE) ?? false);
   }
 
   static glassShadowEnabled(surface: string = 'panel'): boolean {
     return ThemeRuntime.glassEnabled() &&
+      ThemeRuntime.currentGlass().shadowEnabled &&
       (AppStorage.get<boolean>(ThemeRuntime.KEY_GLASS_SHADOW_ENABLED) ?? true);
   }
 
@@ -230,33 +246,87 @@ export class ThemeRuntime {
     if (!ThemeRuntime.glassEnabled()) {
       return 0;
     }
-    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_PANEL_BLUR, 22, 0, 40);
+    if (ThemeRuntime.usesThemeGlassDefaults()) {
+      const glass = ThemeRuntime.currentGlass();
+      return ThemeRuntime.clampNumber(ThemeRuntime.glassSurface(glass, surface).blurRadius * glass.materialScale,
+        0, 40);
+    }
+    return ThemeRuntime.numberFromStorage(ThemeRuntime.glassBlurStorageKey(surface), fallback, 0, 40);
   }
 
   static glassBorderWidth(surface: string = 'panel'): number {
+    if (ThemeRuntime.usesThemeGlassDefaults()) {
+      return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().borderWidth, 0, 2);
+    }
     return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_BORDER_WIDTH, 1, 0, 2);
   }
 
   static glassCornerRadius(fallback: number = 16, surface: string = 'panel'): number {
+    if (ThemeRuntime.usesThemeGlassDefaults()) {
+      return ThemeRuntime.clampNumber(ThemeRuntime.glassSurface(ThemeRuntime.currentGlass(), surface).cornerRadius,
+        0, 32);
+    }
     return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_CORNER_RADIUS, fallback, 0, 32);
   }
 
   static glassShadowRadius(surface: string = 'panel'): number {
-    return ThemeRuntime.glassShadowEnabled() ?
-      ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_SHADOW_RADIUS, 18, 0, 30) : 0;
+    if (!ThemeRuntime.glassShadowEnabled()) {
+      return 0;
+    }
+    if (ThemeRuntime.usesThemeGlassDefaults()) {
+      return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().shadowRadius, 0, 30);
+    }
+    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_SHADOW_RADIUS, 18, 0, 30);
   }
 
   static glassShadowOffsetX(surface: string = 'panel'): number {
+    if (ThemeRuntime.usesThemeGlassDefaults()) {
+      return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().shadowOffsetX, -12, 12);
+    }
     return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_SHADOW_OFFSET_X, 0, -12, 12);
   }
 
   static glassShadowOffsetY(surface: string = 'panel'): number {
+    if (ThemeRuntime.usesThemeGlassDefaults()) {
+      return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().shadowOffsetY, -12, 12);
+    }
     return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_SHADOW_OFFSET_Y, 6, -12, 12);
   }
 
   private static numberFromStorage(key: string, fallback: number, min: number, max: number): number {
     const value = AppStorage.get<number>(key) ?? fallback;
     return Math.max(min, Math.min(max, value));
+  }
+
+  private static clampNumber(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private static usesThemeGlassDefaults(): boolean {
+    const preset = (AppStorage.get<string>('glassPreset') || 'standard').trim().toLowerCase();
+    return preset === 'standard';
+  }
+
+  private static currentGlass(): ThemeGlassTokens {
+    return ThemeRuntime.currentPack().glass || new ThemeGlassTokens();
+  }
+
+  private static glassSurface(glass: ThemeGlassTokens, surface: string): ThemeGlassSurfaceTokens {
+    const normalized = (surface || '').trim().toLowerCase();
+    if (normalized === 'popover') return glass.popover;
+    if (normalized === 'button') return glass.button;
+    if (normalized === 'overlay') return glass.overlay;
+    if (normalized === 'menu') return glass.menu;
+    return glass.panel;
+  }
+
+  private static glassBlurStorageKey(surface: string): string {
+    const normalized = (surface || '').trim().toLowerCase();
+    if (normalized === 'popover') return ThemeRuntime.KEY_GLASS_POPOVER_BLUR;
+    if (normalized === 'button') return ThemeRuntime.KEY_GLASS_BUTTON_BLUR;
+    if (normalized === 'overlay') return ThemeRuntime.KEY_GLASS_OVERLAY_BLUR;
+    if (normalized === 'menu') return ThemeRuntime.KEY_GLASS_MENU_BLUR;
+    return ThemeRuntime.KEY_GLASS_PANEL_BLUR;
   }
 
   private static opacityHex(opacity: number): string {
@@ -513,13 +583,23 @@ export class ThemeRuntime {
     const style = (value || '').trim();
     if (style === ThemeBubbleStyles.QQ_SOFT || style === ThemeBubbleStyles.QQ_SOLID ||
       style === ThemeBubbleStyles.CAPSULE || style === ThemeBubbleStyles.PAPER ||
-      style === ThemeBubbleStyles.NEON) {
+      style === ThemeBubbleStyles.NEON || style === ThemeBubbleStyles.CLASSIC_GLASS ||
+      style === ThemeBubbleStyles.WARM_SCROLL || style === ThemeBubbleStyles.FOREST_DEW ||
+      style === ThemeBubbleStyles.INK_BRUSH || style === ThemeBubbleStyles.NEON_PULSE ||
+      style === ThemeBubbleStyles.STRAWBERRY_RIBBON ||
+      style === ThemeBubbleStyles.CRIMSON_STAMP || style === ThemeBubbleStyles.CELADON_SLIP ||
+      style === ThemeBubbleStyles.ROSE_FRAME || style === ThemeBubbleStyles.MOON_HALO) {
       return style;
     }
     const fallbackStyle = (fallback || '').trim();
     if (fallbackStyle === ThemeBubbleStyles.QQ_SOFT || fallbackStyle === ThemeBubbleStyles.QQ_SOLID ||
       fallbackStyle === ThemeBubbleStyles.CAPSULE || fallbackStyle === ThemeBubbleStyles.PAPER ||
-      fallbackStyle === ThemeBubbleStyles.NEON) {
+      fallbackStyle === ThemeBubbleStyles.NEON || fallbackStyle === ThemeBubbleStyles.CLASSIC_GLASS ||
+      fallbackStyle === ThemeBubbleStyles.WARM_SCROLL || fallbackStyle === ThemeBubbleStyles.FOREST_DEW ||
+      fallbackStyle === ThemeBubbleStyles.INK_BRUSH || fallbackStyle === ThemeBubbleStyles.NEON_PULSE ||
+      fallbackStyle === ThemeBubbleStyles.STRAWBERRY_RIBBON ||
+      fallbackStyle === ThemeBubbleStyles.CRIMSON_STAMP || fallbackStyle === ThemeBubbleStyles.CELADON_SLIP ||
+      fallbackStyle === ThemeBubbleStyles.ROSE_FRAME || fallbackStyle === ThemeBubbleStyles.MOON_HALO) {
       return fallbackStyle;
     }
     return ThemeBubbleStyles.QQ_SOFT;

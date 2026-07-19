@@ -1,0 +1,9 @@
+<svg width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1080" height="1920" fill="#EEF3F8"/>
+  <circle cx="872" cy="130" r="75" fill="#C9D6E7" fill-opacity="0.72"/><circle cx="850" cy="108" r="75" fill="#EEF3F8"/>
+  <g fill="#6D86A7" fill-opacity="0.5"><circle cx="91" cy="92" r="5"/><circle cx="207" cy="151" r="3"/><circle cx="982" cy="298" r="4"/><circle cx="80" cy="1660" r="4"/><circle cx="947" cy="1741" r="5"/></g>
+  <g fill="none" stroke="#6882A4" stroke-opacity="0.34"><ellipse cx="540" cy="1760" rx="355" ry="74" stroke-width="4"/><ellipse cx="540" cy="1760" rx="255" ry="50" stroke-width="3"/><ellipse cx="540" cy="1760" rx="145" ry="27" stroke-width="2"/></g>
+  <path d="M700 181c-87-45-147-24-188 36 73-25 128-17 170 26-53-2-91 16-119 54 80-21 140-7 181 44-15-50-34-91-44-160Z" fill="#5F7799" fill-opacity="0.34"/>
+  <path d="M532 271c-31 28-47 64-48 107m48-107c30 22 51 54 61 96" fill="none" stroke="#5F7799" stroke-width="5" stroke-opacity="0.34"/>
+  <path d="M70 330h940M70 1590h940" stroke="#7890AD" stroke-opacity="0.14" stroke-dasharray="6 10" stroke-width="2"/>
+</svg>

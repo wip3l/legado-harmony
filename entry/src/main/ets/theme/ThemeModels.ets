@@ -5,6 +5,11 @@ export class ThemeIds {
   static readonly FOREST_MIST: string = 'forest-mist';
   static readonly INK_WASH: string = 'ink-wash';
   static readonly NEON_NIGHT: string = 'neon-night';
+  static readonly STRAWBERRY_CREAM: string = 'strawberry-cream';
+  static readonly CRIMSON_ARCHIVE: string = 'crimson-archive';
+  static readonly PLUM_TEA: string = 'plum-tea';
+  static readonly ROSE_LETTER: string = 'rose-letter';
+  static readonly MOON_CRANE: string = 'moon-crane';
 }
 
 export class ThemeRegexEmphasisModes {
@@ -22,6 +27,16 @@ export class ThemeBubbleStyles {
   static readonly CAPSULE: string = 'capsule';
   static readonly PAPER: string = 'paper';
   static readonly NEON: string = 'neon';
+  static readonly CLASSIC_GLASS: string = 'classic-glass';
+  static readonly WARM_SCROLL: string = 'warm-scroll';
+  static readonly FOREST_DEW: string = 'forest-dew';
+  static readonly INK_BRUSH: string = 'ink-brush';
+  static readonly NEON_PULSE: string = 'neon-pulse';
+  static readonly STRAWBERRY_RIBBON: string = 'strawberry-ribbon';
+  static readonly CRIMSON_STAMP: string = 'crimson-stamp';
+  static readonly CELADON_SLIP: string = 'celadon-slip';
+  static readonly ROSE_FRAME: string = 'rose-frame';
+  static readonly MOON_HALO: string = 'moon-halo';
 }
 
 export class ThemeColorTokens {
@@ -60,6 +75,22 @@ export class ThemeVariant {
 
 export class ThemeTypographyTokens {
   appFontFamily: string = 'sans-serif';
+}
+
+export class ThemeReaderLayoutTokens {
+  fontSize: number = 20;
+  lineHeight: number = 12;
+  paragraphSpacing: number = 10;
+  marginLeft: number = 18;
+  marginRight: number = 18;
+  marginTop: number = 18;
+  marginBottom: number = 18;
+}
+
+export class ThemeBookTokens {
+  coverAssetId: string = ThemeIds.CLASSIC_BLUE;
+  shelfFrameAssetId: string = ThemeIds.CLASSIC_BLUE;
+  shelfFolderAssetId: string = ThemeIds.CLASSIC_BLUE;
 }
 
 export class ThemeNavigationTokens {
@@ -116,13 +147,15 @@ export class ThemeGlassTokens {
 }
 
 export class ThemePack {
-  schemaVersion: number = 2;
+  schemaVersion: number = 3;
   id: string = ThemeIds.CLASSIC_BLUE;
   name: string = '经典蓝';
   description: string = '';
   light: ThemeVariant = new ThemeVariant();
   dark: ThemeVariant = new ThemeVariant();
   typography: ThemeTypographyTokens = new ThemeTypographyTokens();
+  readerLayout: ThemeReaderLayoutTokens = new ThemeReaderLayoutTokens();
+  book: ThemeBookTokens = new ThemeBookTokens();
   navigation: ThemeNavigationTokens = new ThemeNavigationTokens();
   radius: ThemeRadiusTokens = new ThemeRadiusTokens();
   glass: ThemeGlassTokens = new ThemeGlassTokens();

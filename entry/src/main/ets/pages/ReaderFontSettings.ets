@@ -952,10 +952,13 @@ struct ReaderFontSettingsPage {
     };
   }
 
-  regexPreviewTextShadow(highlighted: boolean, index: number): ShadowOptions {
+  regexPreviewTextShadow(highlighted: boolean, index: number): ShadowOptions | ShadowOptions[] {
     const style = this.resolvedRegexEmphasis(index);
     if (!highlighted) {
       return { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 };
+    }
+    if (style.textShadows.length > 0) {
+      return style.textShadows;
     }
     return {
       radius: style.textShadowRadius,
@@ -963,6 +966,29 @@ struct ReaderFontSettingsPage {
       offsetX: style.textShadowOffsetX,
       offsetY: style.textShadowOffsetY
     };
+  }
+
+  regexPreviewDecoration(highlighted: boolean, index: number): DecorationStyleInterface {
+    if (!highlighted) {
+      return { type: TextDecorationType.None };
+    }
+    const style = this.resolvedRegexEmphasis(index);
+    if (!style.decorationEnabled) {
+      return { type: TextDecorationType.None };
+    }
+    return {
+      type: TextDecorationType.Underline,
+      color: style.decorationColor,
+      style: this.regexDecorationStyle(style.decorationStyleId)
+    };
+  }
+
+  regexDecorationStyle(styleId: string): TextDecorationStyle {
+    if (styleId === 'double') return TextDecorationStyle.DOUBLE;
+    if (styleId === 'dotted') return TextDecorationStyle.DOTTED;
+    if (styleId === 'dashed') return TextDecorationStyle.DASHED;
+    if (styleId === 'wavy') return TextDecorationStyle.WAVY;
+    return TextDecorationStyle.SOLID;
   }
 
   @Builder
@@ -981,6 +1007,7 @@ struct ReaderFontSettingsPage {
             .fontColor(this.regexPreviewTextColor(slice.highlighted, index))
             .textBackgroundStyle(this.regexPreviewBackgroundStyle(slice.highlighted, index))
             .textShadow(this.regexPreviewTextShadow(slice.highlighted, index))
+            .decoration(this.regexPreviewDecoration(slice.highlighted, index))
         }, (slice: ReaderRegexPreviewSlice) => slice.key)
       }
       .width('100%')
@@ -1031,7 +1058,17 @@ struct ReaderFontSettingsPage {
       { value: '实色' },
       { value: '圆角胶囊' },
       { value: '纸笺' },
-      { value: '霓虹' }
+      { value: '霓虹' },
+      { value: '经典玻璃' },
+      { value: '暖纸卷轴' },
+      { value: '林间露珠' },
+      { value: '水墨笔触' },
+      { value: '霓虹脉冲' },
+      { value: '草莓软框' },
+      { value: '赤墨印章' },
+      { value: '青瓷纸笺' },
+      { value: '玫瑰信框' },
+      { value: '月光描边' }
     ];
   }
 
@@ -1051,6 +1088,16 @@ struct ReaderFontSettingsPage {
     if (styleId === 'neon') {
       return 5;
     }
+    if (styleId === 'classic-glass') return 6;
+    if (styleId === 'warm-scroll') return 7;
+    if (styleId === 'forest-dew') return 8;
+    if (styleId === 'ink-brush') return 9;
+    if (styleId === 'neon-pulse') return 10;
+    if (styleId === 'strawberry-ribbon') return 11;
+    if (styleId === 'crimson-stamp') return 12;
+    if (styleId === 'celadon-slip') return 13;
+    if (styleId === 'rose-frame') return 14;
+    if (styleId === 'moon-halo') return 15;
     return 0;
   }
 
@@ -1070,6 +1117,16 @@ struct ReaderFontSettingsPage {
     if (index === 5) {
       return 'neon';
     }
+    if (index === 6) return 'classic-glass';
+    if (index === 7) return 'warm-scroll';
+    if (index === 8) return 'forest-dew';
+    if (index === 9) return 'ink-brush';
+    if (index === 10) return 'neon-pulse';
+    if (index === 11) return 'strawberry-ribbon';
+    if (index === 12) return 'crimson-stamp';
+    if (index === 13) return 'celadon-slip';
+    if (index === 14) return 'rose-frame';
+    if (index === 15) return 'moon-halo';
     return 'inherit';
   }
 

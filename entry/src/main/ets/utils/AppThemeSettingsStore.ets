@@ -8,6 +8,7 @@ import { ReaderThemeHelper, ReaderThemeItem } from './ReaderThemeHelper';
 
 export class AppThemeSettings {
   themeId: string = '';
+  themeBookCoverEnabled: boolean = false;
   lightAccentColor: string = AppThemeSettingsStore.DEFAULT_LIGHT_ACCENT_COLOR;
   darkAccentColor: string = AppThemeSettingsStore.DEFAULT_DARK_ACCENT_COLOR;
   lightButtonColor: string = AppThemeSettingsStore.DEFAULT_LIGHT_BUTTON_COLOR;
@@ -33,6 +34,7 @@ export class AppThemeSettings {
 
 export class AppThemeSettingsStore {
   static readonly KEY_THEME_ID: string = ThemeRuntime.KEY_THEME_ID;
+  static readonly KEY_THEME_BOOK_COVER_ENABLED: string = 'appThemeBookCoverEnabled';
   static readonly KEY_LIGHT_ACCENT_COLOR: string = 'appLightAccentColor';
   static readonly KEY_DARK_ACCENT_COLOR: string = 'appDarkAccentColor';
   static readonly KEY_LIGHT_BUTTON_COLOR: string = 'appLightButtonColor';
@@ -72,6 +74,9 @@ export class AppThemeSettingsStore {
       AppThemeSettingsStore.DEFAULT_THEME_ID;
     settings.themeId = AppThemeSettingsStore.normalizeThemeId(await AppThemeSettingsStore.getString(
       store, AppThemeSettingsStore.KEY_THEME_ID, storageThemeId));
+    settings.themeBookCoverEnabled = await AppThemeSettingsStore.getBoolean(
+      store, AppThemeSettingsStore.KEY_THEME_BOOK_COVER_ENABLED,
+      AppStorage.get<boolean>(AppThemeSettingsStore.KEY_THEME_BOOK_COVER_ENABLED) || false);
     const customBaseFallback = BuiltinThemeRegistry.normalizeBuiltinId(settings.themeId);
     settings.customBaseThemeId = BuiltinThemeRegistry.normalizeBuiltinId(await AppThemeSettingsStore.getString(
       store, AppThemeSettingsStore.KEY_CUSTOM_BASE_THEME_ID,
@@ -130,6 +135,7 @@ export class AppThemeSettingsStore {
     AppThemeSettingsStore.cachedSettings = AppThemeSettingsStore.clone(normalized);
     const store = await preferences.getPreferences(context, AppThemeSettingsStore.STORE_NAME);
     await store.put(AppThemeSettingsStore.KEY_THEME_ID, normalized.themeId);
+    await store.put(AppThemeSettingsStore.KEY_THEME_BOOK_COVER_ENABLED, normalized.themeBookCoverEnabled);
     await store.put(AppThemeSettingsStore.KEY_LIGHT_ACCENT_COLOR, normalized.lightAccentColor);
     await store.put(AppThemeSettingsStore.KEY_DARK_ACCENT_COLOR, normalized.darkAccentColor);
     await store.put(AppThemeSettingsStore.KEY_LIGHT_BUTTON_COLOR, normalized.lightButtonColor);
@@ -182,6 +188,8 @@ export class AppThemeSettingsStore {
       normalized.darkButtonColor
     );
     AppStorage.setOrCreate(AppThemeSettingsStore.KEY_THEME_ID, normalized.themeId);
+    AppStorage.setOrCreate(AppThemeSettingsStore.KEY_THEME_BOOK_COVER_ENABLED,
+      normalized.themeBookCoverEnabled);
     AppStorage.setOrCreate(AppThemeSettingsStore.KEY_LIGHT_ACCENT_COLOR, normalized.lightAccentColor);
     AppStorage.setOrCreate(AppThemeSettingsStore.KEY_DARK_ACCENT_COLOR, normalized.darkAccentColor);
     AppStorage.setOrCreate(AppThemeSettingsStore.KEY_LIGHT_BUTTON_COLOR, normalized.lightButtonColor);
@@ -254,6 +262,7 @@ export class AppThemeSettingsStore {
     const settings = AppThemeSettingsStore.defaultsForTheme(normalizedThemeId === ThemeIds.CUSTOM ?
       previous.customBaseThemeId : normalizedThemeId);
     settings.themeId = normalizedThemeId;
+    settings.themeBookCoverEnabled = previous.themeBookCoverEnabled;
     AppThemeSettingsStore.copyCustom(previous, settings);
     if (normalizedThemeId === ThemeIds.CUSTOM) {
       AppThemeSettingsStore.useCustomColors(settings);
@@ -313,11 +322,21 @@ export class AppThemeSettingsStore {
     return typeof value === 'string' ? value : fallback;
   }
 
+  private static async getBoolean(
+    store: preferences.Preferences,
+    key: string,
+    fallback: boolean
+  ): Promise<boolean> {
+    const value = await store.get(key, fallback);
+    return typeof value === 'boolean' ? value : fallback;
+  }
+
   private static clone(source: AppThemeSettings): AppThemeSettings {
     const settings = new AppThemeSettings();
     const currentThemeId = AppStorage.get<string>(AppThemeSettingsStore.KEY_THEME_ID) ||
       AppThemeSettingsStore.DEFAULT_THEME_ID;
     settings.themeId = AppThemeSettingsStore.normalizeThemeId(source.themeId || currentThemeId);
+    settings.themeBookCoverEnabled = source.themeBookCoverEnabled === true;
     settings.customBaseThemeId = BuiltinThemeRegistry.normalizeBuiltinId(source.customBaseThemeId);
     const defaults = AppThemeSettingsStore.defaultsForTheme(settings.themeId === ThemeIds.CUSTOM ?
       settings.customBaseThemeId : settings.themeId);

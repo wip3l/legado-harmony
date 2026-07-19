@@ -1,0 +1,222 @@
+[
+  {
+    "bookSourceUrl": "https://www.dingmanhua.com/",
+    "bookSourceName": "顶漫画（Harmony修复）",
+    "bookSourceGroup": "漫画",
+    "bookSourceComment": "2026-07-19 实测：搜索、发现、目录、图片阅读可用。章节图片由页面内的安全路径/页数提取器生成，不执行外部 eval。",
+    "searchUrl": "https://www.dingmanhua.com/search?query={{key}}&page={{page}}",
+    "exploreUrl": "日漫::https://www.dingmanhua.com/sort?category=1&page={{page}}\n国漫::https://www.dingmanhua.com/sort?category=2&page={{page}}\n韩漫::https://www.dingmanhua.com/sort?category=3&page={{page}}\n热血::https://www.dingmanhua.com/sort?tag=9&page={{page}}\n冒险::https://www.dingmanhua.com/sort?tag=5&page={{page}}",
+    "header": "{\"User-Agent\":\"Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36\"}",
+    "searchRule": {
+      "bookList": ".card-content",
+      "name": ".cardtitle@text",
+      "coverUrl": "img@data-src",
+      "bookUrl": "a@href"
+    },
+    "exploreRule": {
+      "bookList": ".card-content",
+      "name": ".cardtitle@text",
+      "coverUrl": "img@data-src",
+      "bookUrl": "a@href"
+    },
+    "bookInfoRule": {
+      "name": ".comic-info h1@text",
+      "author": ".comic-info .info .author@text##^作者[：:]",
+      "coverUrl": ".comic-info img.cover@data-src",
+      "intro": ".comic-info .description@text",
+      "kind": ".comic-info a[href*=\"/sort?tag\"]@text",
+      "lastChapter": ".comic-info a[href*=\"/chapter/\"]@text"
+    },
+    "tocRule": {
+      "chapterList": "-.chapter-list a[href*=\"/chapter/\"]",
+      "chapterName": "text",
+      "chapterUrl": "href"
+    },
+    "contentRule": {
+      "content": "",
+      "images": "",
+      "imageStyle": "FULL"
+    },
+    "enabled": true,
+    "enabledExplore": true
+  },
+  {
+    "bookSourceUrl": "https://cn.baozimhcn.com",
+    "bookSourceName": "包子漫画（Harmony修复）",
+    "bookSourceGroup": "漫画",
+    "bookSourceComment": "2026-07-19 实测：旧域名已迁移，规则已切换到 www.baozimh.com；搜索、发现、目录、图片阅读可用。",
+    "searchUrl": "https://www.baozimh.com/search?q={{key}}",
+    "exploreUrl": "全部::https://www.baozimh.com/api/bzmhq/amp_comic_list?type=all&region=all&filter=&page={{page}}&limit=36&language=cn&__amp_source_origin=https%3A%2F%2Fwww.baozimh.com\n恋爱::https://www.baozimh.com/api/bzmhq/amp_comic_list?type=lianai&region=all&filter=&page={{page}}&limit=36&language=cn&__amp_source_origin=https%3A%2F%2Fwww.baozimh.com\n热血::https://www.baozimh.com/api/bzmhq/amp_comic_list?type=rexie&region=all&filter=&page={{page}}&limit=36&language=cn&__amp_source_origin=https%3A%2F%2Fwww.baozimh.com\n冒险::https://www.baozimh.com/api/bzmhq/amp_comic_list?type=mouxian&region=all&filter=&page={{page}}&limit=36&language=cn&__amp_source_origin=https%3A%2F%2Fwww.baozimh.com\n韩漫::https://www.baozimh.com/api/bzmhq/amp_comic_list?type=hanman&region=all&filter=&page={{page}}&limit=36&language=cn&__amp_source_origin=https%3A%2F%2Fwww.baozimh.com",
+    "header": "{\"User-Agent\":\"Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36\",\"Accept-Language\":\"zh-CN,zh;q=0.9\"}",
+    "searchRule": {
+      "bookList": ".comics-card",
+      "name": ".comics-card__title@text",
+      "coverUrl": "amp-img@src",
+      "kind": ".tabs@text",
+      "bookUrl": "a@href"
+    },
+    "exploreRule": {
+      "bookList": "$.items[*]",
+      "name": "$.name",
+      "author": "$.author",
+      "coverUrl": "https://static-tw.baozimh.com/cover/{{$.topic_img}}",
+      "kind": "$.type_names[*]",
+      "bookUrl": "https://www.baozimh.com/comic/{{$.comic_id}}"
+    },
+    "bookInfoRule": {
+      "name": ".comics-detail__title@text",
+      "author": ".comics-detail__author@text",
+      "coverUrl": ".comics-detail amp-img@src",
+      "intro": ".comics-detail__desc@text",
+      "kind": ".tag-list@text",
+      "lastChapter": ".supporting-text a[href*=\"page_direct\"]@text"
+    },
+    "tocRule": {
+      "chapterList": "-a.comics-chapters__item",
+      "chapterName": "text",
+      "chapterUrl": "href"
+    },
+    "contentRule": {
+      "images": "amp-img[id^=\"chapter-img\"]@data-src",
+      "imageStyle": "FULL"
+    },
+    "enabled": true,
+    "enabledExplore": true
+  },
+  {
+    "bookSourceUrl": "https://api.kkmh.com",
+    "bookSourceName": "快看漫画（Harmony修复）",
+    "bookSourceGroup": "漫画",
+    "bookSourceComment": "2026-07-19 实测：搜索改用现行搜索接口，详情/目录/阅读改用官方 Web v2 接口；付费或锁定章节仍遵循站点权限。",
+    "searchUrl": "https://search.kkmh.com/search/complex?q={{key}}",
+    "exploreUrl": "人气榜::https://www.kuaikanmanhua.com/v2/pweb/rank/topics?rank_id=9&since=0&limit=50\n新作榜::https://www.kuaikanmanhua.com/v2/pweb/rank/topics?rank_id=2&since=0&limit=50\n飙升榜::https://www.kuaikanmanhua.com/v2/pweb/rank/topics?rank_id=7&since=0&limit=50\n日漫榜::https://www.kuaikanmanhua.com/v2/pweb/rank/topics?rank_id=10&since=0&limit=50\n韩漫榜::https://www.kuaikanmanhua.com/v2/pweb/rank/topics?rank_id=11&since=0&limit=50\n完结榜::https://www.kuaikanmanhua.com/v2/pweb/rank/topics?rank_id=12&since=0&limit=50",
+    "header": "{\"User-Agent\":\"Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36\",\"Referer\":\"https://www.kuaikanmanhua.com/\"}",
+    "searchRule": {
+      "bookList": "$.data.topic.hit[*]&&$.data.topics[*]",
+      "name": "$.title",
+      "author": "$.user.nickname",
+      "coverUrl": "$.cover_image_url",
+      "intro": "$.description",
+      "kind": "$.category[*]",
+      "lastChapter": "$.latest_comic_title",
+      "bookUrl": "https://www.kuaikanmanhua.com/v2/pweb/topic/{{$.id}}?source="
+    },
+    "exploreRule": {
+      "bookList": "$.data.rank_info.topics[*]",
+      "name": "$.title",
+      "author": "$.user.nickname",
+      "coverUrl": "$.cover_image_url",
+      "intro": "$.description",
+      "kind": "$.tags[*]",
+      "lastChapter": "$.latest_comic.title",
+      "bookUrl": "https://www.kuaikanmanhua.com/v2/pweb/topic/{{$.id}}?source="
+    },
+    "bookInfoRule": {
+      "name": "$.data.topic_info.title",
+      "author": "$.data.topic_info.user.nickname",
+      "coverUrl": "$.data.topic_info.cover_image_url",
+      "intro": "$.data.topic_info.description",
+      "kind": "$.data.topic_info.tags[*]"
+    },
+    "tocRule": {
+      "chapterList": "$.data.topic_info.comics[*]",
+      "chapterName": "$.title",
+      "chapterUrl": "https://www.kuaikanmanhua.com/v2/pweb/comic/inner/{{$.id}}?source=",
+      "updateTime": "$.created_at"
+    },
+    "contentRule": {
+      "images": "$.data.comic_info.comic_images[*].url",
+      "imageStyle": "FULL"
+    },
+    "enabled": true,
+    "enabledExplore": true
+  },
+  {
+    "bookSourceUrl": "https://m.iyouman.com",
+    "bookSourceName": "🌠 爱优漫画（Harmony修复）",
+    "bookSourceGroup": "漫画",
+    "bookSourceComment": "2026-07-19 实测：HTTPS 证书异常，规则统一改用仍可访问的 HTTP API；搜索、发现、目录、图片阅读可用。",
+    "searchUrl": "http://m.iyouman.com/api/getsortlist/?search_type=&search_key={{key}}&page={{page}}&size=30&productname=aym&platformname=wap",
+    "exploreUrl": "每日更新::http://m.iyouman.com/api/updatelist/?productname=aym&platformname=wap\n综合榜::http://m.iyouman.com/api/getRankDataForWeb/?product_id=2&isalldata=0&time_type=total&sort_type=all&rank_type=heat&page={{page}}&productname=aym&platformname=wap\n恋爱::http://m.iyouman.com/api/getsortlist/?comic_sort=lianai&orderby=&search_type=&search_key=&page={{page}}&size=30&productname=aym&platformname=wap\n热血::http://m.iyouman.com/api/getsortlist/?comic_sort=rexue&orderby=&search_type=&search_key=&page={{page}}&size=30&productname=aym&platformname=wap\n玄幻::http://m.iyouman.com/api/getsortlist/?comic_sort=xuanhuan&orderby=&search_type=&search_key=&page={{page}}&size=30&productname=aym&platformname=wap\n韩漫::http://m.iyouman.com/api/getsortlist/?comic_sort=os&orderby=&search_type=&search_key=&page={{page}}&size=30&productname=aym&platformname=wap",
+    "header": "{\"User-Agent\":\"Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36\"}",
+    "searchRule": {
+      "bookList": "$.data.update[*].info[*]||$.data.data[*]||$.data[*]",
+      "name": "$.comic_name",
+      "author": "$.comic_author||$.author_name",
+      "coverUrl": "http://image.mhxk.com/mh/{{$.comic_id}}.jpg-600x800.jpg.webp",
+      "intro": "$.comic_desc||$.cartoon_desc",
+      "kind": "$.comic_type||$.sort_typelist",
+      "lastChapter": "$.last_chapter_name||$.comic_chapter_name",
+      "bookUrl": "http://m.iyouman.com/api/getcomicinfo_body/?comic_id={{$.comic_id}}&productname=aym&platformname=wap"
+    },
+    "exploreRule": {
+      "bookList": "$.data.update[*].info[*]||$.data.data[*]||$.data[*]",
+      "name": "$.comic_name",
+      "author": "$.comic_author||$.author_name",
+      "coverUrl": "http://image.mhxk.com/mh/{{$.comic_id}}.jpg-600x800.jpg.webp",
+      "intro": "$.comic_desc||$.cartoon_desc",
+      "kind": "$.comic_type||$.sort_typelist",
+      "lastChapter": "$.last_chapter_name||$.comic_chapter_name",
+      "bookUrl": "http://m.iyouman.com/api/getcomicinfo_body/?comic_id={{$.comic_id}}&productname=aym&platformname=wap"
+    },
+    "bookInfoRule": {
+      "name": "$.data.comic_name@put:{comic_id:$.data.comic_id}",
+      "author": "$.data.comic_author",
+      "coverUrl": "$.data.cover_list[0]",
+      "intro": "$.data.comic_desc",
+      "kind": "$.data.comic_type_new[*].name",
+      "lastChapter": "$.data.last_chapter_name",
+      "tocUrl": "http://m.iyouman.com/api/getchapterlist?product_id=4&productname=aym&platformname=wap&comic_id={{$.data.comic_id}}"
+    },
+    "tocRule": {
+      "chapterList": "-$.data[*]",
+      "chapterName": "$.chapter_name",
+      "chapterUrl": "http://m.iyouman.com/api/getchapterinfov2?product_id=4&productname=aym&platformname=wap&comic_id=@get:{comic_id}&chapter_newid={{$.chapter_newid}}&isWebp=1&quality=low"
+    },
+    "contentRule": {
+      "images": "$.data.current_chapter.chapter_img_list[*]",
+      "imageStyle": "FULL"
+    },
+    "enabled": true,
+    "enabledExplore": true
+  },
+  {
+    "bookSourceUrl": "https://m.dm5.com",
+    "bookSourceName": "漫画小屋（上游目录异常，已禁用）",
+    "bookSourceGroup": "漫画,失效待修",
+    "bookSourceComment": "2026-07-19 实测：搜索和详情页可达，但详情响应不再下发章节目录，无法保证搜索→目录→阅读完整链路，暂时禁用。",
+    "searchUrl": "https://m.dm5.com/search?title={{key}}&language=1",
+    "exploreUrl": "https://m.dm5.com/manhua-list/",
+    "enabled": false,
+    "enabledExplore": false
+  },
+  {
+    "bookSourceUrl": "https://www.9comic.cn/",
+    "bookSourceName": "好看漫画（Cloudflare拦截，已禁用）",
+    "bookSourceGroup": "漫画,失效待修",
+    "bookSourceComment": "2026-07-19 实测：旧域名跳转到 www.9c0mic.com，搜索/API 请求返回 Cloudflare 403，非规则选择器问题，暂时禁用。",
+    "searchUrl": "https://www.9comic.cn/comic22/so/comic?keyword={{key}}&p={{page}}&ver=2.0",
+    "enabled": false,
+    "enabledExplore": false
+  },
+  {
+    "bookSourceUrl": "https://m.1kkk.com",
+    "bookSourceName": "酸奶漫画（上游目录异常，已禁用）",
+    "bookSourceGroup": "漫画,失效待修",
+    "bookSourceComment": "2026-07-19 实测：搜索和详情页可达，但与 DM5 同源的详情响应不再下发章节目录，无法保证完整阅读链路，暂时禁用。",
+    "searchUrl": "https://m.1kkk.com/search?title={{key}}&language=1",
+    "exploreUrl": "https://m.1kkk.com/manhua-list/",
+    "enabled": false,
+    "enabledExplore": false
+  },
+  {
+    "bookSourceUrl": "https://www.kukk.net",
+    "bookSourceName": "酷看漫画（站点超时，已禁用）",
+    "bookSourceGroup": "漫画,失效待修",
+    "bookSourceComment": "2026-07-19 实测：HTTP 跳转 HTTPS 后持续连接超时，无可验证的搜索/发现/阅读响应，暂时禁用。",
+    "searchUrl": "https://www.kukk.net/search,{\"method\":\"POST\",\"body\":\"keyword={{key}}\"}",
+    "exploreUrl": "连载::https://www.kukk.net/booklist/?end=0&page={{page}}\n完结::https://www.kukk.net/booklist?end=1&page={{page}}\n更新::https://www.kukk.net/update?page={{page}}",
+    "enabled": false,
+    "enabledExplore": false
+  }
+]

@@ -10,6 +10,11 @@ import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
 import { ThemeIds, ThemePack, ThemeVariant } from '../theme/ThemeModels';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import {
+  ReaderRegexBubbleStyleResolver,
+  ReaderRegexEmphasisContext,
+  ReaderResolvedRegexEmphasis
+} from '../model/reader/ReaderRegexFontRule';
 import fs from '@ohos.file.fs';
 
 @Entry
@@ -17,6 +22,7 @@ import fs from '@ohos.file.fs';
 struct ThemeSettingsPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('appThemeId') appThemeId: string = AppThemeSettingsStore.DEFAULT_THEME_ID;
+  @StorageLink('appThemeBookCoverEnabled') themeBookCoverEnabled: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('appCustomBaseThemeId') customBaseThemeId: string = AppThemeSettingsStore.DEFAULT_THEME_ID;
   @StorageLink('appCustomLightAccentColor') customLightAccentColor: string = '#007DFF';
@@ -57,6 +63,7 @@ struct ThemeSettingsPage {
       Scroll() {
         Column({ space: 12 }) {
           this.currentThemeSummary()
+          this.themeBookCoverSetting()
           this.sectionTitle('自定义主题')
           this.themeCard(this.customTheme())
           this.sectionTitle('内置主题')
@@ -96,15 +103,33 @@ struct ThemeSettingsPage {
     }
     this.applyingThemeId = themeId;
     try {
+      const theme = themeId === ThemeIds.CUSTOM ? this.customTheme() : BuiltinThemeRegistry.findById(themeId);
+      const coverDialog = await promptAction.showDialog({
+        title: `启用「${theme.name}」主题封面？`,
+        message: '启用后，书架会忽略图书原封面，改用这套主题封面与配套书籍边框。之后可在本页随时关闭。',
+        buttons: [
+          { text: '保留原封面', color: this.subTextColor() },
+          { text: '启用主题封面', color: this.accentColor() }
+        ]
+      });
       const previous: AppThemeSettings = await AppThemeSettingsStore.load(getContext(this));
       const settings: AppThemeSettings = AppThemeSettingsStore.activateTheme(themeId, previous);
+      settings.themeBookCoverEnabled = coverDialog.index === 1;
       AppThemeSettingsStore.applyToStorage(settings);
       await AppThemeSettingsStore.save(getContext(this), settings);
       this.appThemeId = settings.themeId;
+      this.themeBookCoverEnabled = settings.themeBookCoverEnabled;
       const readerSettings = await ReaderSettingsStore.switchThemeProfile(
         getContext(this), previous.themeId, settings.themeId);
-      this.readerLightThemeIndex = readerSettings.lightThemeIndex;
-      this.readerDarkThemeIndex = readerSettings.darkThemeIndex;
+      const layout = theme.readerLayout;
+      await ReaderSettingsStore.saveLayoutSettings(getContext(this), layout.fontSize, layout.lineHeight,
+        layout.paragraphSpacing, layout.marginLeft, layout.marginRight, layout.marginTop, layout.marginBottom);
+      await ReaderSettingsStore.saveThemeSettings(getContext(this), ReaderThemeHelper.APP_THEME_INDEX,
+        ReaderThemeHelper.APP_THEME_INDEX, readerSettings.lightCustomThemeBackgroundColor,
+        readerSettings.lightCustomThemeTextColor, readerSettings.darkCustomThemeBackgroundColor,
+        readerSettings.darkCustomThemeTextColor, this.appDarkMode, readerSettings.customThemesRaw);
+      this.readerLightThemeIndex = ReaderThemeHelper.APP_THEME_INDEX;
+      this.readerDarkThemeIndex = ReaderThemeHelper.APP_THEME_INDEX;
       await this.applyThemeFontWhenAvailable();
       this.refreshRecentReadCard();
       this.syncBars();
@@ -114,6 +139,20 @@ struct ThemeSettingsPage {
       promptAction.showToast({ message: '应用主题失败，请稍后重试' });
     } finally {
       this.applyingThemeId = '';
+    }
+  }
+
+  async setThemeBookCoverEnabled(enabled: boolean): Promise<void> {
+    try {
+      const settings = await AppThemeSettingsStore.load(getContext(this));
+      settings.themeBookCoverEnabled = enabled;
+      AppThemeSettingsStore.applyToStorage(settings);
+      await AppThemeSettingsStore.save(getContext(this), settings);
+      this.themeBookCoverEnabled = enabled;
+      promptAction.showToast({ message: enabled ? '已启用主题封面与书籍边框' : '已恢复图书原封面' });
+    } catch (e) {
+      console.error('保存主题封面设置失败:', e);
+      promptAction.showToast({ message: '保存主题封面设置失败' });
     }
   }
 
@@ -289,9 +328,66 @@ struct ThemeSettingsPage {
   }
 
   @Builder
+  themeBookCoverSetting() {
+    Row({ space: 12 }) {
+      Stack() {
+        Swiper() {
+          ForEach(this.themeCoverSet(this.activeTheme()), (cover: ResourceStr, index: number) => {
+            Image(cover)
+              .width(42)
+              .height(58)
+              .objectFit(ImageFit.Fill)
+          }, (_cover: ResourceStr, index: number) => `active_cover_${index}`)
+        }
+        .width(42)
+        .height(58)
+        .autoPlay(this.themeCoverSet(this.activeTheme()).length > 1)
+        .interval(2800)
+        .indicator(false)
+        .loop(true)
+        Image(ThemeAssetRegistry.themeShelfFrame(this.activeTheme().book.shelfFrameAssetId))
+          .width(42)
+          .height(58)
+          .objectFit(ImageFit.Fill)
+      }
+      .width(42)
+      .height(58)
+
+      Column({ space: 4 }) {
+        Text('主题书籍封面')
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.primaryTextColor())
+        Text(this.themeBookCoverEnabled ? '书架已使用主题封面和配套边框' : '保留每本书原有封面')
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Toggle({ type: ToggleType.Switch, isOn: this.themeBookCoverEnabled })
+        .selectedColor(this.accentColor())
+        .onChange((enabled: boolean) => {
+          this.setThemeBookCoverEnabled(enabled);
+        })
+    }
+    .width('100%')
+    .padding(14)
+    .alignItems(VerticalAlign.Center)
+    .borderRadius(ThemeRuntime.cardRadius())
+    .backgroundColor(this.cardColor())
+  }
+
+  @Builder
   themeCard(theme: ThemePack) {
     Column({ space: 12 }) {
       Row({ space: 10 }) {
+        Image(ThemeAssetRegistry.themeLogo(theme.id))
+          .width(42)
+          .height(42)
+          .borderRadius(theme.radius.medium)
+          .objectFit(ImageFit.Contain)
+
         Column({ space: 3 }) {
           Text(theme.name)
             .fontSize(17)
@@ -323,6 +419,37 @@ struct ThemeSettingsPage {
       .width('100%')
 
       this.themeVisualPreview(theme)
+      Row({ space: 8 }) {
+        Stack() {
+          Swiper() {
+            ForEach(this.themeCoverSet(theme), (cover: ResourceStr, index: number) => {
+              Image(cover)
+                .width(28)
+                .height(40)
+                .objectFit(ImageFit.Fill)
+            }, (_cover: ResourceStr, index: number) => `${theme.id}_cover_${index}`)
+          }
+          .width(28)
+          .height(40)
+          .autoPlay(this.themeCoverSet(theme).length > 1)
+          .interval(3000)
+          .indicator(false)
+          .loop(true)
+          Image(ThemeAssetRegistry.themeShelfFrame(theme.book.shelfFrameAssetId))
+            .width(28)
+            .height(40)
+            .objectFit(ImageFit.Fill)
+        }
+        .width(28)
+        .height(40)
+        Text(`${theme.readerLayout.fontSize} 字号 · ${theme.readerLayout.lineHeight} 行距 · ` +
+          `${theme.readerLayout.marginLeft}/${theme.readerLayout.marginRight} 左右边距`)
+          .fontSize(11)
+          .fontColor(this.activeVariant(theme).colors.subTextColor)
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
       if (theme.id === ThemeIds.CUSTOM) {
         Row() {
           Text('已保存配色与阅读背景')
@@ -388,12 +515,27 @@ struct ThemeSettingsPage {
             .borderRadius(4)
             .backgroundColor(this.activeVariant(theme).colors.subTextColor)
         }
-        Text('强调气泡')
-          .fontSize(12)
-          .fontColor(this.activeVariant(theme).regexEmphasis.emphasisTextColor)
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-          .borderRadius(theme.radius.bubble)
-          .backgroundColor(this.activeVariant(theme).regexEmphasis.emphasisColor)
+        Text() {
+          ContainerSpan() {
+            ImageSpan(ThemeAssetRegistry.regexBubbleCap(this.activeVariant(theme).regexEmphasis.bubbleStyle))
+              .width(16)
+              .height(16)
+              .objectFit(ImageFit.Contain)
+              .verticalAlign(ImageSpanAlignment.CENTER)
+            Span(this.themeRegexPreviewLabel(theme))
+              .fontSize(12)
+              .fontColor(this.themeRegexPreview(theme).textColor)
+              .textShadow(this.themeRegexPreviewShadow(theme))
+              .decoration({ type: TextDecorationType.None })
+            ImageSpan(ThemeAssetRegistry.regexBubbleCap(this.activeVariant(theme).regexEmphasis.bubbleStyle))
+              .width(16)
+              .height(16)
+              .objectFit(ImageFit.Contain)
+              .verticalAlign(ImageSpanAlignment.CENTER)
+              .rotate({ angle: 180 })
+          }
+          .textBackgroundStyle(this.themeRegexPreviewBackground(theme))
+        }
         Row({ space: 5 }) {
           ForEach(['bookshelf', 'explore', 'search', 'mine'], (tabId: string) => {
             Image(ThemeAssetRegistry.navigationIcon(theme.navigation.iconPackId, tabId))
@@ -410,6 +552,82 @@ struct ThemeSettingsPage {
     .padding(10)
     .borderRadius(theme.radius.medium)
     .backgroundColor(this.activeVariant(theme).colors.inputColor)
+  }
+
+  themeRegexPreview(theme: ThemePack): ReaderResolvedRegexEmphasis {
+    const variant = this.activeVariant(theme);
+    const context = new ReaderRegexEmphasisContext();
+    context.inheritedMode = variant.regexEmphasis.emphasisMode;
+    context.inheritedBubbleStyleId = variant.regexEmphasis.bubbleStyle;
+    context.inheritedColor = variant.regexEmphasis.emphasisColor;
+    context.inheritedTextColor = variant.regexEmphasis.emphasisTextColor;
+    context.accentColor = variant.colors.accentColor;
+    context.surfaceColor = variant.reader.backgroundColor;
+    context.normalTextColor = variant.reader.textColor;
+    context.darkMode = variant.reader.contentTone === 'dark';
+    return ReaderRegexBubbleStyleResolver.resolve(null, context);
+  }
+
+  themeCoverSet(theme: ThemePack): ResourceStr[] {
+    return ThemeAssetRegistry.themeBookCovers(theme.book.coverAssetId);
+  }
+
+  themeRegexPreviewLabel(theme: ThemePack): string {
+    const styleId = this.activeVariant(theme).regexEmphasis.bubbleStyle;
+    if (styleId === 'classic-glass') return '经典玻璃';
+    if (styleId === 'warm-scroll') return '暖纸卷轴';
+    if (styleId === 'forest-dew') return '林间露珠';
+    if (styleId === 'ink-brush') return '水墨笔触';
+    if (styleId === 'neon-pulse') return '霓虹脉冲';
+    if (styleId === 'strawberry-ribbon') return '草莓软框';
+    if (styleId === 'crimson-stamp') return '赤墨印章';
+    if (styleId === 'celadon-slip') return '青瓷纸笺';
+    if (styleId === 'rose-frame') return '玫瑰信框';
+    if (styleId === 'moon-halo') return '月光描边';
+    return '强调气泡';
+  }
+
+  themeRegexPreviewBackground(theme: ThemePack): TextBackgroundStyle {
+    const style = this.themeRegexPreview(theme);
+    if (!style.backgroundEnabled) return {};
+    return {
+      color: style.backgroundColor,
+      radius: {
+        topLeft: style.radiusTopLeft,
+        topRight: style.radiusTopRight,
+        bottomLeft: style.radiusBottomLeft,
+        bottomRight: style.radiusBottomRight
+      }
+    };
+  }
+
+  themeRegexPreviewShadow(theme: ThemePack): ShadowOptions | ShadowOptions[] {
+    const style = this.themeRegexPreview(theme);
+    if (style.textShadows.length > 0) return style.textShadows;
+    return {
+      radius: style.textShadowRadius,
+      color: style.textShadowColor,
+      offsetX: style.textShadowOffsetX,
+      offsetY: style.textShadowOffsetY
+    };
+  }
+
+  themeRegexPreviewDecoration(theme: ThemePack): DecorationStyleInterface {
+    const style = this.themeRegexPreview(theme);
+    if (!style.decorationEnabled) return { type: TextDecorationType.None };
+    return {
+      type: TextDecorationType.Underline,
+      color: style.decorationColor,
+      style: this.themeRegexDecorationStyle(style.decorationStyleId)
+    };
+  }
+
+  themeRegexDecorationStyle(styleId: string): TextDecorationStyle {
+    if (styleId === 'double') return TextDecorationStyle.DOUBLE;
+    if (styleId === 'dotted') return TextDecorationStyle.DOTTED;
+    if (styleId === 'dashed') return TextDecorationStyle.DASHED;
+    if (styleId === 'wavy') return TextDecorationStyle.WAVY;
+    return TextDecorationStyle.SOLID;
   }
 
   @Builder

@@ -29,6 +29,7 @@ import { SearchExploreSettings, SearchExploreSettingsStore } from '../utils/Sear
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { BuiltinThemeRegistry } from '../theme/BuiltinThemeRegistry';
 import { LocalBookService } from '../core/book/LocalBookService';
 
 const SHELF_FULL_TEXT_CACHE_CANCEL_EVENT: string = 'com.legado.harmony.action.SHELF_FULL_TEXT_CACHE_CANCEL';
@@ -518,6 +519,9 @@ struct BookshelfPage {
   @Prop navBarHeight: number = 0;
   @Link isBookMultiSelect: boolean;
   @Link @Watch('onActiveShelfGroupChanged') activeShelfGroupId: number;
+  @StorageLink('appThemeBookCoverEnabled') themeBookCoverEnabled: boolean = false;
+  @StorageLink('appThemeId') appThemeId: string = AppThemeSettingsStore.DEFAULT_THEME_ID;
+  @StorageLink('appCustomBaseThemeId') appCustomBaseThemeId: string = AppThemeSettingsStore.DEFAULT_THEME_ID;
   @State books: Book[] = [];
   @State allBooks: Book[] = [];
   @State shelfScope: string = 'network';
@@ -2643,7 +2647,7 @@ struct BookshelfPage {
           .layoutWeight(1)
           .height('100%')
           .padding({ left: 11, right: 10, top: 12, bottom: 10 })
-          .backgroundColor(this.appDarkMode ? '#20242A' : '#F7F0DF')
+          .backgroundColor(this.inputColor())
           .borderRadius({ topRight: 7, bottomRight: 7 })
           .alignItems(HorizontalAlign.Start)
         }
@@ -2737,24 +2741,37 @@ struct BookshelfPage {
   @Builder
   shelfTileGroupFolder(group: BookGroup) {
     Column({ space: 6 }) {
-      Grid() {
-        ForEach(this.getTileGroupPreviewBooks(group.groupId), (book: Book) => {
-          GridItem() {
-            this.coverView(book, '100%', '100%', ImageFit.Cover)
-          }
-        }, (book: Book) => this.shelfBookRenderKey(book, `group_${group.groupId}`))
+      if (this.themeBookCoverEnabled) {
+        Stack() {
+          Image(this.activeThemeShelfFolder())
+            .width('100%')
+            .height('100%')
+            .objectFit(ImageFit.Fill)
+        }
+        .width('100%')
+        .aspectRatio(0.735)
+        .borderRadius(7)
+        .clip(true)
+      } else {
+        Grid() {
+          ForEach(this.getTileGroupPreviewBooks(group.groupId), (book: Book) => {
+            GridItem() {
+              this.coverView(book, '100%', '100%', ImageFit.Cover)
+            }
+          }, (book: Book) => this.shelfBookRenderKey(book, `group_${group.groupId}`))
+        }
+        .width('100%')
+        .aspectRatio(0.735)
+        .columnsTemplate('1fr 1fr')
+        .rowsTemplate('1fr 1fr')
+        .columnsGap(6)
+        .rowsGap(6)
+        .padding(8)
+        .borderRadius(7)
+        .backgroundColor(this.glassCardColor())
+        .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
+        .scrollBar(BarState.Off)
       }
-      .width('100%')
-      .aspectRatio(0.735)
-      .columnsTemplate('1fr 1fr')
-      .rowsTemplate('1fr 1fr')
-      .columnsGap(6)
-      .rowsGap(6)
-      .padding(8)
-      .borderRadius(7)
-      .backgroundColor(this.glassCardColor())
-      .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
-      .scrollBar(BarState.Off)
 
       Text(group.groupName)
         .width('100%')
@@ -3053,7 +3070,7 @@ struct BookshelfPage {
         }
         .width(this.openingBookWidth())
         .height(this.openingBookHeight())
-        .backgroundColor(this.appDarkMode ? '#202226' : '#FFFDF7')
+        .backgroundColor(this.inputColor())
         .borderRadius(8)
         .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
         .shadow({ radius: 24, color: this.appDarkMode ? '#90000000' : '#38000000', offsetX: 8, offsetY: 10 })
@@ -3254,7 +3271,33 @@ struct BookshelfPage {
   @Builder
   coverView(book: Book, width: Length, height: Length, imageFit: ImageFit) {
     Stack() {
-      if (this.getShelfCoverList(book).length === 0) {
+      if (this.themeBookCoverEnabled) {
+        if (this.activeThemeBookCovers(book).length === 1) {
+          Image(this.activeThemeBookCovers(book)[0])
+            .width(width)
+            .height(height)
+            .objectFit(ImageFit.Fill)
+        } else {
+          Swiper() {
+            ForEach(this.activeThemeBookCovers(book), (cover: ResourceStr, index: number) => {
+              Image(cover)
+                .width(width)
+                .height(height)
+                .objectFit(ImageFit.Fill)
+            }, (_cover: ResourceStr, index: number) => `${book.bookUrl}_theme_${index}`)
+          }
+          .width(width)
+          .height(height)
+          .autoPlay(true)
+          .interval(this.themeBookCoverInterval(book))
+          .indicator(false)
+          .loop(true)
+        }
+        Image(this.activeThemeShelfFrame())
+          .width(width)
+          .height(height)
+          .objectFit(ImageFit.Fill)
+      } else if (this.getShelfCoverList(book).length === 0) {
         Column() {
           Text(book.name ? book.name.substring(0, 1) : '书')
             .fontSize(28)
@@ -3291,6 +3334,46 @@ struct BookshelfPage {
     .borderRadius(6)
     .clip(true)
     .backgroundColor(this.inputColor())
+  }
+
+  activeThemeBookCovers(book: Book): ResourceStr[] {
+    const theme = this.appThemeId === 'custom' ?
+      BuiltinThemeRegistry.customTheme(this.appCustomBaseThemeId) : BuiltinThemeRegistry.findById(this.appThemeId);
+    const covers = ThemeAssetRegistry.themeBookCovers(theme.book.coverAssetId);
+    if (covers.length <= 1) return covers;
+    const result: ResourceStr[] = [];
+    const seed = this.themeBookCoverSeed(book);
+    const start = seed % covers.length;
+    const direction = seed % 2 === 0 ? 1 : covers.length - 1;
+    for (let index = 0; index < covers.length; index++) {
+      result.push(covers[(start + index * direction) % covers.length]);
+    }
+    return result;
+  }
+
+  themeBookCoverSeed(book: Book): number {
+    const key = `${book.bookUrl}|${book.name}|${book.author}`;
+    let hash = 17;
+    for (let index = 0; index < key.length; index++) {
+      hash = (hash * 31 + key.charCodeAt(index)) & 0x7FFFFFFF;
+    }
+    return hash;
+  }
+
+  themeBookCoverInterval(book: Book): number {
+    return 3200 + this.themeBookCoverSeed(book) % 5 * 420;
+  }
+
+  activeThemeShelfFrame(): ResourceStr {
+    const theme = this.appThemeId === 'custom' ?
+      BuiltinThemeRegistry.customTheme(this.appCustomBaseThemeId) : BuiltinThemeRegistry.findById(this.appThemeId);
+    return ThemeAssetRegistry.themeShelfFrame(theme.book.shelfFrameAssetId);
+  }
+
+  activeThemeShelfFolder(): ResourceStr {
+    const theme = this.appThemeId === 'custom' ?
+      BuiltinThemeRegistry.customTheme(this.appCustomBaseThemeId) : BuiltinThemeRegistry.findById(this.appThemeId);
+    return ThemeAssetRegistry.themeShelfFolder(theme.book.shelfFolderAssetId);
   }
 
   getShelfCover(book: Book): string {

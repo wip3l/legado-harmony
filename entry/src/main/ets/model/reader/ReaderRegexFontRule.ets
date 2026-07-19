@@ -148,7 +148,10 @@ export class ReaderRegexFontCodec {
   static normalizeBubbleStyleId(styleId: string): string {
     const value = (styleId || '').trim();
     if (value === 'inherit' || value === 'qq-soft' || value === 'qq-solid' || value === 'capsule' ||
-      value === 'paper' || value === 'neon') {
+      value === 'paper' || value === 'neon' || value === 'classic-glass' || value === 'warm-scroll' ||
+      value === 'forest-dew' || value === 'ink-brush' || value === 'neon-pulse' || value === 'strawberry-ribbon' ||
+      value === 'crimson-stamp' || value === 'celadon-slip' || value === 'rose-frame' ||
+      value === 'moon-halo') {
       return value;
     }
     // Compatibility with early theme drafts.
@@ -219,6 +222,10 @@ export class ReaderResolvedRegexEmphasis {
   textShadowColor: string = '#00000000';
   textShadowOffsetX: number = 0;
   textShadowOffsetY: number = 0;
+  textShadows: ShadowOptions[] = [];
+  decorationEnabled: boolean = false;
+  decorationStyleId: string = 'solid';
+  decorationColor: string = '#00000000';
 }
 
 export class ReaderRegexBubbleStyleResolver {
@@ -316,6 +323,124 @@ export class ReaderRegexBubbleStyleResolver {
       context.surfaceColor,
       context.darkMode ? '#111318' : '#FFFFFF'
     );
+    if (result.bubbleStyleId === 'classic-glass') {
+      result.backgroundColor = ReaderRegexBubbleStyleResolver.mix(surface, base, context.darkMode ? 0.28 : 0.16);
+      result.textColor = context.darkMode ? '#DCEBFF' : '#234D72';
+      ReaderRegexBubbleStyleResolver.setRadii(result, 12, 12, 12, 3);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.5, context.darkMode ? '#663B5D7D' : '#DDFFFFFF',
+        0, -0.5);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 2.6,
+        ReaderRegexBubbleStyleResolver.withAlpha(base, 124), 0, 1.2);
+      return;
+    }
+    if (result.bubbleStyleId === 'warm-scroll') {
+      const parchment = context.darkMode ? '#3F3023' : '#F4E5C9';
+      result.backgroundColor = ReaderRegexBubbleStyleResolver.mix(parchment, base, context.darkMode ? 0.20 : 0.13);
+      result.textColor = context.darkMode ? '#FFE9CE' : '#4A3423';
+      ReaderRegexBubbleStyleResolver.setRadii(result, 2, 15, 2, 15);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.5, context.darkMode ? '#5520130A' : '#CCFFF9ED',
+        0, -0.7);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 1.8,
+        ReaderRegexBubbleStyleResolver.withAlpha(base, 96), 1, 1.4);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.4, '#668B6338', -0.8, 0.5);
+      return;
+    }
+    if (result.bubbleStyleId === 'forest-dew') {
+      result.backgroundColor = ReaderRegexBubbleStyleResolver.mix(surface, base, context.darkMode ? 0.25 : 0.18);
+      result.textColor = context.darkMode ? '#DDF5E5' : '#234B35';
+      ReaderRegexBubbleStyleResolver.setRadii(result, 99, 99, 99, 11);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.5, context.darkMode ? '#5524382D' : '#D8FFFFFF',
+        -0.5, -0.7);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 3.2,
+        ReaderRegexBubbleStyleResolver.withAlpha(base, 110), 0.8, 1.2);
+      return;
+    }
+    if (result.bubbleStyleId === 'ink-brush') {
+      const inkPaper = context.darkMode ? '#25292D' : '#E4E3DE';
+      result.backgroundColor = ReaderRegexBubbleStyleResolver.mix(inkPaper, base, context.darkMode ? 0.16 : 0.10);
+      result.textColor = context.darkMode ? '#F1F3F4' : '#252B30';
+      ReaderRegexBubbleStyleResolver.setRadii(result, 1, 7, 1, 7);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.4, context.darkMode ? '#553E4750' : '#AAFFFFFF',
+        -0.8, -0.5);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 1.1, context.darkMode ? '#CC000000' : '#7724292D',
+        1.2, 1.2);
+      return;
+    }
+    if (result.bubbleStyleId === 'neon-pulse') {
+      const neonSurface = context.darkMode ? '#101426' : '#ECEEFF';
+      result.backgroundColor = ReaderRegexBubbleStyleResolver.mix(neonSurface, base,
+        context.darkMode ? 0.24 : 0.14);
+      result.textColor = context.darkMode ? '#DDFCFF' : '#263C72';
+      ReaderRegexBubbleStyleResolver.setRadii(result, 6, 15, 6, 15);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.5, '#CCECFFFF', 0, 0);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 4,
+        ReaderRegexBubbleStyleResolver.withAlpha(base, context.darkMode ? 196 : 126), 0, 0);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 8, '#77954DFF', 1, 0);
+      return;
+    }
+    if (result.bubbleStyleId === 'strawberry-ribbon') {
+      result.backgroundColor = ReaderRegexBubbleStyleResolver.mix(surface, base, context.darkMode ? 0.30 : 0.20);
+      result.textColor = ReaderRegexBubbleStyleResolver.contrastTextColor(result.backgroundColor);
+      ReaderRegexBubbleStyleResolver.setRadii(result, 18, 18, 18, 6);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.6, context.darkMode ? '#55263544' : '#CCFFFFFF',
+        0, -0.5);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 3, ReaderRegexBubbleStyleResolver.withAlpha(base, 116),
+        0, 1.5);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.8, '#77E76E77', 1, 0.8);
+      return;
+    }
+    if (result.bubbleStyleId === 'crimson-stamp') {
+      result.backgroundColor = ReaderRegexBubbleStyleResolver.withAlpha(base, context.darkMode ? 64 : 34);
+      result.textColor = context.darkMode ? '#FFE9E2' : ReaderRegexBubbleStyleResolver.mix('#3A2420', base, 0.48);
+      ReaderRegexBubbleStyleResolver.setRadii(result, 2, 9, 2, 9);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.4,
+        ReaderRegexBubbleStyleResolver.withAlpha(base, 174), -1, 0);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.7,
+        context.darkMode ? '#99000000' : '#6630201D', 1, 1);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.3,
+        context.darkMode ? '#55FFF1EA' : '#88FFF9F5', 0, -1);
+      return;
+    }
+    if (result.bubbleStyleId === 'celadon-slip') {
+      const paper = context.darkMode ? '#28342D' : '#F1EBDD';
+      result.backgroundColor = ReaderRegexBubbleStyleResolver.mix(paper, base, context.darkMode ? 0.25 : 0.18);
+      result.textColor = ReaderRegexBubbleStyleResolver.contrastTextColor(result.backgroundColor);
+      ReaderRegexBubbleStyleResolver.setRadii(result, 3, 13, 3, 13);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.5, context.darkMode ? '#44202924' : '#AAFFFFFF',
+        0, -0.5);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 1.2,
+        ReaderRegexBubbleStyleResolver.withAlpha(base, 92), 0.8, 1);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.5, '#668E765D', -0.6, 0.7);
+      return;
+    }
+    if (result.bubbleStyleId === 'rose-frame') {
+      result.backgroundColor = ReaderRegexBubbleStyleResolver.withAlpha(base, context.darkMode ? 62 : 42);
+      const composite = ReaderRegexBubbleStyleResolver.mix(surface, base, context.darkMode ? 0.34 : 0.24);
+      result.textColor = ReaderRegexBubbleStyleResolver.contrastTextColor(composite);
+      ReaderRegexBubbleStyleResolver.setRadii(result, 19, 7, 19, 7);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.5, context.darkMode ? '#55251318' : '#AAFFFFFF',
+        0, -0.5);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 2.4,
+        ReaderRegexBubbleStyleResolver.withAlpha(base, 112), 0, 1);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.8, '#66B99A6B', 1, 1);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.4,
+        context.darkMode ? '#66FFE8E6' : '#887E3540', -0.8, 0.3);
+      return;
+    }
+    if (result.bubbleStyleId === 'moon-halo') {
+      const night = context.darkMode ? '#0B1728' : '#E8F0F9';
+      result.backgroundColor = ReaderRegexBubbleStyleResolver.mix(night, base, context.darkMode ? 0.24 : 0.16);
+      result.textColor = context.darkMode ? '#D9EEFF' : '#2D5274';
+      ReaderRegexBubbleStyleResolver.setUniformRadius(result, 13);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 0.5, context.darkMode ? '#CCEDF7FF' : '#99FFFFFF',
+        0, 0);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 3,
+        ReaderRegexBubbleStyleResolver.withAlpha(base, 172), 0, 0);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 8,
+        ReaderRegexBubbleStyleResolver.withAlpha(base, 88), 0, 0);
+      ReaderRegexBubbleStyleResolver.addShadow(result, 4, '#557A6CFF', 1, 0);
+      return;
+    }
     if (result.bubbleStyleId === 'qq-solid') {
       result.backgroundColor = base;
       result.textColor = ReaderRegexBubbleStyleResolver.contrastTextColor(base);
@@ -361,6 +486,17 @@ export class ReaderRegexBubbleStyleResolver {
 
   private static setUniformRadius(result: ReaderResolvedRegexEmphasis, radius: number): void {
     ReaderRegexBubbleStyleResolver.setRadii(result, radius, radius, radius, radius);
+  }
+
+  private static addShadow(result: ReaderResolvedRegexEmphasis, radius: number, color: string,
+    offsetX: number, offsetY: number): void {
+    result.textShadows.push({ radius: radius, color: color, offsetX: offsetX, offsetY: offsetY });
+  }
+
+  private static setDecoration(result: ReaderResolvedRegexEmphasis, styleId: string, color: string): void {
+    result.decorationEnabled = true;
+    result.decorationStyleId = styleId;
+    result.decorationColor = color;
   }
 
   private static setRadii(result: ReaderResolvedRegexEmphasis, topLeft: number, topRight: number,

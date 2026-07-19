@@ -8886,7 +8886,6 @@ struct ReadBookPage {
     if (this.readerParagraphSpacing > 0 && /\n/.test(layoutText)) {
       return -1;
     }
-
     try {
       const paragraph = this.buildMeasuredReaderParagraph(layoutText, availableWidth, chapterIndex);
       const metrics = paragraph.getLineMetrics();
@@ -9716,12 +9715,7 @@ struct ReadBookPage {
             ttsRenderVersion, paragraph.text)}_${paragraph.key}_${slice.key}`)
         ForEach(this.getTitleBodyTextSlices(paragraph, chapterIndex, ttsHighlightActive, pageStart),
           (slice: ReadTextSlice) => {
-          Span(slice.text)
-            .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
-            .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
-            .fontColor(this.getStyledSliceFontColor(slice))
-            .textBackgroundStyle(this.getStyledSliceBackgroundStyle(slice))
-            .textShadow(this.getStyledSliceTextShadow(slice))
+          this.styledRegexSlice(slice)
         }, (slice: ReadTextSlice) =>
           `title_body_${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, chapterIndex, contentRenderVersion,
             ttsRenderVersion, paragraph.text)}_${paragraph.key}_${slice.key}`)
@@ -9744,6 +9738,7 @@ struct ReadBookPage {
             .fontColor(this.getStyledSliceFontColor(slice))
             .textBackgroundStyle(this.getStyledSliceBackgroundStyle(slice))
             .textShadow(this.getStyledSliceTextShadow(slice))
+            .decoration(this.getStyledSliceDecoration(slice))
         }, (slice: ReadTextSlice) =>
           `${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, chapterIndex, contentRenderVersion,
             ttsRenderVersion, paragraph.text)}_${paragraph.key}_${slice.key}`)
@@ -9801,12 +9796,7 @@ struct ReadBookPage {
     pageRenderIdentity: string = '', pageStart: number = -1) {
     Text() {
       ForEach(this.getStyledParagraphTextSlices(paragraph, ttsHighlightActive, pageStart), (slice: ReadTextSlice) => {
-        Span(slice.text)
-          .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
-          .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
-          .fontColor(this.getStyledSliceFontColor(slice))
-          .textBackgroundStyle(this.getStyledSliceBackgroundStyle(slice))
-          .textShadow(this.getStyledSliceTextShadow(slice))
+        this.styledRegexSlice(slice)
       }, (slice: ReadTextSlice) =>
         `${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, this.currentChapterIndex, contentRenderVersion,
           ttsRenderVersion, paragraph.text)}_${paragraph.key}_${slice.key}`)
@@ -9818,6 +9808,250 @@ struct ReadBookPage {
     .width('100%')
     .id(`reader_regex_${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, this.currentChapterIndex,
       contentRenderVersion, ttsRenderVersion, paragraph.text)}_${paragraph.key}`)
+  }
+
+  @Builder
+  styledRegexSlice(slice: ReadTextSlice) {
+    if (this.shouldUseFullThemeRegexDecoration(slice)) {
+      ContainerSpan() {
+        ImageSpan(ThemeAssetRegistry.regexBubbleCap(this.getRegexSliceBubbleStyleId(slice)))
+          .width(this.getRegexBubbleCapSize(slice))
+          .height(this.getRegexBubbleCapSize(slice))
+          .objectFit(ImageFit.Contain)
+          .verticalAlign(ImageSpanAlignment.CENTER)
+        Span(slice.text)
+          .fontSize(this.getRegexSliceFontSize(slice))
+          .fontFamily(this.getRegexSliceFontFamily(slice))
+          .fontColor(this.getStyledSliceFontColor(slice))
+          .textBackgroundStyle(slice.ttsHighlighted ? {
+            color: this.getTtsHighlightColor(),
+            radius: 4
+          } : {})
+          .textShadow(this.getStyledSliceTextShadow(slice))
+          .decoration({ type: TextDecorationType.None })
+        ImageSpan(ThemeAssetRegistry.regexBubbleCap(this.getRegexSliceBubbleStyleId(slice)))
+          .width(this.getRegexBubbleCapSize(slice))
+          .height(this.getRegexBubbleCapSize(slice))
+          .objectFit(ImageFit.Contain)
+          .verticalAlign(ImageSpanAlignment.CENTER)
+          .rotate({ angle: 180 })
+      }
+      .textBackgroundStyle(this.getStyledSliceBackgroundStyle(slice))
+    } else {
+      Span(slice.text)
+        .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
+        .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
+        .fontColor(this.getStyledSliceFontColor(slice))
+        .textBackgroundStyle(this.getStyledSliceBackgroundStyle(slice))
+        .textShadow(this.getStyledSliceTextShadow(slice))
+        .decoration(this.getStyledSliceDecoration(slice))
+    }
+  }
+
+  shouldUseFullThemeRegexDecoration(slice: ReadTextSlice): boolean {
+    if (!slice.highlighted) return false;
+    const style = this.resolvedRegexEmphasis(this.getRegexRuleBySlice(slice));
+    return style.mode === 'bubble' && ThemeAssetRegistry.hasRegexBubbleCap(style.bubbleStyleId);
+  }
+
+  getRegexSliceBubbleStyleId(slice: ReadTextSlice): string {
+    return this.resolvedRegexEmphasis(this.getRegexRuleBySlice(slice)).bubbleStyleId;
+  }
+
+  getRegexBubbleCapSize(slice: ReadTextSlice): number {
+    return Math.max(15, Math.min(22, this.getRegexSliceFontSize(slice) * 0.72));
+  }
+
+  @Builder
+  framedRegexReaderText(paragraph: ReaderTextParagraph, ttsHighlightActive: boolean = true,
+    ttsRenderVersion: number = this.ttsHighlightRenderVersion, contentRenderVersion: number = this.pageRenderVersion,
+    pageRenderIdentity: string = '', pageStart: number = -1) {
+    Text() {
+      ForEach(this.getStyledParagraphTextSlices(paragraph, ttsHighlightActive, pageStart),
+        (slice: ReadTextSlice) => {
+        Span(slice.text)
+          .fontSize(slice.highlighted ? this.getRegexSliceFontSize(slice) : this.readerFontSize)
+          .fontFamily(slice.highlighted ? this.getRegexSliceFontFamily(slice) : this.getBodyReaderFontFamily())
+          .fontColor(this.getStyledSliceFontColor(slice))
+          .textBackgroundStyle(slice.ttsHighlighted ? {
+            color: this.getTtsHighlightColor(),
+            radius: 4
+          } : {})
+          .textShadow(this.getStyledSliceTextShadow(slice))
+          .decoration({ type: TextDecorationType.None })
+      }, (slice: ReadTextSlice) =>
+        `framed_${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, this.currentChapterIndex,
+          contentRenderVersion, ttsRenderVersion, paragraph.text)}_${paragraph.key}_${slice.key}`)
+    }
+    .lineHeight(this.getEffectiveReaderLineHeight())
+    .fontColor(this.getTextColor())
+    .textAlign(TextAlign.JUSTIFY)
+    .wordBreak(WordBreak.BREAK_WORD)
+    .width('100%')
+    .padding({
+      left: this.getRegexFrameHorizontalPadding(paragraph, pageStart),
+      right: this.getRegexFrameHorizontalPadding(paragraph, pageStart),
+      top: this.getRegexFrameVerticalPadding(paragraph, pageStart),
+      bottom: this.getRegexFrameVerticalPadding(paragraph, pageStart)
+    })
+    .backgroundColor(this.getRegexFrameBackgroundColor(paragraph, pageStart))
+    .border({
+      width: this.getRegexFrameBorderWidth(paragraph, pageStart),
+      color: this.getRegexFrameBorderColor(paragraph, pageStart),
+      style: this.getRegexFrameBorderStyle(paragraph, pageStart)
+    })
+    .borderRadius(this.getRegexFrameBorderRadius(paragraph, pageStart))
+    .overlay(() => {
+      Image(this.getRegexParagraphFrame(paragraph, pageStart))
+        .width('100%')
+        .height('100%')
+        .objectFit(ImageFit.Fill)
+        .resizable({
+          slice: {
+            left: this.getRegexFrameHorizontalSlice(paragraph, pageStart),
+            right: this.getRegexFrameHorizontalSlice(paragraph, pageStart),
+            top: this.getRegexFrameVerticalSlice(paragraph, pageStart),
+            bottom: this.getRegexFrameVerticalSlice(paragraph, pageStart)
+          }
+        })
+        .draggable(false)
+        .hitTestBehavior(HitTestMode.None)
+    }, { align: Alignment.Center })
+    .id(`reader_regex_frame_${this.effectiveReaderPageRenderIdentity(pageRenderIdentity, this.currentChapterIndex,
+      contentRenderVersion, ttsRenderVersion, paragraph.text)}_${paragraph.key}`)
+  }
+
+  shouldUseRegexParagraphFrame(paragraph: ReaderTextParagraph, pageStart: number = -1): boolean {
+    return !!this.getRegexParagraphFrameStyleId(paragraph, pageStart);
+  }
+
+  getRegexParagraphFrame(paragraph: ReaderTextParagraph, pageStart: number = -1): ResourceStr {
+    return ThemeAssetRegistry.regexBubbleFrame(this.getRegexParagraphFrameStyleId(paragraph, pageStart));
+  }
+
+  getRegexParagraphFrameStyleId(paragraph: ReaderTextParagraph, pageStart: number = -1): string {
+    if (!this.readerRegexFontEnabled || !paragraph.text.trim()) {
+      return '';
+    }
+    const absoluteStart = pageStart < 0 ? -1 : pageStart + paragraph.start;
+    const slices = this.getRegexTextSlicesAt(paragraph.text, absoluteStart);
+    return this.getRegexFrameStyleIdFromSlices(slices);
+  }
+
+  getRegexParagraphFrameStyleIdForText(text: string): string {
+    if (!this.readerRegexFontEnabled || !text.trim()) {
+      return '';
+    }
+    return this.getRegexFrameStyleIdFromSlices(this.getRegexTextSlices(text));
+  }
+
+  getRegexFrameStyleIdFromSlices(slices: ReadTextSlice[]): string {
+    let ruleIndex = -1;
+    for (const slice of slices) {
+      if (slice.highlighted) {
+        if (ruleIndex < 0) {
+          ruleIndex = slice.ruleIndex;
+        } else if (ruleIndex !== slice.ruleIndex) {
+          return '';
+        }
+      } else if (slice.text.trim()) {
+        return '';
+      }
+    }
+    const rules = this.getRegexRules();
+    if (ruleIndex < 0 || ruleIndex >= rules.length) {
+      return '';
+    }
+    const styleId = this.resolvedRegexEmphasis(rules[ruleIndex]).bubbleStyleId;
+    return ThemeAssetRegistry.hasRegexBubbleFrame(styleId) ? styleId : '';
+  }
+
+  getRegexFrameHorizontalPadding(paragraph: ReaderTextParagraph, pageStart: number = -1): number {
+    return this.getRegexFrameHorizontalPaddingForStyle(this.getRegexParagraphFrameStyleId(paragraph, pageStart));
+  }
+
+  getRegexFrameHorizontalPaddingForStyle(styleId: string): number {
+    if (styleId === 'rose-frame') return 18;
+    if (styleId === 'celadon-slip') return 16;
+    if (styleId === 'strawberry-ribbon' || styleId === 'moon-halo') return 16;
+    if (styleId === 'crimson-stamp' || styleId === 'warm-scroll') return 15;
+    return 14;
+  }
+
+  getRegexFrameVerticalPadding(paragraph: ReaderTextParagraph, pageStart: number = -1): number {
+    return this.getRegexFrameVerticalPaddingForStyle(this.getRegexParagraphFrameStyleId(paragraph, pageStart));
+  }
+
+  getRegexFrameVerticalPaddingForStyle(styleId: string): number {
+    if (styleId === 'rose-frame' || styleId === 'celadon-slip') return 7;
+    if (styleId === 'strawberry-ribbon' || styleId === 'moon-halo') return 6;
+    return 5;
+  }
+
+  getRegexFrameBackgroundColor(paragraph: ReaderTextParagraph, pageStart: number = -1): string {
+    const styleId = this.getRegexParagraphFrameStyleId(paragraph, pageStart);
+    if (styleId === 'classic-glass') return this.isReaderThemeDark() ? '#162D6EA3' : '#104B9DE1';
+    if (styleId === 'warm-scroll') return this.isReaderThemeDark() ? '#183C2B1E' : '#18E8CFA5';
+    if (styleId === 'forest-dew') return this.isReaderThemeDark() ? '#163C6750' : '#1478A98A';
+    if (styleId === 'ink-brush') return this.isReaderThemeDark() ? '#18283038' : '#105F6B74';
+    if (styleId === 'neon-pulse') return this.isReaderThemeDark() ? '#1811162A' : '#1000D5FF';
+    if (styleId === 'strawberry-ribbon') return this.isReaderThemeDark() ? '#18263544' : '#14F1B6BC';
+    if (styleId === 'crimson-stamp') return this.isReaderThemeDark() ? '#188D211C' : '#109A2923';
+    if (styleId === 'celadon-slip') return this.isReaderThemeDark() ? '#1828342D' : '#14E6EEE7';
+    if (styleId === 'rose-frame') return this.isReaderThemeDark() ? '#182B171C' : '#14F8E7E1';
+    if (styleId === 'moon-halo') return this.isReaderThemeDark() ? '#180A1627' : '#12DCEBFF';
+    return '#00000000';
+  }
+
+  getRegexFrameBorderColor(paragraph: ReaderTextParagraph, pageStart: number = -1): string {
+    const styleId = this.getRegexParagraphFrameStyleId(paragraph, pageStart);
+    if (styleId === 'classic-glass') return '#804B9DE1';
+    if (styleId === 'warm-scroll') return '#8CA9753D';
+    if (styleId === 'forest-dew') return '#824F8063';
+    if (styleId === 'ink-brush') return this.isReaderThemeDark() ? '#995F6B74' : '#8A283038';
+    if (styleId === 'neon-pulse') return '#A000D5FF';
+    if (styleId === 'strawberry-ribbon') return '#8FE1767D';
+    if (styleId === 'crimson-stamp') return '#9A9A2923';
+    if (styleId === 'celadon-slip') return '#94A96B5C';
+    if (styleId === 'rose-frame') return '#A0A84550';
+    if (styleId === 'moon-halo') return '#9678B9F3';
+    return '#00000000';
+  }
+
+  getRegexFrameBorderWidth(paragraph: ReaderTextParagraph, pageStart: number = -1): number {
+    const styleId = this.getRegexParagraphFrameStyleId(paragraph, pageStart);
+    return styleId === 'neon-pulse' || styleId === 'ink-brush' ? 1.5 : 1;
+  }
+
+  getRegexFrameBorderStyle(paragraph: ReaderTextParagraph, pageStart: number = -1): BorderStyle {
+    const styleId = this.getRegexParagraphFrameStyleId(paragraph, pageStart);
+    if (styleId === 'forest-dew' || styleId === 'strawberry-ribbon') return BorderStyle.Dotted;
+    if (styleId === 'ink-brush' || styleId === 'crimson-stamp') return BorderStyle.Dashed;
+    return BorderStyle.Solid;
+  }
+
+  getRegexFrameBorderRadius(paragraph: ReaderTextParagraph, pageStart: number = -1): number {
+    const styleId = this.getRegexParagraphFrameStyleId(paragraph, pageStart);
+    if (styleId === 'forest-dew') return 18;
+    if (styleId === 'classic-glass' || styleId === 'strawberry-ribbon') return 12;
+    if (styleId === 'rose-frame' || styleId === 'moon-halo') return 10;
+    if (styleId === 'neon-pulse') return 5;
+    return 1;
+  }
+
+  getRegexFrameHorizontalSlice(paragraph: ReaderTextParagraph, pageStart: number = -1): number {
+    const styleId = this.getRegexParagraphFrameStyleId(paragraph, pageStart);
+    if (styleId === 'rose-frame') return 46;
+    if (styleId === 'celadon-slip') return 32;
+    if (styleId === 'strawberry-ribbon' || styleId === 'crimson-stamp') return 40;
+    return 34;
+  }
+
+  getRegexFrameVerticalSlice(paragraph: ReaderTextParagraph, pageStart: number = -1): number {
+    const styleId = this.getRegexParagraphFrameStyleId(paragraph, pageStart);
+    if (styleId === 'rose-frame') return 28;
+    if (styleId === 'celadon-slip') return 24;
+    return 22;
   }
 
   getTitleTextSlices(paragraph: ReaderTextParagraph, chapterIndex: number,
@@ -9966,11 +10200,14 @@ struct ReadBookPage {
     };
   }
 
-  getStyledSliceTextShadow(slice: ReadTextSlice): ShadowOptions {
+  getStyledSliceTextShadow(slice: ReadTextSlice): ShadowOptions | ShadowOptions[] {
     if (slice.ttsHighlighted || !slice.highlighted) {
       return { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 };
     }
     const style = this.resolvedRegexEmphasis(this.getRegexRuleBySlice(slice));
+    if (style.textShadows.length > 0) {
+      return style.textShadows;
+    }
     return {
       radius: style.textShadowRadius,
       color: style.textShadowColor,
@@ -10497,6 +10734,29 @@ struct ReadBookPage {
       starts: starts.length > 0 ? starts : [0],
       ends: ends.length > 0 ? ends : [text.length]
     };
+  }
+
+  getStyledSliceDecoration(slice: ReadTextSlice): DecorationStyleInterface {
+    if (slice.ttsHighlighted || !slice.highlighted) {
+      return { type: TextDecorationType.None };
+    }
+    const style = this.resolvedRegexEmphasis(this.getRegexRuleBySlice(slice));
+    if (!style.decorationEnabled) {
+      return { type: TextDecorationType.None };
+    }
+    return {
+      type: TextDecorationType.Underline,
+      color: style.decorationColor,
+      style: this.regexDecorationStyle(style.decorationStyleId)
+    };
+  }
+
+  regexDecorationStyle(styleId: string): TextDecorationStyle {
+    if (styleId === 'double') return TextDecorationStyle.DOUBLE;
+    if (styleId === 'dotted') return TextDecorationStyle.DOTTED;
+    if (styleId === 'dashed') return TextDecorationStyle.DASHED;
+    if (styleId === 'wavy') return TextDecorationStyle.WAVY;
+    return TextDecorationStyle.SOLID;
   }
 
   paginateReaderImageSourceText(source: string,
