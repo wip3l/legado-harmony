@@ -49,6 +49,7 @@ import {
 } from '../model/reader/ReaderRegexFontRule';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
+import { VirtualListScrollbar } from '../utils/VirtualListScrollbar';
 
 const TOC_WINDOW_PAGE_SIZE = 72;
 
@@ -146,6 +147,16 @@ struct ReadBookPage {
   @State tocQuickJumpArmed: boolean = false;
   @State tocQuickJumpInputVisible: boolean = false;
   @State tocQuickJumpDraft: string = '';
+  @State tocSearchVisible: boolean = false;
+  @State tocSearchQuery: string = '';
+  @State tocSearchChapterIndexes: number[] = [];
+  @State tocSearchLoading: boolean = false;
+  @State tocSearchResultActive: boolean = false;
+  @State tocDatabaseChapterCount: number = 0;
+  @State tocListViewportHeight: number = 0;
+  @State tocFirstVisibleGlobalIndex: number = 0;
+  @State tocVisibleItemCount: number = 1;
+  private tocSearchRequestSerial: number = 0;
   @State currentChapterIndex: number = 0;
   @State menuChapterPreviewIndex: number = 0;
   @State menuChapterSliderActive: boolean = false;
@@ -158,6 +169,7 @@ struct ReadBookPage {
   // 展开屏上记住用户本次唤起菜单的手指侧：-1 左侧，1 右侧。
   @State readerMenuAnchorSide: number = 1;
   @State showReaderActionMenu: boolean = false;
+  @State showLayoutElementSettings: boolean = false;
   @State showToc: boolean = false;
   @State tocPanelTab: number = 0;
   @State bookmarks: Bookmark[] = [];
@@ -315,6 +327,8 @@ struct ReadBookPage {
   @StorageLink('readerExtendToStatusBar') @Watch('onReaderExtendToStatusBarChanged') readerExtendToStatusBar: boolean = false;
   @StorageLink('readerPreloadEnabled') @Watch('onReaderPreloadChanged') readerPreloadEnabled: boolean = true;
   @StorageLink('readerPreloadChapterCount') @Watch('onReaderPreloadChanged') readerPreloadChapterCount: number = 1;
+  @StorageLink('readerUseTtsQuickAction') readerUseTtsQuickAction: boolean = true;
+  @StorageLink('readerUseChapterQuickJump') readerUseChapterQuickJump: boolean = true;
   @StorageLink('readerReplaceRulesUpdateTime') @Watch('onReaderReplaceRulesChanged') readerReplaceRulesUpdateTime: number = 0;
   @StorageLink('readerFontFamily') @Watch('onReaderFontChanged') readerFontFamily: string = '';
   @StorageLink('readerFontFilePath') @Watch('onReaderFontChanged') readerFontFilePath: string = '';
@@ -447,6 +461,10 @@ struct ReadBookPage {
   }
 
   onBackPress(): boolean {
+    if (this.showLayoutElementSettings) {
+      this.showLayoutElementSettings = false;
+      return true;
+    }
     if (this.showBookmarkActionMenu) {
       this.closeBookmarkActionMenu();
       return true;
@@ -676,6 +694,15 @@ struct ReadBookPage {
     this.chapters = [];
     this.tocVisibleChapters = [];
     this.tocWindowStart = 0;
+    this.tocSearchVisible = false;
+    this.tocSearchQuery = '';
+    this.tocSearchChapterIndexes = [];
+    this.tocSearchLoading = false;
+    this.tocSearchResultActive = false;
+    this.tocDatabaseChapterCount = 0;
+    this.tocFirstVisibleGlobalIndex = 0;
+    this.tocVisibleItemCount = 1;
+    this.tocSearchRequestSerial++;
     this.currentChapterIndex = 0;
     this.contentPages = [];
     this.contentPageStarts = [];
@@ -1317,16 +1344,20 @@ struct ReadBookPage {
         this.readerActionMenu()
       }
 
+      if (this.showLayoutElementSettings) {
+        this.readerLayoutElementSettingsDialog()
+      }
+
       if (this.showMenu && !this.showToc && !this.showSettings && this.chapters.length > 0) {
         if (this.supportsReaderImmersiveMaterial()) {
           this.readerHdsFloatingBottomMenu()
         } else {
           this.readerFloatingBottomMenu()
         }
-        if (!this.isReaderComicModeActive() && !this.ttsMediaControlsExpanded) {
+        if (this.readerUseTtsQuickAction && !this.isReaderComicModeActive() && !this.ttsMediaControlsExpanded) {
           this.readerTtsQuickActionButton()
         }
-        if (this.shouldShowTtsMediaControls()) {
+        if (this.readerUseTtsQuickAction && this.shouldShowTtsMediaControls()) {
           this.ttsExpandedMediaControlsBar()
         }
       }
@@ -1430,7 +1461,9 @@ struct ReadBookPage {
   @Builder
   readerHdsFloatingBottomMenu() {
     Column({ space: 4 }) {
-      this.readerHdsChapterTabBar()
+      if (this.readerUseChapterQuickJump) {
+        this.readerHdsChapterTabBar()
+      }
       this.readerHdsActionBar(false)
     }
     .width('100%')
@@ -1743,7 +1776,8 @@ struct ReadBookPage {
   @Builder
   readerFloatingBottomMenu() {
     Column({ space: 10 }) {
-      Row() {
+      if (this.readerUseChapterQuickJump) {
+        Row() {
         Text('‹')
           .fontSize(30)
           .fontColor(this.currentChapterIndex > 0 && !this.isLoading ? this.getTextColor() : this.getSubTextColor())
@@ -1800,15 +1834,16 @@ struct ReadBookPage {
           .onClick(async () => {
             await this.jumpToAdjacentChapterFromMenu(1);
           })
+        }
+        .width('100%')
+        .height(56)
+        .padding({ left: 4, right: 4 })
+        .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
+        .backgroundColor(this.readerGlassPanelColor())
+        .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+        .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
+        .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       }
-      .width('100%')
-      .height(56)
-      .padding({ left: 4, right: 4 })
-      .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
-      .backgroundColor(this.readerGlassPanelColor())
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
 
       Row() {
         this.readerFloatingIconMenuItem($r('sys.symbol.list_bullet'), false, () => {
@@ -2033,138 +2068,261 @@ struct ReadBookPage {
 
   @Builder
   tocPanelSummary() {
-    Row() {
-      Text(`共 ${this.chapters.length} 章`)
-        .fontSize(14)
-        .fontColor(this.getSubTextColor())
-        .layoutWeight(1)
-      SymbolGlyph($r('sys.symbol.chevron_up'))
-        .fontSize(20)
-        .fontColor([this.getTextColor()])
-        .width(32)
-        .height(36)
-        .accessibilityText('跳到目录开头')
-        .onClick(() => {
-          this.scrollTocToChapter(0, ScrollAlign.START);
-        })
-      SymbolGlyph($r('sys.symbol.chevron_down'))
-        .fontSize(20)
-        .fontColor([this.getTextColor()])
-        .width(32)
-        .height(36)
-        .accessibilityText('跳到目录末尾')
-        .onClick(() => {
-          this.scrollTocToChapter(this.chapters.length - 1, ScrollAlign.END);
-        })
-      if (this.tocQuickJumpInputVisible) {
-        TextInput({ text: this.tocQuickJumpDraft, placeholder: `1-${this.chapters.length}` })
-          .type(InputType.Number)
-          .enterKeyType(EnterKeyType.Go)
-          .key('tocQuickJumpChapterInput')
-          .defaultFocus(true)
-          .fontSize(13)
-          .fontColor(this.getTextColor())
-          .textAlign(TextAlign.Center)
-          .width(92)
-          .height(34)
-          .padding({ left: 8, right: 8 })
-          .borderRadius(17)
-          .backgroundColor(this.isReaderThemeDark() ? '#2BFFFFFF' : '#14000000')
-          .accessibilityText('输入目标章节序号，按回车定位')
-          .onChange((value: string) => {
-            this.tocQuickJumpDraft = value.replace(/[^0-9]/g, '').substring(0, 6);
-          })
-          .onSubmit(() => {
-            this.submitTocQuickJump();
-          })
-      } else {
-        Text(`当前 ${Math.min(this.currentChapterIndex + 1, this.chapters.length)}/${this.chapters.length}`)
-          .fontSize(12)
-          .fontColor(this.getTextColor())
-          .padding({ left: 12, right: 12, top: 7, bottom: 7 })
-          .borderRadius(16)
-          .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
-          .accessibilityText(this.tocQuickJumpArmed ? '再次点击输入目标章节' : '回到当前章节')
+    Column({ space: 8 }) {
+      Row() {
+        Text(this.isTocSearchActive() ? `找到 ${this.tocSearchChapterIndexes.length} 章` : `共 ${this.chapters.length} 章`)
+          .fontSize(14)
+          .fontColor(this.getSubTextColor())
+          .margin({ right: 6 })
+        SymbolGlyph($r('sys.symbol.chevron_up'))
+          .fontSize(20)
+          .fontColor([this.getTextColor()])
+          .width(32)
+          .height(36)
+          .accessibilityText('跳到目录开头')
           .onClick(() => {
-            this.handleTocCurrentPositionClick();
+            this.scrollTocVisibleEdge(false);
           })
-      }
-      ImmersiveBackButton({
-        icon: $r('sys.symbol.arrow_clockwise'),
-        iconColor: this.getTextColor(),
-        darkMode: this.isReaderThemeDark(),
-        buttonSize: 34,
-        containerWidth: 44,
-        containerHeight: 44,
-        startInset: 0,
-        materialScale: 0.72,
-        accessibilityLabel: '刷新目录',
-        onBack: () => {
-          this.refreshTocFromPanel();
+        SymbolGlyph($r('sys.symbol.chevron_down'))
+          .fontSize(20)
+          .fontColor([this.getTextColor()])
+          .width(32)
+          .height(36)
+          .accessibilityText('跳到目录末尾')
+          .onClick(() => {
+            this.scrollTocVisibleEdge(true);
+          })
+        Blank()
+          .layoutWeight(1)
+        if (this.tocQuickJumpInputVisible && !this.isTocSearchActive()) {
+          TextInput({ text: this.tocQuickJumpDraft, placeholder: `1-${this.chapters.length}` })
+            .type(InputType.Number)
+            .enterKeyType(EnterKeyType.Go)
+            .key('tocQuickJumpChapterInput')
+            .defaultFocus(true)
+            .fontSize(13)
+            .fontColor(this.getTextColor())
+            .textAlign(TextAlign.Center)
+            .width(92)
+            .height(34)
+            .padding({ left: 8, right: 8 })
+            .borderRadius(17)
+            .backgroundColor(this.isReaderThemeDark() ? '#2BFFFFFF' : '#14000000')
+            .accessibilityText('输入目标章节序号，按回车定位')
+            .onChange((value: string) => {
+              this.tocQuickJumpDraft = value.replace(/[^0-9]/g, '').substring(0, 6);
+            })
+            .onSubmit(() => {
+              this.submitTocQuickJump();
+            })
+        } else if (this.isTocSearchActive()) {
+          Text(`匹配 ${this.tocSearchChapterIndexes.length}`)
+            .fontSize(12)
+            .fontColor(this.getTextColor())
+            .height(34)
+            .padding({ left: 12, right: 12 })
+            .textAlign(TextAlign.Center)
+            .borderRadius(16)
+            .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
+        } else {
+          Text(`当前${Math.min(this.currentChapterIndex + 1, this.chapters.length)}`)
+            .fontSize(12)
+            .fontColor(this.getTextColor())
+            .height(34)
+            .padding({ left: 12, right: 12 })
+            .textAlign(TextAlign.Center)
+            .borderRadius(16)
+            .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
+            .accessibilityText(this.tocQuickJumpArmed ? '再次点击输入目标章节' : '回到当前章节')
+            .onClick(() => {
+              this.handleTocCurrentPositionClick();
+            })
         }
-      })
-        .margin({ left: 8 })
+        ImmersiveBackButton({
+          icon: $r('sys.symbol.arrow_clockwise'),
+          iconColor: this.getTextColor(),
+          darkMode: this.isReaderThemeDark(),
+          buttonSize: 34,
+          containerWidth: 34,
+          containerHeight: 34,
+          startInset: 0,
+          materialScale: 0.7,
+          compactLayout: true,
+          accessibilityLabel: '刷新目录',
+          onBack: () => {
+            this.refreshTocFromPanel();
+          }
+        })
+          .margin({ left: 8 })
+        ImmersiveBackButton({
+          icon: $r('sys.symbol.magnifyingglass'),
+          iconColor: this.tocSearchVisible ? this.accentColor() : this.getTextColor(),
+          darkMode: this.isReaderThemeDark(),
+          buttonSize: 34,
+          containerWidth: 34,
+          containerHeight: 34,
+          startInset: 0,
+          materialScale: 0.7,
+          compactLayout: true,
+          accessibilityLabel: '搜索目录',
+          onBack: () => {
+            this.toggleTocSearch();
+          }
+        })
+          .margin({ left: 8 })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.tocSearchVisible) {
+        Row({ space: 8 }) {
+          SymbolGlyph($r('sys.symbol.magnifyingglass'))
+            .fontSize(18)
+            .fontColor([this.getSubTextColor()])
+          TextInput({ text: this.tocSearchQuery,
+            placeholder: this.tocSearchLoading ? '正在载入完整目录…' : '搜索章节名称' })
+            .key('tocChapterSearchInput')
+            .defaultFocus(true)
+            .fontSize(14)
+            .fontColor(this.getTextColor())
+            .layoutWeight(1)
+            .height(38)
+            .padding({ left: 0, right: 0 })
+            .backgroundColor(Color.Transparent)
+            .enterKeyType(EnterKeyType.Search)
+            .onChange((value: string) => {
+              this.tocSearchQuery = value;
+            })
+            .onSubmit(() => {
+              this.submitTocSearch();
+            })
+          if (this.tocSearchQuery) {
+            Text('×')
+              .fontSize(22)
+              .fontColor(this.getSubTextColor())
+              .width(32)
+              .height(38)
+              .textAlign(TextAlign.Center)
+              .accessibilityText('清空目录搜索')
+              .onClick(() => {
+                this.clearTocSearchResult();
+                setTimeout(() => focusControl.requestFocus('tocChapterSearchInput'), 30);
+              })
+          }
+        }
+        .width('100%')
+        .height(40)
+        .padding({ left: 12, right: 8 })
+        .borderRadius(20)
+        .backgroundColor(this.isReaderThemeDark() ? '#2BFFFFFF' : '#14000000')
+      }
     }
     .width('100%')
     .padding({ left: 20, right: 16, top: 18, bottom: 10 })
-    .alignItems(VerticalAlign.Center)
+    .alignItems(HorizontalAlign.Start)
   }
 
   @Builder
   tocChapterList() {
-    List({ space: 0, scroller: this.tocScroller }) {
-      ForEach(this.tocVisibleChapters, (chapter: BookChapter, localIndex: number) => {
-        ListItem() {
-          Row({ space: 10 }) {
-            Text(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ? '•' : '·')
-              .fontSize(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ? 22 : 18)
-              .fontColor(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ?
-                this.accentColor() : this.getSubTextColor())
-              .width(18)
-              .textAlign(TextAlign.Center)
-
-            Text(this.getChapterTitle(this.tocGlobalIndex(localIndex)))
-              .fontSize(15)
-              .fontWeight(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ?
-                FontWeight.Medium : FontWeight.Regular)
-              .fontColor(this.getTocTitleColor(chapter, this.tocGlobalIndex(localIndex)))
-              .maxLines(2)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .layoutWeight(1)
-
-            if (this.book?.origin !== 'local' && chapter.cacheDate > 0) {
-              Text('已缓存')
-                .fontSize(10)
-                .fontColor(this.isReaderThemeDark() ? '#7CC7A0' : '#1F8F55')
-                .padding({ left: 7, right: 7, top: 3, bottom: 3 })
-                .backgroundColor(this.isReaderThemeDark() ? '#24382F' : '#E6F4EC')
-                .borderRadius(10)
+    Stack({ alignContent: Alignment.TopEnd }) {
+      List({ space: 0, scroller: this.tocScroller }) {
+        if (this.isTocSearchActive() && this.tocVisibleChapters.length === 0) {
+          ListItem() {
+            Column({ space: 8 }) {
+              SymbolGlyph($r('sys.symbol.magnifyingglass'))
+                .fontSize(28)
+                .fontColor([this.getSubTextColor()])
+              Text('未找到匹配章节')
+                .fontSize(14)
+                .fontColor(this.getSubTextColor())
             }
+            .width('100%')
+            .padding({ top: 44, bottom: 44 })
           }
-          .width('100%')
-          .padding({ left: 14, right: 16, top: 14, bottom: 14 })
-          .backgroundColor(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ?
-            this.tocSelectedBackgroundColor() : Color.Transparent)
-          .border({ width: { bottom: 0.5 }, color: this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000' })
-          .onClick(async () => {
-            const targetChapterIndex = this.tocGlobalIndex(localIndex);
-            this.currentPageIndex = 0;
-            this.pendingRestorePageIndex = 0;
-            this.showToc = false;
-            this.showMenu = false;
-            await this.loadContent(false, targetChapterIndex);
-            await this.saveReadingProgress();
-          })
         }
-      }, (chapter: BookChapter, localIndex: number) =>
-        `${this.tocWindowStart + localIndex}_${chapter.url || chapter.title}`)
+        ForEach(this.tocVisibleChapters, (chapter: BookChapter, localIndex: number) => {
+          ListItem() {
+            Row({ space: 10 }) {
+              Text(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ? '•' : '·')
+                .fontSize(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ? 22 : 18)
+                .fontColor(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ?
+                  this.accentColor() : this.getSubTextColor())
+                .width(18)
+                .textAlign(TextAlign.Center)
+
+              Text(this.getChapterTitle(this.tocGlobalIndex(localIndex)))
+                .fontSize(15)
+                .fontWeight(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ?
+                  FontWeight.Medium : FontWeight.Regular)
+                .fontColor(this.getTocTitleColor(chapter, this.tocGlobalIndex(localIndex)))
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+
+              if (this.book?.origin !== 'local' && chapter.cacheDate > 0) {
+                Text('已缓存')
+                  .fontSize(10)
+                  .fontColor(this.isReaderThemeDark() ? '#7CC7A0' : '#1F8F55')
+                  .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+                  .backgroundColor(this.isReaderThemeDark() ? '#24382F' : '#E6F4EC')
+                  .borderRadius(10)
+              }
+            }
+            .width('100%')
+            .padding({ left: 14, right: 16, top: 14, bottom: 14 })
+            .backgroundColor(this.tocGlobalIndex(localIndex) === this.currentChapterIndex ?
+              this.tocSelectedBackgroundColor() : Color.Transparent)
+            .border({ width: { bottom: 0.5 }, color: this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000' })
+            .onClick(async () => {
+              const targetChapterIndex = this.tocGlobalIndex(localIndex);
+              this.currentPageIndex = 0;
+              this.pendingRestorePageIndex = 0;
+              this.showToc = false;
+              this.showMenu = false;
+              await this.loadContent(false, targetChapterIndex);
+              await this.saveReadingProgress();
+            })
+          }
+        }, (chapter: BookChapter, localIndex: number) =>
+          `${this.tocGlobalIndex(localIndex)}_${chapter.url || chapter.title}`)
+      }
+      .width('100%')
+      .height('100%')
+      .scrollBar(BarState.Off)
+      .onScrollIndex((start: number, end: number) => {
+        this.updateTocScrollbarPosition(start, end);
+      })
+      .onReachStart(() => this.loadPreviousTocPage())
+      .onReachEnd(() => this.loadNextTocPage())
+
+      this.tocVirtualScrollbar()
     }
     .layoutWeight(1)
     .width('100%')
-    .scrollBar(BarState.Auto)
-    .scrollBarColor(this.isReaderThemeDark() ? '#668A8F98' : '#667A6F63')
-    .onReachStart(() => this.loadPreviousTocPage())
-    .onReachEnd(() => this.loadNextTocPage())
+    .onAreaChange((_oldValue: Area, newValue: Area) => {
+      this.tocListViewportHeight = Number(newValue.height);
+    })
+  }
+
+  @Builder
+  tocVirtualScrollbar() {
+    if (this.tocShouldShowVirtualScrollbar()) {
+      Column()
+        .width(3)
+        .height(this.tocListViewportHeight)
+        .borderRadius(2)
+        .backgroundColor(this.isReaderThemeDark() ? '#18FFFFFF' : '#14000000')
+        .margin({ right: 3 })
+        .hitTestBehavior(HitTestMode.None)
+      Column()
+        .width(3)
+        .height(this.tocScrollbarThumbLength())
+        .borderRadius(2)
+        .backgroundColor(this.isReaderThemeDark() ? '#99D5D8DE' : '#887A6F63')
+        .margin({ right: 3 })
+        .translate({ y: this.tocScrollbarThumbOffset() })
+        .hitTestBehavior(HitTestMode.None)
+    }
   }
 
   @Builder
@@ -2387,9 +2545,21 @@ struct ReadBookPage {
           '朗读设置',
           () => this.openTtsSettingsPanel(),
           true,
-          false
+          true
         )
       }
+      this.readerActionMenuItem(
+        $r('sys.symbol.rectangle_3_group'),
+        '布局元素设置',
+        () => this.openLayoutElementSettings()
+      )
+      this.readerActionMenuItem(
+        $r('sys.symbol.arrow_left_arrow_right'),
+        '替换净化配置',
+        () => this.openCurrentReaderReplaceRules(),
+        true,
+        false
+      )
     }
     .width(220)
     .padding({ left: 8, right: 8, top: 6, bottom: 6 })
@@ -2439,6 +2609,130 @@ struct ReadBookPage {
       this.showReaderActionMenu = false;
       action();
     })
+  }
+
+  openLayoutElementSettings(): void {
+    this.showReaderActionMenu = false;
+    this.showLayoutElementSettings = true;
+  }
+
+  openCurrentReaderReplaceRules(): void {
+    const chapter = this.chapters.length > 0 ?
+      this.chapters[this.clampChapterIndex(this.currentChapterIndex)] : null;
+    const rawTitle = chapter ? this.cleanChapterTitle(chapter.title || '') : '';
+    const cached = this.chapters.length > 0 ?
+      ReadBookEngine.get().getCachedContent(this.currentChapterIndex) : '';
+    const rawContent = cached || this.content || '';
+    AppStorage.setOrCreate('readerReplacePreviewTitle', rawTitle);
+    AppStorage.setOrCreate('readerReplacePreviewContent', rawContent.substring(0, 20000));
+    AppStorage.setOrCreate('readerReplacePreviewBookName', this.book?.name || '');
+    AppStorage.setOrCreate('readerReplacePreviewBookAuthor', this.book?.author || '');
+    AppStorage.setOrCreate('readerReplacePreviewBookOriginName', this.book?.originName || '');
+    AppStorage.setOrCreate('readerReplacePreviewBookOrigin', this.book?.origin || '');
+    AppStorage.setOrCreate('readerReplacePreviewBookUrl', this.book?.bookUrl || this.bookUrl);
+    this.hideReaderPanels();
+    router.pushUrl({ url: 'pages/ReaderReplaceRules', params: { previewCurrentChapter: 'true' } });
+  }
+
+  @Builder
+  readerLayoutElementSettingsDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.isReaderThemeDark() ? '#52000000' : '#26000000')
+        .backdropBlur(ThemeRuntime.glassBlur('overlay', 18))
+        .onClick(() => {
+          this.showLayoutElementSettings = false;
+        })
+
+      Column({ space: 4 }) {
+        Row() {
+          Text('布局元素设置')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.getTextColor())
+            .layoutWeight(1)
+          ImmersiveBackButton({
+            icon: $r('sys.symbol.xmark'),
+            iconColor: this.getTextColor(),
+            darkMode: this.isReaderThemeDark(),
+            buttonSize: 38,
+            containerWidth: 38,
+            containerHeight: 38,
+            startInset: 0,
+            compactLayout: true,
+            accessibilityLabel: '关闭布局元素设置',
+            onBack: () => this.showLayoutElementSettings = false
+          })
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        Text('控制点击阅读页后出现的快捷组件')
+          .fontSize(13)
+          .fontColor(this.getSubTextColor())
+          .width('100%')
+          .margin({ bottom: 8 })
+
+        this.readerLayoutElementToggle(
+          '使用快速朗读组件',
+          '显示朗读快捷按钮与展开控制条',
+          this.readerUseTtsQuickAction,
+          (enabled: boolean) => {
+            this.readerUseTtsQuickAction = enabled;
+            if (!enabled) this.ttsMediaControlsExpanded = false;
+          }
+        )
+        this.readerLayoutElementToggle(
+          '使用章节快速跳转组件',
+          '显示章节滑杆与上一章、下一章按钮',
+          this.readerUseChapterQuickJump,
+          (enabled: boolean) => {
+            this.readerUseChapterQuickJump = enabled;
+            if (!enabled) this.resetMenuChapterPreview();
+          }
+        )
+      }
+      .width(Math.min(420, Math.max(300, this.pageViewWidth - 36)))
+      .padding({ left: 20, right: 20, top: 18, bottom: 18 })
+      .borderRadius(ThemeRuntime.glassCornerRadius(24, 'overlay'))
+      .backgroundColor(this.readerGlassPanelColor())
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 24))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: this.readerGlassBorderColor() })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: this.readerGlassShadowColor(),
+        offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+      .onClick(() => {
+      })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  readerLayoutElementToggle(title: string, description: string, enabled: boolean,
+    onChange: (enabled: boolean) => void) {
+    Row({ space: 12 }) {
+      Column({ space: 4 }) {
+        Text(title)
+          .fontSize(16)
+          .fontColor(this.getTextColor())
+        Text(description)
+          .fontSize(12)
+          .fontColor(this.getSubTextColor())
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      Toggle({ type: ToggleType.Switch, isOn: enabled })
+        .selectedColor(this.accentColor())
+        .onChange(onChange)
+    }
+    .width('100%')
+    .constraintSize({ minHeight: 64 })
+    .padding({ left: 12, right: 8 })
+    .borderRadius(14)
+    .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
+    .alignItems(VerticalAlign.Center)
   }
 
   currentReaderSource(): BookSource | null {
@@ -3607,6 +3901,14 @@ struct ReadBookPage {
 
   openTocPanel(): void {
     this.tocPanelTab = 0;
+    this.tocSearchVisible = false;
+    this.tocSearchQuery = '';
+    this.tocSearchChapterIndexes = [];
+    this.tocSearchLoading = false;
+    this.tocSearchResultActive = false;
+    this.tocSearchRequestSerial++;
+    this.tocDatabaseChapterCount = this.chapters.length;
+    this.tocFirstVisibleGlobalIndex = this.currentChapterIndex;
     this.tocQuickJumpArmed = false;
     this.tocQuickJumpInputVisible = false;
     this.tocQuickJumpDraft = '';
@@ -3616,12 +3918,19 @@ struct ReadBookPage {
     this.showMenu = false;
     this.scrollTocToCurrentChapter(false);
     this.loadBookmarks();
+    this.loadTocDatabaseChapterCount();
   }
 
   async refreshTocFromPanel(): Promise<void> {
+    const searchQuery = this.tocSearchQuery;
     await this.retryFetchChapters();
-    this.setTocWindowAround(this.currentChapterIndex, ScrollAlign.CENTER);
-    this.scrollTocToCurrentChapter(false);
+    this.tocDatabaseChapterCount = this.chapters.length;
+    if (this.tocSearchVisible && this.tocSearchResultActive && searchQuery.trim()) {
+      await this.submitTocSearch();
+    } else {
+      this.setTocWindowAround(this.currentChapterIndex, ScrollAlign.CENTER);
+      this.scrollTocToCurrentChapter(false);
+    }
     promptAction.showToast({ message: '目录已刷新' });
   }
 
@@ -4238,7 +4547,147 @@ struct ReadBookPage {
   }
 
   tocGlobalIndex(localIndex: number): number {
+    if (this.isTocSearchActive()) {
+      return this.tocSearchChapterIndexes[localIndex] ?? 0;
+    }
     return this.tocWindowStart + localIndex;
+  }
+
+  isTocSearchActive(): boolean {
+    return this.tocSearchVisible && this.tocSearchResultActive;
+  }
+
+  toggleTocSearch(): void {
+    if (this.tocSearchVisible) {
+      this.tocSearchVisible = false;
+      this.tocSearchQuery = '';
+      this.tocSearchChapterIndexes = [];
+      this.tocSearchLoading = false;
+      this.tocSearchResultActive = false;
+      this.tocSearchRequestSerial++;
+      this.setTocWindowAround(this.currentChapterIndex, ScrollAlign.CENTER);
+      this.scrollTocToCurrentChapter(false);
+      return;
+    }
+    this.tocSearchVisible = true;
+    this.tocQuickJumpArmed = false;
+    this.tocQuickJumpInputVisible = false;
+    this.tocQuickJumpDraft = '';
+    setTimeout(() => {
+      focusControl.requestFocus('tocChapterSearchInput');
+    }, 50);
+  }
+
+  async submitTocSearch(): Promise<void> {
+    const keyword = this.tocSearchQuery.trim();
+    if (!keyword) {
+      this.clearTocSearchResult();
+      return;
+    }
+    const requestSerial = ++this.tocSearchRequestSerial;
+    const bookUrl = this.book?.bookUrl || this.bookUrl;
+    this.tocSearchLoading = true;
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const matches = await db.searchBookChapters(bookUrl, keyword);
+      const totalCount = await db.getBookChapterCount(bookUrl);
+      if (requestSerial !== this.tocSearchRequestSerial || !this.tocSearchVisible) return;
+      const indexes: number[] = [];
+      for (const chapter of matches) {
+        indexes.push(chapter.index);
+      }
+      this.tocDatabaseChapterCount = Math.max(totalCount, this.chapters.length);
+      this.tocSearchChapterIndexes = indexes;
+      this.tocVisibleChapters = matches;
+      this.tocWindowStart = 0;
+      this.tocSearchResultActive = true;
+      this.tocFirstVisibleGlobalIndex = indexes.length > 0 ? indexes[0] : 0;
+      this.tocVisibleItemCount = 1;
+      console.info(`[TOC] 数据库目录搜索: keyword=${keyword}, total=${totalCount}, matches=${matches.length}`);
+      setTimeout(() => {
+        if (matches.length > 0) {
+          this.tocScroller.scrollToIndex(0, false, ScrollAlign.START);
+        }
+      }, 0);
+    } catch (e) {
+      console.warn('数据库目录搜索失败:', e);
+      if (requestSerial === this.tocSearchRequestSerial) {
+        promptAction.showToast({ message: '目录搜索失败' });
+      }
+    } finally {
+      if (requestSerial === this.tocSearchRequestSerial) {
+        this.tocSearchLoading = false;
+      }
+    }
+  }
+
+  clearTocSearchResult(): void {
+    this.tocSearchRequestSerial++;
+    this.tocSearchQuery = '';
+    this.tocSearchLoading = false;
+    this.tocSearchResultActive = false;
+    this.tocSearchChapterIndexes = [];
+    const localIndex = this.setTocWindowAround(this.currentChapterIndex, ScrollAlign.CENTER);
+    setTimeout(() => {
+      try {
+        this.tocScroller.scrollToIndex(localIndex, false, ScrollAlign.CENTER);
+      } catch (e) {
+        console.warn('清空目录搜索后恢复定位失败:', e);
+      }
+    }, 0);
+  }
+
+  async loadTocDatabaseChapterCount(): Promise<void> {
+    const bookUrl = this.book?.bookUrl || this.bookUrl;
+    if (!bookUrl) return;
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      this.tocDatabaseChapterCount = Math.max(await db.getBookChapterCount(bookUrl), this.chapters.length);
+    } catch (e) {
+      console.warn('读取数据库章节总数失败:', e);
+    }
+  }
+
+  updateTocScrollbarPosition(start: number, end: number): void {
+    const localStart = Math.max(0, start);
+    this.tocFirstVisibleGlobalIndex = this.tocGlobalIndex(localStart);
+    this.tocVisibleItemCount = Math.max(1, end - start + 1);
+  }
+
+  tocShouldShowVirtualScrollbar(): boolean {
+    return this.tocListViewportHeight > 0 && this.tocDatabaseChapterCount > this.tocVisibleItemCount;
+  }
+
+  tocScrollbarThumbLength(): number {
+    return VirtualListScrollbar.thumbLength(this.tocListViewportHeight,
+      this.tocDatabaseChapterCount, this.tocVisibleItemCount);
+  }
+
+  tocScrollbarThumbOffset(): number {
+    const thumbLength = this.tocScrollbarThumbLength();
+    return VirtualListScrollbar.thumbOffset(this.tocListViewportHeight, thumbLength,
+      this.tocDatabaseChapterCount, this.tocFirstVisibleGlobalIndex, this.tocVisibleItemCount);
+  }
+
+  scrollTocVisibleEdge(toEnd: boolean): void {
+    if (!this.isTocSearchActive()) {
+      this.scrollTocToChapter(toEnd ? this.chapters.length - 1 : 0,
+        toEnd ? ScrollAlign.END : ScrollAlign.START);
+      return;
+    }
+    if (this.tocVisibleChapters.length === 0) {
+      return;
+    }
+    const localIndex = toEnd ? this.tocVisibleChapters.length - 1 : 0;
+    setTimeout(() => {
+      try {
+        this.tocScroller.scrollToIndex(localIndex, true, toEnd ? ScrollAlign.END : ScrollAlign.START);
+      } catch (e) {
+        console.warn('定位目录搜索结果失败:', e);
+      }
+    }, 0);
   }
 
   setTocWindowAround(index: number, align: ScrollAlign): number {
@@ -4264,7 +4713,7 @@ struct ReadBookPage {
   }
 
   loadNextTocPage(): void {
-    if (this.tocLoadingNextPage) {
+    if (this.isTocSearchActive() || this.tocLoadingNextPage) {
       return;
     }
     const loadedEnd = this.tocWindowStart + this.tocVisibleChapters.length;
@@ -4280,7 +4729,7 @@ struct ReadBookPage {
   }
 
   loadPreviousTocPage(): void {
-    if (this.tocLoadingPreviousPage || this.tocWindowStart <= 0) {
+    if (this.isTocSearchActive() || this.tocLoadingPreviousPage || this.tocWindowStart <= 0) {
       return;
     }
     this.tocLoadingPreviousPage = true;
@@ -4468,7 +4917,7 @@ struct ReadBookPage {
   }
 
   readerBottomMenuOverlayHeight(): number {
-    return 120 + this.readerFloatingBarBottomMargin();
+    return (this.readerUseChapterQuickJump ? 120 : 56) + this.readerFloatingBarBottomMargin();
   }
 
   readerBottomActionOverlayHeight(): number {
@@ -5231,6 +5680,8 @@ struct ReadBookPage {
     this.book.durChapterTime = now;
     this.book.putVariable('readStarted', '1');
     this.book.putVariable('lastReadTime', `${now}`);
+    this.book.putVariable('readProgressChapterIndex', `${chapterIndex}`);
+    this.book.putVariable('readProgressPageCount', `${this.currentChapterProgressPageCount()}`);
     engine.curIdx = chapterIndex;
     engine.curPos = pageIndex;
     engine.book = this.book;
@@ -5322,6 +5773,20 @@ struct ReadBookPage {
     .backgroundColor(Color.Transparent)
     .translate({ y: this.getReaderBottomInfoBarVisualOffsetY() })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  currentChapterProgressPageCount(): number {
+    if (this.contentPages.length === 0) {
+      return 0;
+    }
+    if (this.hasPagedReaderArea() && this.pagedContentText) {
+      const pagination = this.getCachedReaderPagination(this.currentChapterIndex, this.pagedContentText);
+      if (pagination && !pagination.complete) {
+        // 增量分页尚未完成时，总页数并不可靠；下一次翻页或离开页面时会重新保存。
+        return 0;
+      }
+    }
+    return this.contentPages.length;
   }
 
   onReaderLandscapeDoublePageChanged(): void {
@@ -9950,6 +10415,7 @@ struct ReadBookPage {
     this.menuChapterSliderActive = false;
     this.menuChapterTooltipVisible = false;
     this.showReaderActionMenu = false;
+    this.showLayoutElementSettings = false;
     this.showMenu = false;
     this.showSettings = false;
     this.showQuickTypographyValueInput = false;

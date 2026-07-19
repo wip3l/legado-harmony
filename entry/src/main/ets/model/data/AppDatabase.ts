@@ -1019,6 +1019,24 @@ export class AppDatabase {
     return chapters;
   }
 
+  async searchBookChapters(bookUrl: string, keyword: string): Promise<BookChapter[]> {
+    if (!this.store || !bookUrl || !keyword.trim()) return [];
+    const predicates = new relationalStore.RdbPredicates('book_chapters');
+    predicates.equalTo('bookUrl', bookUrl);
+    predicates.like('title', `%${keyword.trim()}%`);
+    predicates.orderByAsc('chapterIndex');
+    const resultSet = await this.store.query(predicates, []);
+    const chapters: BookChapter[] = [];
+    while (resultSet.goToNextRow()) {
+      chapters.push(this.resultSetToBookChapter(resultSet));
+    }
+    const cacheDates = await this.getBookChapterCacheDateMap(bookUrl);
+    for (const chapter of chapters) {
+      chapter.cacheDate = cacheDates.get(chapter.index) || 0;
+    }
+    return chapters;
+  }
+
   async getBookChapterCount(bookUrl: string): Promise<number> {
     if (!this.store) return 0;
     const predicates = new relationalStore.RdbPredicates('book_chapters');

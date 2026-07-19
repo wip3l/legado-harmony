@@ -17,6 +17,16 @@ export class ReaderReplaceRule {
   enabled: boolean = true;
 }
 
+export class ReaderReplaceRuleCheck {
+  state: string = 'noMatch';
+  label: string = '当前章节未匹配';
+  valid: boolean = true;
+  scopeMatched: boolean = true;
+  titleMatched: boolean = false;
+  contentMatched: boolean = false;
+  changed: boolean = false;
+}
+
 export class ReaderReplaceRuleStore {
   static readonly UPDATE_TIME_KEY: string = 'readerReplaceRulesUpdateTime';
   private static readonly STORE_NAME: string = 'reader_replace_rules';
@@ -56,6 +66,63 @@ export class ReaderReplaceRuleStore {
 
   static applyContent(text: string, rules: ReaderReplaceRule[], book: Book | null): string {
     return ReaderReplaceRuleStore.apply(text, rules, book, false);
+  }
+
+  static checkRule(sourceRule: ReaderReplaceRule, book: Book | null,
+    title: string, content: string): ReaderReplaceRuleCheck {
+    const result = new ReaderReplaceRuleCheck();
+    const rule = ReaderReplaceRuleStore.normalize(sourceRule);
+    if (!rule.enabled) {
+      result.state = 'disabled';
+      result.label = '已禁用';
+      return result;
+    }
+    if (!rule.pattern) {
+      result.state = 'invalid';
+      result.label = '规则无效：匹配内容为空';
+      result.valid = false;
+      return result;
+    }
+    result.scopeMatched = ReaderReplaceRuleStore.matchesBookScope(rule, book);
+    if (!result.scopeMatched) {
+      result.state = 'outOfScope';
+      result.label = '不适用于当前书籍';
+      return result;
+    }
+    try {
+      if (rule.isRegex) {
+        const titleRegex = new RegExp(rule.pattern, 'g');
+        const contentRegex = new RegExp(rule.pattern, 'g');
+        result.titleMatched = rule.applyToTitle && !!title && titleRegex.test(title);
+        result.contentMatched = rule.applyToContent && !!content && contentRegex.test(content);
+        if (result.titleMatched) {
+          result.changed = title.replace(new RegExp(rule.pattern, 'g'), rule.replacement) !== title;
+        }
+        if (result.contentMatched) {
+          result.changed = result.changed ||
+            content.replace(new RegExp(rule.pattern, 'g'), rule.replacement) !== content;
+        }
+      } else {
+        result.titleMatched = rule.applyToTitle && !!title && title.includes(rule.pattern);
+        result.contentMatched = rule.applyToContent && !!content && content.includes(rule.pattern);
+        if (result.titleMatched) {
+          result.changed = title.split(rule.pattern).join(rule.replacement) !== title;
+        }
+        if (result.contentMatched) {
+          result.changed = result.changed || content.split(rule.pattern).join(rule.replacement) !== content;
+        }
+      }
+    } catch (error) {
+      result.state = 'invalid';
+      result.label = `规则无效：${error instanceof Error ? error.message : String(error)}`;
+      result.valid = false;
+      return result;
+    }
+    if (result.titleMatched || result.contentMatched) {
+      result.state = result.changed ? 'effective' : 'matched';
+      result.label = result.changed ? '当前章节已生效' : '已匹配，替换结果未变化';
+    }
+    return result;
   }
 
   private static apply(

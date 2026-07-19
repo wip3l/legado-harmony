@@ -14,6 +14,7 @@ import { VerificationSupport } from '../core/http/VerificationSupport';
 import { CookieStore } from '../core/http/CookieStore';
 import { BookSourceGroupStore } from '../utils/BookSourceGroupStore';
 import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
+import { VirtualListScrollbar } from '../utils/VirtualListScrollbar';
 
 const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const BOOK_SOURCE_IMPORT_TIMEOUT_MS = 20000;
@@ -36,6 +37,9 @@ struct BookSourcePage {
   @State allSources: BookSource[] = [];
   @State sources: BookSource[] = [];
   @State visibleSources: BookSource[] = [];
+  @State sourceListViewportHeight: number = 0;
+  @State sourceFirstVisibleIndex: number = 0;
+  @State sourceVisibleItemCount: number = 1;
   @State sourceGroups: string[] = [];
   @State isLoading: boolean = false;
   @State searchText: string = '';
@@ -257,7 +261,8 @@ struct BookSourcePage {
           .height('100%')
           .justifyContent(FlexAlign.Center)
         } else {
-          List({ space: 8 }) {
+          Stack({ alignContent: Alignment.TopEnd }) {
+            List({ space: 8 }) {
             ForEach(this.visibleSources, (source: BookSource) => {
               ListItem() {
                 Row() {
@@ -382,13 +387,26 @@ struct BookSourcePage {
                 edgeEffect: SwipeEdgeEffect.Spring
               })
             }, (source: BookSource) => this.sourceListItemKey(source))
+            }
+            .width('100%')
+            .height('100%')
+            .padding({ left: 16, right: 16 })
+            .lanes(ResponsiveManagerListLayout.laneCount(this.contextViewportWidth),
+              ResponsiveManagerListLayout.gutter(this.contextViewportWidth))
+            .scrollBar(BarState.Off)
+            .onScrollIndex((start: number, end: number) => {
+              this.sourceFirstVisibleIndex = Math.max(0, start);
+              this.sourceVisibleItemCount = Math.max(1, end - start + 1);
+            })
+            .onReachEnd(() => this.loadMoreVisibleSources())
+
+            this.sourceVirtualScrollbar()
           }
           .width('100%')
           .layoutWeight(1)
-          .padding({ left: 16, right: 16 })
-          .lanes(ResponsiveManagerListLayout.laneCount(this.contextViewportWidth),
-            ResponsiveManagerListLayout.gutter(this.contextViewportWidth))
-          .onReachEnd(() => this.loadMoreVisibleSources())
+          .onAreaChange((_oldValue: Area, newValue: Area) => {
+            this.sourceListViewportHeight = Number(newValue.height);
+          })
         }
 
         if (this.selectionMode) {
@@ -1329,6 +1347,42 @@ struct BookSourcePage {
   }
 
   @Builder
+  sourceVirtualScrollbar() {
+    if (this.sourceShouldShowVirtualScrollbar()) {
+      Column()
+        .width(3)
+        .height(this.sourceListViewportHeight)
+        .borderRadius(2)
+        .backgroundColor(this.appDarkMode ? '#18FFFFFF' : '#14000000')
+        .margin({ right: 3 })
+        .hitTestBehavior(HitTestMode.None)
+      Column()
+        .width(3)
+        .height(this.sourceScrollbarThumbLength())
+        .borderRadius(2)
+        .backgroundColor(this.appDarkMode ? '#99D5D8DE' : '#887A6F63')
+        .margin({ right: 3 })
+        .translate({ y: this.sourceScrollbarThumbOffset() })
+        .hitTestBehavior(HitTestMode.None)
+    }
+  }
+
+  sourceShouldShowVirtualScrollbar(): boolean {
+    return this.sourceListViewportHeight > 0 && this.sources.length > this.sourceVisibleItemCount;
+  }
+
+  sourceScrollbarThumbLength(): number {
+    return VirtualListScrollbar.thumbLength(this.sourceListViewportHeight,
+      this.sources.length, this.sourceVisibleItemCount);
+  }
+
+  sourceScrollbarThumbOffset(): number {
+    return VirtualListScrollbar.thumbOffset(this.sourceListViewportHeight,
+      this.sourceScrollbarThumbLength(), this.sources.length,
+      this.sourceFirstVisibleIndex, this.sourceVisibleItemCount);
+  }
+
+  @Builder
   sourceGroupBar() {
     Scroll() {
       Row({ space: 8 }) {
@@ -1868,6 +1922,8 @@ struct BookSourcePage {
     }
     this.sources = filtered.slice();
     this.visibleSources = this.sources.slice(0, BOOK_SOURCE_LIST_BATCH_SIZE);
+    this.sourceFirstVisibleIndex = 0;
+    this.sourceVisibleItemCount = 1;
     this.pruneSelectedSources();
   }
 

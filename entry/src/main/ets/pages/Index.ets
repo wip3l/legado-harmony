@@ -4792,7 +4792,15 @@ struct BookshelfPage {
     if (!Book.hasStartedReading(book)) {
       return 0;
     }
-    const readChapterCount = Math.min(Math.max(book.durChapterIndex + 1, 0), book.totalChapterNum);
+    const chapterIndex = Math.min(Math.max(book.durChapterIndex, 0), book.totalChapterNum - 1);
+    const progressChapterIndex = Number.parseInt(book.getVariable('readProgressChapterIndex'));
+    const currentChapterPageCount = Number.parseInt(book.getVariable('readProgressPageCount'));
+    let currentChapterProgress = 1;
+    if (progressChapterIndex === chapterIndex && currentChapterPageCount > 0) {
+      const currentPageNumber = Math.min(Math.max(book.durChapterPos + 1, 1), currentChapterPageCount);
+      currentChapterProgress = currentPageNumber / currentChapterPageCount;
+    }
+    const readChapterCount = Math.min(chapterIndex + currentChapterProgress, book.totalChapterNum);
     return Math.floor(readChapterCount * 1000 / book.totalChapterNum) / 10;
   }
 

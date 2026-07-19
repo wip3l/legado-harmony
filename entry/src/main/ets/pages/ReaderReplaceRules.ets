@@ -1,7 +1,8 @@
 import { promptAction, router } from '@kit.ArkUI';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
-import { ReaderReplaceRule, ReaderReplaceRuleStore } from '../utils/ReaderReplaceRuleStore';
+import { Book } from '../model/data/Book';
+import { ReaderReplaceRule, ReaderReplaceRuleCheck, ReaderReplaceRuleStore } from '../utils/ReaderReplaceRuleStore';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
 
@@ -28,8 +29,13 @@ struct ReaderReplaceRulesPage {
   @State selectionMode: boolean = false;
   @State selectedRuleIds: number[] = [];
   @State isBatchOperating: boolean = false;
+  @State previewMode: boolean = false;
+  @State previewTitle: string = '';
+  @State previewContent: string = '';
+  private previewBook: Book | null = null;
 
   aboutToAppear(): void {
+    this.loadPreviewContext();
     this.loadRules();
     this.syncBars();
   }
@@ -119,7 +125,8 @@ struct ReaderReplaceRulesPage {
           }
         }
       })
-      Text(this.editing ? (this.draft.name ? '编辑替换规则' : '新增替换规则') : '替换净化')
+      Text(this.editing ? (this.draft.name ? '编辑替换规则' : '新增替换规则') :
+        (this.previewMode ? '替换净化配置' : '替换净化'))
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
         .fontColor(this.primaryTextColor())
@@ -149,6 +156,9 @@ struct ReaderReplaceRulesPage {
   @Builder
   managerView() {
     Column() {
+      if (this.previewMode) {
+        this.currentChapterPreviewCard()
+      }
       TextInput({ placeholder: '搜索规则名称或匹配内容', text: this.query })
         .height(44)
         .fontSize(14)
@@ -251,6 +261,12 @@ struct ReaderReplaceRulesPage {
         Text(this.ruleScopeSummary(rule))
           .fontSize(12)
           .fontColor(this.subTextColor())
+
+        if (this.previewMode) {
+          Text(this.ruleEffectLabel(rule))
+            .fontSize(12)
+            .fontColor(this.ruleEffectColor(rule))
+        }
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
@@ -279,6 +295,141 @@ struct ReaderReplaceRulesPage {
         this.openEditRule(rule);
       }
     })
+  }
+
+  @Builder
+  currentChapterPreviewCard() {
+    Column({ space: 8 }) {
+      Row() {
+        Column({ space: 3 }) {
+          Text('当前章节生效检查')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
+          Text(this.previewTitle || '当前章节')
+            .fontSize(12)
+            .fontColor(this.subTextColor())
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Text(this.previewSummaryText())
+          .fontSize(12)
+          .fontColor(this.previewEffectiveCount() > 0 ? '#1E8E3E' : this.subTextColor())
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.previewChanged()) {
+        Column({ space: 3 }) {
+          Text('替换前').fontSize(11).fontColor(this.subTextColor()).width('100%')
+          Text(this.previewBeforeExcerpt())
+            .fontSize(12)
+            .fontColor(this.secondaryTextColor())
+            .maxLines(3)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+          Text('替换后').fontSize(11).fontColor(this.subTextColor()).width('100%').margin({ top: 3 })
+          Text(this.previewAfterExcerpt())
+            .fontSize(12)
+            .fontColor(this.primaryTextColor())
+            .maxLines(3)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+        }
+        .width('100%')
+        .padding(10)
+        .borderRadius(10)
+        .backgroundColor(this.inputColor())
+      } else {
+        Text(this.rules.length === 0 ? '尚未配置规则，可点击右下角新增。' :
+          '当前规则未改变本章内容；可查看每条规则下方的检查状态。')
+          .fontSize(12)
+          .fontColor(this.secondaryTextColor())
+          .width('100%')
+      }
+    }
+    .width('calc(100% - 32vp)')
+    .padding(14)
+    .margin({ left: 16, right: 16, top: 12 })
+    .borderRadius(14)
+    .backgroundColor(this.cardColor())
+    .border({ width: ThemeRuntime.glassBorderWidth(), color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+  }
+
+  loadPreviewContext(): void {
+    const params = router.getParams() as Record<string, string>;
+    if (!params || params['previewCurrentChapter'] !== 'true') return;
+    const book = new Book();
+    book.name = AppStorage.get<string>('readerReplacePreviewBookName') || '';
+    book.author = AppStorage.get<string>('readerReplacePreviewBookAuthor') || '';
+    book.originName = AppStorage.get<string>('readerReplacePreviewBookOriginName') || '';
+    book.origin = AppStorage.get<string>('readerReplacePreviewBookOrigin') || '';
+    book.bookUrl = AppStorage.get<string>('readerReplacePreviewBookUrl') || '';
+    this.previewBook = book;
+    this.previewTitle = AppStorage.get<string>('readerReplacePreviewTitle') || '';
+    this.previewContent = AppStorage.get<string>('readerReplacePreviewContent') || '';
+    this.previewMode = true;
+  }
+
+  ruleEffectCheck(rule: ReaderReplaceRule): ReaderReplaceRuleCheck {
+    return ReaderReplaceRuleStore.checkRule(
+      rule, this.previewBook, this.previewTitle, this.previewContent);
+  }
+
+  ruleEffectLabel(rule: ReaderReplaceRule): string {
+    return this.ruleEffectCheck(rule).label;
+  }
+
+  ruleEffectColor(rule: ReaderReplaceRule): string {
+    const state = this.ruleEffectCheck(rule).state;
+    if (state === 'effective') return '#1E8E3E';
+    if (state === 'invalid') return '#E53935';
+    if (state === 'matched') return '#D17A00';
+    return this.subTextColor();
+  }
+
+  previewEffectiveCount(): number {
+    return this.rules.filter((rule: ReaderReplaceRule) =>
+      this.ruleEffectCheck(rule).state === 'effective').length;
+  }
+
+  previewInvalidCount(): number {
+    return this.rules.filter((rule: ReaderReplaceRule) =>
+      this.ruleEffectCheck(rule).state === 'invalid').length;
+  }
+
+  previewSummaryText(): string {
+    const effective = this.previewEffectiveCount();
+    const invalid = this.previewInvalidCount();
+    return `${effective} 条生效${invalid > 0 ? ` · ${invalid} 条无效` : ''}`;
+  }
+
+  previewChanged(): boolean {
+    return this.previewBeforeText() !== this.previewAfterText();
+  }
+
+  previewBeforeText(): string {
+    return `${this.previewTitle}\n${this.previewContent}`.trim();
+  }
+
+  previewAfterText(): string {
+    const title = ReaderReplaceRuleStore.applyTitle(this.previewTitle, this.rules, this.previewBook);
+    const content = ReaderReplaceRuleStore.applyContent(this.previewContent, this.rules, this.previewBook);
+    return `${title}\n${content}`.trim();
+  }
+
+  previewBeforeExcerpt(): string {
+    return this.previewExcerpt(this.previewBeforeText());
+  }
+
+  previewAfterExcerpt(): string {
+    return this.previewExcerpt(this.previewAfterText());
+  }
+
+  previewExcerpt(value: string): string {
+    return (value || '').replace(/\s+/g, ' ').trim().substring(0, 360) || '（空内容）';
   }
 
   @Builder
