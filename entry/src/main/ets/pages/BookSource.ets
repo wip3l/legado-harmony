@@ -13,6 +13,7 @@ import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { VerificationSupport } from '../core/http/VerificationSupport';
 import { CookieStore } from '../core/http/CookieStore';
 import { BookSourceGroupStore } from '../utils/BookSourceGroupStore';
+import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
 
 const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const BOOK_SOURCE_IMPORT_TIMEOUT_MS = 20000;
@@ -48,6 +49,7 @@ struct BookSourcePage {
   @State showMoreActionDialog: boolean = false;
   @State showSourceActionDialog: boolean = false;
   @State showSourceDeleteDialog: boolean = false;
+  @State showSourceGroupToolsMenu: boolean = false;
   @State showSourceGroupActionMenu: boolean = false;
   @State showRenameSourceGroupDialog: boolean = false;
   @State showDeleteSourceGroupDialog: boolean = false;
@@ -123,6 +125,7 @@ struct BookSourcePage {
       Column() {
         Row() {
           ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+            buttonSize: 40, containerWidth: 56, materialScale: 0.83, compactLayout: true,
             onBack: () => router.back() })
 
           Text('书源管理')
@@ -131,12 +134,26 @@ struct BookSourcePage {
             .fontColor(this.primaryTextColor())
             .layoutWeight(1)
 
+          if (!this.selectionMode) {
+            Text('校验')
+              .fontSize(15)
+              .fontColor(this.isCheckingSources ? this.subTextColor() : this.primaryTextColor())
+              .width(44)
+              .height(40)
+              .textAlign(TextAlign.Center)
+              .onClick(() => {
+                this.openCheckOptions();
+              })
+
+          }
+
           Text(this.selectionMode ? '取消' : '选择')
             .fontSize(15)
             .fontColor(this.isBatchOperating ? this.subTextColor() : this.primaryTextColor())
             .width(44)
             .height(40)
             .textAlign(TextAlign.Center)
+            .margin({ left: this.selectionMode ? 0 : 4 })
             .onClick(() => {
               if (this.isBatchOperating) {
                 return;
@@ -147,20 +164,6 @@ struct BookSourcePage {
                 this.enterSelectionMode();
               }
             })
-
-          if (!this.selectionMode) {
-            Text('校验')
-              .fontSize(15)
-              .fontColor(this.isCheckingSources ? this.subTextColor() : this.primaryTextColor())
-              .width(44)
-              .height(40)
-              .textAlign(TextAlign.Center)
-              .margin({ left: 4 })
-              .onClick(() => {
-                this.openCheckOptions();
-              })
-
-          }
         }
         .width('100%')
         .height(56)
@@ -383,6 +386,8 @@ struct BookSourcePage {
           .width('100%')
           .layoutWeight(1)
           .padding({ left: 16, right: 16 })
+          .lanes(ResponsiveManagerListLayout.laneCount(this.contextViewportWidth),
+            ResponsiveManagerListLayout.gutter(this.contextViewportWidth))
           .onReachEnd(() => this.loadMoreVisibleSources())
         }
 
@@ -500,8 +505,11 @@ struct BookSourcePage {
           }
           .width('90%')
           .padding(24)
-          .backgroundColor(this.cardColor())
-          .borderRadius(12)
+          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
         }
         .width('100%')
         .height('100%')
@@ -554,8 +562,11 @@ struct BookSourcePage {
           }
           .width('85%')
           .padding(24)
-          .backgroundColor(this.cardColor())
-          .borderRadius(12)
+          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
         }
         .width('100%')
         .height('100%')
@@ -639,8 +650,11 @@ struct BookSourcePage {
           }
           .width('88%')
           .padding(24)
-          .backgroundColor(this.cardColor())
-          .borderRadius(12)
+          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
         }
         .width('100%')
         .height('100%')
@@ -657,6 +671,10 @@ struct BookSourcePage {
 
       if (this.showSourceGroupActionMenu) {
         this.sourceGroupActionMenu()
+      }
+
+      if (this.showSourceGroupToolsMenu) {
+        this.sourceGroupToolsMenu()
       }
 
       if (this.showRenameSourceGroupDialog) {
@@ -799,8 +817,11 @@ struct BookSourcePage {
           .width('88%')
           .constraintSize({ maxHeight: '78%' })
           .padding(24)
-          .backgroundColor(this.cardColor())
-          .borderRadius(12)
+          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
           .alignItems(HorizontalAlign.Center)
           .onClick(() => {
           })
@@ -837,8 +858,11 @@ struct BookSourcePage {
           }
           .width(180)
           .padding({ left: 24, right: 24, top: 26, bottom: 24 })
-          .backgroundColor(this.cardColor())
-          .borderRadius(12)
+          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
           .alignItems(HorizontalAlign.Center)
         }
         .width('100%')
@@ -870,8 +894,11 @@ struct BookSourcePage {
           }
           .width(190)
           .padding({ left: 24, right: 24, top: 26, bottom: 24 })
-          .backgroundColor(this.cardColor())
-          .borderRadius(12)
+          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
           .alignItems(HorizontalAlign.Center)
         }
         .width('100%')
@@ -1283,8 +1310,11 @@ struct BookSourcePage {
       }
       .width('86%')
       .padding(22)
-      .backgroundColor(this.cardColor())
-      .borderRadius(12)
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
       .onClick(() => {
       })
     }
@@ -1302,6 +1332,21 @@ struct BookSourcePage {
   sourceGroupBar() {
     Scroll() {
       Row({ space: 8 }) {
+        Stack({ alignContent: Alignment.Center }) {
+          SymbolGlyph($r('sys.symbol.more'))
+            .fontSize(18)
+            .fontColor([this.primaryTextColor()])
+        }
+          .width(32)
+          .height(32)
+          .borderRadius(16)
+          .backgroundColor(this.glassCardColor())
+          .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
+          .onClick((event: ClickEvent) => {
+            this.contextMenuX = event.windowX;
+            this.contextMenuY = event.windowY;
+            this.showSourceGroupToolsMenu = true;
+          })
         this.sourceGroupChip('全部', '__all__')
         ForEach(this.getSourceGroups(), (group: string) => {
           this.sourceGroupChip(group, group, true)
@@ -1322,10 +1367,47 @@ struct BookSourcePage {
           })
       }
       .padding({ left: 16, right: 16, bottom: 8 })
+      .constraintSize({ minWidth: '100%' })
+      .justifyContent(FlexAlign.Start)
     }
     .width('100%')
     .scrollable(ScrollDirection.Horizontal)
     .scrollBar(BarState.Off)
+  }
+
+  @Builder
+  sourceGroupToolsMenu() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(Color.Transparent)
+        .onClick(() => {
+          this.showSourceGroupToolsMenu = false;
+        })
+
+      Column() {
+        this.contextActionItem($r('sys.symbol.trash'), '清除空分组', this.primaryTextColor(), () => {
+          this.showSourceGroupToolsMenu = false;
+          this.clearEmptySourceGroups();
+        })
+        this.contextActionItem($r('sys.symbol.plus'), '新建分组', this.primaryTextColor(), () => {
+          this.showSourceGroupToolsMenu = false;
+          this.newSourceGroupInput = '';
+          this.showAddSourceGroupDialog = true;
+        })
+      }
+      .width(166)
+      .padding({ top: 6, bottom: 6 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
+      .position({ x: this.contextMenuLeft(166), y: this.contextMenuTop(100) })
+    }
+    .width('100%')
+    .height('100%')
   }
 
   @Builder
@@ -1423,8 +1505,11 @@ struct BookSourcePage {
       }
       .width('85%')
       .padding(22)
-      .borderRadius(14)
-      .backgroundColor(this.cardColor())
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     }
     .width('100%')
     .height('100%')
@@ -1471,8 +1556,11 @@ struct BookSourcePage {
       }
       .width('85%')
       .padding(22)
-      .borderRadius(14)
-      .backgroundColor(this.cardColor())
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     }
     .width('100%')
     .height('100%')
@@ -1514,8 +1602,11 @@ struct BookSourcePage {
       }
       .width('85%')
       .padding(22)
-      .borderRadius(14)
-      .backgroundColor(this.cardColor())
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     }
     .width('100%')
     .height('100%')
@@ -1642,6 +1733,45 @@ struct BookSourcePage {
     } catch (e) {
       console.error('新增书源分组失败:', e);
       promptAction.showToast({ message: '新增分组失败' });
+    } finally {
+      this.isBatchOperating = false;
+    }
+  }
+
+  async reconcileSourceGroups(): Promise<void> {
+    try {
+      this.sourceGroups = await BookSourceGroupStore.load(getContext(this), this.sourceGroupsFromSources());
+      this.ensureActiveSourceGroup();
+      this.applySourceFilters();
+    } catch (e) {
+      console.warn('清理空书源分组失败:', e);
+    }
+  }
+
+  async clearEmptySourceGroups(): Promise<void> {
+    if (this.isBatchOperating) {
+      return;
+    }
+    const occupiedGroups = this.sourceGroupsFromSources();
+    const emptyGroups = this.getSourceGroups().filter((group: string) => !occupiedGroups.includes(group));
+    if (emptyGroups.length === 0) {
+      promptAction.showToast({ message: '没有空分组' });
+      return;
+    }
+    this.isBatchOperating = true;
+    this.batchOperationText = '正在清除空分组...';
+    try {
+      let groups = this.sourceGroups;
+      for (const group of emptyGroups) {
+        groups = await BookSourceGroupStore.remove(getContext(this), group, groups);
+      }
+      this.sourceGroups = groups;
+      this.ensureActiveSourceGroup();
+      this.applySourceFilters();
+      promptAction.showToast({ message: `已清除 ${emptyGroups.length} 个空分组` });
+    } catch (e) {
+      console.error('清除空书源分组失败:', e);
+      promptAction.showToast({ message: '清除空分组失败' });
     } finally {
       this.isBatchOperating = false;
     }
@@ -2057,6 +2187,7 @@ struct BookSourcePage {
       this.allSources = this.allSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
       this.visibleSources = this.visibleSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
       this.selectedSourceUrls = this.selectedSourceUrls.filter((url: string) => url !== source.bookSourceUrl);
+      await this.reconcileSourceGroups();
       promptAction.showToast({ message: '书源已删除' });
     } catch (e) {
       console.error('滑动删除书源失败:', e);
@@ -2086,6 +2217,7 @@ struct BookSourcePage {
       this.allSources = this.allSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
       this.visibleSources = this.visibleSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
       this.actionSourceUrl = '';
+      await this.reconcileSourceGroups();
       promptAction.showToast({ message: '书源已删除' });
     } catch (e) {
       console.error('删除书源失败:', e);
@@ -2207,6 +2339,7 @@ struct BookSourcePage {
     }
 
     const groupName = this.groupNameInput.trim();
+    const isNewUserGroup = !!groupName && !this.getSourceGroups().includes(groupName);
     this.isBatchOperating = true;
     this.batchOperationText = '正在设置分组...';
     try {
@@ -2216,7 +2349,8 @@ struct BookSourcePage {
         await db.updateBookSourceListFields(source.bookSourceUrl, { bookSourceGroup: groupName });
       }
       if (groupName) {
-        this.sourceGroups = await BookSourceGroupStore.add(getContext(this), groupName, this.sourceGroups);
+        this.sourceGroups = await BookSourceGroupStore.add(
+          getContext(this), groupName, this.sourceGroups, isNewUserGroup);
       }
       this.sources = this.sources.map((source: BookSource) => {
         if (this.isSourceSelected(source.bookSourceUrl) && !source.isLocked) {
@@ -2805,21 +2939,31 @@ struct BookSourcePage {
       }
 
       const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
       let importCount = 0;
+      let failedCount = 0;
+      let lastInsertError = '';
       for (const source of sources) {
         if (source.bookSourceUrl && source.bookSourceName) {
           try {
             await db.insertBookSource(source);
             importCount++;
           } catch (insertErr) {
+            failedCount++;
+            lastInsertError = insertErr instanceof Error ? insertErr.message : String(insertErr);
             console.error('插入书源失败:', source.bookSourceName, insertErr);
           }
         }
       }
 
+      if (importCount === 0) {
+        throw new Error(lastInsertError || '书源未能写入本地数据库');
+      }
+
       const loginCount = sources.filter((source: BookSource) => this.sourceNeedsLogin(source)).length;
       const loginMessage = loginCount > 0 ? `，其中 ${loginCount} 个需要登录` : '';
-      promptAction.showToast({ message: `成功导入 ${importCount} 个书源${loginMessage}` });
+      const failedMessage = failedCount > 0 ? `，${failedCount} 个失败` : '';
+      promptAction.showToast({ message: `成功导入 ${importCount} 个书源${failedMessage}${loginMessage}` });
       await this.loadSources();
     } catch (e) {
       console.error('解析书源失败:', e);

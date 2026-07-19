@@ -126,6 +126,12 @@ struct Index {
   }
 
   onBackPress(): boolean {
+    if (this.currentIndex !== 0) {
+      this.bookshelfMultiSelectActive = false;
+      this.currentIndex = 0;
+      this.syncHomeSystemBars();
+      return true;
+    }
     if (this.currentIndex === 0 && this.bookshelfActiveGroupId > 0) {
       this.bookshelfActiveGroupId = 0;
       return true;
@@ -547,6 +553,11 @@ struct BookshelfPage {
   @State showTagDialog: boolean = false;
   @State showCacheDialog: boolean = false;
   @State showChapterCacheDialog: boolean = false;
+  @State showNetworkCoverDialog: boolean = false;
+  @State networkCoverTargetBook: Book | null = null;
+  @State networkCoverCandidates: SearchBook[] = [];
+  @State networkCoverSearching: boolean = false;
+  @State networkCoverStatus: string = '';
   @State pendingDeleteBook: Book | null = null;
   @State pendingActionBook: Book | null = null;
   @State contextMenuX: number = 16;
@@ -565,6 +576,8 @@ struct BookshelfPage {
   @State editingTags: string[] = [];
   @State tagInput: string = '';
   @State shelfCoverMap: Map<string, string> = new Map();
+  @State shelfCoverRenderVersions: Map<string, number> = new Map();
+  private shelfCoverCacheRevision: number = 0;
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
   @StorageLink('bookshelfSortMode') sortMode: string = 'recentRead';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
@@ -624,6 +637,8 @@ struct BookshelfPage {
   private openingBookRouteTimer: number = -1;
   private openingBookOriginX: number = 0;
   private openingBookOriginY: number = 0;
+  private networkCoverCoordinator: SearchCoordinator | null = null;
+  private networkCoverSearchToken: number = 0;
 
   aboutToAppear() {
     this.reloadDisplaySettings();
@@ -634,6 +649,7 @@ struct BookshelfPage {
   aboutToDisappear(): void {
     this.releaseShelfFullTextCacheCancelSubscriber();
     this.cancelShelfBookOpening();
+    this.cancelNetworkCoverSearch();
   }
 
   onActiveShelfGroupChanged(): void {
@@ -752,6 +768,180 @@ struct BookshelfPage {
     this.pendingActionBook = null;
   }
 
+  async openNetworkCoverPicker(book: Book): Promise<void> {
+    const keyword = (book.name || '').trim();
+    if (!keyword) {
+      promptAction.showToast({ message: '书名为空，无法搜索封面' });
+      return;
+    }
+    this.cancelNetworkCoverSearch();
+    this.networkCoverTargetBook = book;
+    this.networkCoverCandidates = [];
+    this.networkCoverSearching = true;
+    this.networkCoverStatus = '正在从启用的书源中搜索...';
+    this.showNetworkCoverDialog = true;
+    const token = this.networkCoverSearchToken;
+    const coordinator = new SearchCoordinator(SearchExploreSettingsStore.getSearchConcurrency());
+    this.networkCoverCoordinator = coordinator;
+    try {
+      await AppDatabase.getInstance().initWithContext(getContext(this));
+      const results = await coordinator.search(keyword, (progress: SearchProgress) => {
+        if (token !== this.networkCoverSearchToken || this.networkCoverCoordinator !== coordinator) return;
+        const incoming = progress.finished ? progress.results : (progress.deltaResults || []);
+        if (incoming.length > 0) {
+          this.appendNetworkCoverCandidates(incoming);
+        }
+        this.networkCoverStatus = progress.finished ?
+          `搜索完成，找到 ${this.networkCoverCandidates.length} 个可选封面` :
+          `${progress.status}，可选封面 ${this.networkCoverCandidates.length} 个`;
+        if (progress.finished) this.networkCoverSearching = false;
+      }, {
+        exactMatch: true,
+        exactMatchAuthor: false
+      });
+      if (token !== this.networkCoverSearchToken || this.networkCoverCoordinator !== coordinator) return;
+      this.appendNetworkCoverCandidates(results);
+      this.networkCoverSearching = false;
+      this.networkCoverStatus = this.networkCoverCandidates.length > 0 ?
+        `搜索完成，找到 ${this.networkCoverCandidates.length} 个可选封面` : '搜索完成，未找到带封面的书籍';
+    } catch (e) {
+      if (token !== this.networkCoverSearchToken) return;
+      console.error('搜索网络封面失败:', e);
+      this.networkCoverSearching = false;
+      this.networkCoverStatus = '搜索网络封面失败，请稍后重试';
+    } finally {
+      if (token === this.networkCoverSearchToken && this.networkCoverCoordinator === coordinator) {
+        this.networkCoverCoordinator = null;
+      }
+    }
+  }
+
+  appendNetworkCoverCandidates(results: SearchBook[]): void {
+    const merged = this.networkCoverCandidates.slice();
+    const coverUrls = new Set<string>(merged.map((item: SearchBook) => item.coverUrl));
+    for (const result of results) {
+      const coverUrl = (result.coverUrl || '').trim();
+      if (!/^https?:\/\//i.test(coverUrl) || coverUrls.has(coverUrl)) continue;
+      result.coverUrl = coverUrl;
+      merged.push(result);
+      coverUrls.add(coverUrl);
+      if (merged.length >= 90) break;
+    }
+    this.networkCoverCandidates = merged;
+  }
+
+  async applyNetworkCover(candidate: SearchBook): Promise<void> {
+    const target = this.networkCoverTargetBook;
+    const coverUrl = (candidate.coverUrl || '').trim();
+    if (!target || !coverUrl) return;
+    try {
+      const db = AppDatabase.getInstance();
+      const current = await db.getBook(target.bookUrl);
+      if (!current) {
+        promptAction.showToast({ message: '书籍已不在书架中' });
+        this.closeNetworkCoverPicker();
+        return;
+      }
+      current.customCoverUrl = coverUrl;
+      await db.updateBook(current);
+      this.applyShelfBookCoverState(current);
+      this.closeNetworkCoverPicker();
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      promptAction.showToast({ message: '网络封面已启用' });
+    } catch (e) {
+      console.error('应用网络封面失败:', e);
+      promptAction.showToast({ message: '应用网络封面失败' });
+    }
+  }
+
+  async restoreDefaultBookCover(book: Book): Promise<void> {
+    if (!book.customCoverUrl) return;
+    try {
+      const db = AppDatabase.getInstance();
+      const current = await db.getBook(book.bookUrl);
+      if (!current) {
+        promptAction.showToast({ message: '书籍已不在书架中' });
+        return;
+      }
+      current.customCoverUrl = '';
+      await db.updateBook(current);
+      this.applyShelfBookCoverState(current);
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      promptAction.showToast({ message: '已恢复默认封面' });
+    } catch (e) {
+      console.error('恢复默认封面失败:', e);
+      promptAction.showToast({ message: '恢复默认封面失败' });
+    }
+  }
+
+  applyShelfBookCoverState(current: Book): void {
+    this.allBooks = this.allBooks.map((book: Book) => book.bookUrl === current.bookUrl ? current : book);
+    this.applyShelfScope();
+    this.bumpShelfBookCoverRenderVersion(current.bookUrl);
+    this.shelfCoverMap = new Map();
+    this.refreshShelfCoverCache(this.books);
+  }
+
+  bumpShelfBookCoverRenderVersion(bookUrl: string): void {
+    const versions = new Map<string, number>(this.shelfCoverRenderVersions);
+    versions.set(bookUrl, (versions.get(bookUrl) || 0) + 1);
+    this.shelfCoverRenderVersions = versions;
+  }
+
+  shelfBookRenderKey(book: Book, prefix: string): string {
+    return `${prefix}_${book.bookUrl}_cover_${this.shelfCoverRenderVersions.get(book.bookUrl) || 0}`;
+  }
+
+  closeNetworkCoverPicker(): void {
+    this.cancelNetworkCoverSearch();
+    this.showNetworkCoverDialog = false;
+    this.networkCoverTargetBook = null;
+    this.networkCoverCandidates = [];
+    this.networkCoverStatus = '';
+    this.networkCoverSearching = false;
+  }
+
+  cancelNetworkCoverSearch(): void {
+    this.networkCoverSearchToken++;
+    this.networkCoverCoordinator?.cancel();
+    this.networkCoverCoordinator = null;
+    this.networkCoverSearching = false;
+  }
+
+  networkCoverColumnCount(): number {
+    const horizontalPadding = 32;
+    const targetCardWidth = 108;
+    const preferredColumnGap = 8;
+    const contentWidth = Math.max(1, this.contextViewportWidth - horizontalPadding);
+    const fittedCount = Math.round(
+      (contentWidth + preferredColumnGap) / (targetCardWidth + preferredColumnGap)
+    );
+    return Math.max(3, Math.min(24, fittedCount));
+  }
+
+  networkCoverColumnsTemplate(): string {
+    const columnCount = this.networkCoverColumnCount();
+    let template = '1fr';
+    for (let index = 1; index < columnCount; index++) {
+      template += ' 1fr';
+    }
+    return template;
+  }
+
+  networkCoverColumnGap(): number {
+    const horizontalPadding = 32;
+    const targetCardWidth = 108;
+    const columnCount = this.networkCoverColumnCount();
+    const contentWidth = Math.max(1, this.contextViewportWidth - horizontalPadding);
+    const fittedGap = columnCount > 1 ?
+      (contentWidth - targetCardWidth * columnCount) / (columnCount - 1) : 8;
+    return Math.max(8, Math.min(12, fittedGap));
+  }
+
+  networkCoverRowGap(): number {
+    return this.networkCoverColumnGap() + 2;
+  }
+
   captureContextMenuAnchor(event?: GestureEvent): void {
     const finger = event && event.fingerList.length > 0 ? event.fingerList[0] : undefined;
     if (finger) {
@@ -789,6 +979,11 @@ struct BookshelfPage {
     return Math.max(topLimit, Math.min(this.contextMenuY - menuHeight - 12, maxTop));
   }
 
+  bookActionMenuHeight(book: Book): number {
+    const baseHeight = LocalBookService.isLocalBook(book) ? 232 : 276;
+    return baseHeight + (book.customCoverUrl ? 44 : 0);
+  }
+
   contextMenuBottomInset(): number {
     if (deviceInfo.sdkApiVersion < 23) {
       return 12;
@@ -816,6 +1011,7 @@ struct BookshelfPage {
   }
 
   async refreshShelfCoverCache(books: Book[]): Promise<void> {
+    const revision = ++this.shelfCoverCacheRevision;
     const context = getContext(this);
     const nextMap: Map<string, string> = new Map(this.shelfCoverMap);
     const pending: Array<[string, string]> = [];
@@ -847,10 +1043,11 @@ struct BookshelfPage {
         pending.push([key, raw]);
       }
     }
-    if (hasCachedChange) {
+    if (hasCachedChange && revision === this.shelfCoverCacheRevision) {
       this.shelfCoverMap = new Map(nextMap);
     }
     for (const item of pending) {
+      if (revision !== this.shelfCoverCacheRevision) return;
       const key = item[0];
       const raw = item[1];
       if (nextMap.get(key)) {
@@ -858,7 +1055,8 @@ struct BookshelfPage {
       }
         try {
           const cached = await BookCoverCache.resolveCover(context, raw);
-          if (cached && cached !== raw && nextMap.get(key) !== cached) {
+          if (cached && cached !== raw && nextMap.get(key) !== cached &&
+            revision === this.shelfCoverCacheRevision) {
             nextMap.set(key, cached);
             this.shelfCoverMap = new Map(nextMap);
           }
@@ -876,6 +1074,10 @@ struct BookshelfPage {
             ImmersiveBackButton({
               iconColor: this.primaryTextColor(),
               darkMode: this.appDarkMode,
+              buttonSize: 40,
+              containerWidth: 56,
+              materialScale: 0.83,
+              compactLayout: true,
               onBack: () => this.exitTileGroupPage()
             })
             Text(this.activeShelfGroupName())
@@ -1021,7 +1223,7 @@ struct BookshelfPage {
                   .width('100%')
                   .alignItems(VerticalAlign.Center)
                 }
-              })
+              }, (book: Book) => this.shelfBookRenderKey(book, 'list'))
 
               ListItem() {
                 Column()
@@ -1081,6 +1283,24 @@ struct BookshelfPage {
                 }
               })
             }
+            this.contextActionItem($r('sys.symbol.picture_badge_arrow_down'), '获取网络封面', this.primaryTextColor(), () => {
+              if (this.pendingActionBook) {
+                const book = this.pendingActionBook;
+                this.showActionDialog = false;
+                this.pendingActionBook = null;
+                this.openNetworkCoverPicker(book);
+              }
+            })
+            if (this.pendingActionBook.customCoverUrl) {
+              this.contextActionItem($r('sys.symbol.minus_circle'), '恢复默认封面',
+                this.primaryTextColor(), () => {
+                  if (this.pendingActionBook) {
+                    const book = this.pendingActionBook;
+                    this.closeBookActions();
+                    this.restoreDefaultBookCover(book);
+                  }
+                })
+            }
             this.contextActionItem($r('sys.symbol.folder'), '移动分组', this.primaryTextColor(), () => {
               if (this.pendingActionBook) {
                 const bookUrl = this.pendingActionBook.bookUrl;
@@ -1122,11 +1342,150 @@ struct BookshelfPage {
           .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
           .position({
             x: this.contextMenuLeft(158),
-            y: this.contextMenuTop(LocalBookService.isLocalBook(this.pendingActionBook) ? 188 : 232)
+            y: this.contextMenuTop(this.bookActionMenuHeight(this.pendingActionBook))
           })
         }
         .width('100%')
         .height('100%')
+      }
+
+      if (this.showNetworkCoverDialog && this.networkCoverTargetBook) {
+        Column() {
+          Blank()
+            .layoutWeight(1)
+            .onClick(() => this.closeNetworkCoverPicker())
+
+          Column() {
+            Row() {
+              Column() {
+                Text('获取网络封面')
+                  .fontSize(18)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(this.primaryTextColor())
+                Text(`《${this.networkCoverTargetBook.name}》`)
+                  .fontSize(13)
+                  .fontColor(this.secondaryTextColor())
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .margin({ top: 3 })
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+
+              Button('取消')
+                .height(36)
+                .backgroundColor(this.inputColor())
+                .fontColor(this.primaryTextColor())
+                .onClick(() => this.closeNetworkCoverPicker())
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+
+            Row({ space: 8 }) {
+              if (this.networkCoverSearching) {
+                LoadingProgress()
+                  .width(18)
+                  .height(18)
+              }
+              Text(this.networkCoverStatus || '正在准备搜索...')
+                .fontSize(12)
+                .fontColor(this.subTextColor())
+                .maxLines(2)
+                .layoutWeight(1)
+            }
+            .width('100%')
+            .margin({ top: 12, bottom: 10 })
+
+            if (this.networkCoverCandidates.length === 0 && !this.networkCoverSearching) {
+              Column({ space: 10 }) {
+                SymbolGlyph($r('sys.symbol.square_grid_2x2'))
+                  .fontSize(42)
+                  .fontColor([this.subTextColor()])
+                Text('未找到可用的网络封面')
+                  .fontSize(14)
+                  .fontColor(this.secondaryTextColor())
+              }
+              .width('100%')
+              .height(220)
+              .justifyContent(FlexAlign.Center)
+            } else {
+              Grid() {
+                ForEach(this.networkCoverCandidates, (candidate: SearchBook) => {
+                  GridItem() {
+                    Column() {
+                      Stack() {
+                        Column() {
+                          Text((candidate.name || '书').substring(0, 1))
+                            .fontSize(28)
+                            .fontColor('#FFFFFF')
+                        }
+                        .width('100%')
+                        .aspectRatio(0.72)
+                        .justifyContent(FlexAlign.Center)
+                        .backgroundColor(this.accentColor())
+
+                        Image(candidate.coverUrl)
+                          .width('100%')
+                          .height('100%')
+                          .objectFit(ImageFit.Cover)
+                      }
+                      .width('100%')
+                      .aspectRatio(0.72)
+                      .borderRadius(7)
+                      .clip(true)
+                      .backgroundColor(this.inputColor())
+
+                      Text(candidate.name || '未知书名')
+                        .fontSize(12)
+                        .fontColor(this.primaryTextColor())
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .width('100%')
+                        .margin({ top: 6 })
+                      Text(candidate.originName || candidate.author || '启用书源')
+                        .fontSize(10)
+                        .fontColor(this.subTextColor())
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .width('100%')
+                        .margin({ top: 2 })
+                    }
+                    .width('100%')
+                    .padding(5)
+                    .borderRadius(9)
+                    .backgroundColor(this.glassCardColor())
+                    .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
+                    .onClick(() => this.applyNetworkCover(candidate))
+                  }
+                }, (candidate: SearchBook) => candidate.coverUrl)
+                GridItem() {
+                  Column()
+                    .height(68)
+                }
+                .columnStart(0)
+                .columnEnd(this.networkCoverColumnCount() - 1)
+              }
+              .columnsTemplate(this.networkCoverColumnsTemplate())
+              .columnsGap(this.networkCoverColumnGap())
+              .rowsGap(this.networkCoverRowGap())
+              .layoutWeight(1)
+              .width('100%')
+            }
+          }
+          .width('100%')
+          .height('72%')
+          .padding({ left: 16, right: 16, top: 18, bottom: Math.max(this.navBarHeight, 12) + 12 })
+          .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+          .borderRadius({
+            topLeft: ThemeRuntime.glassCornerRadius(22, 'panel'),
+            topRight: ThemeRuntime.glassCornerRadius(22, 'panel')
+          })
+          .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+          .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#66000000')
       }
 
       if (this.showCacheDialog && this.cacheTargetBook) {
@@ -1187,8 +1546,14 @@ struct BookshelfPage {
           }
           .width('100%')
           .padding({ left: 18, right: 18, top: 18, bottom: 18 })
-          .backgroundColor(this.cardColor())
-          .borderRadius({ topLeft: 18, topRight: 18 })
+          .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+          .borderRadius({
+            topLeft: ThemeRuntime.glassCornerRadius(18, 'panel'),
+            topRight: ThemeRuntime.glassCornerRadius(18, 'panel')
+          })
+          .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+          .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
           .margin({ bottom: this.actionSheetBottomMargin() })
         }
         .width('100%')
@@ -1268,8 +1633,14 @@ struct BookshelfPage {
           }
           .width('100%')
           .padding({ left: 18, right: 18, top: 18, bottom: 18 })
-          .backgroundColor(this.cardColor())
-          .borderRadius({ topLeft: 18, topRight: 18 })
+          .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+          .borderRadius({
+            topLeft: ThemeRuntime.glassCornerRadius(18, 'panel'),
+            topRight: ThemeRuntime.glassCornerRadius(18, 'panel')
+          })
+          .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+          .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
           .margin({ bottom: this.actionSheetBottomMargin() })
         }
         .width('100%')
@@ -1370,7 +1741,7 @@ struct BookshelfPage {
           .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
           .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
           .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-          .borderRadius(16)
+          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
         }
         .width('100%')
         .height('100%')
@@ -1425,8 +1796,11 @@ struct BookshelfPage {
           }
           .width('85%')
           .padding(24)
-          .backgroundColor(this.cardColor())
-          .borderRadius(12)
+          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
         }
         .width('100%')
         .height('100%')
@@ -1629,8 +2003,8 @@ struct BookshelfPage {
       .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
       .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
       .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .borderRadius(14)
-      .shadow({ radius: 18, color: this.appDarkMode ? '#66000000' : '#26000000', offsetY: 6 })
+      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .margin({ right: 16, bottom: this.bookGroupPickerBottomMargin() })
     }
     .width('100%')
@@ -1669,7 +2043,12 @@ struct BookshelfPage {
             .onClick(() => this.addShelfBookGroup())
         }.width('100%')
       }
-      .width('85%').padding(22).borderRadius(14).backgroundColor(this.cardColor())
+      .width('85%').padding(22)
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     }
     .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
     .backgroundColor('#80000000')
@@ -1697,7 +2076,7 @@ struct BookshelfPage {
       }
       .width(148).padding({ top: 6, bottom: 6 })
       .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(14).backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel')).backdropBlur(ThemeRuntime.glassBlur('panel', 22))
       .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
       .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
       .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(100) })
@@ -1722,7 +2101,12 @@ struct BookshelfPage {
             .onClick(() => this.renameShelfBookGroup())
         }.width('100%')
       }
-      .width('85%').padding(22).borderRadius(14).backgroundColor(this.cardColor())
+      .width('85%').padding(22)
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     }
     .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
     .backgroundColor('#80000000')
@@ -1743,7 +2127,12 @@ struct BookshelfPage {
             .backgroundColor('#E53935').fontColor('#FFFFFF').onClick(() => this.deleteShelfBookGroup())
         }.width('100%')
       }
-      .width('85%').padding(22).borderRadius(14).backgroundColor(this.cardColor())
+      .width('85%').padding(22)
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     }
     .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
     .backgroundColor('#80000000')
@@ -1764,7 +2153,12 @@ struct BookshelfPage {
             .backgroundColor('#E53935').fontColor('#FFFFFF').onClick(() => this.deleteSelectedBooks())
         }.width('100%')
       }
-      .width('85%').padding(22).borderRadius(14).backgroundColor(this.cardColor())
+      .width('85%').padding(22)
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     }
     .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
     .backgroundColor('#80000000')
@@ -2102,18 +2496,45 @@ struct BookshelfPage {
   }
 
   shelfTileColumnCount(): number {
-    if (this.shelfTileViewportWidth >= 640) return 4;
-    return 3;
+    const horizontalPadding = 40;
+    const targetCoverWidth = 104;
+    const preferredColumnGap = 20;
+    const contentWidth = Math.max(1, this.shelfTileViewportWidth - horizontalPadding);
+    // 以当前手机端约 104vp 的封面宽度为视觉基准，展开屏增加列数而不是放大封面。
+    const fittedCount = Math.round(
+      (contentWidth + preferredColumnGap) / (targetCoverWidth + preferredColumnGap)
+    );
+    return Math.max(3, Math.min(24, fittedCount));
   }
 
   shelfTileColumnsTemplate(): string {
-    return this.shelfTileColumnCount() === 4 ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr';
+    const columnCount = this.shelfTileColumnCount();
+    let template = '1fr';
+    for (let index = 1; index < columnCount; index++) {
+      template += ' 1fr';
+    }
+    return template;
+  }
+
+  shelfTileColumnGap(): number {
+    const horizontalPadding = 40;
+    const targetCoverWidth = 104;
+    const columnCount = this.shelfTileColumnCount();
+    const contentWidth = Math.max(1, this.shelfTileViewportWidth - horizontalPadding);
+    const fittedGap = columnCount > 1 ?
+      (contentWidth - targetCoverWidth * columnCount) / (columnCount - 1) : 20;
+    // 只在原 20vp 附近微调间距，避免宽屏上书籍过散或挤在一起。
+    return Math.max(16, Math.min(24, fittedGap));
+  }
+
+  shelfTileRowGap(): number {
+    return Math.max(24, Math.min(30, this.shelfTileColumnGap() + 8));
   }
 
   shelfTileExpandedCoverAspectRatio(): number {
     const columnCount = this.shelfTileColumnCount();
     const horizontalPadding = 40;
-    const columnGap = 20;
+    const columnGap = this.shelfTileColumnGap();
     const contentWidth = Math.max(1, this.shelfTileViewportWidth - horizontalPadding);
     const columnWidth = Math.max(1, (contentWidth - columnGap * (columnCount - 1)) / columnCount);
     const expandedWidth = columnWidth * 2 + columnGap;
@@ -2131,7 +2552,7 @@ struct BookshelfPage {
         }
         .columnStart(0)
         .columnEnd(1)
-        }, (book: Book) => `${this.shelfScope}_${book.bookUrl}`)
+        }, (book: Book) => this.shelfBookRenderKey(book, `expanded_${this.shelfScope}`))
       }
 
       if (this.shouldUseTileGroupFolders()) {
@@ -2143,13 +2564,14 @@ struct BookshelfPage {
               this.shelfTileBook(entry.book)
             }
           }
-        }, (entry: ShelfTileSortEntry) => entry.key)
+        }, (entry: ShelfTileSortEntry) => entry.book ?
+          this.shelfBookRenderKey(entry.book, entry.key) : entry.key)
       } else {
         ForEach(this.getTileBooksWithoutLatest(this.books), (book: Book) => {
           GridItem() {
             this.shelfTileBook(book)
           }
-        }, (book: Book) => book.bookUrl)
+        }, (book: Book) => this.shelfBookRenderKey(book, 'tile'))
       }
 
       GridItem() {
@@ -2162,8 +2584,8 @@ struct BookshelfPage {
     .width('100%')
     .height('100%')
     .columnsTemplate(this.shelfTileColumnsTemplate())
-    .columnsGap(20)
-    .rowsGap(28)
+    .columnsGap(this.shelfTileColumnGap())
+    .rowsGap(this.shelfTileRowGap())
     .padding({ left: 20, right: 20, top: 10 })
     .backgroundColor(this.pageColor())
     .scrollBar(BarState.Off)
@@ -2186,7 +2608,7 @@ struct BookshelfPage {
       Stack({ alignContent: Alignment.TopStart }) {
         Row({ space: 2 }) {
           Stack() {
-            this.coverView(book, '100%', '100%')
+            this.coverView(book, '100%', '100%', ImageFit.Fill)
           }
           .layoutWeight(1)
           .height('100%')
@@ -2318,9 +2740,9 @@ struct BookshelfPage {
       Grid() {
         ForEach(this.getTileGroupPreviewBooks(group.groupId), (book: Book) => {
           GridItem() {
-            this.coverView(book, '100%', '100%')
+            this.coverView(book, '100%', '100%', ImageFit.Cover)
           }
-        }, (book: Book) => `${group.groupId}_${book.bookUrl}`)
+        }, (book: Book) => this.shelfBookRenderKey(book, `group_${group.groupId}`))
       }
       .width('100%')
       .aspectRatio(0.735)
@@ -2378,7 +2800,7 @@ struct BookshelfPage {
   shelfTileBook(book: Book) {
     Column({ space: 4 }) {
       Stack({ alignContent: Alignment.TopStart }) {
-        this.coverView(book, '100%', '100%')
+        this.coverView(book, '100%', '100%', ImageFit.Cover)
 
         if (this.isBookMultiSelect) {
           Stack({ alignContent: Alignment.Center }) {
@@ -2637,7 +3059,7 @@ struct BookshelfPage {
         .shadow({ radius: 24, color: this.appDarkMode ? '#90000000' : '#38000000', offsetX: 8, offsetY: 10 })
 
         Stack({ alignContent: Alignment.Center }) {
-          this.coverView(book, '100%', '100%')
+          this.coverView(book, '100%', '100%', ImageFit.Cover)
 
           Column()
             .width(8)
@@ -2679,7 +3101,7 @@ struct BookshelfPage {
   compactBookContent(book: Book) {
     Column({ space: 8 }) {
       Row() {
-        this.coverView(book, 56, 72)
+        this.coverView(book, 56, 72, ImageFit.Cover)
 
         Column({ space: 4 }) {
           Row() {
@@ -2738,7 +3160,7 @@ struct BookshelfPage {
   looseBookContent(book: Book) {
     Column({ space: 8 }) {
       Row() {
-        this.coverView(book, 56, 72)
+        this.coverView(book, 56, 72, ImageFit.Cover)
 
         Column({ space: 4 }) {
           Text(book.name)
@@ -2830,7 +3252,7 @@ struct BookshelfPage {
   }
 
   @Builder
-  coverView(book: Book, width: Length, height: Length) {
+  coverView(book: Book, width: Length, height: Length, imageFit: ImageFit) {
     Stack() {
       if (this.getShelfCoverList(book).length === 0) {
         Column() {
@@ -2846,14 +3268,14 @@ struct BookshelfPage {
         Image(this.getShelfCover(book))
           .width(width)
           .height(height)
-          .objectFit(ImageFit.Cover)
+          .objectFit(imageFit)
       } else {
         Swiper() {
           ForEach(this.getShelfCoverList(book), (cover: string) => {
             Image(cover)
               .width(width)
               .height(height)
-              .objectFit(ImageFit.Cover)
+              .objectFit(imageFit)
           }, (cover: string) => cover)
         }
         .width(width)
@@ -4550,6 +4972,7 @@ struct ExplorePage {
   @State showExploreSourcePicker: boolean = false;
   @State exploreSourceFilterInput: string = '';
   @State exploreSourceFilterKeyword: string = '';
+  @State exploreViewportWidth: number = 360;
   @State books: SearchBook[] = [];
   @State shelfBookKeys: string[] = [];
   @State addingShelfBookKeys: string[] = [];
@@ -4768,7 +5191,7 @@ struct ExplorePage {
           containerWidth: 40,
           containerHeight: 40,
           startInset: 0,
-          materialScale: 1,
+          materialScale: 0.83,
           accessibilityLabel: '刷新发现内容',
           onBack: () => {
             this.loadEntries();
@@ -4947,6 +5370,12 @@ struct ExplorePage {
     .width('100%')
     .height('100%')
     .backgroundColor(this.pageColor())
+    .onAreaChange((_oldValue: Area, newValue: Area) => {
+      const width = typeof newValue.width === 'number' ? newValue.width : Number.parseFloat(`${newValue.width}`);
+      if (Number.isFinite(width) && width > 0) {
+        this.exploreViewportWidth = width;
+      }
+    })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -5022,7 +5451,7 @@ struct ExplorePage {
       .constraintSize({ maxHeight: 320 })
       .scrollBar(BarState.Auto)
     }
-    .width('calc(100% - 32vp)')
+    .width(this.exploreSourceDropdownWidth())
     .padding(8)
     .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
     .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
@@ -5031,6 +5460,37 @@ struct ExplorePage {
     .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     .position({ x: 16, y: this.statusBarHeight + 52 })
     .zIndex(10)
+  }
+
+  exploreSourceDropdownWidth(): number {
+    const maxWidth = Math.max(160, Math.min(320, this.exploreViewportWidth - 32));
+    const options = this.getFilteredExploreSourceOptions();
+    let textWidth = this.measureExploreSourceNameWidth(options.length === 0 ? '没有匹配的书源' : '');
+    for (const option of options) {
+      textWidth = Math.max(textWidth, this.measureExploreSourceNameWidth(option.sourceName || '未命名书源'));
+    }
+    // 面板内外边距、选中标记和标记间距合计预留约 72vp。
+    return Math.min(maxWidth, Math.max(184, textWidth + 72));
+  }
+
+  measureExploreSourceNameWidth(name: string): number {
+    if (!name) {
+      return 0;
+    }
+    try {
+      const size = this.getUIContext().getMeasureUtils().measureTextSize({
+        textContent: name,
+        fontSize: 16,
+        fontFamily: this.readerActiveFontFamily
+      });
+      const width = px2vp(Number(size.width));
+      if (Number.isFinite(width) && width > 0) {
+        return width;
+      }
+    } catch (e) {
+      console.warn('测量发现书源名称宽度失败:', e);
+    }
+    return name.length * 16;
   }
 
   async addSearchBookToShelf(searchBook: SearchBook): Promise<void> {
@@ -5489,6 +5949,7 @@ struct SearchPage {
             TextInput({ placeholder: '搜索书籍', text: this.keyword })
               .layoutWeight(1)
               .height(40)
+              .enterKeyType(EnterKeyType.Search)
               .backgroundColor('#00000000')
               .fontColor(this.primaryTextColor())
               .placeholderColor(this.subTextColor())
@@ -5502,6 +5963,9 @@ struct SearchPage {
               .onChange((value: string) => {
                 this.keyword = value;
                 this.showSearchHistoryDropdown = value.trim().length === 0 && this.searchHistory.length > 0;
+              })
+              .onSubmit(() => {
+                this.submitKeywordSearch();
               })
 
             this.searchSettingIcon()
@@ -5522,7 +5986,7 @@ struct SearchPage {
             containerWidth: 40,
             containerHeight: 40,
             startInset: 0,
-            materialScale: 1,
+            materialScale: 0.83,
             accessibilityLabel: this.isSearching ? '停止搜索' : '搜索',
             onBack: () => {
               if (this.isSearching) {
@@ -5684,12 +6148,17 @@ struct SearchPage {
     })
   }
 
-  searchSettingsPanelWidth(): number {
-    return Math.min(300, Math.max(280, this.searchViewportWidth - 112));
+  searchHistoryPopupPanelWidth(): number {
+    return Math.min(252, Math.max(160, this.searchViewportWidth - 32));
   }
 
-  searchSettingsPanelLeft(): number {
-    return Math.max(16, this.searchViewportWidth - this.searchSettingsPanelWidth() - 88);
+  searchSettingsPopupPanelWidth(): number {
+    return Math.min(272, Math.max(200, this.searchViewportWidth - 32));
+  }
+
+  searchSettingsPopupPanelLeft(): number {
+    const panelWidth = this.searchSettingsPopupPanelWidth();
+    return Math.max(16, this.searchViewportWidth - panelWidth - 40);
   }
 
   @Builder
@@ -5789,13 +6258,16 @@ struct SearchPage {
       .width('100%')
       .constraintSize({ maxHeight: 280 })
     }
-    .width('calc(100% - 112vp)')
+    .width(this.searchHistoryPopupPanelWidth())
     .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
     .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
     .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-    .borderRadius(12)
+    .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
     .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    .position({ x: 16, y: this.statusBarHeight + (this.singleSourceSearchUrl ? 92 : 52) })
+    .position({
+      x: 16,
+      y: this.statusBarHeight + (this.singleSourceSearchUrl ? 92 : 52)
+    })
     .zIndex(10)
   }
 
@@ -5903,6 +6375,12 @@ struct SearchPage {
 
   searchFromHistory(keyword: string): void {
     this.keyword = keyword;
+    this.hideKeyboard();
+    this.doSearch();
+  }
+
+  submitKeywordSearch(): void {
+    this.showSearchHistoryDropdown = false;
     this.hideKeyboard();
     this.doSearch();
   }
@@ -6419,7 +6897,7 @@ struct SearchPage {
             this.showSearchSettingsDialog = false;
           })
       }
-      .width(this.searchSettingsPanelWidth())
+      .width(this.searchSettingsPopupPanelWidth())
       .constraintSize({ maxHeight: 620 })
       .padding(18)
       .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
@@ -6428,7 +6906,7 @@ struct SearchPage {
       .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
       .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
       .position({
-        x: this.searchSettingsPanelLeft(),
+        x: this.searchSettingsPopupPanelLeft(),
         y: this.statusBarHeight + (this.singleSourceSearchUrl ? 92 : 52)
       })
       .onClick(() => {

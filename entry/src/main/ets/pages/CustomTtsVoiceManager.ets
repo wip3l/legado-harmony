@@ -9,6 +9,7 @@ import { SystemTtsReader } from '../utils/SystemTtsReader';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
 
 const CUSTOM_TTS_IMPORT_FILE_LIMIT_BYTES: number = 2 * 1024 * 1024;
 
@@ -124,6 +125,8 @@ struct CustomTtsVoiceManagerPage {
           .width('100%')
           .layoutWeight(1)
           .padding({ left: 16, right: 16 })
+          .lanes(ResponsiveManagerListLayout.laneCount(this.contextViewportWidth),
+            ResponsiveManagerListLayout.gutter(this.contextViewportWidth))
         }
 
         if (this.selectionMode) {
@@ -628,6 +631,7 @@ struct CustomTtsVoiceManagerPage {
   titleBar() {
     Row() {
       ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        buttonSize: 40, containerWidth: 56, materialScale: 0.83, compactLayout: true,
         onBack: () => router.back() })
 
       Text('自定义音色管理')
@@ -1003,8 +1007,11 @@ struct CustomTtsVoiceManagerPage {
       }
       .width('86%')
       .padding(20)
-      .backgroundColor(this.cardColor())
-      .borderRadius(12)
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     }
     .width('100%')
     .height('100%')
@@ -1098,8 +1105,11 @@ struct CustomTtsVoiceManagerPage {
       }
       .width('90%')
       .padding(20)
-      .backgroundColor(this.cardColor())
-      .borderRadius(12)
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     }
     .width('100%')
     .height('100%')

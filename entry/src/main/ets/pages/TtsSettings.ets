@@ -121,6 +121,7 @@ struct TtsSettingsPage {
               .width('100%')
               .margin({ top: 10 })
               .selectedColor(this.accentColor())
+              .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
               .onChange((value: number) => {
                 this.applySpeed(value);
               })
@@ -961,6 +962,7 @@ struct TtsSettingsPage {
   titleBar() {
     Row() {
       ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        buttonSize: 40, containerWidth: 56, materialScale: 0.83, compactLayout: true,
         onBack: () => router.back() })
 
       Text('朗读设置')

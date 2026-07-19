@@ -42,33 +42,20 @@ struct GlassSettingsPage {
             this.sectionTitle('效果预设')
             this.presets()
             this.sectionTitle('模糊强度')
-            this.sliderCard('全局模糊强度', this.settings.blur, 0, 40, 1,
-              (value: number) => { this.settings.blur = value; this.changed(); })
+            this.sliderCard('全局模糊强度', 'blur', 0, 40, 1)
             this.sectionTitle('颜色与边框')
-            this.sliderCard('透明度', this.settings.tintOpacity, 0, 100, 1,
-              (value: number) => { this.settings.tintOpacity = value; this.changed(); })
-            this.sliderCard('边框透明度', this.settings.borderOpacity, 0, 100, 1,
-              (value: number) => { this.settings.borderOpacity = value; this.changed(); })
-            this.sliderCard('边框宽度', this.settings.borderWidth, 0, 2, 0.5,
-              (value: number) => { this.settings.borderWidth = value; this.changed(); })
-            this.sliderCard('组件圆角', this.settings.cornerRadius, 0, 32, 1,
-              (value: number) => { this.settings.cornerRadius = value; this.changed(); })
+            this.sliderCard('透明度', 'tintOpacity', 0, 100, 1)
+            this.sliderCard('边框透明度', 'borderOpacity', 0, 100, 1)
+            this.sliderCard('边框宽度', 'borderWidth', 0, 2, 0.5)
+            this.sliderCard('组件圆角', 'cornerRadius', 0, 32, 1)
             this.sectionTitle('阴影')
             this.shadowSwitch()
             if (this.settings.shadowEnabled) {
-              this.sliderCard('阴影模糊', this.settings.shadowRadius, 0, 30, 1,
-                (value: number) => { this.settings.shadowRadius = value; this.changed(); })
+              this.sliderCard('阴影模糊', 'shadowRadius', 0, 30, 1)
               this.sliderCard(this.appDarkMode ? '深色阴影' : '浅色阴影',
-                this.appDarkMode ? this.settings.darkShadowOpacity : this.settings.lightShadowOpacity, 0, 100, 1,
-                (value: number) => {
-                  if (this.appDarkMode) this.settings.darkShadowOpacity = value;
-                  else this.settings.lightShadowOpacity = value;
-                  this.changed();
-                })
-              this.sliderCard('水平偏移', this.settings.shadowOffsetX, -12, 12, 1,
-                (value: number) => { this.settings.shadowOffsetX = value; this.changed(); })
-              this.sliderCard('垂直偏移', this.settings.shadowOffsetY, -12, 12, 1,
-                (value: number) => { this.settings.shadowOffsetY = value; this.changed(); })
+                this.appDarkMode ? 'darkShadowOpacity' : 'lightShadowOpacity', 0, 100, 1)
+              this.sliderCard('水平偏移', 'shadowOffsetX', -12, 12, 1)
+              this.sliderCard('垂直偏移', 'shadowOffsetY', -12, 12, 1)
             }
             this.performanceCard()
           }
@@ -125,6 +112,44 @@ struct GlassSettingsPage {
     }
     this.selectedPresetId = id;
     this.scheduleSave();
+  }
+
+  sliderValue(key: string): number {
+    switch (key) {
+      case 'blur': return this.settings.blur;
+      case 'tintOpacity': return this.settings.tintOpacity;
+      case 'borderOpacity': return this.settings.borderOpacity;
+      case 'borderWidth': return this.settings.borderWidth;
+      case 'cornerRadius': return this.settings.cornerRadius;
+      case 'shadowRadius': return this.settings.shadowRadius;
+      case 'darkShadowOpacity': return this.settings.darkShadowOpacity;
+      case 'lightShadowOpacity': return this.settings.lightShadowOpacity;
+      case 'shadowOffsetX': return this.settings.shadowOffsetX;
+      case 'shadowOffsetY': return this.settings.shadowOffsetY;
+      default: return 0;
+    }
+  }
+
+  updateSliderValue(key: string, value: number): void {
+    switch (key) {
+      case 'blur': this.settings.blur = value; break;
+      case 'tintOpacity': this.settings.tintOpacity = value; break;
+      case 'borderOpacity': this.settings.borderOpacity = value; break;
+      case 'borderWidth': this.settings.borderWidth = value; break;
+      case 'cornerRadius': this.settings.cornerRadius = value; break;
+      case 'shadowRadius': this.settings.shadowRadius = value; break;
+      case 'darkShadowOpacity': this.settings.darkShadowOpacity = value; break;
+      case 'lightShadowOpacity': this.settings.lightShadowOpacity = value; break;
+      case 'shadowOffsetX': this.settings.shadowOffsetX = value; break;
+      case 'shadowOffsetY': this.settings.shadowOffsetY = value; break;
+      default: return;
+    }
+    this.changed();
+  }
+
+  sliderDisplayValue(key: string): string {
+    const value = Math.round(this.sliderValue(key) * 10) / 10;
+    return `${value}`;
   }
 
   setGlassEnabled(enabled: boolean): void {
@@ -196,6 +221,7 @@ struct GlassSettingsPage {
   titleBar() {
     Row() {
       ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        buttonSize: 40, containerWidth: 56, materialScale: 0.83, compactLayout: true,
         onBack: () => router.back() })
       Text('磨砂玻璃')
         .fontSize(20)
@@ -465,17 +491,17 @@ struct GlassSettingsPage {
   }
 
   @Builder
-  sliderCard(title: string, value: number, min: number, max: number, step: number,
-    onChange: (value: number) => void) {
+  sliderCard(title: string, key: string, min: number, max: number, step: number) {
     Column({ space: 4 }) {
       Row() {
         Text(title).fontSize(15).fontColor(this.primaryTextColor()).layoutWeight(1)
-        Text(`${Math.round(value * 10) / 10}`).fontSize(13).fontColor(this.accentColor())
+        Text(this.sliderDisplayValue(key)).fontSize(13).fontColor(this.accentColor())
       }.width('100%')
-      Slider({ value: value, min: min, max: max, step: step, style: SliderStyle.OutSet })
+      Slider({ value: this.sliderValue(key), min: min, max: max, step: step, style: SliderStyle.OutSet })
         .selectedColor(this.accentColor())
         .trackColor(ThemeRuntime.inputColor(this.appDarkMode))
-        .onChange((next: number) => onChange(next))
+        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+        .onChange((next: number) => this.updateSliderValue(key, next))
     }
     .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 8 })
     .borderRadius(ThemeRuntime.cardRadius()).backgroundColor(this.cardColor())

@@ -298,6 +298,7 @@ struct SearchExploreSettingsPage {
   titleBar() {
     Row() {
       ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        buttonSize: 40, containerWidth: 56, materialScale: 0.83, compactLayout: true,
         onBack: () => router.back() })
       Text('搜索/发现配置')
         .fontSize(20)

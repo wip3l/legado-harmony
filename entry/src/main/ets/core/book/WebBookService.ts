@@ -11,6 +11,7 @@ import { BookSourceDataUrlSupport } from './BookSourceDataUrlSupport';
 import { BookUrlResolver } from './BookUrlResolver';
 import { BookFieldSanitizer } from '../../utils/BookFieldSanitizer';
 import { AjaxRuleCompat } from '../rule/AjaxRuleCompat';
+import { ReaderImageMarker } from './ReaderImageMarker';
 
 export class WebBookService {
   private http: HttpClient;
@@ -265,14 +266,8 @@ export class WebBookService {
     console.log('[WS] getContent, url:', chapter.url);
     const specialContent = await this.tryGetSpecialContent(source, chapter);
     if (specialContent) {
-      return this.applyReplaceRegex(specialContent, source.contentRule.replaceRegex)
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<\/p>/gi, '\n\n')
-        .replace(/<[^>]+>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
+      return this.normalizeReaderContent(
+        this.applyReplaceRegex(specialContent, source.contentRule.replaceRegex), chapter.url);
     }
     const au = new AnalyzeUrl(source, this.http);
     let resp = EncodedSourceUrl.canHandle(chapter.url) ?
@@ -297,6 +292,10 @@ export class WebBookService {
 
     const rule = new AnalyzeRule(resp.body, baseUrl, ctx);
     const contentRule = source.contentRule;
+    let imageRuleValues = contentRule.images ? rule.getStringList(contentRule.images) : [];
+    if (imageRuleValues.length === 0) {
+      imageRuleValues = this.tryExtractScriptedComicImages(resp.body);
+    }
 
     let content = await this.tryGetDirectAjaxRuleContent(source, resp.body, baseUrl, ctx, contentRule.content);
     if (!content) content = rule.getString(contentRule.content);
@@ -308,23 +307,39 @@ export class WebBookService {
       const chaoxingContent = this.tryExtractChaoxingDetailContent(book, resp.body);
       if (chaoxingContent) content = chaoxingContent;
     }
-    if (!content) return '';
+    if (!content && imageRuleValues.length === 0) return '';
 
     // 替换净化: contentRule.replaceRegex
     content = this.applyReplaceRegex(content, contentRule.replaceRegex);
 
-    // 基本 HTML 净化
-    content = content
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>/gi, '\n\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+    content = this.normalizeReaderContent(content, baseUrl, imageRuleValues);
 
     book.variable = ctx.toJson();
     return content;
+  }
+
+  /**
+   * Some lightweight comic sites create their image tags in an inline script
+   * instead of including them in the returned HTML.  The common shape is a
+   * base path plus a page count.  Supporting that shape here avoids executing
+   * arbitrary imported JavaScript while still allowing the chapter to stream
+   * through the normal reader image pipeline.
+   */
+  private tryExtractScriptedComicImages(body: string): string[] {
+    if (!body) return [];
+    const pathMatch = body.match(/\b(?:pasd|imagePath|image_path)\s*=\s*["']([^"']+)["']/i);
+    const countMatch = body.match(/\b(?:num|imageCount|image_count)\s*=\s*(?:eval\s*\(\s*)?["']?(\d{1,4})/i);
+    if (!pathMatch || !pathMatch[1] || !countMatch || !countMatch[1]) return [];
+
+    const count = Math.min(parseInt(countMatch[1]), 500);
+    if (!Number.isFinite(count) || count <= 0) return [];
+    const extensionMatch = body.match(/(?:pasd|imagePath|image_path)\s*\+\s*[^+;]+\+\s*["'](\.(?:avif|gif|jpe?g|png|webp))["']/i);
+    const extension = extensionMatch && extensionMatch[1] ? extensionMatch[1] : '.webp';
+    const images: string[] = [];
+    for (let index = 1; index <= count; index++) {
+      images.push(`${pathMatch[1]}${index}${extension}`);
+    }
+    return images;
   }
 
   private async tryGetDirectAjaxRuleContent(source: BookSource, body: string, baseUrl: string,
@@ -805,6 +820,122 @@ export class WebBookService {
       .replace(/&quot;/g, '"')
       .replace(/&apos;/g, "'")
       .replace(/&#39;/g, "'");
+  }
+
+  private normalizeReaderContent(content: string, baseUrl: string, imageRuleValues: string[] = []): string {
+    const explicitImages = this.collectReaderImageUrls(imageRuleValues, baseUrl, true);
+    if (explicitImages.length > 0) {
+      return explicitImages.map((url: string): string => ReaderImageMarker.create(url)).join('\n\n');
+    }
+
+    let value = content || '';
+    value = value.replace(/<(?:img|image)\b[^>]*>/gi, (tag: string): string => {
+      const images = this.collectReaderImageUrls([tag], baseUrl, false);
+      return images.length > 0 ? `\n\n${ReaderImageMarker.create(images[0])}\n\n` : ' ';
+    });
+    value = value.replace(/!\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g,
+      (_all: string, rawUrl: string): string => {
+        const url = this.normalizeReaderImageUrl(rawUrl, baseUrl, true);
+        return url ? `\n\n${ReaderImageMarker.create(url)}\n\n` : ' ';
+      });
+
+    const lines: string[] = [];
+    for (const rawLine of value.replace(/\r\n?/g, '\n').split('\n')) {
+      const line = rawLine.trim();
+      const imageUrl = this.normalizeReaderImageUrl(line, baseUrl, false);
+      if (imageUrl && this.isLikelyReaderImageUrl(line)) {
+        lines.push(ReaderImageMarker.create(imageUrl));
+      } else {
+        lines.push(rawLine);
+      }
+    }
+
+    return lines.join('\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n\n')
+      .replace(/<\/div>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  private collectReaderImageUrls(values: string[], baseUrl: string, trustPlainValue: boolean): string[] {
+    const result: string[] = [];
+    const seen = new Set<string>();
+    for (const rawValue of values) {
+      const value = this.decodeHtmlEntities(rawValue || '').trim();
+      if (!value) continue;
+      const tags = value.match(/<(?:img|image|source|object)\b[^>]*>/gi) || [];
+      for (const tag of tags) {
+        const attrValue = this.findReaderImageAttribute(tag);
+        this.appendReaderImageUrl(result, seen, attrValue, baseUrl, true);
+      }
+      const markdown = /!\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
+      let markdownMatch: RegExpExecArray | null;
+      while ((markdownMatch = markdown.exec(value)) !== null) {
+        this.appendReaderImageUrl(result, seen, markdownMatch[1], baseUrl, true);
+      }
+      if (tags.length === 0 && trustPlainValue) {
+        const parts = this.splitReaderImageRuleValue(value);
+        for (const part of parts) {
+          this.appendReaderImageUrl(result, seen, part, baseUrl, true);
+        }
+      }
+    }
+    return result;
+  }
+
+  private appendReaderImageUrl(result: string[], seen: Set<string>, rawUrl: string, baseUrl: string,
+    trustValue: boolean): void {
+    const url = this.normalizeReaderImageUrl(rawUrl, baseUrl, trustValue);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    result.push(url);
+  }
+
+  private findReaderImageAttribute(tag: string): string {
+    const names = ['data-original', 'data-src', 'data-url', 'data-lazy-src', 'data-echo', 'src',
+      'xlink:href', 'href', 'srcset'];
+    for (const name of names) {
+      const escaped = name.replace(':', '\\:');
+      const quoted = new RegExp(`(?:^|\\s)${escaped}\\s*=\\s*["']([^"']+)["']`, 'i').exec(tag);
+      if (quoted && quoted[1]) return name === 'srcset' ? quoted[1].split(',')[0].trim().split(/\s+/)[0] : quoted[1];
+      const unquoted = new RegExp(`(?:^|\\s)${escaped}\\s*=\\s*([^\\s>]+)`, 'i').exec(tag);
+      if (unquoted && unquoted[1]) return name === 'srcset' ? unquoted[1].split(',')[0].trim().split(/\s+/)[0] : unquoted[1];
+    }
+    return '';
+  }
+
+  private splitReaderImageRuleValue(value: string): string[] {
+    const trimmed = value.trim().replace(/^\[|\]$/g, '');
+    if (!trimmed) return [];
+    return trimmed.split(/(?:\r?\n|\|\||,\s*(?=["']?(?:https?:|\/|\.\.?\/)))/)
+      .map((item: string): string => item.trim().replace(/^['"]|['"]$/g, ''))
+      .filter((item: string): boolean => item.length > 0);
+  }
+
+  private normalizeReaderImageUrl(rawUrl: string, baseUrl: string, trustValue: boolean): string {
+    let value = this.decodeHtmlEntities(rawUrl || '').trim()
+      .replace(/^url\(\s*|\s*\)$/gi, '')
+      .replace(/^['"]|['"]$/g, '');
+    if (!value || /^(?:javascript:|about:|#)/i.test(value)) return '';
+    if (!trustValue && !this.isLikelyReaderImageUrl(value)) return '';
+    if (/^data:image\//i.test(value)) return value;
+    if (/^(?:https?:)?\/\//i.test(value) || /^\.?\.?\//.test(value)) {
+      return BookUrlResolver.resolve(value, baseUrl);
+    }
+    if (trustValue && !/\s/.test(value) && !value.startsWith('<') && !value.startsWith('{')) {
+      return BookUrlResolver.resolve(value, baseUrl);
+    }
+    return '';
+  }
+
+  private isLikelyReaderImageUrl(value: string): boolean {
+    const clean = (value || '').trim();
+    return /^data:image\//i.test(clean) ||
+      /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:[?#].*)?$/i.test(clean);
   }
 
   private escapeRegex(value: string): string {

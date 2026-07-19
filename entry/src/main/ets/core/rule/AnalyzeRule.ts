@@ -49,12 +49,19 @@ export class AnalyzeRule {
 
   getElements(rule: string): string[] {
     if (!rule) return [this.content];
+    // Legado uses a leading "-" on list rules to request reverse ordering.
+    // Keep the convention at the element-list boundary so it works for both
+    // JSONPath and HTML/CSS rules without changing scalar/regex semantics.
+    let elementRule = rule.trim();
+    const reverse = elementRule.startsWith('-') && elementRule.length > 1;
+    if (reverse) elementRule = elementRule.substring(1).trim();
     // 防止超大 HTML 进入正则/CSS 解析，但 JSON 接口列表仍需要正常走 JSONPath。
-    if (this.content.length > MAX_HTML_PARSE_LENGTH && !this.isJsonPathLikeRule(rule)) return [];
-    const jsElements = this.evalJsElementsRule(rule);
-    if (jsElements.length > 0) return jsElements;
-    const items = this.analyze(rule);
-    return items.length > 0 ? items : [this.content];
+    if (this.content.length > MAX_HTML_PARSE_LENGTH && !this.isJsonPathLikeRule(elementRule)) return [];
+    const jsElements = this.evalJsElementsRule(elementRule);
+    if (jsElements.length > 0) return reverse ? jsElements.reverse() : jsElements;
+    const items = this.analyze(elementRule);
+    if (items.length > 0) return reverse ? items.reverse() : items;
+    return [this.content];
   }
 
   private isJsonPathLikeRule(rule: string): boolean {
@@ -1409,7 +1416,7 @@ export class AnalyzeRule {
 
   private extractAttr(html: string, attr: string): string {
     const startTag = html.match(/^<[^>]+>/);
-    return startTag ? this.getHtmlAttr(startTag[0], attr) : '';
+    return startTag ? this.decodeHtmlEntities(this.getHtmlAttr(startTag[0], attr)) : '';
   }
 
   private stripJsWrapper(rule: string): string {

@@ -2,6 +2,7 @@ import { Book, BookChapter, BookSource } from '../../model/data/Book';
 import { appDb } from '../../model/data/AppDatabase';
 import { WebBookService } from './WebBookService';
 import { CoverUrlNormalizer } from '../../utils/CoverUrlNormalizer';
+import { LocalChapterContentLoader } from './LocalChapterContentLoader';
 
 export class ReadBookEngine {
   private static inst: ReadBookEngine | null = null;
@@ -17,6 +18,8 @@ export class ReadBookEngine {
 
   private chapterCache: Map<number, string> = new Map();
   private chapterLoading: Map<number, Promise<string>> = new Map();
+  private readonly chapterCacheLimit: number = 7;
+  private preloadGeneration: number = 0;
 
   private constructor() { this.webBook = new WebBookService(); }
 
@@ -37,6 +40,7 @@ export class ReadBookEngine {
     this.content = '';
     this.chapterCache.clear();
     this.chapterLoading.clear();
+    this.preloadGeneration++;
     this.source = null;
 
     if (book.origin && book.origin !== 'local') {
@@ -144,6 +148,7 @@ export class ReadBookEngine {
     if (idx < 0 || idx >= this.chapters.length || !this.book) return '';
 
     this.curIdx = idx;
+    this.preloadGeneration++;
     return await this.fetchContent(idx);
   }
 
@@ -182,26 +187,48 @@ export class ReadBookEngine {
     if (idx < 0 || idx >= this.chapters.length || !this.book) return '';
 
     const chapter = this.chapters[idx];
-    if (this.chapterCache.has(idx)) return this.chapterCache.get(idx)!;
+    if (this.chapterCache.has(idx)) {
+      const memoryContent = this.chapterCache.get(idx)!;
+      this.chapterCache.delete(idx);
+      this.chapterCache.set(idx, memoryContent);
+      return memoryContent;
+    }
     if (this.chapterLoading.has(idx)) return await this.chapterLoading.get(idx)!;
 
     const cached = await appDb.getCachedChapterContent(this.book.bookUrl, idx);
     if (cached && !this.isInvalidChapterContent(cached)) {
-      this.chapterCache.set(idx, cached);
+      this.putChapterCache(idx, cached);
       chapter.cacheDate = chapter.cacheDate || Date.now();
       return cached;
     }
 
-    if (!this.source) {
-      return '';
+    if (this.book.origin === 'local') {
+      const task = LocalChapterContentLoader.load(this.book, chapter)
+        .then((text: string) => {
+          if (text) {
+            this.putChapterCache(idx, text);
+            chapter.cacheDate = Date.now();
+            appDb.saveCachedChapterContent(this.book!.bookUrl, chapter, text).catch((err: Error) => {
+              console.error('[RE] save local chapter cache failed:', idx, err);
+            });
+          }
+          return text;
+        })
+        .finally(() => {
+          this.chapterLoading.delete(idx);
+        });
+      this.chapterLoading.set(idx, task);
+      return await task;
     }
+
+    if (!this.source) return '';
 
     await this.refreshSourceForContent();
     const task = this.webBook.getContent(this.source, this.book, chapter)
       .then((text: string) => {
         if (text) {
           if (!this.isInvalidChapterContent(text)) {
-            this.chapterCache.set(idx, text);
+            this.putChapterCache(idx, text);
             chapter.cacheDate = Date.now();
             appDb.saveCachedChapterContent(this.book!.bookUrl, chapter, text).catch((err: Error) => {
               console.error('[RE] save chapter cache failed:', idx, err);
@@ -264,18 +291,27 @@ export class ReadBookEngine {
       chapter.cacheDate = 0;
     }
     this.content = '';
+    this.preloadGeneration++;
   }
 
   preloadAround(idx: number, forwardCount: number = 2, backwardCount: number = 1): void {
     if (this.chapters.length === 0 || !this.book) {
       return;
     }
+    const generation = ++this.preloadGeneration;
     for (let offset = 1; offset <= forwardCount; offset++) {
-      this.preloadContent(idx + offset);
+      this.schedulePreloadContent(idx + offset, idx, generation, offset * 80);
     }
     for (let offset = 1; offset <= backwardCount; offset++) {
-      this.preloadContent(idx - offset);
+      this.schedulePreloadContent(idx - offset, idx, generation, (forwardCount + offset) * 80);
     }
+  }
+
+  private schedulePreloadContent(idx: number, anchorIndex: number, generation: number, delayMs: number): void {
+    setTimeout(() => {
+      if (generation !== this.preloadGeneration || this.curIdx !== anchorIndex) return;
+      this.preloadContent(idx);
+    }, Math.max(0, delayMs));
   }
 
   private preloadContent(idx: number): void {
@@ -318,6 +354,27 @@ export class ReadBookEngine {
     this.book.putVariable('readStarted', '1');
     this.book.putVariable('lastReadTime', `${now}`);
     await appDb.updateBook(this.book);
+  }
+
+  private putChapterCache(idx: number, content: string): void {
+    if (!content) return;
+    this.chapterCache.delete(idx);
+    this.chapterCache.set(idx, content);
+    while (this.chapterCache.size > this.chapterCacheLimit) {
+      let evicted = false;
+      const keys = this.chapterCache.keys();
+      let next = keys.next();
+      while (!next.done) {
+        const key = next.value as number;
+        if (key !== this.curIdx) {
+          this.chapterCache.delete(key);
+          evicted = true;
+          break;
+        }
+        next = keys.next();
+      }
+      if (!evicted) break;
+    }
   }
 
   getChapterTitle(): string {

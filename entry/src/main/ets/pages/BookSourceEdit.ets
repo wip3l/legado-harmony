@@ -117,6 +117,7 @@ struct BookSourceEditPage {
       Column() {
         Row() {
           ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+            buttonSize: 40, containerWidth: 56, materialScale: 0.83, compactLayout: true,
             onBack: () => this.requestBack() })
 
           Text(this.bookSourceUrl ? '编辑书源' : '新建书源')

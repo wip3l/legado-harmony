@@ -199,6 +199,19 @@ export struct ColorCodePicker {
     }
   }
 
+  private handlePickerAreaGesture(event: GestureEvent): void {
+    if (event.fingerList.length > 0) {
+      const finger = event.fingerList[0];
+      this.updateSaturationAndBrightness(finger.localX, finger.localY);
+    }
+  }
+
+  private handleHueGesture(event: GestureEvent): void {
+    if (event.fingerList.length > 0) {
+      this.updateHue(event.fingerList[0].localY);
+    }
+  }
+
   private pickerIndicatorX(): number {
     return this.clamp(this.saturation / 100 * this.pickerAreaWidth - 10, -2, this.pickerAreaWidth - 18);
   }
@@ -426,6 +439,17 @@ export struct ColorCodePicker {
         .onTouch((event: TouchEvent) => {
           this.handlePickerAreaTouch(event);
         })
+        .priorityGesture(
+          PanGesture({ direction: PanDirection.All, distance: 1 })
+            .onActionStart((event: GestureEvent) => {
+              this.handlePickerAreaGesture(event);
+            })
+            .onActionUpdate((event: GestureEvent) => {
+              this.handlePickerAreaGesture(event);
+            }),
+          GestureMask.IgnoreInternal
+        )
+        .monopolizeEvents(true)
 
         Stack({ alignContent: Alignment.TopStart }) {
           Row()
@@ -457,6 +481,17 @@ export struct ColorCodePicker {
         .onTouch((event: TouchEvent) => {
           this.handleHueTouch(event);
         })
+        .priorityGesture(
+          PanGesture({ direction: PanDirection.Vertical, distance: 1 })
+            .onActionStart((event: GestureEvent) => {
+              this.handleHueGesture(event);
+            })
+            .onActionUpdate((event: GestureEvent) => {
+              this.handleHueGesture(event);
+            }),
+          GestureMask.IgnoreInternal
+        )
+        .monopolizeEvents(true)
       }
       .width('100%')
 

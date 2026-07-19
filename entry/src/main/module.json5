@@ -58,6 +58,41 @@
                 "scheme": "file",
                 "type": "application/json",
                 "linkFeature": "FileOpen"
+              },
+              {
+                "scheme": "file",
+                "type": "text/json",
+                "linkFeature": "FileOpen"
+              },
+              {
+                "scheme": "file",
+                "type": "application/x-json",
+                "linkFeature": "FileOpen"
+              },
+              {
+                "scheme": "file",
+                "type": "general.plain-text",
+                "linkFeature": "FileOpen"
+              },
+              {
+                "scheme": "file",
+                "type": "text/plain",
+                "linkFeature": "FileOpen"
+              },
+              {
+                "scheme": "file",
+                "type": "general.epub",
+                "linkFeature": "FileOpen"
+              },
+              {
+                "scheme": "file",
+                "type": "application/epub+zip",
+                "linkFeature": "FileOpen"
+              },
+              {
+                "scheme": "file",
+                "type": "application/x-epub+zip",
+                "linkFeature": "FileOpen"
               }
             ]
           }

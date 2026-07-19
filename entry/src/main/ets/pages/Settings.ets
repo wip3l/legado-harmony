@@ -1434,6 +1434,7 @@ struct SettingsPage {
   titleBar() {
     Row() {
       ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        buttonSize: 40, containerWidth: 56, materialScale: 0.83, compactLayout: true,
         onBack: () => router.back() })
 
       Text('阅读设置')
@@ -2056,6 +2057,7 @@ struct SettingsPage {
           .width('100%')
           .margin({ top: 8 })
           .selectedColor(this.accentColor())
+          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
           .onChange((sliderValue: number) => {
             this.setReaderPreloadChapterCount(sliderValue);
           })

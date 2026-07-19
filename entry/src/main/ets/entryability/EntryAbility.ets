@@ -14,6 +14,8 @@ import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { TtsSettingsStore } from '../utils/TtsSettingsStore';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import fs from '@ohos.file.fs';
+import { util } from '@kit.ArkTS';
 
 export default class EntryAbility extends UIAbility {
   private appliedColorMode: number = -1;
@@ -27,6 +29,10 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('appFilesDir', this.context.filesDir);
     AppStorage.setOrCreate('pendingBookSourceImportUri', '');
     AppStorage.setOrCreate('pendingBookSourceImportNonce', 0);
+    AppStorage.setOrCreate('pendingLocalBookImportUri', '');
+    AppStorage.setOrCreate('pendingLocalBookImportNonce', 0);
+    AppStorage.setOrCreate('pendingLocalBookImportFormat', '');
+    AppStorage.setOrCreate('pendingLocalBookImportName', '');
     hilog.info(0x0000, 'testTag', 'StartupTrace onCreate %{public}d', Date.now());
     PersistentStorage.persistProp('appThemeMode', 'system');
     AppThemeModeStore.load(this.context).then((mode: string) => {
@@ -200,12 +206,18 @@ export default class EntryAbility extends UIAbility {
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(0x0000, 'testTag', 'Ability onNewWant %{public}s', JSON.stringify(launchParam));
-    const hasBookSourceFile = this.handleLaunchWant(want);
-    if (hasBookSourceFile && this.mainWindowStage) {
+    const launchTarget = this.handleLaunchWant(want);
+    if (launchTarget && this.mainWindowStage) {
+      const targetUrl = launchTarget === 'bookSource' ? 'pages/BookSource' : 'pages/Startup';
       this.mainWindowStage.getMainWindow().then((mainWindow: window.Window) => {
-        return mainWindow.getUIContext().getRouter().pushUrl({ url: 'pages/BookSource' });
+        const appRouter = mainWindow.getUIContext().getRouter();
+        const state = appRouter.getState();
+        if (this.routeMatches(state.name, state.path, targetUrl)) {
+          return Promise.resolve();
+        }
+        return appRouter.pushUrl({ url: targetUrl });
       }).catch((e: Error) => {
-        hilog.warn(0x0000, 'testTag', 'Open book source import page failed: %{public}s', JSON.stringify(e));
+        hilog.warn(0x0000, 'testTag', 'Open external file failed: %{public}s', JSON.stringify(e));
       });
     }
   }
@@ -248,12 +260,26 @@ export default class EntryAbility extends UIAbility {
     this.context.getApplicationContext().setColorMode(colorMode);
   }
 
-  private handleLaunchWant(want: Want): boolean {
-    if (want.action === 'ohos.want.action.viewData' && want.uri && this.isJsonWant(want)) {
-      AppStorage.setOrCreate('pendingBookSourceImportUri', want.uri);
+  private handleLaunchWant(want: Want): string {
+    hilog.info(0x0000, 'testTag',
+      'Launch want action=%{public}s type=%{public}s uri=%{private}s params=%{public}s',
+      want.action || '', want.type || '', want.uri || '', this.wantParameterKeys(want));
+    const externalUri = this.externalFileUri(want);
+    const externalName = this.externalFileNameHint(want, externalUri);
+    const externalFormat = externalUri ? this.externalFileFormat(want, externalUri, externalName) : '';
+    if (externalUri && externalFormat === 'json') {
+      AppStorage.setOrCreate('pendingBookSourceImportUri', externalUri);
       const nonce = AppStorage.get<number>('pendingBookSourceImportNonce') || 0;
       AppStorage.setOrCreate('pendingBookSourceImportNonce', nonce + 1);
-      return true;
+      return 'bookSource';
+    }
+    if (externalUri && (externalFormat === 'txt' || externalFormat === 'epub')) {
+      AppStorage.setOrCreate('pendingLocalBookImportUri', externalUri);
+      AppStorage.setOrCreate('pendingLocalBookImportFormat', externalFormat);
+      AppStorage.setOrCreate('pendingLocalBookImportName', externalName);
+      const nonce = AppStorage.get<number>('pendingLocalBookImportNonce') || 0;
+      AppStorage.setOrCreate('pendingLocalBookImportNonce', nonce + 1);
+      return 'localBook';
     }
     const params = this.getLaunchParams(want);
     if (params['cacheAction'] === 'cancelFullTextCache') {
@@ -264,12 +290,12 @@ export default class EntryAbility extends UIAbility {
         bookUrl: params['bookUrl'] || ''
       }));
       AppStorage.setOrCreate('fullTextCacheCancelNonce', nonce);
-      return false;
+      return '';
     }
     const action = params['shortcutAction'];
     if (action === RECENT_READ_SHORTCUT_ACTION) {
       RecentReadShortcut.request();
-      return false;
+      return '';
     }
     if (action === OPEN_BOOK_SHORTCUT_ACTION) {
       const bookUrl = params['bookUrl'];
@@ -277,14 +303,177 @@ export default class EntryAbility extends UIAbility {
         RecentReadShortcut.requestBook(bookUrl);
       }
     }
-    return false;
+    return '';
   }
 
-  private isJsonWant(want: Want): boolean {
+  private externalFileFormat(want: Want, uri: string, fileNameHint: string): string {
+    const uriExtension = this.externalFileExtension(uri);
+    const nameExtension = this.externalFileExtension(fileNameHint);
+    const extension = this.isSupportedExternalExtension(uriExtension) ? uriExtension : nameExtension;
+    if (this.isSupportedExternalExtension(extension)) return extension;
     const type = (want.type || '').toLowerCase();
-    if (type === 'application/json' || type === 'general.json') return true;
-    const uri = (want.uri || '').split('?')[0].split('#')[0].toLowerCase();
-    return uri.endsWith('.json');
+    if (type === 'application/json' || type === 'text/json' || type === 'application/x-json' ||
+      type === 'general.json') return 'json';
+    if (type === 'general.epub' || type === 'application/epub+zip' ||
+      type === 'application/x-epub+zip') return 'epub';
+    const sniffed = this.sniffExternalFileFormat(uri);
+    if (sniffed) return sniffed;
+    if (type === 'general.plain-text' || type === 'text/plain' || type === 'general.text') return 'txt';
+    return '';
+  }
+
+  private externalFileUri(want: Want): string {
+    const directUri = this.externalFileUriFromValue(want.uri);
+    if (directUri) return directUri;
+    const parameters = want.parameters;
+    if (!parameters) return '';
+    const preferredKeys = ['ability.params.stream', 'ohos.extra.param.key.stream', 'uri', 'fileUri', 'shareUri'];
+    for (const key of preferredKeys) {
+      const preferredUri = this.externalFileUriFromValue(parameters[key]);
+      if (preferredUri) return preferredUri;
+    }
+    for (const key of Object.keys(parameters)) {
+      const candidate = this.externalFileUriFromValue(parameters[key]);
+      if (candidate) return candidate;
+    }
+    return '';
+  }
+
+  private externalFileUriFromValue(value: Object | undefined): string {
+    if (typeof value === 'string') {
+      const text = value.trim();
+      if (this.isExternalFileUri(text)) return text;
+      if ((text.startsWith('[') && text.endsWith(']')) || (text.startsWith('{') && text.endsWith('}'))) {
+        try {
+          return this.externalFileUriFromValue(JSON.parse(text) as Object);
+        } catch (_) {
+        }
+      }
+      return '';
+    }
+    if (Array.isArray(value)) {
+      const items = value as Object[];
+      for (let i = 0; i < items.length; i++) {
+        const item: Object = items[i];
+        const candidate = this.externalFileUriFromValue(item);
+        if (candidate) return candidate;
+      }
+      return '';
+    }
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, Object>;
+      for (const key of Object.keys(record)) {
+        const candidate = this.externalFileUriFromValue(record[key]);
+        if (candidate) return candidate;
+      }
+    }
+    return '';
+  }
+
+  private isExternalFileUri(value: string): boolean {
+    const lower = value.toLowerCase();
+    return lower.startsWith('file://') || lower.startsWith('datashare://') ||
+      lower.startsWith('content://') || value.startsWith('/');
+  }
+
+  private externalFileNameHint(want: Want, uri: string): string {
+    const uriExtension = this.externalFileExtension(uri);
+    if (this.isSupportedExternalExtension(uriExtension)) return this.externalFileName(uri);
+    const parameters = want.parameters;
+    if (!parameters) return '';
+    const preferredKeys = ['fileName', 'filename', 'displayName', 'name', 'title',
+      'ohos.extra.param.key.contentTitle'];
+    for (const key of preferredKeys) {
+      const hint = this.externalFileNameFromValue(parameters[key]);
+      if (hint) return hint;
+    }
+    for (const key of Object.keys(parameters)) {
+      const hint = this.externalFileNameFromValue(parameters[key]);
+      if (hint) return hint;
+    }
+    return '';
+  }
+
+  private externalFileNameFromValue(value: Object | undefined): string {
+    if (typeof value === 'string') {
+      const text = value.trim();
+      return this.isSupportedExternalExtension(this.externalFileExtension(text)) ?
+        this.externalFileName(text) : '';
+    }
+    if (Array.isArray(value)) {
+      const items = value as Object[];
+      for (let i = 0; i < items.length; i++) {
+        const item: Object = items[i];
+        const hint = this.externalFileNameFromValue(item);
+        if (hint) return hint;
+      }
+    }
+    return '';
+  }
+
+  private sniffExternalFileFormat(uri: string): string {
+    let file: fs.File | null = null;
+    try {
+      file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+      const buffer = new ArrayBuffer(8192);
+      const readLength = fs.readSync(file.fd, buffer, { offset: 0, length: buffer.byteLength });
+      if (readLength >= 4) {
+        const bytes = new Uint8Array(buffer, 0, readLength);
+        if (bytes[0] === 0x50 && bytes[1] === 0x4B &&
+          ((bytes[2] === 0x03 && bytes[3] === 0x04) || (bytes[2] === 0x05 && bytes[3] === 0x06))) {
+          return 'epub';
+        }
+        const text = util.TextDecoder.create('utf-8').decodeWithStream(bytes, { stream: false })
+          .replace(/^\uFEFF/, '').trim();
+        if (text.startsWith('{') || text.startsWith('[')) return 'json';
+        return 'txt';
+      }
+    } catch (e) {
+      hilog.warn(0x0000, 'testTag', 'Sniff external file failed: %{public}s', JSON.stringify(e));
+    } finally {
+      if (file) {
+        try {
+          fs.closeSync(file);
+        } catch (_) {
+        }
+      }
+    }
+    return '';
+  }
+
+  private isSupportedExternalExtension(extension: string): boolean {
+    return extension === 'json' || extension === 'txt' || extension === 'epub';
+  }
+
+  private externalFileName(uriOrName: string): string {
+    const clean = uriOrName.split('?')[0].split('#')[0];
+    let decoded = clean;
+    try {
+      decoded = decodeURIComponent(clean);
+    } catch (_) {
+    }
+    return decoded.substring(Math.max(decoded.lastIndexOf('/'), decoded.lastIndexOf('\\')) + 1);
+  }
+
+  private externalFileExtension(uri: string): string {
+    const cleanUri = uri.split('?')[0].split('#')[0];
+    let decoded = cleanUri;
+    try {
+      decoded = decodeURIComponent(cleanUri);
+    } catch (_) {
+    }
+    const fileName = decoded.substring(decoded.lastIndexOf('/') + 1).toLowerCase();
+    const dot = fileName.lastIndexOf('.');
+    return dot >= 0 ? fileName.substring(dot + 1) : '';
+  }
+
+  private wantParameterKeys(want: Want): string {
+    return want.parameters ? Object.keys(want.parameters).join(',') : '';
+  }
+
+  private routeMatches(name: string, path: string, targetUrl: string): boolean {
+    const targetName = targetUrl.substring(targetUrl.lastIndexOf('/') + 1);
+    return name === targetName || path === targetUrl || path.endsWith(`/${targetName}`);
   }
 
   private getLaunchParams(want: Want): Record<string, string> {

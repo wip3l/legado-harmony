@@ -78,28 +78,29 @@ struct RecentReadCard {
         }
         .width('100%')
         .layoutWeight(1)
-        .margin({ top: 8 })
-        .alignItems(VerticalAlign.Center)
+        .margin({ top: 0 })
+        .translate({ y: -5 })
+        .alignItems(VerticalAlign.Top)
       }
     }
     .width('100%')
     .height('100%')
-    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+    .padding({ left: 12, right: 12, top: 6, bottom: 8 })
     .backgroundColor(this.cardBackgroundColor())
   }
 
   @Builder
   header() {
     Row() {
-      Row({ space: 6 }) {
+      Row({ space: 5 }) {
         Text('最近阅读')
-          .fontSize(17)
-          .fontWeight(FontWeight.Bold)
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
           .fontColor(this.primaryTextColor())
           .maxLines(1)
 
         Text(this.updatedAt ? `更新 ${this.updatedAt}` : '')
-          .fontSize(10)
+          .fontSize(9)
           .fontColor(this.secondaryTextColor())
           .maxLines(1)
       }
@@ -108,12 +109,12 @@ struct RecentReadCard {
 
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-          .fontSize(20)
-          .fontWeight(FontWeight.Medium)
+          .fontSize(16)
+          .fontWeight(FontWeight.Regular)
           .fontColor([this.accentColor])
       }
-        .width(30)
-        .height(30)
+        .width(26)
+        .height(26)
         .backgroundColor(Color.Transparent)
         .accessibilityText('刷新最近阅读')
         .onClick(() => {
@@ -127,6 +128,7 @@ struct RecentReadCard {
         })
     }
     .width('100%')
+    .height(26)
     .alignItems(VerticalAlign.Center)
   }
 
@@ -156,9 +158,9 @@ struct RecentReadCard {
       Stack() {
         this.coverBackground(name, cover, accent)
       }
-      .width(48)
-      .height(68)
-      .borderRadius(6)
+      .width(54)
+      .height(76)
+      .borderRadius(7)
       .clip(true)
 
       Text(name || '未命名书籍')
@@ -181,8 +183,8 @@ struct RecentReadCard {
         .margin({ top: 1 })
     }
     .layoutWeight(1)
-    .height(104)
-    .padding({ left: 3, right: 3, top: 3, bottom: 3 })
+    .height(112)
+    .padding({ left: 3, right: 3, top: 0, bottom: 3 })
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Start)
     .onClick(() => {

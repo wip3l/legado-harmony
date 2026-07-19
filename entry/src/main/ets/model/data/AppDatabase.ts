@@ -8,6 +8,11 @@ interface ColumnMigration {
   definition: string;
 }
 
+export class ReaderPaginationCacheRecord {
+  starts: number[] = [];
+  ends: number[] = [];
+}
+
 export class AppDatabase {
   private static instance: AppDatabase | null = null;
   private store: relationalStore.RdbStore | null = null;
@@ -172,6 +177,18 @@ export class AppDatabase {
         keyword TEXT PRIMARY KEY,
         usage INTEGER DEFAULT 0,
         lastUseTime INTEGER DEFAULT 0
+      )
+    `);
+
+    await this.store.executeSql(`
+      CREATE TABLE IF NOT EXISTS reader_pagination_cache (
+        bookUrl TEXT DEFAULT '',
+        chapterIndex INTEGER DEFAULT 0,
+        layoutKey TEXT DEFAULT '',
+        starts TEXT DEFAULT '[]',
+        ends TEXT DEFAULT '[]',
+        updateTime INTEGER DEFAULT 0,
+        PRIMARY KEY (bookUrl, chapterIndex, layoutKey)
       )
     `);
 
@@ -923,10 +940,24 @@ export class AppDatabase {
   }
 
   async insertBookChapters(chapters: BookChapter[]): Promise<void> {
-    if (!this.store) return;
+    if (!this.store || chapters.length === 0) return;
+    const buckets: relationalStore.ValuesBucket[] = [];
     for (const chapter of chapters) {
-      await this.insertBookChapter(chapter);
+      buckets.push({
+        url: chapter.url,
+        title: chapter.title,
+        bookUrl: chapter.bookUrl,
+        chapterIndex: chapter.index,
+        isVip: chapter.isVip ? 1 : 0,
+        isPay: chapter.isPay ? 1 : 0,
+        resourceUrl: chapter.resourceUrl,
+        tag: chapter.tag,
+        startOffset: chapter.start,
+        endOffset: chapter.end,
+        variable: chapter.variable
+      });
     }
+    await this.store.batchInsert('book_chapters', buckets);
   }
 
   async insertBookChaptersWithContents(bookUrl: string, chapters: BookChapter[], contents: string[]): Promise<void> {
@@ -968,6 +999,7 @@ export class AppDatabase {
     const predicates = new relationalStore.RdbPredicates('book_chapters');
     predicates.equalTo('bookUrl', bookUrl);
     await this.store.delete(predicates);
+    await this.deleteReaderPaginationCache(bookUrl);
   }
 
   async getBookChapters(bookUrl: string): Promise<BookChapter[]> {
@@ -1034,6 +1066,7 @@ export class AppDatabase {
     const predicates = new relationalStore.RdbPredicates('book_contents');
     predicates.equalTo('bookUrl', bookUrl);
     await this.store.delete(predicates);
+    await this.deleteReaderPaginationCache(bookUrl);
   }
 
   async deleteCachedChapterContent(bookUrl: string, chapterIndex: number): Promise<void> {
@@ -1041,6 +1074,54 @@ export class AppDatabase {
     const predicates = new relationalStore.RdbPredicates('book_contents');
     predicates.equalTo('bookUrl', bookUrl);
     predicates.equalTo('chapterIndex', chapterIndex);
+    await this.store.delete(predicates);
+    await this.deleteReaderPaginationCache(bookUrl, chapterIndex);
+  }
+
+  async getReaderPaginationCache(bookUrl: string, chapterIndex: number,
+    layoutKey: string): Promise<ReaderPaginationCacheRecord | null> {
+    if (!this.store || !bookUrl || !layoutKey) return null;
+    const predicates = new relationalStore.RdbPredicates('reader_pagination_cache');
+    predicates.equalTo('bookUrl', bookUrl);
+    predicates.equalTo('chapterIndex', chapterIndex);
+    predicates.equalTo('layoutKey', layoutKey);
+    const resultSet = await this.store.query(predicates, ['starts', 'ends']);
+    if (!resultSet.goToFirstRow()) return null;
+    try {
+      const starts = JSON.parse(resultSet.getString(resultSet.getColumnIndex('starts'))) as number[];
+      const ends = JSON.parse(resultSet.getString(resultSet.getColumnIndex('ends'))) as number[];
+      if (!Array.isArray(starts) || !Array.isArray(ends) || starts.length === 0 || starts.length !== ends.length) {
+        return null;
+      }
+      const record = new ReaderPaginationCacheRecord();
+      record.starts = starts;
+      record.ends = ends;
+      return record;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async saveReaderPaginationCache(bookUrl: string, chapterIndex: number, layoutKey: string,
+    starts: number[], ends: number[]): Promise<void> {
+    if (!this.store || !bookUrl || !layoutKey || starts.length === 0 || starts.length !== ends.length) return;
+    await this.deleteReaderPaginationCache(bookUrl, chapterIndex);
+    const bucket: relationalStore.ValuesBucket = {
+      bookUrl: bookUrl,
+      chapterIndex: chapterIndex,
+      layoutKey: layoutKey,
+      starts: JSON.stringify(starts),
+      ends: JSON.stringify(ends),
+      updateTime: Date.now()
+    };
+    await this.store.insert('reader_pagination_cache', bucket);
+  }
+
+  async deleteReaderPaginationCache(bookUrl: string, chapterIndex: number = -1): Promise<void> {
+    if (!this.store || !bookUrl) return;
+    const predicates = new relationalStore.RdbPredicates('reader_pagination_cache');
+    predicates.equalTo('bookUrl', bookUrl);
+    if (chapterIndex >= 0) predicates.equalTo('chapterIndex', chapterIndex);
     await this.store.delete(predicates);
   }
 

@@ -3,6 +3,7 @@ import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ReaderReplaceRule, ReaderReplaceRuleStore } from '../utils/ReaderReplaceRuleStore';
 import { syncSystemBars } from '../utils/SystemBars';
+import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
 
 @Entry
 @Component
@@ -104,6 +105,10 @@ struct ReaderReplaceRulesPage {
       ImmersiveBackButton({
         iconColor: this.primaryTextColor(),
         darkMode: this.appDarkMode,
+        buttonSize: 40,
+        containerWidth: 56,
+        materialScale: 0.83,
+        compactLayout: true,
         onBack: () => {
           if (this.editing) {
             this.closeEditor();
@@ -207,6 +212,8 @@ struct ReaderReplaceRulesPage {
         .layoutWeight(1)
         .width('100%')
         .padding({ left: 16, right: 16 })
+        .lanes(ResponsiveManagerListLayout.laneCount(this.contextViewportWidth),
+          ResponsiveManagerListLayout.gutter(this.contextViewportWidth))
       }
 
       if (this.selectionMode) {

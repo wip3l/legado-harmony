@@ -456,6 +456,7 @@ struct ReaderFontSettingsPage {
   titleBar() {
     Row() {
       ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        buttonSize: 40, containerWidth: 56, materialScale: 0.83, compactLayout: true,
         onBack: () => this.closeReaderFontSettings() })
       Text('阅读字体')
         .fontSize(20)
@@ -529,6 +530,7 @@ struct ReaderFontSettingsPage {
         .width('100%')
         .margin({ top: 8 })
         .selectedColor(this.accentColor())
+        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
         .onChange((sliderValue: number) => {
           onChange(sliderValue);
         })
@@ -555,6 +557,7 @@ struct ReaderFontSettingsPage {
         .width('100%')
         .margin({ top: 8 })
         .selectedColor(this.accentColor())
+        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
         .onChange((sliderValue: number) => {
           this.setBodyFontSize(sliderValue);
         })
@@ -581,6 +584,7 @@ struct ReaderFontSettingsPage {
         .width('100%')
         .margin({ top: 8 })
         .selectedColor(this.accentColor())
+        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
         .onChange((sliderValue: number) => {
           this.setTitleFontSize(sliderValue);
         })
@@ -1277,6 +1281,7 @@ struct ReaderFontSettingsPage {
         .width('100%')
         .margin({ top: 6 })
         .selectedColor(this.accentColor())
+        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
         .onChange((sliderValue: number) => {
           onChange(sliderValue);
         })
@@ -1302,6 +1307,7 @@ struct ReaderFontSettingsPage {
         .width('100%')
         .margin({ top: 6 })
         .selectedColor(this.accentColor())
+        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
         .onChange((sliderValue: number) => {
           this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
             target.fontSize = Math.max(14, Math.min(Math.round(sliderValue), 50));
