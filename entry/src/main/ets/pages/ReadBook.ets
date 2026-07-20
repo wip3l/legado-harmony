@@ -129,6 +129,18 @@ class ReaderCustomFontData {
   fonts: ReaderCustomFontItem[] = [];
 }
 
+class ReaderTxtCharsetOption {
+  value: string = '';
+  label: string = '';
+  description: string = '';
+
+  constructor(value: string, label: string, description: string) {
+    this.value = value;
+    this.label = label;
+    this.description = description;
+  }
+}
+
 interface PageTurnPreview {
   text: string;
   secondaryText?: string;
@@ -170,6 +182,9 @@ struct ReadBookPage {
   @State readerMenuAnchorSide: number = 1;
   @State showReaderActionMenu: boolean = false;
   @State showLayoutElementSettings: boolean = false;
+  @State showTxtCharsetDialog: boolean = false;
+  @State txtCharsetDraft: string = '';
+  @State txtCharsetApplying: boolean = false;
   @State showToc: boolean = false;
   @State tocPanelTab: number = 0;
   @State bookmarks: Bookmark[] = [];
@@ -461,6 +476,10 @@ struct ReadBookPage {
   }
 
   onBackPress(): boolean {
+    if (this.showTxtCharsetDialog) {
+      if (!this.txtCharsetApplying) this.showTxtCharsetDialog = false;
+      return true;
+    }
     if (this.showLayoutElementSettings) {
       this.showLayoutElementSettings = false;
       return true;
@@ -1346,6 +1365,10 @@ struct ReadBookPage {
 
       if (this.showLayoutElementSettings) {
         this.readerLayoutElementSettingsDialog()
+      }
+
+      if (this.showTxtCharsetDialog) {
+        this.readerTxtCharsetDialog()
       }
 
       if (this.showMenu && !this.showToc && !this.showSettings && this.chapters.length > 0) {
@@ -2548,6 +2571,13 @@ struct ReadBookPage {
           true
         )
       }
+      if (this.canSelectTxtCharset()) {
+        this.readerActionMenuItem(
+          $r('sys.symbol.textformat'),
+          `字符编码 · ${this.txtCharsetMenuLabel()}`,
+          () => this.openTxtCharsetDialog()
+        )
+      }
       this.readerActionMenuItem(
         $r('sys.symbol.rectangle_3_group'),
         '布局元素设置',
@@ -2616,6 +2646,199 @@ struct ReadBookPage {
     this.showLayoutElementSettings = true;
   }
 
+  canSelectTxtCharset(): boolean {
+    const currentBook = this.book;
+    return currentBook !== null && LocalBookService.isLocalBook(currentBook) &&
+      currentBook.type === LocalBookService.TYPE_TXT;
+  }
+
+  txtCharsetOptions(): ReaderTxtCharsetOption[] {
+    return [
+      new ReaderTxtCharsetOption('', '自动识别', '根据文件内容自动判断编码'),
+      new ReaderTxtCharsetOption('gb18030', 'GBK / GB18030', '简体中文'),
+      new ReaderTxtCharsetOption('utf-8', 'UTF-8', 'Unicode，支持带 BOM 文件'),
+      new ReaderTxtCharsetOption('utf-16le', 'UTF-16 LE', 'Unicode 小端序'),
+      new ReaderTxtCharsetOption('utf-16be', 'UTF-16 BE', 'Unicode 大端序'),
+      new ReaderTxtCharsetOption('big5', 'Big5', '繁体中文'),
+      new ReaderTxtCharsetOption('koi8-r', 'KOI8-R', '俄语'),
+      new ReaderTxtCharsetOption('euc-kr', 'EUC-KR', '韩语'),
+      new ReaderTxtCharsetOption('euc-jp', 'EUC-JP', '日语'),
+      new ReaderTxtCharsetOption('shift_jis', 'Shift-JIS', '日语'),
+      new ReaderTxtCharsetOption('windows-1250', 'Windows-1250', '中欧语言'),
+      new ReaderTxtCharsetOption('ibm866', 'IBM866', '西里尔字符')
+    ];
+  }
+
+  txtCharsetLabel(charset: string): string {
+    const normalized = (charset || '').toLowerCase().replace(/_/g, '-');
+    for (const option of this.txtCharsetOptions()) {
+      if (option.value.replace(/_/g, '-') === normalized) return option.label;
+    }
+    return charset ? charset.toUpperCase() : '自动识别';
+  }
+
+  txtCharsetMenuLabel(): string {
+    if (!this.book) return '自动';
+    const charsetOverride = LocalBookService.getTxtCharsetOverride(this.book);
+    return charsetOverride ? this.txtCharsetLabel(charsetOverride) : '自动';
+  }
+
+  openTxtCharsetDialog(): void {
+    if (!this.canSelectTxtCharset()) return;
+    this.showReaderActionMenu = false;
+    this.txtCharsetDraft = LocalBookService.getTxtCharsetOverride(this.book);
+    this.showTxtCharsetDialog = true;
+  }
+
+  async applyTxtCharsetSelection(): Promise<void> {
+    if (!this.book || !this.canSelectTxtCharset() || this.txtCharsetApplying) return;
+    const targetBook: Book = this.book;
+    const selectedCharset = this.txtCharsetDraft;
+    if (selectedCharset === LocalBookService.getTxtCharsetOverride(targetBook)) {
+      this.showTxtCharsetDialog = false;
+      return;
+    }
+    this.txtCharsetApplying = true;
+    try {
+      await this.saveReadingProgress();
+      this.stopTtsReading();
+      await LocalBookService.setTxtCharsetOverride(getContext(this), targetBook, selectedCharset);
+      this.showTxtCharsetDialog = false;
+      this.showMenu = false;
+      await this.loadBook();
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      const applied = selectedCharset ? this.txtCharsetLabel(selectedCharset) :
+        `自动识别（${this.txtCharsetLabel(this.book?.charset || '')}）`;
+      promptAction.showToast({ message: `已使用 ${applied} 重新解析` });
+    } catch (e) {
+      console.error('切换 TXT 字符编码失败:', e);
+      promptAction.showToast({ message: '切换字符编码失败，请尝试其他编码' });
+    } finally {
+      this.txtCharsetApplying = false;
+    }
+  }
+
+  @Builder
+  readerTxtCharsetDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.isReaderThemeDark() ? '#52000000' : '#26000000')
+        .backdropBlur(ThemeRuntime.glassBlur('overlay', 18))
+        .onClick(() => {
+          if (!this.txtCharsetApplying) this.showTxtCharsetDialog = false;
+        })
+
+      Column({ space: 10 }) {
+        Row() {
+          Column({ space: 3 }) {
+            Text('选择字符编码')
+              .fontSize(20)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.getTextColor())
+            Text(`当前解析：${this.txtCharsetLabel(this.book?.charset || '')}`)
+              .fontSize(12)
+              .fontColor(this.getSubTextColor())
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          ImmersiveBackButton({
+            icon: $r('sys.symbol.xmark'),
+            iconColor: this.getTextColor(),
+            darkMode: this.isReaderThemeDark(),
+            buttonSize: 38,
+            containerWidth: 38,
+            containerHeight: 38,
+            startInset: 0,
+            compactLayout: true,
+            accessibilityLabel: '关闭字符编码选择',
+            onBack: () => {
+              if (!this.txtCharsetApplying) this.showTxtCharsetDialog = false;
+            }
+          })
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        Scroll() {
+          Column({ space: 4 }) {
+            ForEach(this.txtCharsetOptions(), (option: ReaderTxtCharsetOption) => {
+              this.readerTxtCharsetOption(option)
+            }, (option: ReaderTxtCharsetOption) => option.value || 'auto')
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .height(Math.min(440, Math.max(160, this.pageViewHeight - 190)))
+        .scrollBar(BarState.Auto)
+
+        Row({ space: 12 }) {
+          Button('取消')
+            .layoutWeight(1)
+            .height(42)
+            .fontColor(this.getTextColor())
+            .backgroundColor(this.isReaderThemeDark() ? '#24FFFFFF' : '#10000000')
+            .enabled(!this.txtCharsetApplying)
+            .onClick(() => {
+              this.showTxtCharsetDialog = false;
+            })
+          Button(this.txtCharsetApplying ? '正在重新解析…' : '应用')
+            .layoutWeight(1)
+            .height(42)
+            .fontColor('#FFFFFF')
+            .backgroundColor(this.accentColor())
+            .enabled(!this.txtCharsetApplying)
+            .onClick(() => this.applyTxtCharsetSelection())
+        }
+        .width('100%')
+      }
+      .width(Math.min(440, Math.max(310, this.pageViewWidth - 32)))
+      .padding({ left: 18, right: 18, top: 16, bottom: 16 })
+      .borderRadius(ThemeRuntime.glassCornerRadius(24, 'overlay'))
+      .backgroundColor(this.readerGlassPanelColor())
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 24))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: this.readerGlassBorderColor() })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: this.readerGlassShadowColor(),
+        offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+      .onClick(() => {
+      })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  readerTxtCharsetOption(option: ReaderTxtCharsetOption) {
+    Row({ space: 12 }) {
+      Column({ space: 3 }) {
+        Text(option.label)
+          .fontSize(16)
+          .fontColor(this.getTextColor())
+        Text(option.description)
+          .fontSize(12)
+          .fontColor(this.getSubTextColor())
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      if (this.txtCharsetDraft === option.value) {
+        SymbolGlyph($r('sys.symbol.checkmark_circle'))
+          .fontSize(22)
+          .fontColor([this.accentColor()])
+      }
+    }
+    .width('100%')
+    .constraintSize({ minHeight: 56 })
+    .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+    .borderRadius(14)
+    .backgroundColor(this.txtCharsetDraft === option.value ?
+      ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()) : Color.Transparent)
+    .enabled(!this.txtCharsetApplying)
+    .onClick(() => {
+      this.txtCharsetDraft = option.value;
+    })
+  }
+
   openCurrentReaderReplaceRules(): void {
     const chapter = this.chapters.length > 0 ?
       this.chapters[this.clampChapterIndex(this.currentChapterIndex)] : null;
@@ -2682,6 +2905,7 @@ struct ReadBookPage {
           (enabled: boolean) => {
             this.readerUseTtsQuickAction = enabled;
             if (!enabled) this.ttsMediaControlsExpanded = false;
+            this.saveReaderLayoutElementSettings();
           }
         )
         this.readerLayoutElementToggle(
@@ -2691,6 +2915,7 @@ struct ReadBookPage {
           (enabled: boolean) => {
             this.readerUseChapterQuickJump = enabled;
             if (!enabled) this.resetMenuChapterPreview();
+            this.saveReaderLayoutElementSettings();
           }
         )
       }
@@ -2733,6 +2958,17 @@ struct ReadBookPage {
     .borderRadius(14)
     .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
     .alignItems(VerticalAlign.Center)
+  }
+
+  saveReaderLayoutElementSettings(): void {
+    ReaderSettingsStore.saveLayoutElementSettings(
+      getContext(this),
+      this.readerUseTtsQuickAction,
+      this.readerUseChapterQuickJump
+    ).catch((e: Error) => {
+      console.error('保存阅读布局元素设置失败:', e);
+      promptAction.showToast({ message: '布局元素设置保存失败' });
+    });
   }
 
   currentReaderSource(): BookSource | null {
@@ -3800,6 +4036,8 @@ struct ReadBookPage {
     this.readerExtendToStatusBar = settings.extendToStatusBar;
     this.readerPreloadEnabled = settings.preloadEnabled;
     this.readerPreloadChapterCount = settings.preloadChapterCount;
+    this.readerUseTtsQuickAction = settings.useTtsQuickAction;
+    this.readerUseChapterQuickJump = settings.useChapterQuickJump;
     this.readerFontFamily = settings.fontFamily || '';
     this.readerFontFilePath = settings.fontFilePath || '';
     AppStorage.setOrCreate<string>('readerFontSourceName', settings.fontSourceName || '系统默认');
@@ -10653,6 +10891,7 @@ struct ReadBookPage {
     this.menuChapterTooltipVisible = false;
     this.showReaderActionMenu = false;
     this.showLayoutElementSettings = false;
+    if (!this.txtCharsetApplying) this.showTxtCharsetDialog = false;
     this.showMenu = false;
     this.showSettings = false;
     this.showQuickTypographyValueInput = false;

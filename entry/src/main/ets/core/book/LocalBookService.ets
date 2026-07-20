@@ -75,17 +75,59 @@ export class LocalBookService {
   static readonly EPUB_IMAGE_MARKER_PREFIX: string = ReaderImageMarker.PREFIX;
   static readonly EPUB_IMAGE_MARKER_SUFFIX: string = ReaderImageMarker.SUFFIX;
 
-  private static readonly TXT_PARSER_VERSION: string = '6';
+  private static readonly TXT_PARSER_VERSION: string = '7';
   private static readonly EPUB_PARSER_VERSION: string = '7';
   private static readonly TXT_READ_CHUNK_BYTES: number = 256 * 1024;
   private static readonly TXT_MAX_CHAPTER_CHARS: number = 32 * 1024;
   private static readonly TXT_DB_BATCH_SIZE: number = 16;
+  private static readonly TXT_CHARSET_OVERRIDE_KEY: string = 'localCharsetOverride';
   private static readonly LOCAL_INTRO_TARGET_LENGTH: number = 96;
   private static readonly TXT_RULE_TOP_LEVEL: string =
     '^(?:扉页|[序引前楔][言子]?|(内容|文章|书籍)?简介|作品相关|卷[首尾末](语|总结|感言)|([^-·.–—_*＊~～=\\s\\n\\r](?!(者[：:]))|[-·.–—_*＊~～=](?!(\\s*[-·.–—_*＊~～=]))).*(?!.)|最?[上中下序引终末][章卷篇幕回节册季话集]|[\\dO零一两二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟萬]+?\\s{0,4}[｜、_|：:；;–.·\\s—-]|[第章卷篇节幕回册]\\s{0,4}[\\dO零一两二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟萬]+?\\s{0,4}[章卷页回幕册话段季篇节集部]?|[\\dO零一两二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟萬]+?\\s{0,4}[章卷页季回幕册话段篇节集部]).{0,35}$';
 
   static isLocalBook(book: Book): boolean {
     return book.origin === LocalBookService.ORIGIN;
+  }
+
+  static getTxtCharsetOverride(book: Book | null): string {
+    if (!book || !LocalBookService.isLocalBook(book) || book.type !== LocalBookService.TYPE_TXT) return '';
+    return LocalBookService.normalizeTxtCharset(book.getVariable(LocalBookService.TXT_CHARSET_OVERRIDE_KEY));
+  }
+
+  static async setTxtCharsetOverride(context: Context, book: Book, charset: string): Promise<void> {
+    if (!LocalBookService.isLocalBook(book) || book.type !== LocalBookService.TYPE_TXT) {
+      throw new Error('仅本地 TXT 书籍支持切换字符编码');
+    }
+    const requested = (charset || '').trim();
+    const normalized = LocalBookService.normalizeTxtCharset(requested);
+    if (requested && !normalized) {
+      throw new Error(`不支持的字符编码：${requested}`);
+    }
+    if (normalized) {
+      // Validate device support before deleting the existing parsed chapter cache.
+      util.TextDecoder.create(normalized);
+    }
+    const localPath = book.getVariable('localFilePath');
+    if (!localPath || !LocalBookService.exists(localPath)) {
+      throw new Error('本地 TXT 文件不存在，请重新导入');
+    }
+    await appDb.initWithContext(context);
+    const previousOverride = book.getVariable(LocalBookService.TXT_CHARSET_OVERRIDE_KEY);
+    const previousCharset = book.charset;
+    book.putVariable(LocalBookService.TXT_CHARSET_OVERRIDE_KEY, normalized);
+    book.putVariable('localParserVersion', 'importing');
+    await appDb.updateBook(book);
+    try {
+      await LocalBookService.rebuildTxtBook(book, localPath);
+    } catch (e) {
+      book.putVariable(LocalBookService.TXT_CHARSET_OVERRIDE_KEY, previousOverride);
+      book.charset = previousCharset;
+      // Keep the parser marked stale so the next open repairs any partially rebuilt cache.
+      book.putVariable('localParserVersion', 'importing');
+      await appDb.updateBook(book);
+      console.error('[LocalBookService] Failed to rebuild TXT with selected charset', e);
+      throw new Error('TXT 字符编码重新解析失败');
+    }
   }
 
   static isEpubImageMarker(value: string): boolean {
@@ -422,7 +464,8 @@ export class LocalBookService {
   }
 
   private static async rebuildTxtBook(book: Book, localPath: string): Promise<void> {
-    book.charset = await LocalBookService.detectTextFileCharset(localPath);
+    const charsetOverride = LocalBookService.getTxtCharsetOverride(book);
+    book.charset = charsetOverride || await LocalBookService.detectTextFileCharset(localPath);
     await appDb.deleteBookChapters(book.bookUrl);
     await appDb.deleteBookCachedContent(book.bookUrl);
     const imported = await LocalBookService.importTxtChapters(
@@ -616,7 +659,8 @@ export class LocalBookService {
     try {
       const buffer = new ArrayBuffer(sampleSize);
       const readSize = await fs.read(file.fd, buffer);
-      return LocalBookService.detectCharset(new Uint8Array(buffer, 0, Math.max(0, readSize)));
+      const bytes = new Uint8Array(buffer, 0, Math.max(0, readSize));
+      return LocalBookService.detectCharset(bytes, readSize < stat.size);
     } finally {
       await fs.close(file);
     }
@@ -1034,20 +1078,42 @@ export class LocalBookService {
     }
   }
 
-  private static detectCharset(bytes: Uint8Array): string {
+  private static detectCharset(bytes: Uint8Array, sampleEndsBeforeFile: boolean = false): string {
     if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) return 'utf-8';
     if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) return 'utf-16le';
     if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) return 'utf-16be';
     const utf16 = LocalBookService.detectBomlessUtf16(bytes);
     if (utf16) return utf16;
     try {
-      const utf8 = util.TextDecoder.create('utf-8').decodeWithStream(bytes, { stream: false });
+      // Keep the decoder stream open when this is only a file prefix. An incomplete UTF-8
+      // character at the sampling boundary is then buffered instead of emitted as U+FFFD.
+      const utf8 = util.TextDecoder.create('utf-8')
+        .decodeWithStream(bytes, { stream: sampleEndsBeforeFile });
       const replacements = (utf8.match(/\uFFFD/g) || []).length;
       // GBK/GB18030 文件可能绝大多数是英文，仅夹少量中文；任何非法 UTF-8 都应触发中文编码回退。
       if (replacements === 0) return 'utf-8';
     } catch (e) {
     }
     return 'gb18030';
+  }
+
+  private static normalizeTxtCharset(charset: string): string {
+    const value = (charset || '').trim().toLowerCase().replace(/_/g, '-');
+    if (!value || value === 'auto') return '';
+    if (value === 'gbk' || value === 'gb2312' || value === 'gb18030') return 'gb18030';
+    if (value === 'utf8' || value === 'utf-8' || value === 'utf8-bom' || value === 'utf-8-bom') {
+      return 'utf-8';
+    }
+    if (value === 'utf16-le' || value === 'utf16le' || value === 'utf-16le') return 'utf-16le';
+    if (value === 'utf16-be' || value === 'utf16be' || value === 'utf-16be') return 'utf-16be';
+    if (value === 'big5') return 'big5';
+    if (value === 'koi8-r') return 'koi8-r';
+    if (value === 'euc-kr') return 'euc-kr';
+    if (value === 'euc-jp') return 'euc-jp';
+    if (value === 'shift-jis' || value === 'sjis') return 'shift_jis';
+    if (value === 'windows1250' || value === 'windows-1250') return 'windows-1250';
+    if (value === 'ibm866') return 'ibm866';
+    return '';
   }
 
   private static detectBomlessUtf16(bytes: Uint8Array): string {

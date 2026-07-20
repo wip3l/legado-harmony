@@ -27,6 +27,8 @@ export class ReaderSettings {
   extendToStatusBar: boolean = false;
   preloadEnabled: boolean = true;
   preloadChapterCount: number = 1;
+  useTtsQuickAction: boolean = true;
+  useChapterQuickJump: boolean = true;
   fontFamily: string = '';
   fontFilePath: string = '';
   fontSourceName: string = '系统默认';
@@ -79,6 +81,8 @@ export class ReaderSettingsStore {
   static readonly KEY_EXTEND_TO_STATUS_BAR: string = 'readerExtendToStatusBar';
   static readonly KEY_PRELOAD_ENABLED: string = 'readerPreloadEnabled';
   static readonly KEY_PRELOAD_CHAPTER_COUNT: string = 'readerPreloadChapterCount';
+  static readonly KEY_USE_TTS_QUICK_ACTION: string = 'readerUseTtsQuickAction';
+  static readonly KEY_USE_CHAPTER_QUICK_JUMP: string = 'readerUseChapterQuickJump';
   static readonly KEY_FONT_FAMILY: string = 'readerFontFamily';
   static readonly KEY_FONT_FILE_PATH: string = 'readerFontFilePath';
   static readonly KEY_FONT_SOURCE_NAME: string = 'readerFontSourceName';
@@ -102,6 +106,7 @@ export class ReaderSettingsStore {
   private static cachedSettings: ReaderSettings | null = null;
   private static cachedThemeId: string = '';
   private static readerFontStyleSaveQueue: Promise<void> = Promise.resolve();
+  private static layoutElementSaveQueue: Promise<void> = Promise.resolve();
 
   static async load(context: Context): Promise<ReaderSettings> {
     const activeThemeId = ReaderSettingsStore.activeThemeId();
@@ -260,6 +265,16 @@ export class ReaderSettingsStore {
       1,
       'preloadChapterCount'
     );
+    settings.useTtsQuickAction = await ReaderSettingsStore.getBoolean(
+      store,
+      ReaderSettingsStore.KEY_USE_TTS_QUICK_ACTION,
+      AppStorage.get<boolean>(ReaderSettingsStore.KEY_USE_TTS_QUICK_ACTION) ?? true
+    );
+    settings.useChapterQuickJump = await ReaderSettingsStore.getBoolean(
+      store,
+      ReaderSettingsStore.KEY_USE_CHAPTER_QUICK_JUMP,
+      AppStorage.get<boolean>(ReaderSettingsStore.KEY_USE_CHAPTER_QUICK_JUMP) ?? true
+    );
     settings.fontFamily = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_FONT_FAMILY, '');
     settings.fontFilePath = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_FONT_FILE_PATH, '');
     settings.fontSourceName = await ReaderSettingsStore.getString(store, ReaderSettingsStore.KEY_FONT_SOURCE_NAME, '系统默认');
@@ -288,6 +303,7 @@ export class ReaderSettingsStore {
 
   static async reload(context: Context): Promise<ReaderSettings> {
     await ReaderSettingsStore.waitForReaderFontStyleSaves();
+    await ReaderSettingsStore.waitForLayoutElementSaves();
     ReaderSettingsStore.cachedSettings = null;
     ReaderSettingsStore.cachedThemeId = '';
     return await ReaderSettingsStore.load(context);
@@ -553,6 +569,37 @@ export class ReaderSettingsStore {
     await store.flush();
   }
 
+  static saveLayoutElementSettings(context: Context, useTtsQuickAction: boolean,
+    useChapterQuickJump: boolean): Promise<void> {
+    const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
+    settings.useTtsQuickAction = useTtsQuickAction;
+    settings.useChapterQuickJump = useChapterQuickJump;
+    ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_USE_TTS_QUICK_ACTION, useTtsQuickAction);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_USE_CHAPTER_QUICK_JUMP, useChapterQuickJump);
+    const snapshot = ReaderSettingsStore.clone(settings);
+    const themeId = ReaderSettingsStore.activeThemeId();
+    const previous = ReaderSettingsStore.layoutElementSaveQueue.catch(() => {
+    });
+    const next = previous.then(async () => {
+      const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+      await store.put(ReaderSettingsStore.KEY_USE_TTS_QUICK_ACTION, snapshot.useTtsQuickAction);
+      await store.put(ReaderSettingsStore.KEY_USE_CHAPTER_QUICK_JUMP, snapshot.useChapterQuickJump);
+      await ReaderSettingsStore.persistThemeProfile(store, themeId, snapshot);
+      await store.flush();
+    });
+    ReaderSettingsStore.layoutElementSaveQueue = next;
+    return next;
+  }
+
+  private static async waitForLayoutElementSaves(): Promise<void> {
+    try {
+      await ReaderSettingsStore.layoutElementSaveQueue;
+    } catch (e) {
+      console.warn('等待阅读布局元素设置保存失败:', e);
+    }
+  }
+
   static async savePageTurnAnimationType(context: Context, type: number): Promise<void> {
     const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
     settings.pageTurnAnimationType = ReaderSettingsStore.normalizePageTurnAnimationType(type);
@@ -600,6 +647,8 @@ export class ReaderSettingsStore {
     ReaderSettingsStore.applyInteractionToStorage(normalized);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_ENABLED, normalized.preloadEnabled);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_CHAPTER_COUNT, normalized.preloadChapterCount);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_USE_TTS_QUICK_ACTION, normalized.useTtsQuickAction);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_USE_CHAPTER_QUICK_JUMP, normalized.useChapterQuickJump);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_FONT_FAMILY, normalized.fontFamily);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_FONT_FILE_PATH, normalized.fontFilePath);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_FONT_SOURCE_NAME, normalized.fontSourceName);
@@ -918,6 +967,10 @@ export class ReaderSettingsStore {
     settings.extendToStatusBar = source.extendToStatusBar;
     settings.preloadEnabled = source.preloadEnabled;
     settings.preloadChapterCount = ReaderSettingsStore.normalizePreloadChapterCount(source.preloadChapterCount);
+    settings.useTtsQuickAction = typeof source.useTtsQuickAction === 'boolean' ? source.useTtsQuickAction :
+      (AppStorage.get<boolean>(ReaderSettingsStore.KEY_USE_TTS_QUICK_ACTION) ?? true);
+    settings.useChapterQuickJump = typeof source.useChapterQuickJump === 'boolean' ? source.useChapterQuickJump :
+      (AppStorage.get<boolean>(ReaderSettingsStore.KEY_USE_CHAPTER_QUICK_JUMP) ?? true);
     settings.fontFamily = source.fontFamily || '';
     settings.fontFilePath = source.fontFilePath || '';
     settings.fontSourceName = source.fontSourceName || '系统默认';
@@ -1010,6 +1063,8 @@ export class ReaderSettingsStore {
     settings.preloadChapterCount = ReaderSettingsStore.normalizePreloadChapterCount(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PRELOAD_CHAPTER_COUNT) ?? 1
     );
+    settings.useTtsQuickAction = AppStorage.get<boolean>(ReaderSettingsStore.KEY_USE_TTS_QUICK_ACTION) ?? true;
+    settings.useChapterQuickJump = AppStorage.get<boolean>(ReaderSettingsStore.KEY_USE_CHAPTER_QUICK_JUMP) ?? true;
     settings.fontFamily = AppStorage.get<string>(ReaderSettingsStore.KEY_FONT_FAMILY) || '';
     settings.fontFilePath = AppStorage.get<string>(ReaderSettingsStore.KEY_FONT_FILE_PATH) || '';
     settings.fontSourceName = AppStorage.get<string>(ReaderSettingsStore.KEY_FONT_SOURCE_NAME) || '系统默认';
