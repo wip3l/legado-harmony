@@ -59,6 +59,11 @@ export class Book {
     this.variable = JSON.stringify(this.variableMap);
   }
 
+  replaceVariable(raw: string): void {
+    this.variable = raw || '{}';
+    this._variableMap = null;
+  }
+
   getRealAuthor(): string {
     return this.author.replace(/[?？]/g, '');
   }
@@ -250,6 +255,7 @@ export class BookSource {
   variableComment: string = '';
   lastUpdateTime: number = 0;
   customOrder: number = 0;
+  isPinned: boolean = false;
   enabled: boolean = true;
   enabledExplore: boolean = true;
   isLocked: boolean = false;

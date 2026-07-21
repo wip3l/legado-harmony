@@ -526,14 +526,23 @@ struct ReaderFontSettingsPage {
           .fontColor(this.subTextColor())
       }
       .width('100%')
-      Slider({ value: value, min: min, max: max, step: 1 })
-        .width('100%')
-        .margin({ top: 8 })
-        .selectedColor(this.accentColor())
-        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-        .onChange((sliderValue: number) => {
-          onChange(sliderValue);
+      Row({ space: 10 }) {
+        this.fontSizeStepButton($r('sys.symbol.minus'), '减小字体', value > min, () => {
+          onChange(Math.max(min, Math.round(value) - 1));
         })
+        Slider({ value: value, min: min, max: max, step: 1 })
+          .layoutWeight(1)
+          .selectedColor(this.accentColor())
+          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+          .onChange((sliderValue: number) => {
+            onChange(sliderValue);
+          })
+        this.fontSizeStepButton($r('sys.symbol.plus'), '增大字体', value !== max, () => {
+          onChange(Math.min(max, Math.round(value) + 1));
+        })
+      }
+      .width('100%')
+      .margin({ top: 8 })
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
@@ -553,14 +562,23 @@ struct ReaderFontSettingsPage {
           .fontColor(this.subTextColor())
       }
       .width('100%')
-      Slider({ value: this.readerFontSize, min: 14, max: 50, step: 1 })
-        .width('100%')
-        .margin({ top: 8 })
-        .selectedColor(this.accentColor())
-        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-        .onChange((sliderValue: number) => {
-          this.setBodyFontSize(sliderValue);
+      Row({ space: 10 }) {
+        this.fontSizeStepButton($r('sys.symbol.minus'), '减小正文字体', this.readerFontSize > 14, () => {
+          this.setBodyFontSize(this.readerFontSize - 1);
         })
+        Slider({ value: this.readerFontSize, min: 14, max: 50, step: 1 })
+          .layoutWeight(1)
+          .selectedColor(this.accentColor())
+          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+          .onChange((sliderValue: number) => {
+            this.setBodyFontSize(sliderValue);
+          })
+        this.fontSizeStepButton($r('sys.symbol.plus'), '增大正文字体', this.readerFontSize !== 50, () => {
+          this.setBodyFontSize(this.readerFontSize + 1);
+        })
+      }
+      .width('100%')
+      .margin({ top: 8 })
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
@@ -580,18 +598,43 @@ struct ReaderFontSettingsPage {
           .fontColor(this.subTextColor())
       }
       .width('100%')
-      Slider({ value: this.readerTitleFontSize, min: 14, max: 50, step: 1 })
-        .width('100%')
-        .margin({ top: 8 })
-        .selectedColor(this.accentColor())
-        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-        .onChange((sliderValue: number) => {
-          this.setTitleFontSize(sliderValue);
+      Row({ space: 10 }) {
+        this.fontSizeStepButton($r('sys.symbol.minus'), '减小标题字体', this.readerTitleFontSize > 14, () => {
+          this.setTitleFontSize(this.readerTitleFontSize - 1);
         })
+        Slider({ value: this.readerTitleFontSize, min: 14, max: 50, step: 1 })
+          .layoutWeight(1)
+          .selectedColor(this.accentColor())
+          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+          .onChange((sliderValue: number) => {
+            this.setTitleFontSize(sliderValue);
+          })
+        this.fontSizeStepButton($r('sys.symbol.plus'), '增大标题字体', this.readerTitleFontSize !== 50, () => {
+          this.setTitleFontSize(this.readerTitleFontSize + 1);
+        })
+      }
+      .width('100%')
+      .margin({ top: 8 })
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     .backgroundColor(this.cardColor())
+  }
+
+  @Builder
+  fontSizeStepButton(icon: Resource, accessibilityText: string, enabled: boolean, action: () => void) {
+    Button({ type: ButtonType.Circle, stateEffect: true }) {
+      SymbolGlyph(icon)
+        .fontSize(17)
+        .fontColor([enabled ? this.primaryTextColor() : this.subTextColor()])
+    }
+    .width(34)
+    .height(34)
+    .padding(0)
+    .enabled(enabled)
+    .backgroundColor(this.inputColor())
+    .accessibilityText(accessibilityText)
+    .onClick(action)
   }
 
   @Builder
@@ -1334,14 +1377,23 @@ struct ReaderFontSettingsPage {
           .fontColor(this.subTextColor())
       }
       .width('100%')
-      Slider({ value: value, min: 14, max: 50, step: 1 })
-        .width('100%')
-        .margin({ top: 6 })
-        .selectedColor(this.accentColor())
-        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-        .onChange((sliderValue: number) => {
-          onChange(sliderValue);
+      Row({ space: 10 }) {
+        this.fontSizeStepButton($r('sys.symbol.minus'), '减小字体', value > 14, () => {
+          onChange(Math.max(14, Math.round(value) - 1));
         })
+        Slider({ value: value, min: 14, max: 50, step: 1 })
+          .layoutWeight(1)
+          .selectedColor(this.accentColor())
+          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+          .onChange((sliderValue: number) => {
+            onChange(sliderValue);
+          })
+        this.fontSizeStepButton($r('sys.symbol.plus'), '增大字体', value !== 50, () => {
+          onChange(Math.min(50, Math.round(value) + 1));
+        })
+      }
+      .width('100%')
+      .margin({ top: 6 })
     }
     .width('100%')
   }
@@ -1360,16 +1412,31 @@ struct ReaderFontSettingsPage {
           .opacity(refreshKey >= 0 ? 1 : 1)
       }
       .width('100%')
-      Slider({ value: this.regexRuleAt(index).fontSize, min: 14, max: 50, step: 1 })
-        .width('100%')
-        .margin({ top: 6 })
-        .selectedColor(this.accentColor())
-        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-        .onChange((sliderValue: number) => {
+      Row({ space: 10 }) {
+        this.fontSizeStepButton($r('sys.symbol.minus'), '减小规则字体',
+          this.regexRuleAt(index).fontSize > 14, () => {
           this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-            target.fontSize = Math.max(14, Math.min(Math.round(sliderValue), 50));
+            target.fontSize = Math.max(14, Math.round(target.fontSize) - 1);
           });
         })
+        Slider({ value: this.regexRuleAt(index).fontSize, min: 14, max: 50, step: 1 })
+          .layoutWeight(1)
+          .selectedColor(this.accentColor())
+          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+          .onChange((sliderValue: number) => {
+            this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+              target.fontSize = Math.max(14, Math.min(Math.round(sliderValue), 50));
+            });
+          })
+        this.fontSizeStepButton($r('sys.symbol.plus'), '增大规则字体',
+          this.regexRuleAt(index).fontSize !== 50, () => {
+          this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+            target.fontSize = Math.min(50, Math.round(target.fontSize) + 1);
+          });
+        })
+      }
+      .width('100%')
+      .margin({ top: 6 })
     }
     .width('100%')
   }

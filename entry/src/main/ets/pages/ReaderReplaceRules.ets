@@ -195,6 +195,9 @@ struct ReaderReplaceRulesPage {
             ListItem() {
               this.ruleCard(rule)
             }
+            .width('100%')
+            .borderRadius(14)
+            .clip(true)
             .swipeAction(this.selectionMode ? {} : {
               start: {
                 builder: () => {
@@ -222,6 +225,7 @@ struct ReaderReplaceRulesPage {
         .layoutWeight(1)
         .width('100%')
         .padding({ left: 16, right: 16 })
+        .clip(true)
         .lanes(ResponsiveManagerListLayout.laneCount(this.contextViewportWidth),
           ResponsiveManagerListLayout.gutter(this.contextViewportWidth))
       }
@@ -670,7 +674,7 @@ struct ReaderReplaceRulesPage {
         .fontSize(11)
         .fontColor('#FFFFFF')
     }
-    .width(72)
+    .width(64)
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
@@ -688,7 +692,7 @@ struct ReaderReplaceRulesPage {
         .fontSize(11)
         .fontColor('#FFFFFF')
     }
-    .width(72)
+    .width(64)
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)

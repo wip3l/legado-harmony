@@ -18,7 +18,6 @@ struct SearchExploreSettingsPage {
   @StorageLink('searchExploreShowSearchProgress') searchExploreShowSearchProgress: boolean = true;
   @StorageLink('searchExploreSearchConcurrency') searchExploreSearchConcurrency: number = 6;
   @StorageLink('searchExploreSelectedSourceGroups') searchExploreSelectedSourceGroups: string = '';
-  @StorageLink('searchExploreSourceSort') searchExploreSourceSort: string = '';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
@@ -115,15 +114,6 @@ struct SearchExploreSettingsPage {
           .clip(true)
           .backgroundColor(this.cardColor())
 
-          this.sectionTitle('发现设置')
-          Column() {
-            this.navItem('书源排序', '调整发现页书源下拉列表顺序', 'pages/ExploreSourceSort')
-          }
-          .width('calc(100% - 24vp)')
-          .margin({ left: 12, right: 12 })
-          .borderRadius(16)
-          .clip(true)
-          .backgroundColor(this.cardColor())
         }
         .width('100%')
         .padding({ bottom: 32 })
@@ -150,7 +140,6 @@ struct SearchExploreSettingsPage {
       this.searchExploreShowSearchProgress = settings.showSearchProgress;
       this.searchExploreSearchConcurrency = settings.searchConcurrency;
       this.searchExploreSelectedSourceGroups = settings.selectedSourceGroupsRaw;
-      this.searchExploreSourceSort = settings.sourceSortRaw;
     } catch (e) {
       console.warn('重新加载搜索/发现配置失败:', e);
     }
@@ -189,7 +178,6 @@ struct SearchExploreSettingsPage {
       settings.showSearchProgress = this.searchExploreShowSearchProgress;
       settings.searchConcurrency = SearchExploreSettingsStore.normalizeSearchConcurrency(this.searchExploreSearchConcurrency);
       settings.selectedSourceGroupsRaw = this.searchExploreSelectedSourceGroups;
-      settings.sourceSortRaw = this.searchExploreSourceSort;
       SearchExploreSettingsStore.applyToStorage(settings);
       return SearchExploreSettingsStore.save(getContext(this), settings);
     }).catch((e: Error) => {

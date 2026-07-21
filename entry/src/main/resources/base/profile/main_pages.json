@@ -15,6 +15,7 @@
     "pages/SearchExploreSettings",
     "pages/ExploreSourceSort",
     "pages/OtherSettings",
+    "pages/DataBackup",
     "pages/AppIconSettings",
     "pages/ThemeColorSettings",
     "pages/ThemeSettings",

@@ -44,6 +44,11 @@ struct BookSourcePage {
   @State isLoading: boolean = false;
   @State searchText: string = '';
   @State activeSourceGroup: string = '__all__';
+  @State showSourceFilterDialog: boolean = false;
+  @State sourceEnabledFilter: string = 'all';
+  @State sourceExplorePageFilter: string = 'all';
+  @State sourceExploreEnabledFilter: string = 'all';
+  @State sourceLoginFilter: string = 'all';
   @State showAddDialog: boolean = false;
   @State showImportUrlDialog: boolean = false;
   @State selectionMode: boolean = false;
@@ -58,6 +63,9 @@ struct BookSourcePage {
   @State showRenameSourceGroupDialog: boolean = false;
   @State showDeleteSourceGroupDialog: boolean = false;
   @State showAddSourceGroupDialog: boolean = false;
+  @State showSourceGroupManagerDialog: boolean = false;
+  @State showDeleteSelectedSourceGroupsDialog: boolean = false;
+  @State selectedManagedSourceGroups: string[] = [];
   @State pendingSourceGroup: string = '';
   @State renameSourceGroupInput: string = '';
   @State newSourceGroupInput: string = '';
@@ -68,6 +76,8 @@ struct BookSourcePage {
   @State contextViewportWidth: number = 360;
   @State contextViewportHeight: number = 720;
   @State groupNameInput: string = '';
+  @State groupActionSourceUrl: string = '';
+  @State draggingSourceUrl: string = '';
   @State importUrl: string = '';
   @State isImporting: boolean = false;
   @State isBatchOperating: boolean = false;
@@ -83,6 +93,7 @@ struct BookSourcePage {
   @State checkStatus: string = '';
   @State checkInvalidAction: string = 'none';
   @State checkAutoHandledCount: number = 0;
+  private sourceListScroller: Scroller = new Scroller();
   private hasShownOnce: boolean = false;
 
   aboutToAppear() {
@@ -139,6 +150,41 @@ struct BookSourcePage {
             .layoutWeight(1)
 
           if (!this.selectionMode) {
+            Stack({ alignContent: Alignment.Center }) {
+              Column({ space: 3 }) {
+                Row()
+                  .width(20)
+                  .height(2)
+                  .borderRadius(1)
+                  .backgroundColor(this.hasActiveSourceFilters() ? this.accentColor() : this.primaryTextColor())
+                Row()
+                  .width(14)
+                  .height(2)
+                  .borderRadius(1)
+                  .backgroundColor(this.hasActiveSourceFilters() ? this.accentColor() : this.primaryTextColor())
+                Row()
+                  .width(8)
+                  .height(2)
+                  .borderRadius(1)
+                  .backgroundColor(this.hasActiveSourceFilters() ? this.accentColor() : this.primaryTextColor())
+              }
+              .alignItems(HorizontalAlign.Center)
+              if (this.hasActiveSourceFilters()) {
+                Circle()
+                  .width(7)
+                  .height(7)
+                  .fill(this.accentColor())
+                  .position({ x: 27, y: 7 })
+              }
+            }
+            .width(40)
+            .height(40)
+            .accessibilityText(this.hasActiveSourceFilters() ?
+              `筛选，已启用 ${this.activeSourceFilterCount()} 项` : '筛选书源')
+            .onClick(() => {
+              this.showSourceFilterDialog = true;
+            })
+
             Text('校验')
               .fontSize(15)
               .fontColor(this.isCheckingSources ? this.subTextColor() : this.primaryTextColor())
@@ -213,7 +259,7 @@ struct BookSourcePage {
                 this.toggleAllSources();
               })
 
-            Text(`已选择 ${this.selectedSourceUrls.length}/${this.sources.length}`)
+            Text(`已选择 ${this.selectedSourceUrls.length}/${this.allSources.length}`)
               .fontSize(14)
               .fontColor(this.secondaryTextColor())
               .margin({ left: 8 })
@@ -262,7 +308,7 @@ struct BookSourcePage {
           .justifyContent(FlexAlign.Center)
         } else {
           Stack({ alignContent: Alignment.TopEnd }) {
-            List({ space: 8 }) {
+            List({ space: 8, scroller: this.sourceListScroller }) {
             ForEach(this.visibleSources, (source: BookSource) => {
               ListItem() {
                 Row() {
@@ -279,6 +325,17 @@ struct BookSourcePage {
                       })
                   }
 
+                  if (!this.selectionMode) {
+                    Text('☰')
+                      .fontSize(18)
+                      .fontColor(this.subTextColor())
+                      .width(28)
+                      .height(40)
+                      .textAlign(TextAlign.Center)
+                      .margin({ right: 8 })
+                      .accessibilityText(`拖动排序：${source.bookSourceName}`)
+                  }
+
                   Column() {
                     Row() {
                       Text(source.bookSourceName)
@@ -289,23 +346,33 @@ struct BookSourcePage {
                         .textOverflow({ overflow: TextOverflow.Ellipsis })
                         .layoutWeight(1)
 
-                      if (this.sourceNeedsLogin(source)) {
-                        Text(this.sourceLoggedIn(source) ? '已登录' : '未登录')
-                          .fontSize(11)
-                          .fontColor(this.sourceLoggedIn(source) ? '#1E8E3E' : '#C62828')
-                          .backgroundColor(this.sourceLoggedIn(source) ? '#E7F5EA' : '#FDECEC')
-                          .padding({ left: 7, right: 7, top: 3, bottom: 3 })
-                          .borderRadius(4)
-                          .margin({ left: 8 })
+                      if (source.isPinned) {
+                        this.sourceStatusIcon($r('sys.symbol.pin'), this.accentColor(), '已置顶')
                       }
-                      if (source.isLocked) {
-                        Text('已锁定')
+                      if (this.isSourceAtBottom(source)) {
+                        this.sourceOrderStatusBadge('尾', '已置尾')
+                      }
+
+                      if (source.bookSourceGroup) {
+                        Text(source.bookSourceGroup)
                           .fontSize(11)
                           .fontColor(this.accentColor())
-                          .backgroundColor(this.inputColor())
+                          .maxLines(1)
+                          .textOverflow({ overflow: TextOverflow.Ellipsis })
+                          .constraintSize({ maxWidth: 72 })
                           .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+                          .backgroundColor(this.inputColor())
                           .borderRadius(4)
-                          .margin({ left: 8 })
+                          .margin({ left: 6 })
+                      }
+
+                      if (this.sourceNeedsLogin(source)) {
+                        this.sourceLoginStatusBadge(
+                          this.sourceLoggedIn(source) ? '#1E8E3E' : '#C62828',
+                          this.sourceLoggedIn(source) ? '已登录' : '未登录')
+                      }
+                      if (source.isLocked) {
+                        this.sourceStatusIcon($r('sys.symbol.lock'), this.accentColor(), '已锁定')
                       }
                     }
                     .width('100%')
@@ -318,15 +385,17 @@ struct BookSourcePage {
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-                    if (source.bookSourceGroup) {
-                      Text(source.bookSourceGroup)
-                        .fontSize(12)
-                        .fontColor(this.secondaryTextColor())
-                        .margin({ top: 4 })
-                    }
                   }
                   .layoutWeight(1)
                   .alignItems(HorizontalAlign.Start)
+                  .gesture(
+                    LongPressGesture({ repeat: false })
+                      .onAction((event: GestureEvent) => {
+                        if (!this.selectionMode && !this.isBatchOperating) {
+                          this.openSourceActions(source, event);
+                        }
+                      })
+                  )
 
                   if (this.selectionMode) {
                     Column() {
@@ -348,14 +417,6 @@ struct BookSourcePage {
                 .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
                 .shadow({ radius: ThemeRuntime.glassShadowRadius(), color: this.glassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX(), offsetY: ThemeRuntime.glassShadowOffsetY() })
                 .opacity(source.enabled ? 1 : 0.45)
-                .gesture(
-                  LongPressGesture({ repeat: false })
-                    .onAction((event: GestureEvent) => {
-                      if (!this.selectionMode && !this.isBatchOperating) {
-                        this.openSourceActions(source, event);
-                      }
-                    })
-                )
                 .onClick(() => {
                   if (this.isBatchOperating) {
                     return;
@@ -365,6 +426,9 @@ struct BookSourcePage {
                   }
                 })
               }
+              .width('100%')
+              .borderRadius(8)
+              .clip(true)
               .swipeAction(this.selectionMode || source.isLocked ? {} : {
                 start: {
                   builder: () => {
@@ -394,11 +458,23 @@ struct BookSourcePage {
             .lanes(ResponsiveManagerListLayout.laneCount(this.contextViewportWidth),
               ResponsiveManagerListLayout.gutter(this.contextViewportWidth))
             .scrollBar(BarState.Off)
+            .clip(true)
             .onScrollIndex((start: number, end: number) => {
               this.sourceFirstVisibleIndex = Math.max(0, start);
               this.sourceVisibleItemCount = Math.max(1, end - start + 1);
             })
             .onReachEnd(() => this.loadMoreVisibleSources())
+            .onItemDragStart((_event: ItemDragInfo, itemIndex: number) => {
+              this.draggingSourceUrl = !this.selectionMode && itemIndex >= 0 && itemIndex < this.visibleSources.length ?
+                this.visibleSources[itemIndex].bookSourceUrl : '';
+              return this.sourceDragPreview;
+            })
+            .onItemDrop((_event: ItemDragInfo, itemIndex: number, insertIndex: number, isSuccess: boolean) => {
+              if (isSuccess && this.draggingSourceUrl) {
+                this.moveVisibleSourceTo(itemIndex, insertIndex);
+              }
+              this.draggingSourceUrl = '';
+            })
 
             this.sourceVirtualScrollbar()
           }
@@ -606,7 +682,8 @@ struct BookSourcePage {
               .textAlign(TextAlign.Center)
               .margin({ bottom: 12 })
 
-            Text(`已选择 ${this.selectedSourceUrls.length} 个书源`)
+            Text(this.groupActionSourceUrl ? `书源：${this.actionGroupingSourceName()}` :
+              `已选择 ${this.selectedSourceUrls.length} 个书源`)
               .fontSize(13)
               .fontColor(this.subTextColor())
               .width('100%')
@@ -626,21 +703,26 @@ struct BookSourcePage {
               })
 
             if (this.getSourceGroups().length > 0) {
-              Flex({ wrap: FlexWrap.Wrap }) {
-                ForEach(this.getSourceGroups(), (group: string) => {
-                  Text(group)
-                    .fontSize(13)
-                    .fontColor(this.secondaryTextColor())
-                    .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                    .backgroundColor(this.inputColor())
-                    .borderRadius(14)
-                    .margin({ right: 8, top: 10 })
-                    .onClick(() => {
-                      this.groupNameInput = group;
-                    })
-                })
+              Scroll() {
+                Flex({ wrap: FlexWrap.Wrap }) {
+                  ForEach(this.getSourceGroups(), (group: string) => {
+                    Text(group)
+                      .fontSize(13)
+                      .fontColor(this.secondaryTextColor())
+                      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                      .backgroundColor(this.inputColor())
+                      .borderRadius(14)
+                      .margin({ right: 8, top: 10 })
+                      .onClick(() => {
+                        this.groupNameInput = group;
+                      })
+                  })
+                }
+                .width('100%')
               }
               .width('100%')
+              .constraintSize({ maxHeight: 240 })
+              .scrollBar(BarState.Auto)
             }
 
             Row() {
@@ -650,7 +732,7 @@ struct BookSourcePage {
                 .backgroundColor(this.inputColor())
                 .fontColor(this.primaryTextColor())
                 .onClick(() => {
-                  this.showGroupDialog = false;
+                  this.closeSourceGroupDialog();
                 })
 
               Button('保存')
@@ -667,6 +749,7 @@ struct BookSourcePage {
             .margin({ top: 18 })
           }
           .width('88%')
+          .constraintSize({ maxHeight: '78%' })
           .padding(24)
           .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
           .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
@@ -679,7 +762,7 @@ struct BookSourcePage {
         .backgroundColor('#80000000')
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
-          this.showGroupDialog = false;
+          this.closeSourceGroupDialog();
         })
       }
 
@@ -695,6 +778,10 @@ struct BookSourcePage {
         this.sourceGroupToolsMenu()
       }
 
+      if (this.showSourceGroupManagerDialog) {
+        this.sourceGroupManagerDialog()
+      }
+
       if (this.showRenameSourceGroupDialog) {
         this.renameSourceGroupDialog()
       }
@@ -703,8 +790,16 @@ struct BookSourcePage {
         this.deleteSourceGroupDialog()
       }
 
+      if (this.showDeleteSelectedSourceGroupsDialog) {
+        this.deleteSelectedSourceGroupsDialog()
+      }
+
       if (this.showAddSourceGroupDialog) {
         this.addSourceGroupDialog()
+      }
+
+      if (this.showSourceFilterDialog) {
+        this.sourceFilterDialog()
       }
 
       if (this.showCheckOptionsDialog) {
@@ -1074,6 +1169,96 @@ struct BookSourcePage {
   }
 
   @Builder
+  sourceFilterDialog() {
+    Column() {
+      Column({ space: 14 }) {
+        Row() {
+          Text('筛选书源')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
+            .layoutWeight(1)
+          Text(`当前 ${this.sources.length}/${this.allSources.length}`)
+            .fontSize(12)
+            .fontColor(this.subTextColor())
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        this.sourceFilterRow('书源状态', 'enabled', '已启用', '未启用')
+        this.sourceFilterRow('发现页面', 'explorePage', '有发现页', '无发现页')
+        this.sourceFilterRow('发现状态', 'exploreEnabled', '已启用', '未启用')
+        this.sourceFilterRow('登录要求', 'login', '需要登录', '无需登录')
+
+        Row({ space: 10 }) {
+          Button('重置', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .enabled(this.hasActiveSourceFilters())
+            .backgroundColor(this.inputColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => this.resetSourceFilters())
+          Button('完成', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor(this.buttonColor())
+            .fontColor('#FFFFFF')
+            .onClick(() => this.showSourceFilterDialog = false)
+        }
+        .width('100%')
+        .margin({ top: 4 })
+      }
+      .width('92%')
+      .constraintSize({ maxWidth: 540 })
+      .padding(22)
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#80000000')
+  }
+
+  @Builder
+  sourceFilterRow(label: string, filterKey: string, yesLabel: string, noLabel: string) {
+    Row({ space: 10 }) {
+      Text(label)
+        .fontSize(14)
+        .fontColor(this.primaryTextColor())
+        .width(66)
+      Row({ space: 6 }) {
+        this.sourceFilterChoice(filterKey, 'all', '不限')
+        this.sourceFilterChoice(filterKey, 'yes', yesLabel)
+        this.sourceFilterChoice(filterKey, 'no', noLabel)
+      }
+      .layoutWeight(1)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  sourceFilterChoice(filterKey: string, value: string, label: string) {
+    Text(label)
+      .fontSize(12)
+      .fontColor(this.sourceFilterValue(filterKey) === value ? '#FFFFFF' : this.secondaryTextColor())
+      .layoutWeight(1)
+      .height(34)
+      .textAlign(TextAlign.Center)
+      .maxLines(1)
+      .backgroundColor(this.sourceFilterValue(filterKey) === value ? this.accentColor() : this.inputColor())
+      .borderRadius(9)
+      .onClick(() => this.setSourceFilterValue(filterKey, value))
+  }
+
+  @Builder
   checkOptionsDialog() {
     Stack({ alignContent: Alignment.TopEnd }) {
       Column()
@@ -1193,9 +1378,15 @@ struct BookSourcePage {
         }
         this.contextActionItem($r('sys.symbol.checkmark_shield'), '校验', this.primaryTextColor(),
           () => this.checkActionSource())
+        this.contextActionItem($r('sys.symbol.pin'), this.actionSourcePinned() ? '取消置顶' : '置顶',
+          this.primaryTextColor(), () => this.toggleActionSourcePinned())
+        this.contextActionItem($r('sys.symbol.chevron_down'), '置底', this.primaryTextColor(),
+          () => this.moveActionSourceToBottom())
         this.contextActionItem($r('sys.symbol.lock'), this.actionSourceLocked() ? '解锁' : '锁定',
           this.primaryTextColor(), () => this.toggleActionSourceLocked())
         if (!this.actionSourceLocked()) {
+          this.contextActionItem($r('sys.symbol.folder'), '分组', this.primaryTextColor(),
+            () => this.openActionSourceGroup())
           this.contextActionItem($r('sys.symbol.square_and_pencil'), '修改', this.primaryTextColor(),
             () => this.openActionSourceEdit())
           this.contextActionItem(this.actionSourceEnabled() ? $r('sys.symbol.minus_circle') :
@@ -1247,6 +1438,51 @@ struct BookSourcePage {
   }
 
   @Builder
+  sourceOrderStatusBadge(label: string, accessibilityLabel: string) {
+    Text(label)
+      .fontSize(11)
+      .fontWeight(FontWeight.Medium)
+      .fontColor(this.accentColor())
+      .width(24)
+      .height(24)
+      .textAlign(TextAlign.Center)
+      .backgroundColor(this.inputColor())
+      .borderRadius(12)
+      .margin({ left: 6 })
+      .accessibilityText(accessibilityLabel)
+  }
+
+  @Builder
+  sourceStatusIcon(icon: Resource, color: string, accessibilityLabel: string) {
+    Stack({ alignContent: Alignment.Center }) {
+      SymbolGlyph(icon)
+        .fontSize(16)
+        .fontColor([color])
+    }
+    .width(24)
+    .height(24)
+    .borderRadius(12)
+    .backgroundColor(this.inputColor())
+    .margin({ left: 6 })
+    .accessibilityText(accessibilityLabel)
+  }
+
+  @Builder
+  sourceLoginStatusBadge(color: string, accessibilityLabel: string) {
+    Text('登')
+      .fontSize(11)
+      .fontWeight(FontWeight.Medium)
+      .fontColor(color)
+      .width(24)
+      .height(24)
+      .textAlign(TextAlign.Center)
+      .backgroundColor(this.inputColor())
+      .borderRadius(12)
+      .margin({ left: 6 })
+      .accessibilityText(accessibilityLabel)
+  }
+
+  @Builder
   sourceDisableSwipeAction(source: BookSource) {
     Column({ space: 4 }) {
       SymbolGlyph(source.enabled ? $r('sys.symbol.minus_circle') : $r('sys.symbol.checkmark_circle'))
@@ -1256,7 +1492,7 @@ struct BookSourcePage {
         .fontSize(11)
         .fontColor('#FFFFFF')
     }
-    .width(72)
+    .width(64)
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
@@ -1276,7 +1512,7 @@ struct BookSourcePage {
         .fontSize(11)
         .fontColor('#FFFFFF')
     }
-    .width(72)
+    .width(64)
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
@@ -1344,6 +1580,39 @@ struct BookSourcePage {
       this.showSourceDeleteDialog = false;
       this.actionSourceUrl = '';
     })
+  }
+
+  @Builder
+  sourceDragPreview() {
+    Row() {
+      Text('☰')
+        .fontSize(18)
+        .fontColor(this.subTextColor())
+        .width(28)
+        .textAlign(TextAlign.Center)
+        .margin({ right: 8 })
+      Column() {
+        Text(this.draggingSourceName())
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.draggingSourceUrl)
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+          .margin({ top: 4 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width(280)
+    .padding(12)
+    .borderRadius(8)
+    .backgroundColor(this.cardColor())
+    .shadow({ radius: 12, color: this.appDarkMode ? '#66000000' : '#22000000', offsetX: 0, offsetY: 4 })
   }
 
   @Builder
@@ -1441,6 +1710,11 @@ struct BookSourcePage {
         })
 
       Column() {
+        this.contextActionItem($r('sys.symbol.list_bullet'), '分组管理', this.primaryTextColor(), () => {
+          this.showSourceGroupToolsMenu = false;
+          this.selectedManagedSourceGroups = [];
+          this.showSourceGroupManagerDialog = true;
+        })
         this.contextActionItem($r('sys.symbol.trash'), '清除空分组', this.primaryTextColor(), () => {
           this.showSourceGroupToolsMenu = false;
           this.clearEmptySourceGroups();
@@ -1458,10 +1732,151 @@ struct BookSourcePage {
       .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
       .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
       .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: this.contextMenuLeft(166), y: this.contextMenuTop(100) })
+      .position({ x: this.contextMenuLeft(166), y: this.contextMenuTop(144) })
     }
     .width('100%')
     .height('100%')
+  }
+
+  @Builder
+  sourceGroupManagerDialog() {
+    Column() {
+      Column() {
+        Row() {
+          Text('分组管理')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
+            .layoutWeight(1)
+          Text('新建')
+            .fontSize(14)
+            .fontColor(this.accentColor())
+            .padding({ left: 10, right: 2, top: 8, bottom: 8 })
+            .onClick(() => {
+              this.newSourceGroupInput = '';
+              this.showAddSourceGroupDialog = true;
+            })
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        if (this.getSourceGroups().length === 0) {
+          Column({ space: 8 }) {
+            SymbolGlyph($r('sys.symbol.folder'))
+              .fontSize(30)
+              .fontColor([this.subTextColor()])
+            Text('暂无书源分组')
+              .fontSize(14)
+              .fontColor(this.subTextColor())
+          }
+          .width('100%')
+          .height(150)
+          .justifyContent(FlexAlign.Center)
+        } else {
+          Row() {
+            Toggle({ type: ToggleType.Checkbox, isOn: this.areAllManagedSourceGroupsSelected() })
+              .selectedColor(this.buttonColor())
+              .onChange((isOn: boolean) => this.selectAllManagedSourceGroups(isOn))
+            Text(this.areAllManagedSourceGroupsSelected() ? '取消全选' : '全选')
+              .fontSize(13)
+              .fontColor(this.secondaryTextColor())
+              .margin({ left: 8 })
+              .layoutWeight(1)
+            Text(`已选 ${this.selectedManagedSourceGroups.length} 项`)
+              .fontSize(12)
+              .fontColor(this.subTextColor())
+          }
+          .width('100%')
+          .height(40)
+          .padding({ left: 4, right: 4 })
+
+          Scroll() {
+            Column({ space: 6 }) {
+              ForEach(this.getSourceGroups(), (group: string) => {
+                Row() {
+                  Toggle({ type: ToggleType.Checkbox, isOn: this.isManagedSourceGroupSelected(group) })
+                    .selectedColor(this.buttonColor())
+                    .onChange((isOn: boolean) => this.setManagedSourceGroupSelected(group, isOn))
+                  Column() {
+                    Text(group)
+                      .fontSize(15)
+                      .fontColor(this.primaryTextColor())
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(`${this.sourceGroupCount(group)} 个书源`)
+                      .fontSize(11)
+                      .fontColor(this.subTextColor())
+                      .margin({ top: 2 })
+                  }
+                  .layoutWeight(1)
+                  .margin({ left: 8 })
+                  .alignItems(HorizontalAlign.Start)
+                  Text('编辑')
+                    .fontSize(13)
+                    .fontColor(this.accentColor())
+                    .height(36)
+                    .padding({ left: 9, right: 9 })
+                    .textAlign(TextAlign.Center)
+                    .onClick(() => this.openManagedSourceGroupRename(group))
+                  Text('删除')
+                    .fontSize(13)
+                    .fontColor('#E53935')
+                    .height(36)
+                    .padding({ left: 9, right: 4 })
+                    .textAlign(TextAlign.Center)
+                    .onClick(() => this.openManagedSourceGroupDelete(group))
+                }
+                .width('100%')
+                .height(56)
+                .padding({ left: 8, right: 8 })
+                .borderRadius(9)
+                .backgroundColor(this.inputColor())
+              }, (group: string) => group)
+            }
+            .width('100%')
+          }
+          .width('100%')
+          .constraintSize({ maxHeight: 360 })
+          .scrollBar(BarState.Auto)
+        }
+
+        Row({ space: 10 }) {
+          Button('关闭', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor(this.glassCardColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => {
+              this.showSourceGroupManagerDialog = false;
+              this.selectedManagedSourceGroups = [];
+            })
+          Button('删除所选', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .enabled(this.selectedManagedSourceGroups.length > 0 && !this.isBatchOperating)
+            .backgroundColor('#E53935')
+            .fontColor('#FFFFFF')
+            .onClick(() => this.showDeleteSelectedSourceGroupsDialog = true)
+        }
+        .width('100%')
+        .margin({ top: 16 })
+      }
+      .width('90%')
+      .constraintSize({ maxWidth: 520 })
+      .padding(22)
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#80000000')
   }
 
   @Builder
@@ -1669,6 +2084,52 @@ struct BookSourcePage {
     .backgroundColor('#80000000')
   }
 
+  @Builder
+  deleteSelectedSourceGroupsDialog() {
+    Column() {
+      Column({ space: 16 }) {
+        Text('删除所选分组')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+        Text(`确定删除所选 ${this.selectedManagedSourceGroups.length} 个分组吗？分组内书源将移到未分组。`)
+          .fontSize(14)
+          .fontColor(this.secondaryTextColor())
+          .textAlign(TextAlign.Center)
+        Row({ space: 12 }) {
+          Button('取消', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor(this.glassCardColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => this.showDeleteSelectedSourceGroupsDialog = false)
+          Button('删除', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor('#E53935')
+            .fontColor('#FFFFFF')
+            .enabled(this.selectedManagedSourceGroups.length > 0 && !this.isBatchOperating)
+            .onClick(() => this.deleteSelectedSourceGroups())
+        }
+        .width('100%')
+      }
+      .width('85%')
+      .padding(22)
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#80000000')
+  }
+
   syncBars(): void {
     syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
@@ -1768,6 +2229,45 @@ struct BookSourcePage {
     this.newSourceGroupInput = '';
   }
 
+  sourceGroupCount(group: string): number {
+    return this.allSources.filter((source: BookSource) =>
+      (source.bookSourceGroup || '').trim() === group).length;
+  }
+
+  isManagedSourceGroupSelected(group: string): boolean {
+    return this.selectedManagedSourceGroups.includes(group);
+  }
+
+  setManagedSourceGroupSelected(group: string, selected: boolean): void {
+    if (selected) {
+      if (!this.isManagedSourceGroupSelected(group)) {
+        this.selectedManagedSourceGroups = this.selectedManagedSourceGroups.concat([group]);
+      }
+      return;
+    }
+    this.selectedManagedSourceGroups = this.selectedManagedSourceGroups.filter((item: string) => item !== group);
+  }
+
+  areAllManagedSourceGroupsSelected(): boolean {
+    const groups = this.getSourceGroups();
+    return groups.length > 0 && this.selectedManagedSourceGroups.length === groups.length;
+  }
+
+  selectAllManagedSourceGroups(selected: boolean): void {
+    this.selectedManagedSourceGroups = selected ? this.getSourceGroups() : [];
+  }
+
+  openManagedSourceGroupRename(group: string): void {
+    this.pendingSourceGroup = group;
+    this.renameSourceGroupInput = group;
+    this.showRenameSourceGroupDialog = true;
+  }
+
+  openManagedSourceGroupDelete(group: string): void {
+    this.pendingSourceGroup = group;
+    this.showDeleteSourceGroupDialog = true;
+  }
+
   async addSourceGroup(): Promise<void> {
     const groupName = this.newSourceGroupInput.trim();
     if (!groupName || this.isBatchOperating) {
@@ -1787,6 +2287,40 @@ struct BookSourcePage {
     } catch (e) {
       console.error('新增书源分组失败:', e);
       promptAction.showToast({ message: '新增分组失败' });
+    } finally {
+      this.isBatchOperating = false;
+    }
+  }
+
+  async deleteSelectedSourceGroups(): Promise<void> {
+    const groupsToDelete = this.selectedManagedSourceGroups.filter((group: string) =>
+      this.getSourceGroups().includes(group));
+    if (groupsToDelete.length === 0 || this.isBatchOperating) return;
+    this.isBatchOperating = true;
+    this.batchOperationText = '正在删除书源分组...';
+    try {
+      const db = AppDatabase.getInstance();
+      for (const source of this.allSources) {
+        if (groupsToDelete.includes((source.bookSourceGroup || '').trim())) {
+          source.bookSourceGroup = '';
+          await db.updateBookSourceGroupMembership(source.bookSourceUrl, '');
+        }
+      }
+      let groups = this.sourceGroups;
+      for (const group of groupsToDelete) {
+        groups = await BookSourceGroupStore.remove(getContext(this), group, groups);
+      }
+      this.sourceGroups = groups;
+      if (groupsToDelete.includes(this.activeSourceGroup)) {
+        this.activeSourceGroup = '__ungrouped__';
+      }
+      this.selectedManagedSourceGroups = [];
+      this.showDeleteSelectedSourceGroupsDialog = false;
+      await this.loadSources();
+      promptAction.showToast({ message: `已删除 ${groupsToDelete.length} 个分组` });
+    } catch (e) {
+      console.error('批量删除书源分组失败:', e);
+      promptAction.showToast({ message: '删除分组失败' });
     } finally {
       this.isBatchOperating = false;
     }
@@ -1854,10 +2388,12 @@ struct BookSourcePage {
         (source.bookSourceGroup || '').trim() === oldName);
       for (const source of groupedSources) {
         source.bookSourceGroup = newName;
-        await db.updateBookSourceListFields(source.bookSourceUrl, { bookSourceGroup: newName });
+        await db.updateBookSourceGroupMembership(source.bookSourceUrl, newName);
       }
       this.sourceGroups = await BookSourceGroupStore.rename(
         getContext(this), oldName, newName, this.sourceGroups);
+      this.selectedManagedSourceGroups = this.selectedManagedSourceGroups.map((group: string) =>
+        group === oldName ? newName : group);
       if (this.activeSourceGroup === oldName) {
         this.activeSourceGroup = newName;
       }
@@ -1887,9 +2423,11 @@ struct BookSourcePage {
         (source.bookSourceGroup || '').trim() === groupName);
       for (const source of groupedSources) {
         source.bookSourceGroup = '';
-        await db.updateBookSourceListFields(source.bookSourceUrl, { bookSourceGroup: '' });
+        await db.updateBookSourceGroupMembership(source.bookSourceUrl, '');
       }
       this.sourceGroups = await BookSourceGroupStore.remove(getContext(this), groupName, this.sourceGroups);
+      this.selectedManagedSourceGroups = this.selectedManagedSourceGroups.filter((group: string) =>
+        group !== groupName);
       if (this.activeSourceGroup === groupName) {
         this.activeSourceGroup = '__ungrouped__';
       }
@@ -1905,6 +2443,141 @@ struct BookSourcePage {
     }
   }
 
+  draggingSourceName(): string {
+    const source = this.allSources.find((item: BookSource) => item.bookSourceUrl === this.draggingSourceUrl);
+    return source ? (source.bookSourceName || '未命名书源') : '';
+  }
+
+  async moveVisibleSourceTo(from: number, to: number): Promise<void> {
+    if (this.isBatchOperating || from < 0 || from >= this.visibleSources.length || this.sources.length < 2) {
+      return;
+    }
+    const draggedUrl = this.draggingSourceUrl || this.visibleSources[from].bookSourceUrl;
+    const sourceIndex = this.sources.findIndex((source: BookSource) => source.bookSourceUrl === draggedUrl);
+    if (sourceIndex < 0) return;
+    const targetIndex = Math.max(0, Math.min(to, this.sources.length - 1));
+    if (sourceIndex === targetIndex) return;
+
+    const reordered = this.sources.slice();
+    const moved = reordered.splice(sourceIndex, 1)[0];
+    reordered.splice(targetIndex, 0, moved);
+
+    const filteredUrls = this.sources.map((source: BookSource) => source.bookSourceUrl);
+    const nextAllSources = this.allSources.slice();
+    let orderedIndex = 0;
+    for (let index = 0; index < nextAllSources.length; index++) {
+      if (filteredUrls.includes(nextAllSources[index].bookSourceUrl)) {
+        nextAllSources[index] = reordered[orderedIndex++];
+      }
+    }
+    await this.applyAndPersistSourceOrder(nextAllSources, '排序已保存');
+  }
+
+  async applyAndPersistSourceOrder(nextSources: BookSource[], successMessage: string = ''): Promise<void> {
+    if (this.isBatchOperating || nextSources.length === 0) return;
+    const orderedSources = nextSources.filter((source: BookSource) => source.isPinned)
+      .concat(nextSources.filter((source: BookSource) => !source.isPinned));
+    const restoreFirstIndex = this.sourceFirstVisibleIndex;
+    const restoreVisibleCount = this.sourceVisibleItemCount;
+    const restoreLoadedCount = this.visibleSources.length;
+    this.isBatchOperating = true;
+    this.batchOperationText = '正在保存书源排序...';
+    try {
+      for (let index = 0; index < orderedSources.length; index++) {
+        orderedSources[index].customOrder = index;
+      }
+      await AppDatabase.getInstance().updateBookSourceOrders(
+        orderedSources.map((source: BookSource) => source.bookSourceUrl));
+      this.allSources = orderedSources;
+      this.applySourceFilters();
+      this.restoreSourceListViewport(restoreFirstIndex, restoreVisibleCount, restoreLoadedCount);
+      const revision = AppStorage.get<number>('bookSourceOrderRevision') || 0;
+      AppStorage.setOrCreate('bookSourceOrderRevision', revision + 1);
+      if (successMessage) promptAction.showToast({ message: successMessage });
+    } catch (e) {
+      console.error('保存书源排序失败:', e);
+      promptAction.showToast({ message: '保存排序失败' });
+      await this.loadSources();
+    } finally {
+      this.isBatchOperating = false;
+    }
+  }
+
+  restoreSourceListViewport(firstIndex: number, visibleCount: number, loadedCount: number): void {
+    if (this.sources.length === 0) return;
+    const targetIndex = Math.max(0, Math.min(firstIndex, this.sources.length - 1));
+    const requiredCount = Math.max(BOOK_SOURCE_LIST_BATCH_SIZE,
+      Math.max(loadedCount, targetIndex + Math.max(1, visibleCount)));
+    this.visibleSources = this.sources.slice(0, Math.min(this.sources.length, requiredCount));
+    this.sourceFirstVisibleIndex = targetIndex;
+    this.sourceVisibleItemCount = Math.max(1, visibleCount);
+    setTimeout(() => {
+      if (targetIndex < this.visibleSources.length) {
+        this.sourceListScroller.scrollToIndex(targetIndex, false, ScrollAlign.START);
+      }
+    }, 0);
+  }
+
+  reapplySourceFiltersPreservingViewport(): void {
+    const restoreFirstIndex = this.sourceFirstVisibleIndex;
+    const restoreVisibleCount = this.sourceVisibleItemCount;
+    const restoreLoadedCount = this.visibleSources.length;
+    this.applySourceFilters();
+    this.restoreSourceListViewport(restoreFirstIndex, restoreVisibleCount, restoreLoadedCount);
+  }
+
+  sourceFilterValue(filterKey: string): string {
+    switch (filterKey) {
+      case 'enabled': return this.sourceEnabledFilter;
+      case 'explorePage': return this.sourceExplorePageFilter;
+      case 'exploreEnabled': return this.sourceExploreEnabledFilter;
+      case 'login': return this.sourceLoginFilter;
+      default: return 'all';
+    }
+  }
+
+  setSourceFilterValue(filterKey: string, value: string): void {
+    const normalized = value === 'yes' || value === 'no' ? value : 'all';
+    switch (filterKey) {
+      case 'enabled': this.sourceEnabledFilter = normalized; break;
+      case 'explorePage': this.sourceExplorePageFilter = normalized; break;
+      case 'exploreEnabled': this.sourceExploreEnabledFilter = normalized; break;
+      case 'login': this.sourceLoginFilter = normalized; break;
+      default: return;
+    }
+    this.applySourceFilters();
+  }
+
+  resetSourceFilters(): void {
+    this.sourceEnabledFilter = 'all';
+    this.sourceExplorePageFilter = 'all';
+    this.sourceExploreEnabledFilter = 'all';
+    this.sourceLoginFilter = 'all';
+    this.applySourceFilters();
+  }
+
+  activeSourceFilterCount(): number {
+    let count = 0;
+    if (this.sourceEnabledFilter !== 'all') count++;
+    if (this.sourceExplorePageFilter !== 'all') count++;
+    if (this.sourceExploreEnabledFilter !== 'all') count++;
+    if (this.sourceLoginFilter !== 'all') count++;
+    return count;
+  }
+
+  hasActiveSourceFilters(): boolean {
+    return this.activeSourceFilterCount() > 0;
+  }
+
+  sourceHasExplorePage(source: BookSource): boolean {
+    return !!String(source.exploreUrl || '').trim();
+  }
+
+  isSourceAtBottom(source: BookSource): boolean {
+    return this.allSources.length > 1 &&
+      this.allSources[this.allSources.length - 1].bookSourceUrl === source.bookSourceUrl;
+  }
+
   applySourceFilters(): void {
     const keyword = this.searchText.trim().toLowerCase();
     let filtered: BookSource[] = this.allSources;
@@ -1913,6 +2586,22 @@ struct BookSourcePage {
     } else if (this.activeSourceGroup !== '__all__') {
       filtered = filtered.filter((source: BookSource) =>
         (source.bookSourceGroup || '').trim() === this.activeSourceGroup);
+    }
+    if (this.sourceEnabledFilter !== 'all') {
+      const expected = this.sourceEnabledFilter === 'yes';
+      filtered = filtered.filter((source: BookSource) => source.enabled === expected);
+    }
+    if (this.sourceExplorePageFilter !== 'all') {
+      const expected = this.sourceExplorePageFilter === 'yes';
+      filtered = filtered.filter((source: BookSource) => this.sourceHasExplorePage(source) === expected);
+    }
+    if (this.sourceExploreEnabledFilter !== 'all') {
+      const expected = this.sourceExploreEnabledFilter === 'yes';
+      filtered = filtered.filter((source: BookSource) => source.enabledExplore === expected);
+    }
+    if (this.sourceLoginFilter !== 'all') {
+      const expected = this.sourceLoginFilter === 'yes';
+      filtered = filtered.filter((source: BookSource) => this.sourceNeedsLogin(source) === expected);
     }
     if (keyword) {
       filtered = filtered.filter((source: BookSource) => {
@@ -1955,6 +2644,9 @@ struct BookSourcePage {
     if (this.searchText.trim()) {
       return '未找到匹配书源';
     }
+    if (this.hasActiveSourceFilters()) {
+      return '筛选条件下暂无书源';
+    }
     if (this.activeSourceGroup !== '__all__') {
       return '当前分组暂无书源';
     }
@@ -1964,6 +2656,9 @@ struct BookSourcePage {
   emptySourceDescription(): string {
     if (this.searchText.trim()) {
       return '请尝试其他关键词';
+    }
+    if (this.hasActiveSourceFilters()) {
+      return '请调整或重置筛选条件';
     }
     if (this.activeSourceGroup !== '__all__') {
       return '可切换其他分组查看';
@@ -2101,11 +2796,68 @@ struct BookSourcePage {
     return source ? source.isLocked : false;
   }
 
+  actionSourcePinned(): boolean {
+    const source = this.actionSource();
+    return source ? source.isPinned : false;
+  }
+
   sourceActionMenuHeight(): number {
     if (this.actionSourceLocked()) {
-      return this.actionSourceNeedsLogin() ? 232 : 188;
+      return this.actionSourceNeedsLogin() ? 320 : 276;
     }
-    return this.actionSourceNeedsLogin() ? 364 : 320;
+    return this.actionSourceNeedsLogin() ? 496 : 452;
+  }
+
+  async toggleActionSourcePinned(): Promise<void> {
+    const source = this.actionSource();
+    if (!source || this.isBatchOperating) return;
+    const sourceUrl = source.bookSourceUrl;
+    const pinned = !source.isPinned;
+    this.closeSourceActions();
+    const currentIndex = this.allSources.findIndex((item: BookSource) => item.bookSourceUrl === sourceUrl);
+    if (currentIndex < 0) return;
+    const next = this.allSources.slice();
+    const moved = next.splice(currentIndex, 1)[0];
+    moved.isPinned = pinned;
+    await AppDatabase.getInstance().setBookSourcePinned(sourceUrl, pinned);
+    if (pinned) {
+      next.unshift(moved);
+    } else {
+      const pinnedCount = next.filter((item: BookSource) => item.isPinned).length;
+      next.splice(pinnedCount, 0, moved);
+    }
+    await this.applyAndPersistSourceOrder(next, pinned ? '书源已置顶' : '已取消置顶');
+  }
+
+  async moveActionSourceToBottom(): Promise<void> {
+    const source = this.actionSource();
+    if (!source || this.isBatchOperating) return;
+    const sourceUrl = source.bookSourceUrl;
+    this.closeSourceActions();
+    const currentIndex = this.allSources.findIndex((item: BookSource) => item.bookSourceUrl === sourceUrl);
+    if (currentIndex < 0) return;
+    const next = this.allSources.slice();
+    const moved = next.splice(currentIndex, 1)[0];
+    moved.isPinned = false;
+    await AppDatabase.getInstance().setBookSourcePinned(sourceUrl, false);
+    next.push(moved);
+    await this.applyAndPersistSourceOrder(next, '书源已置底');
+  }
+
+  openActionSourceGroup(): void {
+    const source = this.actionSource();
+    if (!source) return;
+    if (source.isLocked) {
+      this.closeSourceActions();
+      promptAction.showToast({ message: '请先解锁书源' });
+      return;
+    }
+    const sourceUrl = source.bookSourceUrl;
+    const groupName = source.bookSourceGroup || '';
+    this.closeSourceActions();
+    this.groupActionSourceUrl = sourceUrl;
+    this.groupNameInput = groupName;
+    this.showGroupDialog = true;
   }
 
   async toggleActionSourceLocked(): Promise<void> {
@@ -2218,12 +2970,9 @@ struct BookSourcePage {
     const enabled = !source.enabled;
     source.enabled = enabled;
     await this.updateSource(source);
-    this.sources = this.sources.map((item: BookSource) =>
-      item.bookSourceUrl === source.bookSourceUrl ? source : item);
     this.allSources = this.allSources.map((item: BookSource) =>
       item.bookSourceUrl === source.bookSourceUrl ? source : item);
-    this.visibleSources = this.visibleSources.map((item: BookSource) =>
-      item.bookSourceUrl === source.bookSourceUrl ? source : item);
+    this.reapplySourceFiltersPreservingViewport();
     promptAction.showToast({ message: enabled ? '书源已启用' : '书源已禁用' });
   }
 
@@ -2298,7 +3047,8 @@ struct BookSourcePage {
 
   sourceListItemKey(source: BookSource): string {
     const loginStatus = this.sourceNeedsLogin(source) ? (this.sourceLoggedIn(source) ? 'logged' : 'unlogged') : 'none';
-    return `${source.bookSourceUrl}_${source.bookSourceGroup || ''}_${source.enabled ? '1' : '0'}_${source.enabledExplore ? '1' : '0'}_${source.isLocked ? 'locked' : 'unlocked'}_${source.bookSourceName || ''}_${loginStatus}_${this.selectionMode ? 'select' : 'normal'}`;
+    const positionStatus = `${source.isPinned ? 'pinned' : 'normal'}_${this.isSourceAtBottom(source) ? 'bottom' : 'middle'}`;
+    return `${source.bookSourceUrl}_${source.bookSourceGroup || ''}_${source.enabled ? '1' : '0'}_${source.enabledExplore ? '1' : '0'}_${source.isLocked ? 'locked' : 'unlocked'}_${source.bookSourceName || ''}_${loginStatus}_${positionStatus}_${this.selectionMode ? 'select' : 'normal'}`;
   }
 
   isSourceSelected(bookSourceUrl: string): boolean {
@@ -2320,16 +3070,24 @@ struct BookSourcePage {
   }
 
   isAllSelected(): boolean {
-    return this.sources.length > 0 && this.selectedSourceUrls.length === this.sources.length;
+    return this.sources.length > 0 &&
+      this.sources.every((source: BookSource) => this.isSourceSelected(source.bookSourceUrl));
   }
 
   selectAllSources(): void {
-    this.selectedSourceUrls = this.sources.map((source: BookSource) => source.bookSourceUrl);
+    const selected = this.selectedSourceUrls.slice();
+    for (const source of this.sources) {
+      if (!selected.includes(source.bookSourceUrl)) {
+        selected.push(source.bookSourceUrl);
+      }
+    }
+    this.selectedSourceUrls = selected;
   }
 
   toggleAllSources(): void {
     if (this.isAllSelected()) {
-      this.clearSelection();
+      const filteredUrls = this.sources.map((source: BookSource) => source.bookSourceUrl);
+      this.selectedSourceUrls = this.selectedSourceUrls.filter((url: string) => !filteredUrls.includes(url));
       return;
     }
     this.selectAllSources();
@@ -2343,12 +3101,12 @@ struct BookSourcePage {
     if (this.selectedSourceUrls.length === 0) {
       return;
     }
-    const visibleUrls = this.sources.map((source: BookSource) => source.bookSourceUrl);
-    this.selectedSourceUrls = this.selectedSourceUrls.filter((url: string) => visibleUrls.includes(url));
+    const existingUrls = this.allSources.map((source: BookSource) => source.bookSourceUrl);
+    this.selectedSourceUrls = this.selectedSourceUrls.filter((url: string) => existingUrls.includes(url));
   }
 
   getSelectedSources(): BookSource[] {
-    return this.sources.filter((source: BookSource) => this.isSourceSelected(source.bookSourceUrl));
+    return this.allSources.filter((source: BookSource) => this.isSourceSelected(source.bookSourceUrl));
   }
 
   getSelectedMutableSources(): BookSource[] {
@@ -2384,11 +3142,34 @@ struct BookSourcePage {
     return first;
   }
 
+  groupingSources(): BookSource[] {
+    if (this.groupActionSourceUrl) {
+      const source = this.allSources.find((item: BookSource) =>
+        item.bookSourceUrl === this.groupActionSourceUrl);
+      return source ? [source] : [];
+    }
+    return this.getSelectedSources();
+  }
+
+  mutableGroupingSources(): BookSource[] {
+    return this.groupingSources().filter((source: BookSource) => !source.isLocked);
+  }
+
+  actionGroupingSourceName(): string {
+    const source = this.groupingSources()[0];
+    return source ? (source.bookSourceName || source.bookSourceUrl) : '当前书源';
+  }
+
+  closeSourceGroupDialog(): void {
+    this.showGroupDialog = false;
+    this.groupActionSourceUrl = '';
+  }
+
   async applySelectedSourceGroup(): Promise<void> {
     if (this.isBatchOperating) {
       return;
     }
-    const selectedSources = this.getSelectedMutableSources();
+    const selectedSources = this.mutableGroupingSources();
     if (selectedSources.length === 0) {
       promptAction.showToast({ message: '所选书源均已锁定' });
       return;
@@ -2416,7 +3197,7 @@ struct BookSourcePage {
       });
       this.ensureActiveSourceGroup();
       this.applySourceFilters();
-      this.showGroupDialog = false;
+      this.closeSourceGroupDialog();
       promptAction.showToast({ message: groupName ? `已加入分组：${groupName}` : '已移出分组' });
     } catch (e) {
       console.error('设置书源分组失败:', e);
@@ -2444,12 +3225,7 @@ struct BookSourcePage {
         source.enabled = enabled;
         await db.updateBookSourceListFields(source.bookSourceUrl, { enabled: enabled ? 1 : 0 });
       }
-      this.sources = this.sources.map((source: BookSource) => {
-        if (this.isSourceSelected(source.bookSourceUrl) && !source.isLocked) {
-          source.enabled = enabled;
-        }
-        return source;
-      });
+      this.reapplySourceFiltersPreservingViewport();
       promptAction.showToast({ message: `已${enabled ? '启用' : '禁用'} ${selectedSources.length} 个书源` });
     } catch (e) {
       console.error('批量更新书源失败:', e);
@@ -2477,12 +3253,7 @@ struct BookSourcePage {
         source.enabledExplore = enabled;
         await db.updateBookSourceListFields(source.bookSourceUrl, { enabledExplore: enabled ? 1 : 0 });
       }
-      this.sources = this.sources.map((source: BookSource) => {
-        if (this.isSourceSelected(source.bookSourceUrl) && !source.isLocked) {
-          source.enabledExplore = enabled;
-        }
-        return source;
-      });
+      this.reapplySourceFiltersPreservingViewport();
       promptAction.showToast({ message: `已${enabled ? '启用' : '禁用'} ${selectedSources.length} 个书源的发现` });
     } catch (e) {
       console.error('批量更新发现状态失败:', e);
@@ -3046,6 +3817,7 @@ struct BookSourcePage {
     source.variableComment = obj['variableComment'] as string || obj['variable'] as string || '';
     source.enabled = obj['enabled'] !== false;
     source.enabledExplore = obj['enabledExplore'] !== false;
+    source.isPinned = obj['isPinned'] === true;
     source.isLocked = obj['isLocked'] === true || obj['locked'] === true;
     source.weight = (obj['weight'] as number) || 0;
     source.lastUpdateTime = Date.now();

@@ -892,7 +892,7 @@ export class ReaderSettingsStore {
 
   private static normalizePageTurnMode(mode: number): number {
     const value = Math.round(mode);
-    return value >= 0 && value <= 2 ? value : 1;
+    return value >= 0 && value <= 3 ? value : 1;
   }
 
   private static normalizePageTurnAnimationType(type: number): number {

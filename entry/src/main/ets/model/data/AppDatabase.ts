@@ -19,7 +19,7 @@ export class AppDatabase {
   private initialized: boolean = false;
   private initPromise: Promise<void> | null = null;
   private readonly DATABASE_NAME = 'legado.db';
-  private readonly SCHEMA_VERSION = 6;
+  private readonly SCHEMA_VERSION = 7;
 
   private constructor() {}
 
@@ -126,6 +126,7 @@ export class AppDatabase {
         variableComment TEXT DEFAULT '',
         lastUpdateTime INTEGER DEFAULT 0,
         customOrder INTEGER DEFAULT 0,
+        isPinned INTEGER DEFAULT 0,
         enabled INTEGER DEFAULT 1,
         enabledExplore INTEGER DEFAULT 1,
         isLocked INTEGER DEFAULT 0,
@@ -283,6 +284,7 @@ export class AppDatabase {
       { table: 'book_sources', column: 'jsLib', definition: "jsLib TEXT DEFAULT ''" },
       { table: 'book_sources', column: 'loginHeader', definition: "loginHeader TEXT DEFAULT ''" },
       { table: 'book_sources', column: 'isLocked', definition: 'isLocked INTEGER DEFAULT 0' },
+      { table: 'book_sources', column: 'isPinned', definition: 'isPinned INTEGER DEFAULT 0' },
       { table: 'book_chapters', column: 'variable', definition: "variable TEXT DEFAULT ''" }
     ];
 
@@ -473,6 +475,39 @@ export class AppDatabase {
     return bookmarks;
   }
 
+  async getAllBookmarks(): Promise<Bookmark[]> {
+    const bookmarks: Bookmark[] = [];
+    if (!this.store) return bookmarks;
+    const predicates = new relationalStore.RdbPredicates('bookmarks');
+    predicates.orderByDesc('createTime');
+    const resultSet = await this.store.query(predicates, []);
+    while (resultSet.goToNextRow()) {
+      bookmarks.push(this.resultSetToBookmark(resultSet));
+    }
+    return bookmarks;
+  }
+
+  async restoreBookmark(bookmark: Bookmark): Promise<void> {
+    if (!this.store || !bookmark.bookUrl) return;
+    const predicates = new relationalStore.RdbPredicates('bookmarks');
+    predicates.equalTo('bookUrl', bookmark.bookUrl);
+    predicates.equalTo('chapterIndex', bookmark.chapterIndex);
+    predicates.equalTo('pageIndex', bookmark.pageIndex);
+    await this.store.delete(predicates);
+    await this.store.insert('bookmarks', {
+      bookUrl: bookmark.bookUrl,
+      bookName: bookmark.bookName,
+      bookAuthor: bookmark.bookAuthor,
+      chapterIndex: bookmark.chapterIndex,
+      chapterName: bookmark.chapterName,
+      pageIndex: bookmark.pageIndex,
+      startPos: bookmark.startPos,
+      endPos: bookmark.endPos,
+      content: bookmark.content,
+      createTime: bookmark.createTime
+    });
+  }
+
   async getBookmarkAt(bookUrl: string, chapterIndex: number, pageIndex: number): Promise<Bookmark | null> {
     if (!this.store || !bookUrl) return null;
     const predicates = new relationalStore.RdbPredicates('bookmarks');
@@ -506,6 +541,27 @@ export class AppDatabase {
     const predicates = new relationalStore.RdbPredicates('bookmarks');
     predicates.equalTo('bookUrl', bookUrl);
     await this.store.delete(predicates);
+  }
+
+  async moveBookBookmarks(fromBookUrl: string, toBookUrl: string, bookName: string, bookAuthor: string): Promise<void> {
+    if (!this.store || !fromBookUrl || !toBookUrl || fromBookUrl === toBookUrl) return;
+    const predicates = new relationalStore.RdbPredicates('bookmarks');
+    predicates.equalTo('bookUrl', fromBookUrl);
+    await this.store.update({
+      bookUrl: toBookUrl,
+      bookName: bookName,
+      bookAuthor: bookAuthor
+    }, predicates);
+  }
+
+  async updateBookBookmarkMetadata(bookUrl: string, bookName: string, bookAuthor: string): Promise<void> {
+    if (!this.store || !bookUrl) return;
+    const predicates = new relationalStore.RdbPredicates('bookmarks');
+    predicates.equalTo('bookUrl', bookUrl);
+    await this.store.update({
+      bookName: bookName,
+      bookAuthor: bookAuthor
+    }, predicates);
   }
 
   private resultSetToBookmark(resultSet: relationalStore.ResultSet): Bookmark {
@@ -547,6 +603,16 @@ export class AppDatabase {
     return books;
   }
 
+  async restoreBook(book: Book): Promise<void> {
+    if (!this.store || !book.bookUrl) return;
+    const existing = await this.getBook(book.bookUrl);
+    if (existing) {
+      await this.updateBook(book);
+    } else {
+      await this.insertBook(book);
+    }
+  }
+
   async getCustomBookGroups(): Promise<BookGroup[]> {
     const groups: BookGroup[] = [];
     if (!this.store) return groups;
@@ -563,6 +629,25 @@ export class AppDatabase {
       groups.push(group);
     }
     return groups;
+  }
+
+  async restoreBookGroup(group: BookGroup): Promise<void> {
+    if (!this.store || group.groupId <= 0 || !group.groupName.trim()) return;
+    const predicates = new relationalStore.RdbPredicates('book_groups');
+    predicates.equalTo('groupId', group.groupId);
+    const resultSet = await this.store.query(predicates, []);
+    const bucket: relationalStore.ValuesBucket = {
+      groupId: group.groupId,
+      groupName: group.groupName,
+      groupOrder: group.order,
+      show: group.show ? 1 : 0,
+      enableRefresh: group.enableRefresh ? 1 : 0
+    };
+    if (resultSet.rowCount > 0) {
+      await this.store.update(bucket, predicates);
+    } else {
+      await this.store.insert('book_groups', bucket);
+    }
   }
 
   async addBookGroup(groupName: string): Promise<BookGroup | null> {
@@ -699,6 +784,7 @@ export class AppDatabase {
       variableComment: source.variableComment,
       lastUpdateTime: source.lastUpdateTime,
       customOrder: source.customOrder,
+      isPinned: source.isPinned ? 1 : 0,
       enabled: source.enabled ? 1 : 0,
       enabledExplore: source.enabledExplore ? 1 : 0,
       isLocked: source.isLocked ? 1 : 0,
@@ -714,8 +800,21 @@ export class AppDatabase {
       if (this.getLongColumn(resultSet, 'isLocked') === 1) {
         return;
       }
+      // 导入更新已有书源时保留用户在管理页设置的顺序。
+      bucket['customOrder'] = this.getLongColumn(resultSet, 'customOrder');
+      source.customOrder = bucket['customOrder'] as number;
+      bucket['isPinned'] = this.getLongColumn(resultSet, 'isPinned');
+      source.isPinned = bucket['isPinned'] === 1;
       await this.store.update(bucket, predicates);
     } else {
+      // 新书源追加到现有顺序末尾，避免默认值 0 把它插到列表顶部。
+      const maxOrderResult = await this.store.querySql('SELECT MAX(customOrder) AS maxOrder FROM book_sources');
+      let maxOrder = -1;
+      if (maxOrderResult.goToFirstRow()) {
+        maxOrder = this.getLongColumn(maxOrderResult, 'maxOrder', -1);
+      }
+      source.customOrder = Math.max(0, maxOrder + 1);
+      bucket['customOrder'] = source.customOrder;
       await this.store.insert('book_sources', bucket);
     }
   }
@@ -745,6 +844,7 @@ export class AppDatabase {
       variableComment: source.variableComment,
       lastUpdateTime: source.lastUpdateTime,
       customOrder: source.customOrder,
+      isPinned: source.isPinned ? 1 : 0,
       enabled: source.enabled ? 1 : 0,
       enabledExplore: source.enabledExplore ? 1 : 0,
       isLocked: source.isLocked ? 1 : 0,
@@ -779,6 +879,7 @@ export class AppDatabase {
   async getAllBookSources(): Promise<BookSource[]> {
     if (!this.store) return [];
     const predicates = new relationalStore.RdbPredicates('book_sources');
+    predicates.orderByDesc('isPinned');
     predicates.orderByAsc('customOrder');
     const resultSet = await this.store.query(predicates, []);
     const sources: BookSource[] = [];
@@ -788,14 +889,57 @@ export class AppDatabase {
     return sources;
   }
 
+  async restoreBookSource(source: BookSource): Promise<void> {
+    if (!this.store || !source.bookSourceUrl) return;
+    const bucket: relationalStore.ValuesBucket = {
+      bookSourceUrl: source.bookSourceUrl,
+      bookSourceName: source.bookSourceName,
+      bookSourceGroup: source.bookSourceGroup,
+      bookSourceComment: source.bookSourceComment,
+      loginUrl: source.loginUrl,
+      loginUi: source.loginUi,
+      loginCheckJs: source.loginCheckJs,
+      loginHeader: source.loginHeader,
+      bookUrlPattern: source.bookUrlPattern,
+      searchUrl: source.searchUrl,
+      exploreUrl: source.exploreUrl,
+      jsLib: source.jsLib,
+      header: source.header,
+      bookListRule: JSON.stringify(source.bookListRule),
+      searchRule: JSON.stringify(source.searchRule),
+      exploreRule: JSON.stringify(source.exploreRule),
+      bookInfoRule: JSON.stringify(source.bookInfoRule),
+      tocRule: JSON.stringify(source.tocRule),
+      contentRule: JSON.stringify(source.contentRule),
+      variableComment: source.variableComment,
+      lastUpdateTime: source.lastUpdateTime,
+      customOrder: source.customOrder,
+      isPinned: source.isPinned ? 1 : 0,
+      enabled: source.enabled ? 1 : 0,
+      enabledExplore: source.enabledExplore ? 1 : 0,
+      isLocked: source.isLocked ? 1 : 0,
+      weight: source.weight,
+      concurrentRate: source.concurrentRate
+    };
+    const predicates = new relationalStore.RdbPredicates('book_sources');
+    predicates.equalTo('bookSourceUrl', source.bookSourceUrl);
+    const resultSet = await this.store.query(predicates, []);
+    if (resultSet.rowCount > 0) {
+      await this.store.update(bucket, predicates);
+    } else {
+      await this.store.insert('book_sources', bucket);
+    }
+  }
+
   /** 列表只读取轻量字段；规则详情在实际使用时再按主键加载。 */
   async getBookSourceSummaries(): Promise<BookSource[]> {
     if (!this.store) return [];
     const predicates = new relationalStore.RdbPredicates('book_sources');
+    predicates.orderByDesc('isPinned');
     predicates.orderByAsc('customOrder');
     const columns = [
       'bookSourceUrl', 'bookSourceName', 'bookSourceGroup', 'loginUrl', 'loginUi',
-      'loginCheckJs', 'loginHeader', 'customOrder', 'enabled', 'enabledExplore', 'isLocked'
+      'loginCheckJs', 'loginHeader', 'exploreUrl', 'customOrder', 'isPinned', 'enabled', 'enabledExplore', 'isLocked'
     ];
     const resultSet = await this.store.query(predicates, columns);
     const sources: BookSource[] = [];
@@ -808,7 +952,9 @@ export class AppDatabase {
       source.loginUi = resultSet.getString(resultSet.getColumnIndex('loginUi'));
       source.loginCheckJs = resultSet.getString(resultSet.getColumnIndex('loginCheckJs'));
       source.loginHeader = resultSet.getString(resultSet.getColumnIndex('loginHeader'));
+      source.exploreUrl = resultSet.getString(resultSet.getColumnIndex('exploreUrl'));
       source.customOrder = resultSet.getLong(resultSet.getColumnIndex('customOrder'));
+      source.isPinned = this.getLongColumn(resultSet, 'isPinned') === 1;
       source.enabled = resultSet.getLong(resultSet.getColumnIndex('enabled')) === 1;
       source.enabledExplore = resultSet.getLong(resultSet.getColumnIndex('enabledExplore')) === 1;
       source.isLocked = this.getLongColumn(resultSet, 'isLocked') === 1;
@@ -824,10 +970,39 @@ export class AppDatabase {
     if (fields['bookSourceGroup'] !== undefined) bucket['bookSourceGroup'] = fields['bookSourceGroup'];
     if (fields['enabled'] !== undefined) bucket['enabled'] = fields['enabled'];
     if (fields['enabledExplore'] !== undefined) bucket['enabledExplore'] = fields['enabledExplore'];
+    if (fields['customOrder'] !== undefined) bucket['customOrder'] = fields['customOrder'];
     bucket['lastUpdateTime'] = Date.now();
     const predicates = new relationalStore.RdbPredicates('book_sources');
     predicates.equalTo('bookSourceUrl', bookSourceUrl);
     await this.store.update(bucket, predicates);
+  }
+
+  /** 书源排序属于列表管理信息，不受书源内容锁定状态影响。 */
+  async updateBookSourceOrders(bookSourceUrls: string[]): Promise<void> {
+    if (!this.store) return;
+    for (let index = 0; index < bookSourceUrls.length; index++) {
+      const bookSourceUrl = bookSourceUrls[index];
+      if (!bookSourceUrl) continue;
+      const predicates = new relationalStore.RdbPredicates('book_sources');
+      predicates.equalTo('bookSourceUrl', bookSourceUrl);
+      await this.store.update({ customOrder: index }, predicates);
+    }
+  }
+
+  /** 置顶属于列表管理信息，不受书源规则锁定状态影响。 */
+  async setBookSourcePinned(bookSourceUrl: string, pinned: boolean): Promise<void> {
+    if (!this.store || !bookSourceUrl) return;
+    const predicates = new relationalStore.RdbPredicates('book_sources');
+    predicates.equalTo('bookSourceUrl', bookSourceUrl);
+    await this.store.update({ isPinned: pinned ? 1 : 0 }, predicates);
+  }
+
+  /** 分组重命名或删除时更新归属；这类列表管理操作不改动书源规则内容。 */
+  async updateBookSourceGroupMembership(bookSourceUrl: string, groupName: string): Promise<void> {
+    if (!this.store || !bookSourceUrl) return;
+    const predicates = new relationalStore.RdbPredicates('book_sources');
+    predicates.equalTo('bookSourceUrl', bookSourceUrl);
+    await this.store.update({ bookSourceGroup: groupName, lastUpdateTime: Date.now() }, predicates);
   }
 
   async setBookSourceLocked(bookSourceUrl: string, locked: boolean): Promise<void> {
@@ -850,6 +1025,7 @@ export class AppDatabase {
     if (!this.store) return [];
     const predicates = new relationalStore.RdbPredicates('book_sources');
     predicates.equalTo('enabled', 1);
+    predicates.orderByDesc('isPinned');
     predicates.orderByAsc('customOrder');
     const resultSet = await this.store.query(predicates, []);
     const sources: BookSource[] = [];
@@ -863,6 +1039,7 @@ export class AppDatabase {
     if (!this.store) return [];
     const predicates = new relationalStore.RdbPredicates('book_sources');
     predicates.like('bookSourceName', `%${keyword}%`);
+    predicates.orderByDesc('isPinned');
     predicates.orderByAsc('customOrder');
     const resultSet = await this.store.query(predicates, []);
     const sources: BookSource[] = [];
@@ -912,6 +1089,7 @@ export class AppDatabase {
     source.variableComment = resultSet.getString(resultSet.getColumnIndex('variableComment'));
     source.lastUpdateTime = resultSet.getLong(resultSet.getColumnIndex('lastUpdateTime'));
     source.customOrder = resultSet.getLong(resultSet.getColumnIndex('customOrder'));
+    source.isPinned = this.getLongColumn(resultSet, 'isPinned') === 1;
     source.enabled = resultSet.getLong(resultSet.getColumnIndex('enabled')) === 1;
     source.isLocked = this.getLongColumn(resultSet, 'isLocked') === 1;
     source.enabledExplore = resultSet.getLong(resultSet.getColumnIndex('enabledExplore')) === 1;
@@ -1227,6 +1405,23 @@ export class AppDatabase {
   async clearSearchKeywords(): Promise<void> {
     if (!this.store) return;
     await this.store.executeSql('DELETE FROM search_keywords');
+  }
+
+  async restoreSearchKeyword(keyword: SearchKeyword): Promise<void> {
+    if (!this.store || !keyword.keyword) return;
+    const predicates = new relationalStore.RdbPredicates('search_keywords');
+    predicates.equalTo('keyword', keyword.keyword);
+    const resultSet = await this.store.query(predicates, []);
+    const bucket: relationalStore.ValuesBucket = {
+      keyword: keyword.keyword,
+      usage: keyword.usage,
+      lastUseTime: keyword.lastUseTime
+    };
+    if (resultSet.rowCount > 0) {
+      await this.store.update(bucket, predicates);
+    } else {
+      await this.store.insert('search_keywords', bucket);
+    }
   }
 
   async deleteSearchKeyword(keyword: string): Promise<void> {

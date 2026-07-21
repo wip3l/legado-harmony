@@ -20,6 +20,7 @@ export interface ExploreEntry {
 export interface ExploreSourceOption {
   sourceName: string;
   sourceUrl: string;
+  sourceGroup: string;
   platforms: string[];
 }
 
@@ -39,6 +40,7 @@ export class ExploreCoordinator {
       options.push({
         sourceName: source.bookSourceName,
         sourceUrl: source.bookSourceUrl,
+        sourceGroup: (source.bookSourceGroup || '').trim(),
         platforms: BookSourceDataUrlSupport.sourceUsesGyExplore(source) ?
           await BookSourceDataUrlSupport.getExplorePlatforms(this.http, source) :
           []

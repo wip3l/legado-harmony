@@ -117,14 +117,23 @@ struct TtsSettingsPage {
             }
             .width('100%')
 
-            Slider({ value: this.ttsSpeed, min: 0.5, max: 2, step: 0.1 })
-              .width('100%')
-              .margin({ top: 10 })
-              .selectedColor(this.accentColor())
-              .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-              .onChange((value: number) => {
-                this.applySpeed(value);
+            Row({ space: 10 }) {
+              this.speedStepButton($r('sys.symbol.minus'), '降低朗读倍速', this.ttsSpeed > 0.5, () => {
+                this.applySpeed(this.ttsSpeed - 0.1);
               })
+              Slider({ value: this.ttsSpeed, min: 0.5, max: 2, step: 0.1 })
+                .layoutWeight(1)
+                .selectedColor(this.accentColor())
+                .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+                .onChange((value: number) => {
+                  this.applySpeed(value);
+                })
+              this.speedStepButton($r('sys.symbol.plus'), '提高朗读倍速', this.ttsSpeed !== 2, () => {
+                this.applySpeed(this.ttsSpeed + 0.1);
+              })
+            }
+            .width('100%')
+            .margin({ top: 10 })
 
             Row({ space: 8 }) {
               this.speedChip(0.8)
@@ -1065,6 +1074,22 @@ struct TtsSettingsPage {
       .onClick(() => {
         this.applySpeed(value);
       })
+  }
+
+  @Builder
+  speedStepButton(icon: Resource, accessibilityText: string, enabled: boolean, action: () => void) {
+    Button({ type: ButtonType.Circle, stateEffect: true }) {
+      SymbolGlyph(icon)
+        .fontSize(16)
+        .fontColor([enabled ? this.primaryTextColor() : this.subTextColor()])
+    }
+    .width(34)
+    .height(34)
+    .padding(0)
+    .enabled(enabled)
+    .backgroundColor(this.inputColor())
+    .accessibilityText(accessibilityText)
+    .onClick(action)
   }
 
   @Builder

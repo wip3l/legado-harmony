@@ -149,7 +149,7 @@ struct SettingsPage {
           Column() {
           this.readerThemePanel()
 
-          this.selectItem('翻页方式', '选择滚动、滑动或点击翻页',
+          this.selectItem('翻页方式', '选择滚动、滑动、点击或上下连续滑动',
             this.pageTurnModeOptions(), this.pageTurnModeSelectedIndex(), (index: number) => {
               this.setReaderPageTurnMode(index);
             })
@@ -797,6 +797,7 @@ struct SettingsPage {
   pageTurnModeText(): string {
     if (this.readerPageTurnMode === 1) return '滑动翻页';
     if (this.readerPageTurnMode === 2) return '点击翻页';
+    if (this.readerPageTurnMode === 3) return '上下滑动';
     return '滚动阅读';
   }
 
@@ -804,12 +805,13 @@ struct SettingsPage {
     return [
       { value: '滚动阅读' },
       { value: '滑动翻页' },
-      { value: '点击翻页' }
+      { value: '点击翻页' },
+      { value: '上下滑动' }
     ];
   }
 
   pageTurnModeSelectedIndex(): number {
-    return this.readerPageTurnMode >= 0 && this.readerPageTurnMode <= 2 ? this.readerPageTurnMode : 0;
+    return this.readerPageTurnMode >= 0 && this.readerPageTurnMode <= 3 ? this.readerPageTurnMode : 0;
   }
 
   readerTapZoneActionsList(): number[] {
@@ -2053,19 +2055,46 @@ struct SettingsPage {
         .width('100%')
         .margin({ top: 12 })
 
-        Slider({ value: this.readerPreloadChapterCount, min: 1, max: 10, step: 1 })
-          .width('100%')
-          .margin({ top: 8 })
-          .selectedColor(this.accentColor())
-          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-          .onChange((sliderValue: number) => {
-            this.setReaderPreloadChapterCount(sliderValue);
+        Row({ space: 10 }) {
+          this.settingsSliderStepButton($r('sys.symbol.minus'), '减少预缓存章节数',
+            this.readerPreloadChapterCount > 1, () => {
+            this.setReaderPreloadChapterCount(this.readerPreloadChapterCount - 1);
           })
+          Slider({ value: this.readerPreloadChapterCount, min: 1, max: 10, step: 1 })
+            .layoutWeight(1)
+            .selectedColor(this.accentColor())
+            .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+            .onChange((sliderValue: number) => {
+              this.setReaderPreloadChapterCount(sliderValue);
+            })
+          this.settingsSliderStepButton($r('sys.symbol.plus'), '增加预缓存章节数',
+            this.readerPreloadChapterCount !== 10, () => {
+            this.setReaderPreloadChapterCount(this.readerPreloadChapterCount + 1);
+          })
+        }
+        .width('100%')
+        .margin({ top: 8 })
       }
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     .backgroundColor(this.cardColor())
+  }
+
+  @Builder
+  settingsSliderStepButton(icon: Resource, accessibilityText: string, enabled: boolean, action: () => void) {
+    Button({ type: ButtonType.Circle, stateEffect: true }) {
+      SymbolGlyph(icon)
+        .fontSize(16)
+        .fontColor([enabled ? this.primaryTextColor() : this.subTextColor()])
+    }
+    .width(34)
+    .height(34)
+    .padding(0)
+    .enabled(enabled)
+    .backgroundColor(this.inputColor())
+    .accessibilityText(accessibilityText)
+    .onClick(action)
   }
 
   @Builder

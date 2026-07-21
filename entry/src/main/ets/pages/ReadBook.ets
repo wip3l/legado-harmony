@@ -52,6 +52,7 @@ import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
 import { VirtualListScrollbar } from '../utils/VirtualListScrollbar';
 
 const TOC_WINDOW_PAGE_SIZE = 72;
+const FULL_TEXT_CACHE_NOTIFICATION_INTERVAL_MS = 5000;
 
 interface ReadTextSlice {
   text: string;
@@ -112,9 +113,26 @@ class ReaderComicPageDataSource implements IDataSource {
   }
 
   replace(pages: string[]): void {
+    const previousCount = this.pages.length;
+    let appendsExistingPrefix = pages.length >= previousCount;
+    if (appendsExistingPrefix) {
+      for (let index = 0; index < previousCount; index++) {
+        if (this.pages[index] !== pages[index]) {
+          appendsExistingPrefix = false;
+          break;
+        }
+      }
+    }
+    if (appendsExistingPrefix && pages.length === previousCount) return;
     this.pages = [...pages];
     for (const listener of this.listeners) {
-      listener.onDataReloaded();
+      if (appendsExistingPrefix) {
+        for (let index = previousCount; index < pages.length; index++) {
+          listener.onDataAdd(index);
+        }
+      } else {
+        listener.onDataReloaded();
+      }
     }
   }
 }
@@ -226,6 +244,7 @@ struct ReadBookPage {
   @State statusBarSafeHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State isTtsSpeaking: boolean = false;
+  @State ttsPagedScrollOverride: boolean = false;
   @State ttsMediaControlsExpanded: boolean = false;
   @State ttsMediaImage: string = '';
   @State ttsDisplayText: string = '';
@@ -917,8 +936,8 @@ struct ReadBookPage {
     this.fullTextCacheDone = this.countCachedChapters(engine.chapters);
     this.fullTextCacheStatus = '全文缓存后台进行中';
 
-    await this.requestFullTextCacheNotificationEnabled();
     await this.startFullTextCacheBackgroundRunning();
+    await this.requestFullTextCacheNotificationEnabled();
     await this.publishFullTextCacheProgress(true);
 
     for (let index = 0; index < engine.chapters.length; index++) {
@@ -930,10 +949,7 @@ struct ReadBookPage {
         continue;
       }
 
-      const title = chapter.title || `第${index + 1}章`;
-      this.fullTextCacheStatus = `正在缓存：${title}`;
-      await this.publishFullTextCacheProgress(false);
-      const ok = await engine.cacheChapter(index);
+      const ok = await this.cacheFullTextChapter(engine, index, taskId);
       if (taskId !== this.fullTextCacheTaskId) {
         break;
       }
@@ -941,7 +957,7 @@ struct ReadBookPage {
         this.fullTextCacheDone = this.countCachedChapters(engine.chapters);
         this.chapters = [...engine.chapters];
       }
-      await this.publishFullTextCacheProgress(true);
+      await this.publishFullTextCacheProgress(false);
       await this.sleep(0);
     }
 
@@ -954,10 +970,12 @@ struct ReadBookPage {
     this.chapters = [...engine.chapters];
     this.fullTextCacheDone = this.countCachedChapters(engine.chapters);
     this.fullTextCaching = false;
-    this.fullTextCacheStatus = canceled ? '全文缓存已取消' : '全文缓存完成';
+    const failedCount = Math.max(0, this.fullTextCacheTotal - this.fullTextCacheDone);
+    this.fullTextCacheStatus = canceled ? '全文缓存已取消' :
+      (failedCount > 0 ? `缓存结束，${failedCount} 章未缓存` : '全文缓存完成');
     this.fullTextCacheCancelRequested = false;
     await this.publishFullTextCacheNotification(
-      canceled ? '缓存已停止' : '全文缓存完成',
+      canceled ? '缓存已停止' : this.fullTextCacheStatus,
       this.fullTextCacheProgressText(),
       false
     );
@@ -978,6 +996,25 @@ struct ReadBookPage {
       this.fullTextCacheCancelRequested = true;
       this.fullTextCacheCancelSeenNonce = nonce;
       return true;
+    }
+    return false;
+  }
+
+  async cacheFullTextChapter(engine: ReadBookEngine, chapterIndex: number, taskId: number): Promise<boolean> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (taskId !== this.fullTextCacheTaskId || this.shouldCancelFullTextCache()) {
+        return false;
+      }
+      try {
+        if (await engine.cacheChapter(chapterIndex)) {
+          return true;
+        }
+      } catch (error) {
+        console.warn(`缓存第 ${chapterIndex + 1} 章失败（第 ${attempt + 1} 次）:`, error);
+      }
+      if (attempt === 0) {
+        await this.sleep(300);
+      }
     }
     return false;
   }
@@ -1004,7 +1041,7 @@ struct ReadBookPage {
 
   async publishFullTextCacheProgress(force: boolean): Promise<void> {
     const now = Date.now();
-    if (!force && now - this.fullTextCacheNotificationLastAt < 1200) {
+    if (!force && now - this.fullTextCacheNotificationLastAt < FULL_TEXT_CACHE_NOTIFICATION_INTERVAL_MS) {
       return;
     }
     this.fullTextCacheNotificationLastAt = now;
@@ -1077,6 +1114,10 @@ struct ReadBookPage {
 
   async startFullTextCacheBackgroundRunning(): Promise<void> {
     if (this.fullTextCacheBackgroundRunning) {
+      return;
+    }
+    if (this.ttsBackgroundRunning) {
+      this.fullTextCacheBackgroundRunning = true;
       return;
     }
     try {
@@ -1183,6 +1224,20 @@ struct ReadBookPage {
                     this.updateReaderComicImageRatio(index, event.width, event.height);
                   }
                 })
+            } else if (this.isReaderNovelContinuousScrollModeActive()) {
+              Column() {
+                this.styledReaderText(
+                  page,
+                  index === this.contentPages.length - 1 ? this.readerMarginBottom : 0,
+                  this.currentChapterIndex,
+                  0,
+                  this.pageRenderVersion,
+                  `reader_vertical_scroll_${this.currentChapterIndex}_${index}`,
+                  index,
+                  index === 0 ? this.readerMarginTop : 0
+                )
+              }
+              .width('100%')
             } else {
               Column() {
                 this.styledReaderText(page, this.getReaderContentBottomPadding(), this.currentChapterIndex,
@@ -1279,7 +1334,7 @@ struct ReadBookPage {
       Column() {
         if (!this.shouldRenderPrimaryReaderContent()) {
           this.readerLoadingPanel()
-        } else if (this.isReaderComicModeActive()) {
+        } else if (this.isReaderContinuousScrollSurfaceActive()) {
           this.readerComicScrollSurface()
         } else {
           Stack() {
@@ -1329,12 +1384,12 @@ struct ReadBookPage {
         this.readerLoadingPanel()
       }
 
-      if (this.isReaderComicModeActive() && !this.showMenu && !this.showToc && !this.showSettings &&
+      if (this.isReaderContinuousScrollSurfaceActive() && !this.showMenu && !this.showToc && !this.showSettings &&
         !this.shouldBlockReaderInteraction() && !this.readerComicChapterSwitching) {
         this.readerComicInteractionLayer()
       }
 
-      if (!this.isReaderComicModeActive() && !this.showMenu && !this.showToc && !this.showSettings &&
+      if (!this.isReaderContinuousScrollSurfaceActive() && !this.showMenu && !this.showToc && !this.showSettings &&
         !this.shouldBlockReaderInteraction()) {
         this.readerTapLayer()
       }
@@ -1464,6 +1519,7 @@ struct ReadBookPage {
   readerRoundMenuButton(icon: Resource, accessibilityText: string, action: () => void) {
     ImmersiveBackButton({
       icon: icon,
+      iconOffsetX: 0,
       iconColor: this.getTextColor(),
       darkMode: this.isReaderThemeDark(),
       buttonSize: 40,
@@ -1568,7 +1624,7 @@ struct ReadBookPage {
   readerHdsChapterBarContent() {
     Row() {
       Stack({ alignContent: Alignment.Center }) {
-        SymbolGlyph($r('sys.symbol.arrow_left'))
+        SymbolGlyph($r('sys.symbol.chevron_left'))
           .fontSize(25)
           .fontColor([this.currentChapterIndex > 0 && !this.isLoading ?
             this.getTextColor() : this.getSubTextColor()])
@@ -1600,7 +1656,7 @@ struct ReadBookPage {
         })
 
       Stack({ alignContent: Alignment.Center }) {
-        SymbolGlyph($r('sys.symbol.arrow_right'))
+        SymbolGlyph($r('sys.symbol.chevron_right'))
           .fontSize(25)
           .fontColor([this.currentChapterIndex < this.chapters.length - 1 && !this.isLoading ?
             this.getTextColor() : this.getSubTextColor()])
@@ -1801,12 +1857,11 @@ struct ReadBookPage {
     Column({ space: 10 }) {
       if (this.readerUseChapterQuickJump) {
         Row() {
-        Text('‹')
-          .fontSize(30)
-          .fontColor(this.currentChapterIndex > 0 && !this.isLoading ? this.getTextColor() : this.getSubTextColor())
+        SymbolGlyph($r('sys.symbol.chevron_left'))
+          .fontSize(24)
+          .fontColor([this.currentChapterIndex > 0 && !this.isLoading ? this.getTextColor() : this.getSubTextColor()])
           .width(46)
           .height(54)
-          .textAlign(TextAlign.Center)
           .enabled(this.currentChapterIndex > 0 && !this.isLoading)
           .onClick(async () => {
             await this.jumpToAdjacentChapterFromMenu(-1);
@@ -1846,13 +1901,12 @@ struct ReadBookPage {
         }
         .layoutWeight(1)
 
-        Text('›')
-          .fontSize(30)
-          .fontColor(this.currentChapterIndex < this.chapters.length - 1 && !this.isLoading ?
-            this.getTextColor() : this.getSubTextColor())
+        SymbolGlyph($r('sys.symbol.chevron_right'))
+          .fontSize(24)
+          .fontColor([this.currentChapterIndex < this.chapters.length - 1 && !this.isLoading ?
+            this.getTextColor() : this.getSubTextColor()])
           .width(46)
           .height(54)
-          .textAlign(TextAlign.Center)
           .enabled(this.currentChapterIndex < this.chapters.length - 1 && !this.isLoading)
           .onClick(async () => {
             await this.jumpToAdjacentChapterFromMenu(1);
@@ -1976,6 +2030,7 @@ struct ReadBookPage {
 
           ImmersiveBackButton({
             icon: $r('sys.symbol.xmark'),
+            iconOffsetX: 0,
             iconColor: this.getTextColor(),
             darkMode: this.isReaderThemeDark(),
             buttonSize: 40,
@@ -2163,6 +2218,7 @@ struct ReadBookPage {
         }
         ImmersiveBackButton({
           icon: $r('sys.symbol.arrow_clockwise'),
+          iconOffsetX: 0,
           iconColor: this.getTextColor(),
           darkMode: this.isReaderThemeDark(),
           buttonSize: 34,
@@ -2179,6 +2235,7 @@ struct ReadBookPage {
           .margin({ left: 8 })
         ImmersiveBackButton({
           icon: $r('sys.symbol.magnifyingglass'),
+          iconOffsetX: 0,
           iconColor: this.tocSearchVisible ? this.accentColor() : this.getTextColor(),
           darkMode: this.isReaderThemeDark(),
           buttonSize: 34,
@@ -2480,6 +2537,8 @@ struct ReadBookPage {
                 })
             )
           }
+          .width('100%')
+          .clip(true)
           .swipeAction({
             start: {
               builder: this.bookmarkMultiSelectAction.bind(this, bookmark),
@@ -2501,6 +2560,7 @@ struct ReadBookPage {
       }
       .layoutWeight(1)
       .width('100%')
+      .clip(true)
       .scrollBar(BarState.Auto)
       .scrollBarColor(this.isReaderThemeDark() ? '#668A8F98' : '#667A6F63')
     }
@@ -2516,7 +2576,7 @@ struct ReadBookPage {
         .fontSize(11)
         .fontColor('#FFFFFF')
     }
-    .width(72)
+    .width(64)
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
@@ -2578,6 +2638,11 @@ struct ReadBookPage {
           () => this.openTxtCharsetDialog()
         )
       }
+      this.readerActionMenuItem(
+        $r('sys.symbol.rectangle_3_group'),
+        this.isReaderComicModeActive() ? '切换为普通阅读' : '切换为漫画阅读',
+        () => this.toggleReaderComicReadingMode()
+      )
       this.readerActionMenuItem(
         $r('sys.symbol.rectangle_3_group'),
         '布局元素设置',
@@ -2745,6 +2810,7 @@ struct ReadBookPage {
           .alignItems(HorizontalAlign.Start)
           ImmersiveBackButton({
             icon: $r('sys.symbol.xmark'),
+            iconOffsetX: 0,
             iconColor: this.getTextColor(),
             darkMode: this.isReaderThemeDark(),
             buttonSize: 38,
@@ -2878,6 +2944,7 @@ struct ReadBookPage {
             .layoutWeight(1)
           ImmersiveBackButton({
             icon: $r('sys.symbol.xmark'),
+            iconOffsetX: 0,
             iconColor: this.getTextColor(),
             darkMode: this.isReaderThemeDark(),
             buttonSize: 38,
@@ -3041,6 +3108,7 @@ struct ReadBookPage {
     Stack({ alignContent: Alignment.Center }) {
       ImmersiveBackButton({
         icon: $r('sys.symbol.play'),
+        iconOffsetX: 0,
         iconColor: this.getTextColor(),
         darkMode: this.isReaderThemeDark(),
         buttonSize: 48,
@@ -3088,7 +3156,7 @@ struct ReadBookPage {
         .fontSize(11)
         .fontColor('#FFFFFF')
     }
-    .width(72)
+    .width(64)
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
@@ -3312,12 +3380,14 @@ struct ReadBookPage {
   isLandscapeDoublePageActive(): boolean {
     return this.readerLandscapeDoublePage &&
       (this.pageViewWidth > this.pageViewHeight || this.pageViewWidth >= 600) &&
-      !this.isReaderComicModeActive();
+      !this.isReaderContinuousScrollSurfaceActive();
   }
 
   initializeReaderComicMode(): void {
-    const storedComicMode = this.book?.getVariable('readerComicMode') === '1';
-    this.readerComicMode = storedComicMode || this.readerSourceIndicatesComic();
+    const manualMode = this.book?.getVariable('readerComicManualMode') || '';
+    const autoDetected = this.book?.getVariable('readerComicAutoDetected') === '1';
+    this.readerComicMode = manualMode === 'comic' ||
+      (manualMode !== 'text' && (autoDetected || this.readerSourceIndicatesComic()));
     if (this.readerComicMode) {
       this.stopTtsReading();
       this.showSettings = false;
@@ -3328,36 +3398,63 @@ struct ReadBookPage {
 
   readerSourceIndicatesComic(): boolean {
     const source = this.currentReaderSource();
-    if (!source) return false;
-    const imageRule = String(source.contentRule?.images || '').trim();
-    const sourceIdentity = `${source.bookSourceGroup || ''}\n${source.bookSourceName || ''}`;
-    return !!imageRule || /漫画|comic|manga/i.test(sourceIdentity);
+    const bookIdentity = `${this.book?.kind || ''}\n${this.book?.customTag || ''}`;
+    const sourceIdentity = source ? `${source.bookSourceGroup || ''}\n${source.bookSourceName || ''}` : '';
+    return /漫画|漫話|条漫|條漫|コミック|comic|manga|manhua|webtoon/i.test(
+      `${bookIdentity}\n${sourceIdentity}`);
   }
 
-  detectReaderComicMode(source: string): void {
-    if (this.readerComicMode || (!this.readerSourceIndicatesComic() && !this.isReaderImageOnlySource(source))) {
-      return;
-    }
+  detectReaderComicMode(_source: string): void {
+    if (this.readerComicMode || !this.readerSourceIndicatesComic() ||
+      this.book?.getVariable('readerComicManualMode') === 'text') return;
     this.readerComicMode = true;
     this.showSettings = false;
     this.ttsMediaControlsExpanded = false;
     this.stopTtsReading();
     this.enterReaderImmersive();
-    if (!this.book || this.book.getVariable('readerComicMode') === '1') {
-      return;
-    }
-    this.book.putVariable('readerComicMode', '1');
+  }
+
+  toggleReaderComicReadingMode(): void {
+    if (!this.book) return;
+    const next = !this.isReaderComicModeActive();
+    this.stopTtsReading();
+    this.readerComicMode = next;
+    this.book.putVariable('readerComicManualMode', next ? 'comic' : 'text');
+    // 继续写入旧字段，兼容已有导入导出数据；实际判定优先读取手动模式字段。
+    this.book.putVariable('readerComicMode', next ? '1' : '0');
     AppDatabase.getInstance().updateBook(this.book).catch((error: Error) => {
-      console.warn('保存漫画阅读模式失败:', error);
+      console.warn('保存阅读模式失败:', error);
     });
+    this.showReaderActionMenu = false;
+    this.showSettings = false;
+    this.ttsMediaControlsExpanded = false;
+    this.resetSlidePageEffect();
+    this.syncReaderComicPageDataSource();
+    if (next) {
+      this.scheduleReaderComicScrollRestore();
+    }
+    this.enterReaderImmersive();
+    promptAction.showToast({ message: next ? '已切换为漫画阅读' : '已切换为普通阅读' });
   }
 
   isReaderComicModeActive(): boolean {
-    return this.readerComicMode || this.isReaderImageOnlySource(this.content);
+    return this.readerComicMode;
+  }
+
+  isReaderNovelContinuousScrollModeActive(): boolean {
+    return !this.isReaderComicModeActive() && this.readerPageTurnMode === 3 && !this.ttsPagedScrollOverride;
+  }
+
+  isReaderContinuousScrollSurfaceActive(): boolean {
+    return this.isReaderComicModeActive() || this.isReaderNovelContinuousScrollModeActive();
+  }
+
+  readerEffectivePageTurnMode(): number {
+    return this.ttsPagedScrollOverride && this.readerPageTurnMode === 3 ? 0 : this.readerPageTurnMode;
   }
 
   comicBoundaryChapterSwipeDirection(offsetY: number): number {
-    if (!this.isReaderComicModeActive() || this.readerComicChapterSwitching || Math.abs(offsetY) < 36) {
+    if (!this.isReaderContinuousScrollSurfaceActive() || this.readerComicChapterSwitching || Math.abs(offsetY) < 36) {
       return 0;
     }
     try {
@@ -3419,14 +3516,14 @@ struct ReadBookPage {
   }
 
   scheduleReaderComicScrollRestore(): void {
-    if (!this.isReaderComicModeActive() || this.contentPages.length === 0) return;
+    if (!this.isReaderContinuousScrollSurfaceActive() || this.contentPages.length === 0) return;
     const serial = ++this.readerComicScrollRestoreSerial;
     const chapterIndex = this.currentChapterIndex;
     const pageIndex = Math.max(0, Math.min(this.currentPageIndex, this.contentPages.length - 1));
     this.readerComicScrollRestoring = true;
     setTimeout(() => {
       if (serial !== this.readerComicScrollRestoreSerial || chapterIndex !== this.currentChapterIndex ||
-        !this.isReaderComicModeActive()) {
+        !this.isReaderContinuousScrollSurfaceActive()) {
         return;
       }
       try {
@@ -3443,7 +3540,7 @@ struct ReadBookPage {
   }
 
   onReaderComicScrollIndexChanged(start: number): void {
-    if (!this.isReaderComicModeActive() || this.readerComicScrollRestoring || this.contentPages.length === 0) {
+    if (!this.isReaderContinuousScrollSurfaceActive() || this.readerComicScrollRestoring || this.contentPages.length === 0) {
       return;
     }
     const pageIndex = Math.max(0, Math.min(Math.round(start), this.contentPages.length - 1));
@@ -5346,7 +5443,7 @@ struct ReadBookPage {
     if (!this.readerVolumeTurnPage || this.showMenu || this.showToc || this.showSettings || this.isLoading || this.chapters.length === 0) {
       return;
     }
-    if (this.isReaderComicModeActive()) {
+    if (this.isReaderContinuousScrollSurfaceActive()) {
       this.scrollReaderComicByPage(direction);
       return;
     }
@@ -5483,6 +5580,7 @@ struct ReadBookPage {
             } else {
               ImmersiveBackButton({
                 icon: $r('sys.symbol.arrow_clockwise'),
+                iconOffsetX: 0,
                 iconColor: this.getTextColor(),
                 darkMode: this.isReaderThemeDark(),
                 buttonSize: 40,
@@ -5500,6 +5598,7 @@ struct ReadBookPage {
 
             ImmersiveBackButton({
               icon: $r('sys.symbol.xmark'),
+              iconOffsetX: 0,
               iconColor: this.getTextColor(),
               darkMode: this.isReaderThemeDark(),
               buttonSize: 40,
@@ -5812,11 +5911,12 @@ struct ReadBookPage {
       }
 
       if (oldBookUrl !== fullBook.bookUrl) {
-        await db.deleteBook(oldBookUrl);
         const existing = await db.getBook(fullBook.bookUrl);
         if (existing) {
           await db.deleteBook(existing.bookUrl);
         }
+        await db.moveBookBookmarks(oldBookUrl, fullBook.bookUrl, fullBook.name, fullBook.author);
+        await db.deleteBook(oldBookUrl);
         await db.insertBook(fullBook);
       } else {
         await db.updateBook(fullBook);
@@ -5833,6 +5933,7 @@ struct ReadBookPage {
       this.closeChangeSourceDialog();
       promptAction.showToast({ message: `已切换至 ${fullBook.originName || searchBook.originName}` });
       await this.loadBook();
+      await this.loadBookmarks();
     } catch (e) {
       if (!this.isChangeSourceSessionActive(sessionId)) {
         return;
@@ -6312,7 +6413,7 @@ struct ReadBookPage {
 
   @Builder
   readerTapLayer() {
-    if (this.readerPageTurnMode === 2) {
+    if (this.readerEffectivePageTurnMode() === 2) {
       Column() {
         ForEach([0, 1, 2], (row: number) => {
           Row() {
@@ -6353,7 +6454,7 @@ struct ReadBookPage {
             this.handleReaderPanCancel();
           })
       )
-    } else if (this.readerPageTurnMode === 0) {
+    } else if (this.readerEffectivePageTurnMode() === 0) {
       Column() {
         Blank()
           .width('100%')
@@ -6414,7 +6515,8 @@ struct ReadBookPage {
         this.handleReaderTouch(event);
       })
       .parallelGesture(
-        PanGesture({ direction: this.readerPageTurnMode === 0 ? PanDirection.Vertical : PanDirection.Horizontal, distance: 1 })
+        PanGesture({ direction: this.readerEffectivePageTurnMode() === 0 ?
+          PanDirection.Vertical : PanDirection.Horizontal, distance: 1 })
           .onActionStart((event: GestureEvent) => {
             this.handleReaderPanStart(event);
           })
@@ -6437,7 +6539,7 @@ struct ReadBookPage {
           if (this.consumeSuppressedReaderTapClick()) {
             return;
           }
-          if (this.readerPageTurnMode === 1 && !this.showMenu && !this.showToc && !this.showSettings) {
+          if (this.readerEffectivePageTurnMode() === 1 && !this.showMenu && !this.showToc && !this.showSettings) {
             this.showMenu = true;
           }
         })
@@ -6478,7 +6580,7 @@ struct ReadBookPage {
   }
 
   canHandleBookmarkPull(offsetX: number, offsetY: number): boolean {
-    return this.readerPageTurnMode !== 0 && offsetY > 0 &&
+    return this.readerEffectivePageTurnMode() !== 0 && offsetY > 0 &&
       Math.abs(offsetY) > Math.abs(offsetX) * 1.25;
   }
 
@@ -6654,12 +6756,13 @@ struct ReadBookPage {
   }
 
   commitReaderTapByPoint(x: number, y: number): boolean {
-    if (this.isPageTurnAnimationEnabled() && this.readerPageTurnMode !== 0 && this.readerPageTurnMode !== 2) {
+    if (this.isPageTurnAnimationEnabled() && this.readerEffectivePageTurnMode() !== 0 &&
+      this.readerEffectivePageTurnMode() !== 2) {
       return false;
     }
     const width = Math.max(1, this.pageViewWidth || this.getPageTurnWidth());
     const height = Math.max(1, this.pageViewHeight || this.getPageTurnHeight());
-    if (this.readerPageTurnMode === 2) {
+    if (this.readerEffectivePageTurnMode() === 2) {
       return this.commitReaderTapZone(this.getTapZoneIndex(x, y, width, height));
     }
     if (y < height * 0.3) {
@@ -6846,7 +6949,8 @@ struct ReadBookPage {
   }
 
   commitReaderHorizontalMove(offsetX: number): void {
-    if ((this.readerPageTurnMode !== 1 && this.readerPageTurnMode !== 2) || this.showToc || this.showSettings ||
+    if ((this.readerEffectivePageTurnMode() !== 1 && this.readerEffectivePageTurnMode() !== 2) ||
+      this.showToc || this.showSettings ||
       this.chapters.length === 0) {
       return;
     }
@@ -6873,6 +6977,7 @@ struct ReadBookPage {
 
         ImmersiveBackButton({
           icon: $r('sys.symbol.xmark'),
+          iconOffsetX: 0,
           iconColor: this.getTextColor(),
           darkMode: this.isReaderThemeDark(),
           buttonSize: 40,
@@ -7060,7 +7165,7 @@ struct ReadBookPage {
 
       this.readerReplaceRulesEntryItem()
 
-      this.readerSelectSettingItem('翻页方式', '选择滚动、滑动或点击翻页',
+      this.readerSelectSettingItem('翻页方式', '选择滚动、滑动、点击或上下连续滑动',
         this.pageTurnModeOptions(), this.pageTurnModeSelectedIndex(), (index: number) => {
           this.switchPageTurnMode(index);
         })
@@ -7324,13 +7429,22 @@ struct ReadBookPage {
       }
       .width('100%')
 
-      Slider({ value: this.ttsSpeed, min: 0.5, max: 2, step: 0.1 })
-        .width('100%')
-        .selectedColor(this.accentColor())
-        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-        .onChange((value: number) => {
-          this.applyTtsSpeed(value);
+      Row({ space: 10 }) {
+        this.readerSliderStepButton($r('sys.symbol.minus'), '降低朗读倍速', this.ttsSpeed > 0.5, () => {
+          this.applyTtsSpeed(this.ttsSpeed - 0.1);
         })
+        Slider({ value: this.ttsSpeed, min: 0.5, max: 2, step: 0.1 })
+          .layoutWeight(1)
+          .selectedColor(this.accentColor())
+          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+          .onChange((value: number) => {
+            this.applyTtsSpeed(value);
+          })
+        this.readerSliderStepButton($r('sys.symbol.plus'), '提高朗读倍速', this.ttsSpeed !== 2, () => {
+          this.applyTtsSpeed(this.ttsSpeed + 0.1);
+        })
+      }
+      .width('100%')
 
       Row({ space: 8 }) {
         this.ttsSpeedChip(0.8)
@@ -7393,6 +7507,22 @@ struct ReadBookPage {
   }
 
   @Builder
+  readerSliderStepButton(icon: Resource, accessibilityText: string, enabled: boolean, action: () => void) {
+    Button({ type: ButtonType.Circle, stateEffect: true }) {
+      SymbolGlyph(icon)
+        .fontSize(16)
+        .fontColor([enabled ? this.getTextColor() : this.getSubTextColor()])
+    }
+    .width(34)
+    .height(34)
+    .padding(0)
+    .enabled(enabled)
+    .backgroundColor(this.isReaderThemeDark() ? '#24272D' : '#EEF0F3')
+    .accessibilityText(accessibilityText)
+    .onClick(action)
+  }
+
+  @Builder
   ttsVoiceRow(voice: TtsVoiceOption) {
     Row() {
       Text(this.ttsVoiceTitle(voice))
@@ -7448,12 +7578,13 @@ struct ReadBookPage {
     return [
       { value: '滚动阅读' },
       { value: '滑动翻页' },
-      { value: '点击翻页' }
+      { value: '点击翻页' },
+      { value: '上下滑动' }
     ];
   }
 
   pageTurnModeSelectedIndex(): number {
-    return this.readerPageTurnMode >= 0 && this.readerPageTurnMode <= 2 ? this.readerPageTurnMode : 0;
+    return this.readerPageTurnMode >= 0 && this.readerPageTurnMode <= 3 ? this.readerPageTurnMode : 0;
   }
 
   pageTurnAnimationOptions(): SelectOption[] {
@@ -7729,14 +7860,25 @@ struct ReadBookPage {
         .width('100%')
         .margin({ top: 10 })
 
-        Slider({ value: this.readerPreloadChapterCount, min: 1, max: 10, step: 1 })
-          .width('100%')
-          .margin({ top: 6 })
-          .selectedColor(this.accentColor())
-          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-          .onChange((sliderValue: number) => {
-            this.setReaderPreloadChapterCount(sliderValue);
+        Row({ space: 10 }) {
+          this.readerSliderStepButton($r('sys.symbol.minus'), '减少预缓存章节数',
+            this.readerPreloadChapterCount > 1, () => {
+            this.setReaderPreloadChapterCount(this.readerPreloadChapterCount - 1);
           })
+          Slider({ value: this.readerPreloadChapterCount, min: 1, max: 10, step: 1 })
+            .layoutWeight(1)
+            .selectedColor(this.accentColor())
+            .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+            .onChange((sliderValue: number) => {
+              this.setReaderPreloadChapterCount(sliderValue);
+            })
+          this.readerSliderStepButton($r('sys.symbol.plus'), '增加预缓存章节数',
+            this.readerPreloadChapterCount !== 10, () => {
+            this.setReaderPreloadChapterCount(this.readerPreloadChapterCount + 1);
+          })
+        }
+        .width('100%')
+        .margin({ top: 6 })
       }
     }
     .width('100%')
@@ -8149,11 +8291,26 @@ struct ReadBookPage {
     await this.startTtsReadingFromCurrentPosition(true);
   }
 
+  setTtsPagedScrollOverride(enabled: boolean): void {
+    const next = enabled && this.readerPageTurnMode === 3 && !this.isReaderComicModeActive();
+    if (this.ttsPagedScrollOverride === next) return;
+    this.ttsPagedScrollOverride = next;
+    this.resetSlidePageEffect();
+    if (next) {
+      // 取消纵向连续列表尚未执行的定位任务，朗读期间使用原有分页滚动与逐句高亮。
+      this.readerComicScrollRestoreSerial++;
+      this.readerComicScrollRestoring = false;
+    } else if (this.readerPageTurnMode === 3) {
+      this.scheduleReaderComicScrollRestore();
+    }
+  }
+
   async startTtsReadingFromCurrentPosition(showToast: boolean): Promise<void> {
     if (this.isReaderComicModeActive()) {
       this.finishTtsReading();
       return;
     }
+    this.setTtsPagedScrollOverride(true);
     const text = this.getTtsReadingText();
     if (!text) {
       this.finishTtsReading();
@@ -8238,6 +8395,7 @@ struct ReadBookPage {
     this.stopTtsBackgroundRunning();
     if (!this.isTtsSpeaking && !this.ttsReader.isSpeaking()) {
       this.clearTtsHighlight();
+      this.setTtsPagedScrollOverride(false);
       return;
     }
     this.ttsReader.stop();
@@ -8246,6 +8404,7 @@ struct ReadBookPage {
     this.clearTtsHighlight();
     this.ttsLastFocusChunk = null;
     this.ttsLastFocusPageIndex = -1;
+    this.setTtsPagedScrollOverride(false);
   }
 
   stopTtsReaderForChapterSwitch(): void {
@@ -8260,6 +8419,7 @@ struct ReadBookPage {
     this.ttsReader.stop();
     this.isTtsSpeaking = false;
     this.clearTtsHighlight();
+    this.setTtsPagedScrollOverride(false);
   }
 
   async continueTtsReading(token: number): Promise<void> {
@@ -8315,6 +8475,7 @@ struct ReadBookPage {
     this.clearTtsHighlight();
     this.ttsLastFocusChunk = null;
     this.ttsLastFocusPageIndex = -1;
+    this.setTtsPagedScrollOverride(false);
   }
 
   async loadReaderSettings(): Promise<void> {
@@ -8384,6 +8545,13 @@ struct ReadBookPage {
       return;
     }
     this.ttsBackgroundRunning = false;
+    if (this.fullTextCaching) {
+      this.fullTextCacheBackgroundRunning = true;
+      return;
+    }
+    if (this.fullTextCacheBackgroundRunning) {
+      return;
+    }
     try {
       await backgroundTaskManager.stopBackgroundRunning(getContext(this));
       console.info(`[TTS-BG] background audio task stopped: ${this.ttsBackgroundDebugState()}`);
@@ -9533,7 +9701,7 @@ struct ReadBookPage {
         this.commitVisibleCurrentPageText(targetText);
         this.finishPageTurnAnimation();
         this.commitCurrentPageTextLater(this.currentChapterIndex, this.currentPageIndex, targetText);
-      } else if (this.readerPageTurnMode === 1) {
+      } else if (this.readerEffectivePageTurnMode() === 1) {
         await this.runTtsSlidePageTurn(direction, turnSerial);
       } else {
         await this.runTtsTapPageTurn(direction, turnSerial);
@@ -9912,7 +10080,8 @@ struct ReadBookPage {
   styledReaderText(text: string, bottomPadding: number, chapterIndex: number = this.currentChapterIndex,
     ttsRenderVersion: number = this.ttsHighlightRenderVersion, contentRenderVersion: number = this.pageRenderVersion,
     pageRenderIdentity: string = this.readerPageRenderIdentity('text', chapterIndex, this.currentPageIndex,
-      contentRenderVersion, ttsRenderVersion, text), pageIndex: number = this.currentPageIndex) {
+      contentRenderVersion, ttsRenderVersion, text), pageIndex: number = this.currentPageIndex,
+    topPadding: number = this.readerMarginTop) {
     Column() {
       ForEach(this.getReaderTextParagraphs(text), (paragraph: ReaderTextParagraph) => {
         this.styledReaderParagraph(paragraph, chapterIndex, this.hasActiveTtsHighlight(text), ttsRenderVersion,
@@ -9926,7 +10095,7 @@ struct ReadBookPage {
     .padding({
       left: this.getReaderPageHorizontalPadding(text, this.readerMarginLeft),
       right: this.getReaderPageHorizontalPadding(text, this.readerMarginRight),
-      top: this.getReaderPageVerticalPadding(text, this.readerMarginTop),
+      top: this.getReaderPageVerticalPadding(text, topPadding),
       bottom: this.getReaderPageVerticalPadding(text, bottomPadding)
     })
   }
@@ -11155,6 +11324,9 @@ struct ReadBookPage {
         this.contentPages = [...result.pages];
         this.contentPageStarts = [...result.starts];
         this.contentPageEnds = [...result.ends];
+        if (this.isReaderContinuousScrollSurfaceActive()) {
+          this.syncReaderComicPageDataSource();
+        }
       }
       if (result.complete) {
         this.persistReaderPagination(chapterIndex, key, result);
@@ -11282,23 +11454,23 @@ struct ReadBookPage {
   }
 
   async turnNext() {
-    if (this.isReaderComicModeActive()) {
+    if (this.isReaderContinuousScrollSurfaceActive()) {
       this.scrollReaderComicByPage(1);
       return;
     }
-    await this.runPageTurnAnimation(1, this.readerPageTurnMode === 1 ? 'slide' : 'tap');
+    await this.runPageTurnAnimation(1, this.readerEffectivePageTurnMode() === 1 ? 'slide' : 'tap');
   }
 
   async turnPrev() {
-    if (this.isReaderComicModeActive()) {
+    if (this.isReaderContinuousScrollSurfaceActive()) {
       this.scrollReaderComicByPage(-1);
       return;
     }
-    await this.runPageTurnAnimation(-1, this.readerPageTurnMode === 1 ? 'slide' : 'tap');
+    await this.runPageTurnAnimation(-1, this.readerEffectivePageTurnMode() === 1 ? 'slide' : 'tap');
   }
 
   scrollReaderComicByPage(direction: number): void {
-    if (!this.isReaderComicModeActive() || this.contentPages.length === 0) return;
+    if (!this.isReaderContinuousScrollSurfaceActive() || this.contentPages.length === 0) return;
     const targetIndex = this.currentPageIndex + (direction > 0 ? 1 : -1);
     if (targetIndex >= 0 && targetIndex < this.contentPages.length) {
       this.readerComicScroller.scrollToIndex(targetIndex, true, ScrollAlign.START);
@@ -11355,6 +11527,9 @@ struct ReadBookPage {
     this.contentPages = [...result.pages];
     this.contentPageStarts = [...result.starts];
     this.contentPageEnds = [...result.ends];
+    if (this.isReaderContinuousScrollSurfaceActive()) {
+      this.syncReaderComicPageDataSource();
+    }
     if (result.complete) this.persistReaderPagination(this.currentChapterIndex, key, result);
   }
 
@@ -11893,7 +12068,7 @@ struct ReadBookPage {
   }
 
   isVerticalPageTurnAnimation(): boolean {
-    return this.readerPageTurnMode === 0;
+    return this.readerEffectivePageTurnMode() === 0;
   }
 
   isStackPageTurnAnimation(): boolean {

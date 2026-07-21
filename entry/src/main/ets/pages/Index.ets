@@ -33,6 +33,7 @@ import { BuiltinThemeRegistry } from '../theme/BuiltinThemeRegistry';
 import { LocalBookService } from '../core/book/LocalBookService';
 
 const SHELF_FULL_TEXT_CACHE_CANCEL_EVENT: string = 'com.legado.harmony.action.SHELF_FULL_TEXT_CACHE_CANCEL';
+const SHELF_FULL_TEXT_CACHE_NOTIFICATION_INTERVAL_MS: number = 5000;
 
 interface FullTextCacheCancelSignal {
   nonce: number;
@@ -554,6 +555,9 @@ struct BookshelfPage {
   @State isLoading: boolean = false;
   @State showDeleteDialog: boolean = false;
   @State showActionDialog: boolean = false;
+  @State showEditBookInfoDialog: boolean = false;
+  @State editingBookName: string = '';
+  @State editingBookAuthor: string = '';
   @State showTagDialog: boolean = false;
   @State showCacheDialog: boolean = false;
   @State showChapterCacheDialog: boolean = false;
@@ -984,7 +988,7 @@ struct BookshelfPage {
   }
 
   bookActionMenuHeight(book: Book): number {
-    const baseHeight = LocalBookService.isLocalBook(book) ? 232 : 276;
+    const baseHeight = 276;
     return baseHeight + (book.customCoverUrl ? 44 : 0);
   }
 
@@ -1305,6 +1309,17 @@ struct BookshelfPage {
                   }
                 })
             }
+            if (LocalBookService.isLocalBook(this.pendingActionBook)) {
+              this.contextActionItem($r('sys.symbol.square_and_pencil'), '编辑书籍信息',
+                this.primaryTextColor(), () => {
+                  if (this.pendingActionBook) {
+                    this.editingBookName = this.pendingActionBook.name;
+                    this.editingBookAuthor = this.pendingActionBook.author;
+                    this.showActionDialog = false;
+                    this.showEditBookInfoDialog = true;
+                  }
+                })
+            }
             this.contextActionItem($r('sys.symbol.folder'), '移动分组', this.primaryTextColor(), () => {
               if (this.pendingActionBook) {
                 const bookUrl = this.pendingActionBook.bookUrl;
@@ -1490,6 +1505,94 @@ struct BookshelfPage {
         .width('100%')
         .height('100%')
         .backgroundColor('#66000000')
+      }
+
+      if (this.showEditBookInfoDialog && this.pendingActionBook) {
+        Column() {
+          Column() {
+            Text('编辑书籍信息')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.primaryTextColor())
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ bottom: 18 })
+
+            Text('书名')
+              .fontSize(13)
+              .fontColor(this.secondaryTextColor())
+              .width('100%')
+              .margin({ bottom: 6 })
+
+            TextInput({ placeholder: '请输入书名', text: this.editingBookName })
+              .width('100%')
+              .height(44)
+              .fontColor(this.primaryTextColor())
+              .placeholderColor(this.subTextColor())
+              .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'popover'))
+              .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
+              .border({ width: ThemeRuntime.glassBorderWidth('popover'),
+                color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'popover') })
+              .borderRadius(12)
+              .onChange((value: string) => {
+                this.editingBookName = value;
+              })
+
+            Text('作者')
+              .fontSize(13)
+              .fontColor(this.secondaryTextColor())
+              .width('100%')
+              .margin({ top: 14, bottom: 6 })
+
+            TextInput({ placeholder: '请输入作者（可留空）', text: this.editingBookAuthor })
+              .width('100%')
+              .height(44)
+              .fontColor(this.primaryTextColor())
+              .placeholderColor(this.subTextColor())
+              .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'popover'))
+              .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
+              .border({ width: ThemeRuntime.glassBorderWidth('popover'),
+                color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'popover') })
+              .borderRadius(12)
+              .onChange((value: string) => {
+                this.editingBookAuthor = value;
+              })
+
+            Row() {
+              Button('取消')
+                .width('45%')
+                .height(44)
+                .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'popover'))
+                .fontColor(this.primaryTextColor())
+                .onClick(() => this.closeEditBookInfoDialog())
+
+              Button('保存')
+                .width('45%')
+                .height(44)
+                .enabled(!!this.editingBookName.trim())
+                .opacity(this.editingBookName.trim() ? 1 : 0.45)
+                .onClick(() => this.saveLocalBookInfo())
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.SpaceBetween)
+            .margin({ top: 22 })
+          }
+          .width('85%')
+          .padding(20)
+          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+          .border({ width: ThemeRuntime.glassBorderWidth('overlay'),
+            color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'),
+            color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'),
+            offsetX: ThemeRuntime.glassShadowOffsetX('overlay'),
+            offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#80000000')
+        .justifyContent(FlexAlign.Center)
       }
 
       if (this.showCacheDialog && this.cacheTargetBook) {
@@ -3492,6 +3595,52 @@ struct BookshelfPage {
     promptAction.showToast({ message: '标签已保存' });
   }
 
+  closeEditBookInfoDialog(): void {
+    this.showEditBookInfoDialog = false;
+    this.editingBookName = '';
+    this.editingBookAuthor = '';
+    this.pendingActionBook = null;
+  }
+
+  async saveLocalBookInfo(): Promise<void> {
+    const target = this.pendingActionBook;
+    const name = this.editingBookName.trim();
+    const author = this.editingBookAuthor.trim();
+    if (!target || !LocalBookService.isLocalBook(target)) {
+      this.closeEditBookInfoDialog();
+      return;
+    }
+    if (!name) {
+      promptAction.showToast({ message: '书名不能为空' });
+      return;
+    }
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const book = await db.getBook(target.bookUrl);
+      if (!book || !LocalBookService.isLocalBook(book)) {
+        promptAction.showToast({ message: '书籍已不在书架中' });
+        this.closeEditBookInfoDialog();
+        return;
+      }
+      book.name = name;
+      book.author = author;
+      book.putVariable('localMetadataCustomized', '1');
+      book.putVariable('localCustomName', name);
+      book.putVariable('localCustomAuthor', author);
+      await db.updateBook(book);
+      await db.updateBookBookmarkMetadata(book.bookUrl, name, author);
+      this.allBooks = this.allBooks.map((item: Book) => item.bookUrl === book.bookUrl ? book : item);
+      this.applyShelfScope();
+      this.closeEditBookInfoDialog();
+      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+      promptAction.showToast({ message: '书籍信息已保存' });
+    } catch (e) {
+      console.error('保存本地书籍信息失败:', e);
+      promptAction.showToast({ message: '保存失败' });
+    }
+  }
+
   async openCacheDialog(book: Book): Promise<void> {
     this.cacheTargetBook = book;
     this.cacheChapters = [];
@@ -3701,6 +3850,7 @@ struct BookshelfPage {
     this.registerShelfFullTextCacheTask(task);
     this.setFullTextCacheStatus(task, '全文缓存后台进行中');
     try {
+      await this.startShelfFullTextCacheBackgroundRunning(book);
       await this.refreshFullTextCacheCover(book, task);
       if (await this.prepareShelfFullTextCacheNotification()) {
         await this.publishShelfFullTextCacheNotification(task, '准备缓存章节',
@@ -3725,7 +3875,6 @@ struct BookshelfPage {
         return;
       }
 
-      await this.startShelfFullTextCacheBackgroundRunning(book);
       await this.publishShelfFullTextCacheProgress(task, true);
 
       for (let i = 0; i < total; i++) {
@@ -3738,16 +3887,13 @@ struct BookshelfPage {
         }
         this.setFullTextCacheStatus(task, `正在缓存 ${i + 1}/${total}`);
         try {
-          const title = chapter.title || `第${i + 1}章`;
-          await this.publishShelfFullTextCacheNotification(task, `正在缓存：${title}`,
-            this.shelfFullTextCacheProgressText(task), true);
           if (await engine.cacheChapter(i)) {
             task.done = this.countCachedChapters(engine.chapters);
           }
         } catch (e) {
           console.error('缓存章节失败:', i, e);
         }
-        await this.publishShelfFullTextCacheProgress(task, true);
+        await this.publishShelfFullTextCacheProgress(task, false);
         await this.sleep(0);
       }
 
@@ -3998,11 +4144,11 @@ struct BookshelfPage {
 
   async publishShelfFullTextCacheProgress(task: ShelfFullTextCacheTask, force: boolean): Promise<void> {
     const now = Date.now();
-    if (!force && now - task.notificationLastAt < 1200) {
+    if (!force && now - task.notificationLastAt < SHELF_FULL_TEXT_CACHE_NOTIFICATION_INTERVAL_MS) {
       return;
     }
     task.notificationLastAt = now;
-    await this.publishShelfFullTextCacheNotification(task, task.status || '全文缓存后台进行中',
+    await this.publishShelfFullTextCacheNotification(task, '全文缓存后台进行中',
       this.shelfFullTextCacheProgressText(task), true);
   }
 
@@ -4271,11 +4417,17 @@ struct BookshelfPage {
     if (this.fullTextCacheBackgroundRunning) {
       return;
     }
-    this.fullTextCacheBackgroundRunning = false;
+    try {
+      const agent = await this.createShelfFullTextCacheOpenWantAgent(book);
+      await backgroundTaskManager.startBackgroundRunning(getContext(this), ['dataTransfer'], agent);
+      this.fullTextCacheBackgroundRunning = true;
+    } catch (error) {
+      console.warn('启动书架全文缓存后台任务失败:', error);
+    }
   }
 
   async stopShelfFullTextCacheBackgroundRunning(): Promise<void> {
-    if (!this.fullTextCacheBackgroundRunning) {
+    if (!this.fullTextCacheBackgroundRunning || this.fullTextCacheTasks.size > 0) {
       return;
     }
     this.fullTextCacheBackgroundRunning = false;
@@ -5056,6 +5208,8 @@ struct ExplorePage {
   @Prop @Watch('onActiveChanged') isActive: boolean = false;
   @State entries: ExploreEntry[] = [];
   @State sourceOptions: ExploreSourceOption[] = [];
+  @State exploreSourceGroups: string[] = [];
+  @State activeExploreSourceGroup: string = '__all__';
   @State platformNames: string[] = [];
   @State sourceNames: string[] = [];
   @State selectedSourceName: string = '';
@@ -5074,13 +5228,13 @@ struct ExplorePage {
   @StorageLink('explorePlatform') selectedPlatform: string = '番茄';
   @StorageLink('exploreSourceUrl') selectedSourceUrl: string = '';
   @StorageLink('shelfUpdateTime') @Watch('onShelfChanged') shelfUpdateTime: number = 0;
+  @StorageLink('bookSourceOrderRevision') @Watch('onBookSourceOrderChanged') bookSourceOrderRevision: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('searchExploreShowResultCover') searchExploreShowResultCover: boolean = true;
   @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = false;
   @StorageLink('searchExploreShowResultTags') searchExploreShowResultTags: boolean = true;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
-  @StorageLink('searchExploreSourceSort') searchExploreSourceSort: string = '';
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
@@ -5117,6 +5271,12 @@ struct ExplorePage {
     this.syncExploreShelfStatus(this.books);
   }
 
+  onBookSourceOrderChanged(): void {
+    if (this.isActive && this.hasLoaded && !this.isLoading) {
+      this.loadEntries();
+    }
+  }
+
   async loadEntries(platformOverride: string = '') {
     const loadVersion = this.beginExploreLoad();
     this.hasLoaded = true;
@@ -5136,7 +5296,13 @@ struct ExplorePage {
       const previousSourceUrl = this.selectedSourceUrl;
       const sourceOptions = await this.coordinator.getExploreSources();
       if (!this.isCurrentExploreLoad(loadVersion)) return;
-      this.sourceOptions = this.sortExploreSourceOptions(sourceOptions);
+      // 数据库查询已经按书源管理中的 customOrder 排序，同时只会返回已启用的书源。
+      this.sourceOptions = sourceOptions;
+      this.exploreSourceGroups = this.buildExploreSourceGroups();
+      if (this.activeExploreSourceGroup !== '__all__' &&
+        !this.exploreSourceGroups.includes(this.activeExploreSourceGroup)) {
+        this.activeExploreSourceGroup = '__all__';
+      }
       this.sourceNames = this.sourceOptions.map((option: ExploreSourceOption) => option.sourceName);
       const restoredOption = this.sourceOptions.find((option: ExploreSourceOption) =>
         option.sourceUrl === previousSourceUrl) ||
@@ -5276,6 +5442,7 @@ struct ExplorePage {
 
         ImmersiveBackButton({
           icon: $r('sys.symbol.arrow_clockwise'),
+          iconOffsetX: 0,
           iconColor: this.primaryTextColor(),
           darkMode: this.appDarkMode,
           buttonSize: 40,
@@ -5337,6 +5504,8 @@ struct ExplorePage {
             })
           }
           .padding({ left: 16, right: 16 })
+          .constraintSize({ minWidth: '100%' })
+          .justifyContent(FlexAlign.Start)
         }
         .width('100%')
         .height(44)
@@ -5493,10 +5662,12 @@ struct ExplorePage {
   @Builder
   exploreSourceDropdown() {
     Column() {
+      this.exploreSourceGroupBar()
+
       Scroll() {
         Column() {
           if (this.getFilteredExploreSourceOptions().length === 0) {
-            Text('没有匹配的书源')
+            Text(this.activeExploreSourceGroup === '__all__' ? '没有匹配的书源' : '当前分组没有匹配的书源')
               .fontSize(14)
               .fontColor(this.secondaryTextColor())
               .width('100%')
@@ -5513,6 +5684,20 @@ struct ExplorePage {
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                   .layoutWeight(1)
+
+                if (this.activeExploreSourceGroup === '__all__') {
+                  Text(this.exploreSourceGroupLabel(option.sourceGroup))
+                    .fontSize(10)
+                    .fontFamily(this.readerActiveFontFamily)
+                    .fontColor(this.secondaryTextColor())
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .constraintSize({ maxWidth: 68 })
+                    .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                    .borderRadius(8)
+                    .backgroundColor(this.inputColor())
+                    .margin({ left: 8 })
+                }
 
                 if (option.sourceUrl === this.selectedSourceUrl) {
                   Text('✓')
@@ -5545,43 +5730,59 @@ struct ExplorePage {
     .width(this.exploreSourceDropdownWidth())
     .padding(8)
     .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+    .clip(true)
     .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
     .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
     .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
     .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
     .position({ x: 16, y: this.statusBarHeight + 52 })
     .zIndex(10)
+    .parallelGesture(
+      PanGesture({ direction: PanDirection.Horizontal, distance: 18 })
+        .onActionEnd((event: GestureEvent) => {
+          this.switchExploreSourceGroupBySwipe(event.offsetX);
+        })
+    )
+  }
+
+  @Builder
+  exploreSourceGroupBar() {
+    Scroll() {
+      Row({ space: 7 }) {
+        this.exploreSourceGroupChip('全部', '__all__')
+        ForEach(this.exploreSourceGroups, (group: string) => {
+          this.exploreSourceGroupChip(group, group)
+        }, (group: string) => group)
+      }
+      .padding({ left: 4, right: 4, bottom: 8 })
+      .constraintSize({ minWidth: '100%' })
+    }
+    .width('100%')
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
+    .clip(true)
+  }
+
+  @Builder
+  exploreSourceGroupChip(label: string, groupKey: string) {
+    Text(label)
+      .fontSize(12)
+      .fontFamily(this.readerActiveFontFamily)
+      .fontColor(this.activeExploreSourceGroup === groupKey ? '#FFFFFF' : this.secondaryTextColor())
+      .height(30)
+      .maxLines(1)
+      .textOverflow({ overflow: TextOverflow.Ellipsis })
+      .constraintSize({ maxWidth: 128 })
+      .padding({ left: 11, right: 11 })
+      .textAlign(TextAlign.Center)
+      .borderRadius(15)
+      .backgroundColor(this.activeExploreSourceGroup === groupKey ? this.accentColor() : this.inputColor())
+      .onClick(() => this.selectExploreSourceGroup(groupKey))
   }
 
   exploreSourceDropdownWidth(): number {
-    const maxWidth = Math.max(160, Math.min(320, this.exploreViewportWidth - 32));
-    const options = this.getFilteredExploreSourceOptions();
-    let textWidth = this.measureExploreSourceNameWidth(options.length === 0 ? '没有匹配的书源' : '');
-    for (const option of options) {
-      textWidth = Math.max(textWidth, this.measureExploreSourceNameWidth(option.sourceName || '未命名书源'));
-    }
-    // 面板内外边距、选中标记和标记间距合计预留约 72vp。
-    return Math.min(maxWidth, Math.max(184, textWidth + 72));
-  }
-
-  measureExploreSourceNameWidth(name: string): number {
-    if (!name) {
-      return 0;
-    }
-    try {
-      const size = this.getUIContext().getMeasureUtils().measureTextSize({
-        textContent: name,
-        fontSize: 16,
-        fontFamily: this.readerActiveFontFamily
-      });
-      const width = px2vp(Number(size.width));
-      if (Number.isFinite(width) && width > 0) {
-        return width;
-      }
-    } catch (e) {
-      console.warn('测量发现书源名称宽度失败:', e);
-    }
-    return name.length * 16;
+    // 常规设备保持稳定的 320vp；窄屏只按安全边距收窄，不再随书源或分组内容变化。
+    return Math.min(320, Math.max(1, this.exploreViewportWidth - 32));
   }
 
   async addSearchBookToShelf(searchBook: SearchBook): Promise<void> {
@@ -5604,6 +5805,7 @@ struct ExplorePage {
     }
     this.exploreSourceFilterInput = '';
     this.exploreSourceFilterKeyword = '';
+    this.activeExploreSourceGroup = '__all__';
     this.showExploreSourcePicker = true;
   }
 
@@ -5629,15 +5831,51 @@ struct ExplorePage {
   }
 
   getFilteredExploreSourceOptions(): ExploreSourceOption[] {
+    let options = this.sourceOptions;
+    if (this.activeExploreSourceGroup !== '__all__') {
+      options = options.filter((option: ExploreSourceOption) =>
+        this.exploreSourceGroupLabel(option.sourceGroup) === this.activeExploreSourceGroup);
+    }
     const keyword = this.exploreSourceFilterKeyword;
     if (!keyword) {
-      return this.sourceOptions;
+      return options;
     }
-    return this.sourceOptions.filter((option: ExploreSourceOption) => {
-      const searchable = `${option.sourceName || ''}\n${option.sourceUrl || ''}\n${(option.platforms || []).join(' ')}`
+    return options.filter((option: ExploreSourceOption) => {
+      const searchable = `${option.sourceName || ''}\n${option.sourceUrl || ''}\n${option.sourceGroup || ''}\n${(option.platforms || []).join(' ')}`
         .toLowerCase();
       return searchable.includes(keyword);
     });
+  }
+
+  buildExploreSourceGroups(): string[] {
+    const groups: string[] = [];
+    for (const option of this.sourceOptions) {
+      const group = this.exploreSourceGroupLabel(option.sourceGroup);
+      if (!groups.includes(group)) groups.push(group);
+    }
+    return groups;
+  }
+
+  exploreSourceGroupLabel(group: string): string {
+    const normalized = (group || '').trim();
+    return normalized || '未分组';
+  }
+
+  selectExploreSourceGroup(groupKey: string): void {
+    if (groupKey === '__all__' || this.exploreSourceGroups.includes(groupKey)) {
+      this.activeExploreSourceGroup = groupKey;
+    }
+  }
+
+  switchExploreSourceGroupBySwipe(offsetX: number): void {
+    if (Math.abs(offsetX) < 36) return;
+    const groups = ['__all__'].concat(this.exploreSourceGroups);
+    const currentIndex = Math.max(0, groups.indexOf(this.activeExploreSourceGroup));
+    const direction = offsetX < 0 ? 1 : -1;
+    const targetIndex = Math.max(0, Math.min(groups.length - 1, currentIndex + direction));
+    if (targetIndex !== currentIndex) {
+      this.activeExploreSourceGroup = groups[targetIndex];
+    }
   }
 
   switchExplorePlatform(platform: string): void {
@@ -5806,28 +6044,6 @@ struct ExplorePage {
     return names;
   }
 
-  sortExploreSourceOptions(sourceOptions: ExploreSourceOption[]): ExploreSourceOption[] {
-    const order = (this.searchExploreSourceSort || '').split('\n')
-      .map((url: string) => url.trim())
-      .filter((url: string) => !!url);
-    if (order.length === 0) {
-      return sourceOptions;
-    }
-    const result: ExploreSourceOption[] = [];
-    for (const url of order) {
-      const option = sourceOptions.find((item: ExploreSourceOption) => item.sourceUrl === url);
-      if (option && !result.some((item: ExploreSourceOption) => item.sourceUrl === option.sourceUrl)) {
-        result.push(option);
-      }
-    }
-    for (const option of sourceOptions) {
-      if (!result.some((item: ExploreSourceOption) => item.sourceUrl === option.sourceUrl)) {
-        result.push(option);
-      }
-    }
-    return result;
-  }
-
   exploreSourceSelectOptions(): SelectOption[] {
     const options: SelectOption[] = [];
     if (this.sourceNames.length === 0) {
@@ -5914,6 +6130,10 @@ struct ExplorePage {
 
   cardColor(): string {
     return ThemeRuntime.cardColor(this.appDarkMode);
+  }
+
+  inputColor(): string {
+    return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
   glassCardColor(): string {
@@ -6071,6 +6291,7 @@ struct SearchPage {
 
           ImmersiveBackButton({
             icon: this.isSearching ? $r('sys.symbol.xmark') : $r('sys.symbol.magnifyingglass'),
+            iconOffsetX: 0,
             iconColor: this.isSearching ? '#E53935' : this.primaryTextColor(),
             darkMode: this.appDarkMode,
             buttonSize: 40,
@@ -6240,7 +6461,7 @@ struct SearchPage {
   }
 
   searchHistoryPopupPanelWidth(): number {
-    return Math.min(252, Math.max(160, this.searchViewportWidth - 32));
+    return Math.min(420, Math.max(200, this.searchViewportWidth - 32));
   }
 
   searchSettingsPopupPanelWidth(): number {
@@ -6257,97 +6478,69 @@ struct SearchPage {
     Column() {
       Row() {
         Text('搜索历史')
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
+          .fontSize(15)
+          .fontWeight(FontWeight.Bold)
           .fontColor(this.primaryTextColor())
           .layoutWeight(1)
 
-        Text('收起')
+        Text('清除')
           .fontSize(13)
-          .fontColor(this.buttonColor())
-          .padding({ left: 10, top: 6, bottom: 6 })
-          .onClick(() => {
-            this.showSearchHistoryDropdown = false;
-          })
-      }
-      .width('100%')
-      .height(38)
-      .padding({ left: 12, right: 8 })
-      .alignItems(VerticalAlign.Center)
-
-      Scroll() {
-        Column() {
-          ForEach(this.searchHistory, (keyword: string, index: number) => {
-            Column() {
-              Row() {
-                Row() {
-                  Text('◷')
-                    .fontSize(16)
-                    .fontColor(this.subTextColor())
-                    .margin({ right: 10 })
-
-                  Text(keyword)
-                    .fontSize(14)
-                    .fontColor(this.secondaryTextColor())
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .layoutWeight(1)
-                }
-                  .layoutWeight(1)
-                  .height('100%')
-                  .alignItems(VerticalAlign.Center)
-                  .onClick(() => {
-                    this.showSearchHistoryDropdown = false;
-                    this.searchFromHistory(keyword);
-                  })
-
-                SymbolGlyph($r('sys.symbol.xmark'))
-                  .fontSize(15)
-                  .fontColor([this.subTextColor()])
-                  .width(34)
-                  .height(34)
-                  .onClick(() => {
-                    this.deleteSearchHistoryItem(keyword);
-                  })
-              }
-              .width('100%')
-              .height(44)
-              .padding({ left: 12, right: 6 })
-              .alignItems(VerticalAlign.Center)
-
-              if (index < this.searchHistory.length - 1) {
-                Divider()
-                  .color(this.glassBorderColor())
-                  .margin({ left: 38, right: 12 })
-              }
-            }
-            .width('100%')
-          }, (keyword: string) => keyword)
-
-          Divider()
-            .color(this.glassBorderColor())
-            .margin({ left: 12, right: 12 })
-
-          Row({ space: 8 }) {
-            SymbolGlyph($r('sys.symbol.trash'))
-              .fontSize(17)
-              .fontColor(['#E53935'])
-            Text('清空搜索记录')
-              .fontSize(14)
-              .fontColor('#E53935')
-          }
-          .width('100%')
-          .height(44)
-          .padding({ left: 12, right: 12 })
-          .justifyContent(FlexAlign.Center)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.secondaryTextColor())
+          .height(32)
+          .padding({ left: 12, right: 4 })
+          .textAlign(TextAlign.Center)
           .onClick(() => {
             this.clearSearchHistory();
           })
-        }
-        .width('100%')
       }
       .width('100%')
-      .constraintSize({ maxHeight: 280 })
+      .height(46)
+      .padding({ left: 14, right: 10 })
+      .alignItems(VerticalAlign.Center)
+
+      Divider()
+        .color(this.glassBorderColor())
+        .margin({ left: 14, right: 14 })
+
+      Scroll() {
+        Flex({ wrap: FlexWrap.Wrap }) {
+          ForEach(this.searchHistory, (keyword: string) => {
+            Row() {
+              Text(keyword)
+                .fontSize(14)
+                .fontColor(this.secondaryTextColor())
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+            .constraintSize({ maxWidth: '72%' })
+            .height(34)
+            .padding({ left: 12, right: 12 })
+            .margin({ right: 8, bottom: 8 })
+            .borderRadius(17)
+            .backgroundColor(this.buttonBackgroundColor())
+            .alignItems(VerticalAlign.Center)
+            .priorityGesture(
+              GestureGroup(GestureMode.Exclusive,
+                LongPressGesture({ repeat: false })
+                  .onAction(() => {
+                    this.deleteSearchHistoryItem(keyword);
+                  }),
+                TapGesture()
+                  .onAction(() => {
+                    this.showSearchHistoryDropdown = false;
+                    this.searchFromHistory(keyword);
+                  })
+              ),
+              GestureMask.IgnoreInternal
+            )
+          }, (keyword: string) => keyword)
+        }
+        .width('100%')
+        .padding({ left: 14, right: 6, top: 12, bottom: 4 })
+      }
+      .width('100%')
+      .constraintSize({ maxHeight: 260 })
     }
     .width(this.searchHistoryPopupPanelWidth())
     .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
@@ -6480,6 +6673,7 @@ struct SearchPage {
     try {
       await AppDatabase.getInstance().deleteSearchKeyword(keyword);
       this.searchHistory = this.searchHistory.filter((item: string) => item !== keyword);
+      promptAction.showToast({ message: '已删除该条搜索记录' });
       if (this.searchHistory.length === 0) {
         this.searchHistoryEditing = false;
         this.searchHistoryExpanded = false;

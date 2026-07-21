@@ -99,6 +99,9 @@ struct CustomTtsVoiceManagerPage {
               ListItem() {
                 this.voiceListItem(voice)
               }
+              .width('100%')
+              .borderRadius(8)
+              .clip(true)
               .swipeAction(this.selectionMode ? {} : {
                 start: {
                   builder: () => {
@@ -125,6 +128,7 @@ struct CustomTtsVoiceManagerPage {
           .width('100%')
           .layoutWeight(1)
           .padding({ left: 16, right: 16 })
+          .clip(true)
           .lanes(ResponsiveManagerListLayout.laneCount(this.contextViewportWidth),
             ResponsiveManagerListLayout.gutter(this.contextViewportWidth))
         }
@@ -789,7 +793,7 @@ struct CustomTtsVoiceManagerPage {
         .fontSize(11)
         .fontColor('#FFFFFF')
     }
-    .width(72)
+    .width(64)
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
@@ -809,7 +813,7 @@ struct CustomTtsVoiceManagerPage {
         .fontSize(11)
         .fontColor('#FFFFFF')
     }
-    .width(72)
+    .width(64)
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)

@@ -27,6 +27,18 @@ struct OtherSettingsPage {
 
       Scroll() {
         Column() {
+          this.sectionTitle('数据')
+          Column() {
+            this.menuItem('数据导入与导出', '跨签名迁移书源、书架、进度、本地图书和设置', false, () => {
+              router.pushUrl({ url: 'pages/DataBackup' });
+            })
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
+
           this.sectionTitle('外观')
           Column() {
             this.menuItem('主题与外观', '内置主题 / 阅读背景 / 气泡 / 导航图标', true, () => {

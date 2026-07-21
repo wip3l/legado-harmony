@@ -3,10 +3,12 @@ import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
 
 @Component
 export struct ImmersiveBackButton {
-  @Prop icon: Resource = $r('sys.symbol.arrow_left');
+  @Prop icon: Resource = $r('sys.symbol.chevron_left');
   @Prop iconColor: ResourceColor = '#18191C';
   @Prop labelText: string = '';
   @Prop labelFontSize: number = 21;
+  @Prop iconSize: number = 22;
+  @Prop iconOffsetX: number = -1;
   @Prop darkMode: boolean = false;
   @Prop buttonSize: number = 38;
   @Prop containerWidth: number = 52;
@@ -25,8 +27,8 @@ export struct ImmersiveBackButton {
         Button({ type: ButtonType.Circle, stateEffect: true }) {
           this.buttonContent(false)
         }
-        .width(this.buttonSize)
-        .height(this.buttonSize)
+        .width(this.materialButtonSize())
+        .height(this.materialButtonSize())
         .padding(0)
         .backgroundColor(Color.Transparent)
         .accessibilityText(this.accessibilityLabel)
@@ -113,14 +115,15 @@ export struct ImmersiveBackButton {
     Stack({ alignContent: Alignment.Center }) {
       if (this.labelText) {
         Text(this.labelText)
-          .fontSize(this.labelFontSize * (useMaterialScale ? this.normalizedMaterialScale() : 1))
+          .fontSize(this.labelFontSize)
           .fontWeight(FontWeight.Medium)
           .fontColor(this.iconColor)
       } else {
         SymbolGlyph(this.icon)
-          .fontSize(21 * (useMaterialScale ? this.normalizedMaterialScale() : 1))
+          .fontSize(this.iconSize)
           .fontWeight(FontWeight.Medium)
           .fontColor([this.iconColor])
+          .translate({ x: this.iconOffsetX })
       }
     }
     .width('100%')
@@ -141,6 +144,7 @@ export struct ImmersiveBackButton {
   }
 
   materialButtonSize(): number {
-    return Math.max(this.buttonSize, 48 * this.normalizedMaterialScale());
+    // materialScale 应同时收紧材质底座；图标保持清晰尺寸，避免“小图标套大圆盘”的失衡观感。
+    return Math.max(36, this.buttonSize * this.normalizedMaterialScale());
   }
 }

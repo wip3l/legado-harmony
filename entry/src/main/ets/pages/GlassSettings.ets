@@ -497,13 +497,44 @@ struct GlassSettingsPage {
         Text(title).fontSize(15).fontColor(this.primaryTextColor()).layoutWeight(1)
         Text(this.sliderDisplayValue(key)).fontSize(13).fontColor(this.accentColor())
       }.width('100%')
-      Slider({ value: this.sliderValue(key), min: min, max: max, step: step, style: SliderStyle.OutSet })
-        .selectedColor(this.accentColor())
-        .trackColor(ThemeRuntime.inputColor(this.appDarkMode))
-        .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-        .onChange((next: number) => this.updateSliderValue(key, next))
+      Row({ space: 10 }) {
+        this.sliderStepButton($r('sys.symbol.minus'), '减小', this.sliderValue(key) > min, () => {
+          this.stepSliderValue(key, min, max, -step);
+        })
+        Slider({ value: this.sliderValue(key), min: min, max: max, step: step, style: SliderStyle.OutSet })
+          .layoutWeight(1)
+          .selectedColor(this.accentColor())
+          .trackColor(ThemeRuntime.inputColor(this.appDarkMode))
+          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+          .onChange((next: number) => this.updateSliderValue(key, next))
+        this.sliderStepButton($r('sys.symbol.plus'), '增大', this.sliderValue(key) !== max, () => {
+          this.stepSliderValue(key, min, max, step);
+        })
+      }
+      .width('100%')
     }
     .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 8 })
     .borderRadius(ThemeRuntime.cardRadius()).backgroundColor(this.cardColor())
+  }
+
+  stepSliderValue(key: string, min: number, max: number, delta: number): void {
+    const next = Math.round((this.sliderValue(key) + delta) * 1000) / 1000;
+    this.updateSliderValue(key, Math.max(min, Math.min(max, next)));
+  }
+
+  @Builder
+  sliderStepButton(icon: Resource, accessibilityText: string, enabled: boolean, action: () => void) {
+    Button({ type: ButtonType.Circle, stateEffect: true }) {
+      SymbolGlyph(icon)
+        .fontSize(15)
+        .fontColor([enabled ? this.primaryTextColor() : this.subTextColor()])
+    }
+    .width(32)
+    .height(32)
+    .padding(0)
+    .enabled(enabled)
+    .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
+    .accessibilityText(accessibilityText)
+    .onClick(action)
   }
 }

@@ -76,7 +76,7 @@ export class LocalBookService {
   static readonly EPUB_IMAGE_MARKER_SUFFIX: string = ReaderImageMarker.SUFFIX;
 
   private static readonly TXT_PARSER_VERSION: string = '7';
-  private static readonly EPUB_PARSER_VERSION: string = '7';
+  private static readonly EPUB_PARSER_VERSION: string = '8';
   private static readonly TXT_READ_CHUNK_BYTES: number = 256 * 1024;
   private static readonly TXT_MAX_CHAPTER_CHARS: number = 32 * 1024;
   private static readonly TXT_DB_BATCH_SIZE: number = 16;
@@ -271,10 +271,12 @@ export class LocalBookService {
     book.putVariable('bookAddTime', oldBook?.getVariable('bookAddTime') || `${Date.now()}`);
     const metadataSource = sourceName || sourceUri;
     const fileMetadata = LocalBookService.parseFileNameMetadata(metadataSource);
+    const hasCustomMetadata = book.getVariable('localMetadataCustomized') === '1';
 
     if (extension === 'txt') {
-      book.name = fileMetadata.title || LocalBookService.fileStem(metadataSource);
-      book.author = fileMetadata.author;
+      book.name = hasCustomMetadata ? book.getVariable('localCustomName') :
+        (fileMetadata.title || LocalBookService.fileStem(metadataSource));
+      book.author = hasCustomMetadata ? book.getVariable('localCustomAuthor') : fileMetadata.author;
       book.coverUrl = '';
       book.putVariable('localExtractRoot', '');
       book.putVariable('localParserVersion', 'importing');
@@ -289,8 +291,9 @@ export class LocalBookService {
 
     let chapters: LocalChapterData[] = [];
     const epub = await LocalBookService.parseEpub(context, localPath, id);
-    book.name = epub.title || fileMetadata.title || LocalBookService.fileStem(metadataSource);
-    book.author = epub.author || fileMetadata.author;
+    book.name = hasCustomMetadata ? book.getVariable('localCustomName') :
+      (epub.title || fileMetadata.title || LocalBookService.fileStem(metadataSource));
+    book.author = hasCustomMetadata ? book.getVariable('localCustomAuthor') : (epub.author || fileMetadata.author);
     book.coverUrl = epub.coverPath ? fileUri.getUriFromPath(epub.coverPath) : '';
     const oldExtractRoot = book.getVariable('localExtractRoot');
     if (oldExtractRoot && oldExtractRoot !== epub.extractRoot) {
@@ -298,9 +301,8 @@ export class LocalBookService {
     }
     book.putVariable('localExtractRoot', epub.extractRoot);
     book.putVariable('localParserVersion', LocalBookService.EPUB_PARSER_VERSION);
-    if (epub.isComic) {
-      book.putVariable('readerComicMode', '1');
-    }
+    book.putVariable('readerComicAutoDetected', epub.isComic ? '1' : '0');
+    book.putVariable('readerComicMode', epub.isComic ? '1' : '0');
     chapters = epub.chapters;
 
     if (chapters.length === 0) {
@@ -385,8 +387,13 @@ export class LocalBookService {
     const id = book.bookUrl.startsWith('local://') ? book.bookUrl.substring('local://'.length) :
       LocalBookService.hashText(localPath);
     const epub = await LocalBookService.parseEpub(context, localPath, id);
-    if (epub.title) book.name = epub.title;
-    if (epub.author) book.author = epub.author;
+    if (book.getVariable('localMetadataCustomized') === '1') {
+      book.name = book.getVariable('localCustomName');
+      book.author = book.getVariable('localCustomAuthor');
+    } else {
+      if (epub.title) book.name = epub.title;
+      if (epub.author) book.author = epub.author;
+    }
     book.coverUrl = epub.coverPath ? fileUri.getUriFromPath(epub.coverPath) : book.coverUrl;
     const oldExtractRoot = book.getVariable('localExtractRoot');
     if (oldExtractRoot && oldExtractRoot !== epub.extractRoot) {
@@ -394,9 +401,8 @@ export class LocalBookService {
     }
     book.putVariable('localExtractRoot', epub.extractRoot);
     book.putVariable('localParserVersion', LocalBookService.EPUB_PARSER_VERSION);
-    if (epub.isComic) {
-      book.putVariable('readerComicMode', '1');
-    }
+    book.putVariable('readerComicAutoDetected', epub.isComic ? '1' : '0');
+    book.putVariable('readerComicMode', epub.isComic ? '1' : '0');
 
     const chapters = epub.chapters;
     if (chapters.length === 0) {
@@ -772,8 +778,10 @@ export class LocalBookService {
       spineChapters.push(chapter);
     }
 
-    const comicDominant = imageOnlyChapterCount >= 2 &&
-      imageOnlyChapterCount * 100 >= spineChapters.length * 60;
+    // 单个封面、插图页或少量图集不应把整本 EPUB 识别为漫画。
+    // 长篇要求至少 3 个纯图片章节且占比达到 80%；只有 2 个章节的短篇则必须全部为纯图片。
+    const comicDominant = (spineChapters.length === 2 && imageOnlyChapterCount === 2) ||
+      (imageOnlyChapterCount >= 3 && imageOnlyChapterCount * 100 >= spineChapters.length * 80);
     if (comicDominant) {
       const waterfall = new LocalChapterData();
       waterfall.title = result.title || spineChapters[0]?.title || '漫画正文';
