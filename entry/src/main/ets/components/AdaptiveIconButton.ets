@@ -52,11 +52,11 @@ export struct AdaptiveIconButton {
 
   private material(): uiMaterial.ImmersiveMaterial {
     return new uiMaterial.ImmersiveMaterial({
-      style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
+      style: ImmersiveMaterialRuntime.materialStyle(),
       materialColor: '#2EFFFFFF',
       applyShadow: true,
-      interactive: true,
-      lightEffect: { color: '#66FFFFFF' }
+      interactive: ImmersiveMaterialRuntime.configuredLightLevel() !== 'weak',
+      lightEffect: ImmersiveMaterialRuntime.lightEffect()
     });
   }
 }

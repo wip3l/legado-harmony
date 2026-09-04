@@ -1,5 +1,6 @@
 import { UIContext, promptAction, uiMaterial } from '@kit.ArkUI';
 import deviceInfo from '@ohos.deviceInfo';
+import { ImmersiveMaterialRuntime } from './ImmersiveMaterialRuntime';
 import {
   HdsSnackBar,
   SnackBarIconOptions,
@@ -33,9 +34,10 @@ export class HdsFeedback {
     try {
       if (deviceInfo.sdkApiVersion >= 26 && uiMaterial.isImmersiveMaterialSupported()) {
         const material: uiMaterial.ImmersiveMaterial = new uiMaterial.ImmersiveMaterial({
-          style: uiMaterial.ImmersiveStyle.REGULAR,
+          style: ImmersiveMaterialRuntime.materialStyle(),
           applyShadow: true,
-          interactive: false
+          interactive: ImmersiveMaterialRuntime.configuredLightLevel() !== 'weak',
+          lightEffect: ImmersiveMaterialRuntime.lightEffect()
         });
         promptAction.showToast({ message: message, systemMaterial: material });
         return;

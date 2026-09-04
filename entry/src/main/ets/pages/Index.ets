@@ -10079,11 +10079,11 @@ struct SearchPage {
 
   private searchFieldMaterial(): uiMaterial.ImmersiveMaterial {
     return new uiMaterial.ImmersiveMaterial({
-      style: uiMaterial.ImmersiveStyle.THIN,
+      style: ImmersiveMaterialRuntime.materialStyle(),
       materialColor: this.appDarkMode ? '#351B1D22' : '#35FFFFFF',
       applyShadow: true,
-      interactive: true,
-      lightEffect: { color: '#66FFFFFF' }
+      interactive: ImmersiveMaterialRuntime.configuredLightLevel() !== 'weak',
+      lightEffect: ImmersiveMaterialRuntime.lightEffect()
     });
   }
 

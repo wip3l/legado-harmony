@@ -32,11 +32,11 @@ export struct AdaptiveSwitch {
 
   private material(): uiMaterial.ImmersiveMaterial {
     return new uiMaterial.ImmersiveMaterial({
-      style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
+      style: ImmersiveMaterialRuntime.materialStyle(),
       materialColor: '#22FFFFFF',
       applyShadow: true,
-      interactive: true,
-      lightEffect: { color: '#55FFFFFF' }
+      interactive: ImmersiveMaterialRuntime.configuredLightLevel() !== 'weak',
+      lightEffect: ImmersiveMaterialRuntime.lightEffect()
     });
   }
 }

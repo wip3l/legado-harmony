@@ -416,9 +416,18 @@ export class SystemTtsReader {
     this.optionFocusBreakOffsets = this.normalizeFocusBreakOffsets(options?.focusBreakOffsets, cleanText.length);
     this.keepAudioOutputOnFinish = options?.keepAudioOutputOnFinish === true;
     const customVoice = this.getCurrentCustomVoice();
-    this.chunks = this.optionCloudVoiceId ? this.splitCloudText(cleanText) :
+    const splitChunks = this.optionCloudVoiceId ? this.splitCloudText(cleanText) :
       (customVoice ? this.splitCustomText(cleanText, 64) :
         this.splitSystemText(cleanText, this.optionFocusBreakOffsets));
+    // A run of trailing punctuation (for example "......" or "……") can be split into a
+    // punctuation-only chunk. Some Harmony TTS engines return no PCM/onStart for such a
+    // chunk, which makes the reader believe the chapter tail was not spoken and retry/stop.
+    // Coalesce those chunks with the preceding readable chunk while keeping the original
+    // source offsets intact. This applies to all synthesis routes (system/custom/cloud).
+    this.chunks = this.coalescePunctuationOnlyChunks(splitChunks, cleanText);
+    if (this.chunks.length === 0) {
+      throw new Error('朗读内容为空');
+    }
     this.chunkIndex = 0;
     this.active = true;
     if (this.optionCloudVoiceId) {
@@ -1812,6 +1821,59 @@ export class SystemTtsReader {
       .replace(/^[，。！？；;：:,.!?…]+/, '')
       .replace(/[，,]+$/, '')
       .trim();
+  }
+
+  /**
+   * Merge chunks whose speech payload contains only punctuation/whitespace. A splitter is
+   * intentionally punctuation-aware, so a trailing ellipsis can otherwise become a separate
+   * audio request. Keeping it attached to the previous chunk avoids empty-audio callbacks while
+   * preserving the source range used by reader highlighting and chapter-end confirmation.
+   */
+  private coalescePunctuationOnlyChunks(chunks: TtsChunk[], source: string): TtsChunk[] {
+    if (!chunks || chunks.length === 0) return [];
+    const result: TtsChunk[] = [];
+    for (const chunk of chunks) {
+      const speech = this.normalizeChunkForSpeech(chunk.text);
+      if (speech && !this.isSpeechOnlyPunctuation(speech)) {
+        result.push({ text: chunk.text, start: chunk.start, end: chunk.end });
+        continue;
+      }
+      if (result.length === 0) {
+        // Leading decorative punctuation has no useful audible content. Drop it rather than
+        // creating an audio request that may never emit a completion callback.
+        continue;
+      }
+      const previous = result[result.length - 1];
+      const mergedEnd = Math.max(previous.end, chunk.end);
+      previous.end = mergedEnd;
+      previous.text = source.substring(previous.start, mergedEnd);
+    }
+    return result;
+  }
+
+  /** Return true when a normalized chunk has no letters/numbers/words, only punctuation. */
+  private isSpeechOnlyPunctuation(text: string): boolean {
+    const value = (text || '').trim();
+    if (!value) return true;
+    for (let index = 0; index < value.length; index++) {
+      const code = value.charCodeAt(index);
+      if (this.isSpeechPunctuationCode(code)) continue;
+      return false;
+    }
+    return true;
+  }
+
+  private isSpeechPunctuationCode(code: number): boolean {
+    // ASCII punctuation and controls.
+    if (code <= 0x2f || (code >= 0x3a && code <= 0x40) ||
+      (code >= 0x5b && code <= 0x60) || (code >= 0x7b && code <= 0x7e)) return true;
+    // Unicode punctuation blocks commonly found in book sources. Keep letters/digits outside
+    // these blocks as readable content (including CJK, kana, Cyrillic and emoji).
+    if ((code >= 0x2000 && code <= 0x206f) ||
+      (code >= 0x2e00 && code <= 0x2e7f) ||
+      (code >= 0x3000 && code <= 0x303f) ||
+      (code >= 0xff00 && code <= 0xff65)) return true;
+    return false;
   }
 
   /**

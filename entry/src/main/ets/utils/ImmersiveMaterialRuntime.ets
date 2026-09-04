@@ -42,12 +42,38 @@ export class ImmersiveMaterialRuntime {
   }
 
   static materialLevel(): hdsMaterial.MaterialLevel {
-    const configured = (AppStorage.get<string>(ImmersiveMaterialRuntime.KEY_LIGHT_LEVEL) || 'adaptive')
-      .trim().toLowerCase();
+    const configured = ImmersiveMaterialRuntime.configuredLightLevel();
     if (configured === 'high') return hdsMaterial.MaterialLevel.EXQUISITE;
     if (configured === 'balanced') return hdsMaterial.MaterialLevel.GENTLE;
     if (configured === 'weak') return hdsMaterial.MaterialLevel.SMOOTH;
     return hdsMaterial.MaterialLevel.ADAPTIVE;
+  }
+
+  /** Returns the persisted app-level light setting, defaulting to follow-system. */
+  static configuredLightLevel(): string {
+    return (AppStorage.get<string>(ImmersiveMaterialRuntime.KEY_LIGHT_LEVEL) || 'adaptive')
+      .trim().toLowerCase();
+  }
+
+  /** Maps the app setting to the closest API 26 material style for component-level materials. */
+  static materialStyle(): uiMaterial.ImmersiveStyle {
+    const configured = ImmersiveMaterialRuntime.configuredLightLevel();
+    if (configured === 'high') return uiMaterial.ImmersiveStyle.ULTRA_THIN;
+    if (configured === 'weak') return uiMaterial.ImmersiveStyle.THICK;
+    return uiMaterial.ImmersiveStyle.REGULAR;
+  }
+
+  /**
+   * Component-level immersive materials do not expose HDS MaterialLevel. Their
+   * light-sense feedback is therefore mapped to the same app setting instead.
+   * Undefined preserves the platform follow-system behavior, null disables it.
+   */
+  static lightEffect(): uiMaterial.LightEffectOptions | null | undefined {
+    const configured = ImmersiveMaterialRuntime.configuredLightLevel();
+    if (configured === 'high') return { color: '#88FFFFFF' };
+    if (configured === 'balanced') return { color: '#55FFFFFF' };
+    if (configured === 'weak') return null;
+    return undefined;
   }
 
   /**
@@ -58,11 +84,11 @@ export class ImmersiveMaterialRuntime {
   static selectMenuMaterial(): uiMaterial.ImmersiveMaterial | undefined {
     if (!ImmersiveMaterialRuntime.supportsHds()) return undefined;
     return new uiMaterial.ImmersiveMaterial({
-      style: uiMaterial.ImmersiveStyle.REGULAR,
+      style: ImmersiveMaterialRuntime.materialStyle(),
       materialColor: '#00000000',
       applyShadow: false,
-      interactive: false,
-      lightEffect: null
+      interactive: ImmersiveMaterialRuntime.configuredLightLevel() !== 'weak',
+      lightEffect: ImmersiveMaterialRuntime.lightEffect()
     });
   }
 }
