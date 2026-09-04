@@ -10,6 +10,7 @@ import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { BookshelfDisplaySettings, BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettingsStore';
 import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 
 @Entry
 @Component
@@ -601,14 +602,16 @@ struct BookshelfSettingsPage {
         .backgroundColor(Color.Transparent)
         .arrowPosition(ArrowPosition.END)
         .padding({ left: 0, right: 0 })
-        .borderRadius(0)
+        .borderRadius(16)
         .border({ width: 0 })
         .optionBgColor(Color.Transparent)
+        .divider(null)
         .optionFontColor(this.primaryTextColor())
         .selectedOptionFontColor(ThemeRuntime.accentColor(this.appDarkMode))
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+        .menuBackgroundBlurStyle(BlurStyle.NONE)
+        .menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial())
         .onSelect((index: number) => {
           onSelect(index);
         })
@@ -644,14 +647,16 @@ struct BookshelfSettingsPage {
         .backgroundColor(Color.Transparent)
         .arrowPosition(ArrowPosition.END)
         .padding({ left: 0, right: 0 })
-        .borderRadius(0)
+        .borderRadius(16)
         .border({ width: 0 })
         .optionBgColor(Color.Transparent)
+        .divider(null)
         .optionFontColor(this.primaryTextColor())
         .selectedOptionFontColor(ThemeRuntime.accentColor(this.appDarkMode))
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+        .menuBackgroundBlurStyle(BlurStyle.NONE)
+        .menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial())
         .onTouch((event: TouchEvent) => {
           if (event.type === TouchType.Down) {
             this.refreshAlbumOptionsForMenu();

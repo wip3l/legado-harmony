@@ -62,6 +62,7 @@ struct SearchResultGroupPage {
           topPadding: 56 + this.statusBarHeight,
           bottomPadding: 20 + this.navBarHeight,
           onOpenBook: (book: SearchBook) => this.openBook(book),
+          onReadBook: (book: SearchBook) => this.readBook(book),
           onToggleShelf: (book: SearchBook) => this.toggleShelf(book)
         })
       } else {
@@ -151,6 +152,31 @@ struct SearchResultGroupPage {
     } finally {
       this.busyBookKeys = SearchBookShelfHelper.withoutKey(this.busyBookKeys, key);
     }
+  }
+
+  async readBook(book: SearchBook): Promise<void> {
+    const key = SearchBookShelfHelper.keyOf(book);
+    if (!key || this.busyBookKeys.includes(key)) return;
+    if (!SearchBookShelfHelper.isInShelf(book, this.shelfBookKeys)) {
+      this.busyBookKeys = SearchBookShelfHelper.withAddedKey(this.busyBookKeys, key);
+      try {
+        const change = await SearchBookShelfHelper.addToShelf(getContext(this), book);
+        this.shelfBookKeys = SearchBookShelfHelper.withAddedKey(
+          this.shelfBookKeys, change.shelfKey || change.requestKey);
+      } catch (e) {
+        console.error('准备阅读书籍失败:', e);
+        promptAction.showToast({ message: '书籍准备失败，请稍后重试' });
+        return;
+      } finally {
+        this.busyBookKeys = SearchBookShelfHelper.withoutKey(this.busyBookKeys, key);
+      }
+    }
+    const shelfBook = await SearchBookShelfHelper.findShelfBookByKey(key, true);
+    if (!shelfBook?.bookUrl) {
+      promptAction.showToast({ message: '书籍准备失败，请稍后重试' });
+      return;
+    }
+    router.pushUrl({ url: 'pages/ReadBook', params: { bookUrl: shelfBook.bookUrl } });
   }
 
   openBook(book: SearchBook): void {

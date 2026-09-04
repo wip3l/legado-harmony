@@ -6,6 +6,16 @@ import { ReaderReplaceRule, ReaderReplaceRuleCheck, ReaderReplaceRuleStore } fro
 import { syncSystemBars } from '../utils/SystemBars';
 import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
 import { FormDraftStore } from '../utils/FormDraftStore';
+import deviceInfo from '@ohos.deviceInfo';
+import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
+import { SymbolGlyphModifier } from '@kit.ArkUI';
+import picker from '@ohos.file.picker';
+import fs from '@ohos.file.fs';
+import { util } from '@kit.ArkTS';
+import { HttpClient } from '../core/http/HttpClient';
+
+const REPLACE_RULE_IMPORT_FILE_LIMIT_BYTES: number = 5 * 1024 * 1024;
+const REPLACE_RULE_IMPORT_TIMEOUT_MS: number = 20000;
 
 class ReplaceRuleFormDraft {
   ruleJson: string = '';
@@ -31,6 +41,11 @@ struct ReaderReplaceRulesPage {
   @State draftApplyToContent: boolean = true;
   @State draftIsRegex: boolean = true;
   @State showRuleActionDialog: boolean = false;
+  @State showRuleMoreDialog: boolean = false;
+  @State showAddRuleDialog: boolean = false;
+  @State showImportUrlDialog: boolean = false;
+  @State importUrl: string = '';
+  @State isImporting: boolean = false;
   @State actionRuleId: number = 0;
   @State contextMenuX: number = 16;
   @State contextMenuY: number = 96;
@@ -75,8 +90,20 @@ struct ReaderReplaceRulesPage {
   }
 
   onBackPress(): boolean {
+    if (this.showRuleMoreDialog) {
+      this.showRuleMoreDialog = false;
+      return true;
+    }
     if (this.selectionMode) {
       this.exitRuleSelectionMode();
+      return true;
+    }
+    if (this.showImportUrlDialog) {
+      this.showImportUrlDialog = false;
+      return true;
+    }
+    if (this.showAddRuleDialog) {
+      this.showAddRuleDialog = false;
       return true;
     }
     if (this.showRuleActionDialog) {
@@ -94,6 +121,170 @@ struct ReaderReplaceRulesPage {
     this.rules = await ReaderReplaceRuleStore.load(getContext(this), true);
   }
 
+  async importRulesFromFile(): Promise<void> {
+    try {
+      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      options.maxSelectNumber = 1;
+      options.fileSuffixFilters = ['JSON|.json', '文本|.txt'];
+      const result: Array<string> = await new picker.DocumentViewPicker(getContext(this)).select(options);
+      if (!result || result.length === 0) return;
+      this.isImporting = true;
+      const content = await this.readRuleTextFile(result[0]);
+      await this.importRulesFromJson(content);
+    } catch (e) {
+      console.error('从文件导入替换规则失败:', e);
+      promptAction.showToast({ message: `导入失败: ${this.importErrorMessage(e as Object)}` });
+    } finally {
+      this.isImporting = false;
+    }
+  }
+
+  async importRulesFromUrl(): Promise<void> {
+    const url = this.importUrl.trim();
+    if (!url) {
+      promptAction.showToast({ message: '请输入URL' });
+      return;
+    }
+    try {
+      this.isImporting = true;
+      const response = await new HttpClient(REPLACE_RULE_IMPORT_TIMEOUT_MS).execute({
+        url: url,
+        method: 'GET',
+        headers: { 'Accept': 'application/json,text/plain,*/*' },
+        connectTimeout: REPLACE_RULE_IMPORT_TIMEOUT_MS,
+        readTimeout: REPLACE_RULE_IMPORT_TIMEOUT_MS,
+        maxResponseBytes: REPLACE_RULE_IMPORT_FILE_LIMIT_BYTES
+      });
+      if (!response.success || !response.body) {
+        throw new Error(response.error || `HTTP ${response.statusCode}`);
+      }
+      await this.importRulesFromJson(response.body);
+      this.showImportUrlDialog = false;
+      this.importUrl = '';
+    } catch (e) {
+      console.error('从URL导入替换规则失败:', e);
+      promptAction.showToast({ message: `导入失败: ${this.importErrorMessage(e as Object)}` });
+    } finally {
+      this.isImporting = false;
+    }
+  }
+
+  async importRulesFromJson(raw: string): Promise<void> {
+    const values = this.decodeImportedRules(raw);
+    if (values.length === 0) {
+      throw new Error('未找到有效的替换净化规则');
+    }
+    const next = this.rules.map((rule: ReaderReplaceRule) => ReaderReplaceRuleStore.cloneRule(rule));
+    const usedIds = new Set<number>(next.map((rule: ReaderReplaceRule) => rule.id));
+    let nextId = Date.now();
+    let importedCount = 0;
+    for (const value of values) {
+      const imported = ReaderReplaceRuleStore.cloneRule(value);
+      if (!imported.pattern.trim()) continue;
+      const existingIndex = next.findIndex((rule: ReaderReplaceRule) => rule.id === imported.id);
+      if (existingIndex >= 0) {
+        next[existingIndex] = imported;
+      } else {
+        while (usedIds.has(imported.id) || imported.id <= 0) imported.id = nextId++;
+        usedIds.add(imported.id);
+        next.push(imported);
+      }
+      importedCount++;
+    }
+    if (importedCount === 0) {
+      throw new Error('未找到有效的替换净化规则');
+    }
+    await ReaderReplaceRuleStore.save(getContext(this), next);
+    this.rules = await ReaderReplaceRuleStore.load(getContext(this), true);
+    this.selectedRuleIds = [];
+    promptAction.showToast({ message: `已导入 ${importedCount} 条替换规则` });
+  }
+
+  decodeImportedRules(raw: string): ReaderReplaceRule[] {
+    if (!raw || raw.trim().length === 0) throw new Error('文件内容为空');
+    let parsed: Object;
+    try {
+      parsed = JSON.parse(raw.replace(/^\uFEFF/, '')) as Object;
+    } catch (_) {
+      throw new Error('内容不是有效的 JSON');
+    }
+    if (Array.isArray(parsed)) return parsed as ReaderReplaceRule[];
+    if (parsed && typeof parsed === 'object') {
+      const record = parsed as Record<string, Object>;
+      for (const key of ['rules', 'replaceRules', 'readerReplaceRules']) {
+        const values = record[key];
+        if (Array.isArray(values)) return values as ReaderReplaceRule[];
+      }
+    }
+    throw new Error('JSON 中未找到规则数组');
+  }
+
+  async readRuleTextFile(uri: string): Promise<string> {
+    let file: fs.File | null = null;
+    try {
+      const stat = await fs.stat(uri);
+      if (stat.size <= 0) return '';
+      if (stat.size > REPLACE_RULE_IMPORT_FILE_LIMIT_BYTES) {
+        throw new Error('文件过大，请选择 5MB 以内的规则文件');
+      }
+      file = await fs.open(uri, fs.OpenMode.READ_ONLY);
+      const buffer = new ArrayBuffer(stat.size);
+      await fs.read(file.fd, buffer, { offset: 0, length: stat.size });
+      return util.TextDecoder.create('utf-8')
+        .decodeWithStream(new Uint8Array(buffer), { stream: false })
+        .replace(/^\uFEFF/, '');
+    } finally {
+      if (file) await fs.close(file);
+    }
+  }
+
+  async exportRules(): Promise<void> {
+    if (!this.selectionMode) {
+      promptAction.showToast({ message: '请先进入选择模式' });
+      return;
+    }
+    const selected = this.rules.filter((rule: ReaderReplaceRule) => this.selectedRuleIds.includes(rule.id));
+    if (selected.length === 0) {
+      promptAction.showToast({ message: '请先选择规则' });
+      return;
+    }
+    let file: fs.File | null = null;
+    try {
+      const options: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+      options.newFileNames = [`legado_replace_rules_${this.exportTimestamp()}.json`];
+      options.fileSuffixChoices = ['JSON 文件|.json'];
+      const result = await new picker.DocumentViewPicker(getContext(this)).save(options);
+      if (!result || result.length === 0) return;
+      const json = JSON.stringify(selected, null, 2);
+      const bytes = new util.TextEncoder().encodeInto(json);
+      file = await fs.open(result[0], fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
+      await fs.write(file.fd, bytes.buffer, { offset: 0, length: bytes.byteLength });
+      await fs.close(file);
+      file = null;
+      promptAction.showToast({ message: `已导出 ${selected.length} 条替换规则` });
+    } catch (e) {
+      console.error('导出替换规则失败:', e);
+      promptAction.showToast({ message: `导出失败: ${this.importErrorMessage(e as Object)}` });
+    } finally {
+      if (file) {
+        try { await fs.close(file); } catch (_) {}
+      }
+    }
+  }
+
+  exportTimestamp(): string {
+    const date = new Date();
+    const pad = (value: number): string => value < 10 ? `0${value}` : `${value}`;
+    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_` +
+      `${pad(date.getHours())}${pad(date.getMinutes())}`;
+  }
+
+  importErrorMessage(error: Object): string {
+    if (error instanceof Error && error.message) return error.message;
+    const message = String((error as Record<string, Object>)?.['message'] || '').trim();
+    return message || String(error || '未知错误');
+  }
+
   build() {
     Stack({ alignContent: Alignment.BottomEnd }) {
       Column() {
@@ -108,7 +299,7 @@ struct ReaderReplaceRulesPage {
       .height('100%')
       .backgroundColor(this.pageColor())
 
-      if (!this.editing && !this.selectionMode) {
+      if (!this.editing && !this.selectionMode && !this.showAddRuleDialog && !this.isImporting) {
         Button({ type: ButtonType.Circle, stateEffect: true }) {
           SymbolGlyph($r('sys.symbol.plus'))
             .fontSize(25)
@@ -122,11 +313,27 @@ struct ReaderReplaceRulesPage {
         .border({ width: ThemeRuntime.glassBorderWidth('button'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'button') })
         .shadow({ radius: ThemeRuntime.glassShadowRadius('button'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'button'), offsetX: ThemeRuntime.glassShadowOffsetX('button'), offsetY: ThemeRuntime.glassShadowOffsetY('button') })
         .accessibilityText('新增替换净化规则')
-        .onClick(() => this.openNewRule())
+        .onClick(() => this.showAddRuleDialog = true)
+      }
+
+      if (this.showAddRuleDialog) {
+        this.addRuleDropdown()
+      }
+
+      if (this.showImportUrlDialog) {
+        this.importUrlDialog()
+      }
+
+      if (this.isImporting) {
+        this.importingOverlay()
       }
 
       if (this.showRuleActionDialog) {
         this.ruleActionDialog()
+      }
+
+      if (this.showRuleMoreDialog) {
+        this.ruleBatchMorePopupMenu()
       }
     }
     .width('100%')
@@ -179,10 +386,171 @@ struct ReaderReplaceRulesPage {
     }
     .width('100%')
     .height(56 + this.statusBarHeight)
-    .padding({ top: this.statusBarHeight })
+    // Keep the action text aligned with the content/search field right edge.
+    .padding({ right: 16, top: this.statusBarHeight })
     .backgroundColor(ThemeRuntime.topBarColor(this.appDarkMode))
     .backdropBlur(ThemeRuntime.topBarBlur())
     .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  addRuleDropdown() {
+    Stack({ alignContent: Alignment.BottomEnd }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .onClick(() => {
+          this.showAddRuleDialog = false;
+        })
+
+      Column() {
+        this.ruleAddActionItem($r('sys.symbol.plus'), '新建规则', () => {
+          this.showAddRuleDialog = false;
+          this.openNewRule();
+        })
+        this.ruleAddActionItem($r('sys.symbol.arrow_right_up_and_square'), '从 URL 导入', () => {
+          this.showAddRuleDialog = false;
+          this.importUrl = '';
+          this.showImportUrlDialog = true;
+        })
+        this.ruleAddActionItem($r('sys.symbol.download'), '从文件导入', () => {
+          this.showAddRuleDialog = false;
+          this.importRulesFromFile();
+        }, false)
+      }
+      .width(188)
+      .padding({ left: 6, right: 6, top: 6, bottom: 6 })
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor(), 'panel'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
+      .margin({ right: 22, bottom: this.navBarHeight + 82 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  ruleAddActionItem(icon: Resource, label: string, action: () => void, showDivider: boolean = true) {
+    Column() {
+      Row({ space: 10 }) {
+        SymbolGlyph(icon)
+          .fontSize(19)
+          .fontColor([this.primaryTextColor()])
+        Text(label)
+          .fontSize(14)
+          .fontColor(this.primaryTextColor())
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .height(42)
+      .padding({ left: 10, right: 10 })
+      .alignItems(VerticalAlign.Center)
+      .onClick(action)
+      if (showDivider) {
+        Divider()
+          .strokeWidth(0.5)
+          .color(ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel'))
+          .margin({ left: 10, right: 10 })
+      }
+    }
+    .width('100%')
+  }
+
+  @Builder
+  importUrlDialog() {
+    Column() {
+      Column() {
+        Text('从 URL 导入替换规则')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .margin({ bottom: 16 })
+
+        TextInput({ placeholder: '请输入规则 JSON URL', text: this.importUrl })
+          .width('100%')
+          .height(48)
+          .borderRadius(8)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .placeholderColor(this.subTextColor())
+          .padding({ left: 12, right: 12 })
+          .margin({ bottom: 16 })
+          .onChange((value: string) => this.importUrl = value)
+
+        Row({ space: 10 }) {
+          Button('取消')
+            .layoutWeight(1)
+            .height(44)
+            .backgroundColor(this.inputColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => {
+              this.showImportUrlDialog = false;
+              this.importUrl = '';
+            })
+          Button('导入')
+            .layoutWeight(1)
+            .height(44)
+            .backgroundColor(this.buttonColor())
+            .fontColor('#FFFFFF')
+            .enabled(!this.isImporting)
+            .onClick(() => this.importRulesFromUrl())
+        }
+        .width('100%')
+      }
+      .width('88%')
+      .constraintSize({ maxWidth: 420 })
+      .padding(24)
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+      .onClick(() => {})
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#80000000')
+    .justifyContent(FlexAlign.Center)
+    .onClick(() => {
+      this.showImportUrlDialog = false;
+    })
+  }
+
+  @Builder
+  importingOverlay() {
+    Column() {
+      Column() {
+        LoadingProgress()
+          .width(46)
+          .height(46)
+          .color(this.accentColor())
+        Text('正在导入替换规则...')
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .margin({ top: 14 })
+        Text('请稍候')
+          .fontSize(13)
+          .fontColor(this.subTextColor())
+          .margin({ top: 6 })
+      }
+      .width(210)
+      .padding({ left: 24, right: 24, top: 26, bottom: 24 })
+      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
+      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
+      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+      .alignItems(HorizontalAlign.Center)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#80000000')
+    .justifyContent(FlexAlign.Center)
   }
 
   @Builder
@@ -224,30 +592,22 @@ struct ReaderReplaceRulesPage {
       } else {
         List({ space: 10, scroller: this.ruleListScroller }) {
           ForEach(this.filteredRules(), (rule: ReaderReplaceRule) => {
-            ListItem() {
-              this.ruleCard(rule)
+            if (deviceInfo.sdkApiVersion >= 26) {
+              HdsListItem({
+                customItemBuilder: () => {
+                  this.ruleCard(rule)
+                },
+                swipeActionOptions: this.ruleSwipeActions(rule)
+              })
+              } else {
+                ListItem() {
+                  Row() {
+                    this.ruleCard(rule)
+                    Button(rule.enabled ? '禁用' : '启用').fontSize(11).width(64).height(32).fontColor('#FFFFFF').backgroundColor(this.buttonColor()).onClick(() => this.setRuleEnabled(rule.id, !rule.enabled))
+                    Button('删除').fontSize(11).width(64).height(32).fontColor('#FFFFFF').backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode)).onClick(() => this.confirmDelete(rule))
+                  }
+                }
             }
-            .width('100%')
-            .borderRadius(14)
-            .clip(true)
-            .onAreaChange((_oldValue: Area, area: Area) => this.rememberRuleSelectionArea(rule.id, area))
-            .swipeAction(this.selectionMode ? {} : {
-              start: {
-                builder: () => {
-                  this.ruleEnableSwipeAction(rule)
-                },
-                actionAreaDistance: 64,
-                onAction: () => this.setRuleEnabled(rule.id, !rule.enabled)
-              },
-              end: {
-                builder: () => {
-                  this.ruleDeleteSwipeAction(rule)
-                },
-                actionAreaDistance: 64,
-                onAction: () => this.confirmDelete(rule)
-              },
-              edgeEffect: SwipeEdgeEffect.Spring
-            })
           }, (rule: ReaderReplaceRule) =>
             `${rule.id}_${rule.enabled ? '1' : '0'}_${this.selectionMode ? 'select' : 'normal'}`)
 
@@ -278,6 +638,18 @@ struct ReaderReplaceRulesPage {
     }
     .width('100%')
     .layoutWeight(1)
+  }
+
+  private ruleSwipeActions(rule: ReaderReplaceRule): HdsSwipeActionOptions {
+    return { icons: [
+      {
+        icon: new SymbolGlyphModifier(rule.enabled ? $r('sys.symbol.minus_circle') : $r('sys.symbol.checkmark_circle')),
+        backgroundColor: this.buttonColor(),
+        iconOptions: { accessibilityText: rule.enabled ? '禁用规则' : '启用规则' },
+        onAction: () => this.setRuleEnabled(rule.id, !rule.enabled)
+      },
+      { icon: new SymbolGlyphModifier($r('sys.symbol.trash')), backgroundColor: ThemeRuntime.dangerColor(this.appDarkMode), iconOptions: { accessibilityText: '删除规则' }, onAction: () => this.confirmDelete(rule) }
+    ] };
   }
 
   @Builder
@@ -314,10 +686,13 @@ struct ReaderReplaceRulesPage {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      SymbolGlyph(rule.enabled ? $r('sys.symbol.checkmark_circle') : $r('sys.symbol.minus_circle'))
-        .fontSize(20)
-        .fontColor([rule.enabled ? this.accentColor() : this.subTextColor()])
-        .margin({ left: 12 })
+      Column() {
+        Text(rule.enabled ? '已启用' : '已禁用')
+          .fontSize(12)
+          .fontColor(rule.enabled ? '#1E8E3E' : this.subTextColor())
+      }
+      .alignItems(HorizontalAlign.End)
+      .margin({ left: 12 })
     }
     .width('100%')
     .padding(14)
@@ -526,10 +901,52 @@ struct ReaderReplaceRulesPage {
         .backgroundColor('#E53935')
         .fontColor('#FFFFFF')
         .onClick(() => this.batchDeleteRules())
+      Button('更多')
+        .layoutWeight(1)
+        .height(42)
+        .margin({ left: 8 })
+        .enabled(!this.isBatchOperating)
+        .backgroundColor(this.inputColor())
+        .fontColor(this.primaryTextColor())
+        .onClick(() => this.showRuleMoreDialog = true)
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 10, bottom: 12 })
     .backgroundColor(this.cardColor())
+  }
+
+  @Builder
+  ruleBatchMorePopupMenu() {
+    Stack({ alignContent: Alignment.BottomEnd }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .onClick(() => this.showRuleMoreDialog = false)
+
+      Column() {
+        Text(`已选择 ${this.selectedRuleIds.length} 条规则`)
+          .fontSize(12)
+          .fontColor(this.subTextColor())
+          .width('100%')
+          .height(34)
+          .padding({ left: 12, right: 12 })
+          .textAlign(TextAlign.Start)
+        this.ruleAddActionItem($r('sys.symbol.download'), '导出 JSON', () => {
+          this.showRuleMoreDialog = false;
+          this.exportRules();
+        }, false)
+      }
+      .width(188)
+      .padding({ left: 6, right: 6, top: 4, bottom: 6 })
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
+      .margin({ right: 16, bottom: this.navBarHeight + 78 })
+    }
+    .width('100%')
+    .height('100%')
   }
 
   @Builder
@@ -727,7 +1144,7 @@ struct ReaderReplaceRulesPage {
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor(rule.enabled ? '#F39C3D' : '#1E8E3E')
+    .backgroundColor(this.buttonColor())
     .onClick(() => this.setRuleEnabled(rule.id, !rule.enabled))
   }
 
@@ -745,7 +1162,7 @@ struct ReaderReplaceRulesPage {
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#E53935')
+    .backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode))
     .onClick(() => this.confirmDelete(rule))
   }
 

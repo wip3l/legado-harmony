@@ -16,11 +16,18 @@
       {
         "name": "client_id",
         "value": "6917604888286360848"
+      },
+      {
+        "name": "ohos.arkui.UIMaterial.state",
+        "value": "enable"
       }
     ],
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.GET_NETWORK_INFO"
       },
       {
         "name": "ohos.permission.KEEP_BACKGROUND_RUNNING"

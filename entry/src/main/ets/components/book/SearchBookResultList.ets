@@ -3,6 +3,9 @@ import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { BookDisplayHelper } from '../../utils/BookDisplayHelper';
 import { CoverGallerySettings } from '../../utils/CoverGallerySettings';
 import { SearchBookShelfHelper } from '../../utils/SearchBookShelfHelper';
+import deviceInfo from '@ohos.deviceInfo';
+import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
+import { SymbolGlyphModifier } from '@kit.ArkUI';
 
 export type SearchBookAction = (book: SearchBook) => void;
 
@@ -61,6 +64,7 @@ export struct SearchBookResultList {
   private tagCache: Map<string, string[]> = new Map<string, string[]>();
   private coverCache: Map<string, string> = new Map<string, string>();
   onOpenBook: SearchBookAction = (_book: SearchBook) => {};
+  onReadBook: SearchBookAction = (_book: SearchBook) => {};
   onToggleShelf: SearchBookAction = (_book: SearchBook) => {};
   onNeedMetadata: SearchBookAction = (_book: SearchBook) => {};
   onReachEnd: () => void = () => {};
@@ -85,79 +89,7 @@ export struct SearchBookResultList {
       }
 
       LazyForEach(this.dataSource, (book: SearchBook) => {
-        ListItem() {
-          Row() {
-            if (this.showResultCover) {
-              this.coverView(book)
-            }
-
-            Column() {
-              Text(this.safeText(book.name, '未知书名'))
-                .fontSize(16)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.primaryTextColor)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-              Text(this.safeText(book.author, '作者未知'))
-                .fontSize(14)
-                .fontColor(this.secondaryTextColor)
-                .margin({ top: 4 })
-
-              if (this.showResultTags && this.getTags(book).length > 0) {
-                Flex({ wrap: FlexWrap.Wrap }) {
-                  ForEach(this.getTags(book), (tag: string, index: number) => {
-                    this.tagChip(tag, index)
-                  })
-                }
-                .width('100%')
-                .margin({ top: 7 })
-              }
-
-              if (this.metadataLine(book)) {
-                Text(this.metadataLine(book))
-                  .fontSize(12)
-                  .fontColor(this.subTextColor)
-                  .margin({ top: 3 })
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }
-
-              if (this.showSourceLine) {
-                Text(this.sourceLine(book))
-                  .fontSize(12)
-                  .fontColor(this.subTextColor)
-                  .margin({ top: this.showResultTags && this.getTags(book).length > 0 ? 6 : 4 })
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }
-            }
-            .layoutWeight(1)
-            .margin({ left: this.showResultCover ? 12 : 0 })
-            .alignItems(HorizontalAlign.Start)
-
-            if (book.aggregationCount > 1) {
-              this.aggregationIndicator(book)
-            } else {
-              this.shelfActionButton(book)
-            }
-          }
-          .width('100%')
-          .padding(12)
-          .backgroundColor(this.cardColor)
-          .borderRadius(8)
-          .border({ width: this.itemBorderWidth, color: this.itemBorderColor })
-          .shadow({ radius: 10, color: this.shadowColor, offsetX: 0, offsetY: 4 })
-          .onClick(() => {
-            this.onOpenBook(book);
-          })
-        }
-        .onAppear(() => {
-          if (book.aggregationCount <= 1 &&
-            (!this.safeText(book.author, '') || (this.showResultCover && !this.safeText(book.coverUrl, '')))) {
-            this.onNeedMetadata(book);
-          }
-        })
+        this.searchResultItem(book)
       }, (book: SearchBook) => this.itemKey(book))
 
       if (this.showLoadingMore) {
@@ -194,25 +126,143 @@ export struct SearchBookResultList {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
+  private supportsHdsListItem(): boolean {
+    return deviceInfo.sdkApiVersion >= 26;
+  }
+
   @Builder
-  shelfActionButton(book: SearchBook) {
-    Button({ type: ButtonType.Capsule, stateEffect: true }) {
-      this.shelfActionGlyph(book)
-    }
-      .enabled(!SearchBookShelfHelper.isBusy(book, this.busyBookKeys))
-      .width(64)
-      .height(36)
-      .borderRadius(ThemeRuntime.glassCornerRadius(18, 'button'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.isDarkMode(), this.cardColor, 'button'))
-      .backdropBlur(ThemeRuntime.glassBlur('button', 12))
-      .border({ width: ThemeRuntime.glassBorderWidth('button'), color: ThemeRuntime.glassBorderColor(this.isDarkMode(), 'button') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('button'), color: ThemeRuntime.glassShadowColor(this.isDarkMode(), 'button'), offsetX: ThemeRuntime.glassShadowOffsetX('button'), offsetY: ThemeRuntime.glassShadowOffsetY('button') })
-      .accessibilityText(SearchBookShelfHelper.buttonText(book, this.shelfBookKeys, this.busyBookKeys))
-      .margin({ left: 12 })
-      .opacity(SearchBookShelfHelper.isBusy(book, this.busyBookKeys) ? 0.58 : 1)
-      .onClick(() => {
-        this.onToggleShelf(book);
+  searchResultItem(book: SearchBook) {
+    if (this.supportsHdsListItem()) {
+      HdsListItem({
+        customItemBuilder: () => {
+          this.searchResultCard(book)
+        },
+        // 聚合项只是进入同名结果页，不能直接执行某个来源书籍的操作。
+        swipeActionOptions: book.aggregationCount > 1 ? undefined : this.searchResultSwipeActions(book)
       })
+    } else {
+      // API 25 及以下保留原生 ListItem，避免加载 HDS 滑动容器。
+      ListItem() {
+        this.searchResultCard(book)
+      }
+    }
+  }
+
+  @Builder
+  searchResultCard(book: SearchBook) {
+    Row() {
+      if (this.showResultCover) {
+        this.coverView(book)
+      }
+
+      Column() {
+        Text(this.safeText(book.name, '未知书名'))
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        Text(this.safeText(book.author, '作者未知'))
+          .fontSize(14)
+          .fontColor(this.secondaryTextColor)
+          .margin({ top: 4 })
+
+        if (this.showResultTags && this.getTags(book).length > 0) {
+          Flex({ wrap: FlexWrap.Wrap }) {
+            ForEach(this.getTags(book), (tag: string, index: number) => {
+              this.tagChip(tag, index)
+            })
+          }
+          .width('100%')
+          .margin({ top: 7 })
+        }
+
+        if (this.metadataLine(book)) {
+          Text(this.metadataLine(book))
+            .fontSize(12)
+            .fontColor(this.subTextColor)
+            .margin({ top: 3 })
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+
+        if (this.showSourceLine) {
+          Text(this.sourceLine(book))
+            .fontSize(12)
+            .fontColor(this.subTextColor)
+            .margin({ top: this.showResultTags && this.getTags(book).length > 0 ? 6 : 4 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+      }
+      .layoutWeight(1)
+      .margin({ left: this.showResultCover ? 12 : 0 })
+      .alignItems(HorizontalAlign.Start)
+
+      if (book.aggregationCount > 1) {
+        this.aggregationIndicator(book)
+      } else if (!this.supportsHdsListItem()) {
+        // API 25 及以下没有 HDS 滑动容器，直接显示等价操作按钮。
+        Column({ space: 6 }) {
+          Button(SearchBookShelfHelper.isInShelf(book, this.shelfBookKeys) ? '移出' : '加入')
+            .fontSize(11)
+            .width(64).height(32)
+            .fontColor('#FFFFFF').backgroundColor(ThemeRuntime.buttonColor(this.isDarkMode()))
+            .onClick(() => this.onToggleShelf(book))
+          Button('阅读')
+            .fontSize(11)
+            .width(64).height(32)
+            .fontColor('#FFFFFF').backgroundColor(ThemeRuntime.accentColor(this.isDarkMode()))
+            .onClick(() => this.onReadBook(book))
+        }
+        .margin({ left: 8 })
+      }
+    }
+    .width('100%')
+    .padding(12)
+    .backgroundColor(this.cardColor)
+    .borderRadius(8)
+    .border({ width: this.itemBorderWidth, color: this.itemBorderColor })
+    .shadow({ radius: 10, color: this.shadowColor, offsetX: 0, offsetY: 4 })
+    .onClick(() => {
+      this.onOpenBook(book);
+    })
+    .onAppear(() => {
+      if (book.aggregationCount <= 1 &&
+        (!this.safeText(book.author, '') || (this.showResultCover && !this.safeText(book.coverUrl, '')))) {
+        this.onNeedMetadata(book);
+      }
+    })
+  }
+
+  private searchResultSwipeActions(book: SearchBook): HdsSwipeActionOptions {
+    const options: HdsSwipeActionOptions = {
+      icons: [
+        {
+          icon: new SymbolGlyphModifier($r('sys.symbol.bookshelf_badge_plus')),
+          // 使用主题按钮色，随当前主题保持一致并确保图标有足够对比度。
+          backgroundColor: ThemeRuntime.buttonColor(this.isDarkMode()),
+          iconOptions: {
+            accessibilityText: SearchBookShelfHelper.isInShelf(book, this.shelfBookKeys) ? '移出书架' : '加入书架'
+          },
+          onAction: () => {
+            this.onToggleShelf(book);
+          }
+        },
+        {
+          icon: new SymbolGlyphModifier($r('sys.symbol.book')),
+          backgroundColor: ThemeRuntime.accentColor(this.isDarkMode()),
+          iconOptions: {
+            accessibilityText: '阅读'
+          },
+          onAction: () => {
+            this.onReadBook(book);
+          }
+        }
+      ]
+    };
+    return options;
   }
 
   @Builder
@@ -232,35 +282,6 @@ export struct SearchBookResultList {
     .justifyContent(FlexAlign.Center)
   }
 
-  @Builder
-  shelfActionGlyph(book: SearchBook) {
-    if (SearchBookShelfHelper.isBusy(book, this.busyBookKeys)) {
-      SymbolGlyph($r('sys.symbol.hourglass'))
-        .fontSize(21)
-        .fontWeight(FontWeight.Medium)
-        .fontColor([SearchBookShelfHelper.buttonColor(book, this.shelfBookKeys, this.busyBookKeys)])
-    } else if (SearchBookShelfHelper.isInShelf(book, this.shelfBookKeys)) {
-      Stack({ alignContent: Alignment.Center }) {
-        SymbolGlyph($r('sys.symbol.bookshelf'))
-          .fontSize(22)
-          .fontWeight(FontWeight.Medium)
-          .fontColor([SearchBookShelfHelper.buttonColor(book, this.shelfBookKeys, this.busyBookKeys)])
-
-        SymbolGlyph($r('sys.symbol.minus_circle_fill'))
-          .fontSize(11)
-          .fontWeight(FontWeight.Bold)
-          .fontColor([SearchBookShelfHelper.buttonColor(book, this.shelfBookKeys, this.busyBookKeys)])
-          .position({ x: 17, y: 0 })
-      }
-      .width(28)
-      .height(24)
-    } else {
-      SymbolGlyph($r('sys.symbol.bookshelf_badge_plus'))
-        .fontSize(21)
-        .fontWeight(FontWeight.Medium)
-        .fontColor([SearchBookShelfHelper.buttonColor(book, this.shelfBookKeys, this.busyBookKeys)])
-    }
-  }
 
   sourceLine(book: SearchBook): string {
     if (book.aggregationCount > 1) {

@@ -7,11 +7,14 @@ import { ReaderCustomThemeData, ReaderCustomThemeHelper, ReaderCustomThemeScheme
 import { ReaderBackgroundImageStore } from '../utils/ReaderBackgroundImageStore';
 import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
+import { AdaptiveIconButton } from '../components/AdaptiveIconButton';
+import { AdaptiveSwitch } from '../components/AdaptiveSwitch';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
-import { ColorCodePicker } from '../components/ColorCodePicker';
+import { AdaptiveColorPicker } from '../components/AdaptiveColorPicker';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { EyeTurnController } from '../core/reader/EyeTurnController';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import fs from '@ohos.file.fs';
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -89,7 +92,6 @@ struct SettingsPage {
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
-
   @State customFonts: ReaderCustomFontItem[] = [];
   @State previewFontRenderVersion: number = 0;
   @State showTapZoneSettings: boolean = false;
@@ -1156,6 +1158,19 @@ struct SettingsPage {
     return titles[index];
   }
 
+  typographySettingMin(): number {
+    return this.typographySettingIndex === 0 ? 14 : 0;
+  }
+
+  typographySettingMax(): number {
+    if (this.typographySettingIndex === 0) return 50;
+    if (this.typographySettingIndex === 1) return 8;
+    if (this.typographySettingIndex === 2) return 52;
+    if (this.typographySettingIndex === 3) return 32;
+    if (this.typographySettingIndex === 4 || this.typographySettingIndex === 5) return 80;
+    return 120;
+  }
+
   currentTypographySettingValue(): number {
     switch (this.typographySettingIndex) {
       case 1:
@@ -1222,21 +1237,24 @@ struct SettingsPage {
     }
     switch (this.typographySettingIndex) {
       case 1:
-        this.setReaderLineHeight(value);
+        this.setReaderLetterSpacing(value);
         break;
       case 2:
-        this.setReaderParagraphSpacing(value);
+        this.setReaderLineHeight(value);
         break;
       case 3:
-        this.setReaderMarginLeft(value);
+        this.setReaderParagraphSpacing(value);
         break;
       case 4:
-        this.setReaderMarginRight(value);
+        this.setReaderMarginLeft(value);
         break;
       case 5:
-        this.setReaderMarginTop(value);
+        this.setReaderMarginRight(value);
         break;
       case 6:
+        this.setReaderMarginTop(value);
+        break;
+      case 7:
         this.setReaderMarginBottom(value);
         break;
       default:
@@ -1626,12 +1644,21 @@ struct SettingsPage {
     return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
+  settingsDividerColor(): string {
+    return this.appDarkMode ? '#24FFFFFF' : '#14000000';
+  }
+
   primaryTextColor(): string {
     return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
 
   subTextColor(): string {
     return ThemeRuntime.subTextColor(this.appDarkMode);
+  }
+
+  /** Use one deterministic menu material for settings Select controls on API 26+. */
+  selectMenuMaterial() {
+    return ImmersiveMaterialRuntime.selectMenuMaterial();
   }
 
   accentColor(): string {
@@ -1824,14 +1851,16 @@ struct SettingsPage {
         .backgroundColor(Color.Transparent)
         .arrowPosition(ArrowPosition.END)
         .padding({ left: 0, right: 0 })
-        .borderRadius(0)
+        .borderRadius(16)
         .border({ width: 0 })
         .optionBgColor(Color.Transparent)
+        .divider(null)
         .optionFontColor(this.primaryTextColor())
         .selectedOptionFontColor(this.accentColor())
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+        .menuBackgroundBlurStyle(BlurStyle.NONE)
+        .menuSystemMaterial(this.selectMenuMaterial())
         .onSelect((index: number) => {
           this.selectReaderFontByIndex(index);
         })
@@ -1889,6 +1918,7 @@ struct SettingsPage {
     .constraintSize({ minHeight: 62 })
     .padding({ left: 0, right: 0, top: 8, bottom: 8 })
     .margin({ left: 16, right: 16 })
+    .border({ width: { top: 0.5, bottom: 0.5 }, color: this.settingsDividerColor() })
     .backgroundColor(this.cardColor())
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
@@ -1918,7 +1948,7 @@ struct SettingsPage {
     .constraintSize({ minHeight: 62 })
     .padding({ left: 0, right: 0, top: 8, bottom: 8 })
     .margin({ left: 16, right: 16 })
-    .border({ width: { top: 0.5 }, color: ThemeRuntime.glassBorderColor(this.appDarkMode) })
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
     .backgroundColor(this.cardColor())
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
@@ -2000,6 +2030,7 @@ struct SettingsPage {
     .constraintSize({ minHeight: 64 })
     .padding({ left: 16, right: 16, top: 10, bottom: 10 })
     .backgroundColor(this.cardColor())
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
     .alignItems(VerticalAlign.Center)
   }
 
@@ -2146,13 +2177,17 @@ struct SettingsPage {
               .backgroundColor(Color.Transparent)
               .arrowPosition(ArrowPosition.START)
               .padding({ left: 0, right: 0 })
+              .borderRadius(16)
+              .border({ width: 0 })
               .layoutWeight(1)
+              .divider(null)
               .optionBgColor(Color.Transparent)
               .optionFontColor(this.primaryTextColor())
               .selectedOptionFontColor(this.accentColor())
               .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
               .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-              .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+              .menuBackgroundBlurStyle(BlurStyle.NONE)
+              .menuSystemMaterial(this.selectMenuMaterial())
               .onSelect((index: number) => {
                 this.selectCustomTheme(index);
               })
@@ -2203,19 +2238,23 @@ struct SettingsPage {
               .backgroundColor(Color.Transparent)
               .arrowPosition(ArrowPosition.END)
               .padding({ left: 0, right: 0 })
+              .borderRadius(16)
+              .border({ width: 0 })
               .optionBgColor(Color.Transparent)
+              .divider(null)
               .optionFontColor(this.primaryTextColor())
               .selectedOptionFontColor(this.accentColor())
               .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
               .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-              .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+              .menuBackgroundBlurStyle(BlurStyle.NONE)
+              .menuSystemMaterial(this.selectMenuMaterial())
               .onSelect((index: number) => {
                 this.setCurrentCustomThemeBackgroundType(index);
               })
           }
           .width('100%')
           if (this.currentCustomThemeBackgroundTypeIndex() === 0) {
-            ColorCodePicker({
+            AdaptiveColorPicker({
               value: this.currentCustomThemeBackgroundColor(),
               placeholder: this.currentCustomThemeBackgroundColor(),
               appDarkMode: this.appDarkMode,
@@ -2252,13 +2291,17 @@ struct SettingsPage {
                   .backgroundColor(Color.Transparent)
                   .arrowPosition(ArrowPosition.END)
                   .padding({ left: 0, right: 0 })
+                  .borderRadius(16)
+                  .border({ width: 0 })
                   .layoutWeight(1)
+                  .divider(null)
                   .optionBgColor(Color.Transparent)
                   .optionFontColor(this.primaryTextColor())
                   .selectedOptionFontColor(this.accentColor())
                   .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
                   .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-                  .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+                  .menuBackgroundBlurStyle(BlurStyle.NONE)
+                  .menuSystemMaterial(this.selectMenuMaterial())
                   .onSelect((index: number) => {
                     this.setCurrentCustomThemeImageFit(index);
                   })
@@ -2266,7 +2309,7 @@ struct SettingsPage {
             }
             .width('100%')
           }
-          ColorCodePicker({
+          AdaptiveColorPicker({
             value: this.currentCustomThemeTextColor(),
             placeholder: this.currentCustomThemeTextColor(),
             appDarkMode: this.appDarkMode,
@@ -2296,31 +2339,30 @@ struct SettingsPage {
         .backgroundColor(Color.Transparent)
         .arrowPosition(ArrowPosition.START)
         .padding({ left: 0, right: 0 })
-        .borderRadius(0)
+        .borderRadius(16)
         .border({ width: 0 })
         .optionBgColor(Color.Transparent)
+        .divider(null)
         .optionFontColor(this.primaryTextColor())
         .selectedOptionFontColor(this.accentColor())
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+        .menuBackgroundBlurStyle(BlurStyle.NONE)
+        .menuSystemMaterial(this.selectMenuMaterial())
         .onSelect((index: number) => {
           this.showTypographyValueInput = false;
           this.typographySettingIndex = Math.max(0, Math.min(index, this.typographySettingOptions().length - 1));
         })
       Blank()
         .layoutWeight(1)
-      Button('-')
-        .width(44)
-        .height(36)
-        .backgroundColor(this.buttonColor())
-        .fontColor('#FFFFFF')
-        .onClick(() => {
+      this.settingsSliderStepButton($r('sys.symbol.minus'), `减小${this.typographySettingTitle()}`,
+        this.currentTypographySettingValue() > this.typographySettingMin(), () => {
           this.adjustCurrentTypographySetting(-1);
         })
       if (this.showTypographyValueInput) {
         TextInput({ text: this.typographyValueDraft, placeholder: `${this.currentTypographySettingValue()}` })
           .type(InputType.Number)
+          .enterKeyType(EnterKeyType.Done)
           .defaultFocus(true)
           .fontSize(15)
           .fontColor(this.primaryTextColor())
@@ -2350,18 +2392,15 @@ struct SettingsPage {
             this.openTypographyValueInput();
           })
       }
-      Button('+')
-        .width(44)
-        .height(36)
-        .backgroundColor(this.buttonColor())
-        .fontColor('#FFFFFF')
-        .onClick(() => {
+      this.settingsSliderStepButton($r('sys.symbol.plus'), `增加${this.typographySettingTitle()}`,
+        this.currentTypographySettingValue() < this.typographySettingMax(), () => {
           this.adjustCurrentTypographySetting(1);
         })
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     .backgroundColor(this.cardColor())
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
     .alignItems(VerticalAlign.Center)
   }
 
@@ -2422,68 +2461,51 @@ struct SettingsPage {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        Toggle({ type: ToggleType.Switch, isOn: this.readerPreloadEnabled })
-          .selectedColor(this.buttonColor())
-          .onChange((checked: boolean) => {
+        AdaptiveSwitch({ isOn: this.readerPreloadEnabled, selectedColor: this.buttonColor(),
+          onChange: (checked: boolean) => {
             this.setReaderPreloadEnabled(checked);
-          })
+          },
+        })
       }
-      .width('100%')
+      .width('calc(100% - 32vp)')
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+      .margin({ left: 16, right: 16 })
+      .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
       .alignItems(VerticalAlign.Center)
 
       if (this.readerPreloadEnabled) {
-        Row() {
-          Text('下一章节数')
-            .fontSize(14)
-            .fontColor(this.primaryTextColor())
-            .layoutWeight(1)
-          Text(`${this.readerPreloadChapterCount}章`)
-            .fontSize(14)
-            .fontColor(this.subTextColor())
-        }
-        .width('100%')
-        .margin({ top: 12 })
-
-        Row({ space: 10 }) {
-          this.settingsSliderStepButton($r('sys.symbol.minus'), '减少预缓存章节数',
-            this.readerPreloadChapterCount > 1, () => {
-            this.setReaderPreloadChapterCount(this.readerPreloadChapterCount - 1);
-          })
-          Slider({ value: this.readerPreloadChapterCount, min: 1, max: 10, step: 1 })
-            .layoutWeight(1)
-            .selectedColor(this.accentColor())
-            .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-            .onChange((sliderValue: number) => {
-              this.setReaderPreloadChapterCount(sliderValue);
-            })
-          this.settingsSliderStepButton($r('sys.symbol.plus'), '增加预缓存章节数',
-            this.readerPreloadChapterCount !== 10, () => {
-            this.setReaderPreloadChapterCount(this.readerPreloadChapterCount + 1);
-          })
-        }
-        .width('100%')
-        .margin({ top: 8 })
+        this.selectItem('下一章节数', '选择自动预缓存的后续章节数量',
+          this.readerPreloadChapterOptions(), this.readerPreloadChapterCount - 1,
+          (index: number) => this.setReaderPreloadChapterCount(index + 1),
+          'settings_reader_preload_chapter_count_select')
       }
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     .backgroundColor(this.cardColor())
   }
 
   @Builder
   settingsSliderStepButton(icon: Resource, accessibilityText: string, enabled: boolean, action: () => void) {
-    Button({ type: ButtonType.Circle, stateEffect: true }) {
-      SymbolGlyph(icon)
-        .fontSize(16)
-        .fontColor([enabled ? this.primaryTextColor() : this.subTextColor()])
+    AdaptiveIconButton({
+      icon: icon,
+      accessibilityLabel: accessibilityText,
+      buttonEnabled: enabled,
+      buttonSize: 34,
+      iconSize: 16,
+      fillColor: this.inputColor(),
+      iconColor: this.primaryTextColor(),
+      disabledIconColor: this.subTextColor(),
+      action: action
+    })
+  }
+
+  readerPreloadChapterOptions(): SelectOption[] {
+    const options: SelectOption[] = [];
+    for (let index = 1; index <= 10; index++) {
+      options.push({ value: `${index}章` });
     }
-    .width(34)
-    .height(34)
-    .padding(0)
-    .enabled(enabled)
-    .backgroundColor(this.inputColor())
-    .accessibilityText(accessibilityText)
-    .onClick(action)
+    return options;
   }
 
   @Builder
@@ -2510,7 +2532,7 @@ struct SettingsPage {
     .padding({ left: 0, right: 0, top: 10, bottom: 10 })
     .margin({ left: 16, right: 16 })
     .backgroundColor(Color.Transparent)
-    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
     .alignItems(VerticalAlign.Center)
     .onClick((): void => {
       promptAction.showToast({ message: '请打开任意书籍，在正文阅读设置中点击“眼动校准”' });
@@ -2542,14 +2564,16 @@ struct SettingsPage {
         .backgroundColor(Color.Transparent)
         .arrowPosition(ArrowPosition.END)
         .padding({ left: 0, right: 0 })
-        .borderRadius(0)
+        .borderRadius(16)
         .border({ width: 0 })
         .optionBgColor(Color.Transparent)
+        .divider(null)
         .optionFontColor(this.primaryTextColor())
         .selectedOptionFontColor(this.accentColor())
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+        .menuBackgroundBlurStyle(BlurStyle.NONE)
+        .menuSystemMaterial(this.selectMenuMaterial())
         .onSelect((index: number) => {
           onSelect(index);
         })
@@ -2559,7 +2583,7 @@ struct SettingsPage {
     .padding({ left: 0, right: 0, top: 10, bottom: 10 })
     .margin({ left: 16, right: 16 })
     .backgroundColor(Color.Transparent)
-    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
     .alignItems(VerticalAlign.Center)
   }
 
@@ -2585,17 +2609,17 @@ struct SettingsPage {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      Toggle({ type: ToggleType.Switch, isOn: value })
-        .selectedColor(this.buttonColor())
-        .onChange((checked: boolean) => {
+      AdaptiveSwitch({ isOn: value, selectedColor: this.buttonColor(),
+        onChange: (checked: boolean) => {
           onChange(checked);
-        })
+        },
+      })
     }
     .width('calc(100% - 32vp)')
     .constraintSize({ minHeight: 64 })
     .padding({ left: 0, right: 0, top: 10, bottom: 10 })
     .margin({ left: 16, right: 16 })
     .backgroundColor(Color.Transparent)
-    .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
   }
 }

@@ -1,8 +1,10 @@
 import { router } from '@kit.ArkUI';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
+import { AdaptiveIconButton } from '../components/AdaptiveIconButton';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { GlassPresetIds, GlassSettings, GlassSettingsStore } from '../utils/GlassSettingsStore';
 import { syncSystemBars } from '../utils/SystemBars';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 
 @Entry
 @Component
@@ -505,9 +507,10 @@ struct GlassSettingsPage {
         })
         Slider({ value: this.sliderValue(key), min: min, max: max, step: step, style: SliderStyle.OutSet })
           .layoutWeight(1)
+          .showTips(true)
           .selectedColor(this.accentColor())
           .trackColor(ThemeRuntime.inputColor(this.appDarkMode))
-          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+          .sliderInteractionMode(ImmersiveMaterialRuntime.supportsHds() ? SliderInteraction.SLIDE_AND_CLICK_UP : SliderInteraction.SLIDE_ONLY)
           .onChange((next: number) => this.updateSliderValue(key, next))
         this.sliderStepButton($r('sys.symbol.plus'), '增大', this.sliderValue(key) !== max, () => {
           this.stepSliderValue(key, min, max, step);
@@ -526,17 +529,16 @@ struct GlassSettingsPage {
 
   @Builder
   sliderStepButton(icon: Resource, accessibilityText: string, enabled: boolean, action: () => void) {
-    Button({ type: ButtonType.Circle, stateEffect: true }) {
-      SymbolGlyph(icon)
-        .fontSize(15)
-        .fontColor([enabled ? this.primaryTextColor() : this.subTextColor()])
-    }
-    .width(32)
-    .height(32)
-    .padding(0)
-    .enabled(enabled)
-    .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
-    .accessibilityText(accessibilityText)
-    .onClick(action)
+    AdaptiveIconButton({
+      icon: icon,
+      accessibilityLabel: accessibilityText,
+      buttonEnabled: enabled,
+      buttonSize: 32,
+      iconSize: 15,
+      fillColor: ThemeRuntime.inputColor(this.appDarkMode),
+      iconColor: this.primaryTextColor(),
+      disabledIconColor: this.subTextColor(),
+      action: action
+    })
   }
 }

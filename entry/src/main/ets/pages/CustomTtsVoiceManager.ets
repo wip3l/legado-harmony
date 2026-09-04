@@ -11,6 +11,9 @@ import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
 import { FormDraftStore } from '../utils/FormDraftStore';
+import deviceInfo from '@ohos.deviceInfo';
+import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
+import { SymbolGlyphModifier } from '@kit.ArkUI';
 
 class VoiceEditFormDraft {
   editingVoiceId: string = '';
@@ -134,34 +137,22 @@ struct CustomTtsVoiceManagerPage {
         } else {
           List({ space: 8, scroller: this.voiceListScroller }) {
             ForEach(this.filteredVoices(), (voice: HttpTTS) => {
-              ListItem() {
-                this.voiceListItem(voice)
+              if (deviceInfo.sdkApiVersion >= 26) {
+                HdsListItem({
+                  customItemBuilder: () => {
+                    this.voiceListItem(voice)
+                  },
+                  swipeActionOptions: this.voiceSwipeActions(voice)
+                })
+              } else {
+                ListItem() {
+                  Row() {
+                    this.voiceListItem(voice)
+                    Button(voice.enabled ? '禁用' : '启用').fontSize(11).width(64).height(32).fontColor('#FFFFFF').backgroundColor(this.buttonColor()).onClick(() => this.toggleVoiceState(voice))
+                    Button('删除').fontSize(11).width(64).height(32).fontColor('#FFFFFF').backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode)).onClick(() => this.deleteVoice(voice))
+                  }
+                }
               }
-              .onAreaChange((_oldValue: Area, area: Area) => this.rememberVoiceSelectionArea(voice, area))
-              .width('100%')
-              .borderRadius(8)
-              .clip(true)
-              .swipeAction(this.selectionMode ? {} : {
-                start: {
-                  builder: () => {
-                    this.voiceDisableSwipeAction(voice)
-                  },
-                  actionAreaDistance: 64,
-                  onAction: () => {
-                    if (!this.selectionMode) this.toggleVoiceState(voice);
-                  }
-                },
-                end: {
-                  builder: () => {
-                    this.voiceDeleteSwipeAction(voice)
-                  },
-                  actionAreaDistance: 64,
-                  onAction: () => {
-                    if (!this.selectionMode) this.deleteVoice(voice);
-                  }
-                },
-                edgeEffect: SwipeEdgeEffect.Spring
-              })
             }, (voice: HttpTTS) => this.voiceKey(voice))
 
             ListItem() {
@@ -223,6 +214,18 @@ struct CustomTtsVoiceManagerPage {
       if (Number.isFinite(height) && height > 0) this.contextViewportHeight = height;
     })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  private voiceSwipeActions(voice: HttpTTS): HdsSwipeActionOptions {
+    return { icons: [
+      {
+        icon: new SymbolGlyphModifier(voice.enabled ? $r('sys.symbol.minus_circle') : $r('sys.symbol.checkmark_circle')),
+        backgroundColor: this.buttonColor(),
+        iconOptions: { accessibilityText: voice.enabled ? '禁用音色' : '启用音色' },
+        onAction: () => this.toggleVoiceState(voice)
+      },
+      { icon: new SymbolGlyphModifier($r('sys.symbol.trash')), backgroundColor: ThemeRuntime.dangerColor(this.appDarkMode), iconOptions: { accessibilityText: '删除音色' }, onAction: () => this.deleteVoice(voice) }
+    ] };
   }
 
   loadSettings(): void {
@@ -1077,7 +1080,7 @@ struct CustomTtsVoiceManagerPage {
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor(voice.enabled ? '#F39C3D' : '#1E8E3E')
+    .backgroundColor(this.buttonColor())
     .onClick(() => {
       if (!this.selectionMode) this.toggleVoiceState(voice);
     })
@@ -1097,7 +1100,7 @@ struct CustomTtsVoiceManagerPage {
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#E53935')
+    .backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode))
     .onClick(() => {
       if (!this.selectionMode) this.deleteVoice(voice);
     })

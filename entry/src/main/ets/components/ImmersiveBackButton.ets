@@ -1,5 +1,6 @@
 import deviceInfo from '@ohos.deviceInfo';
 import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 
 @Component
 export struct ImmersiveBackButton {
@@ -43,10 +44,6 @@ export struct ImmersiveBackButton {
   @Builder
   linkedSystemMaterialButton() {
     Stack({ alignContent: Alignment.Center }) {
-      // API 23~25 只将 HdsTabs 作为系统材质和按压光影提供层；业务点击由上层标准按钮承载。
-      // ADAPTIVE 会跟随系统沉浸光感设置、设备能力和热控策略。
-      // API 26 升级点：compileSdk 升至 26 后，仅替换这个材质提供层为
-      // systemMaterial(new uiMaterial.ImmersiveMaterial(...))，圆形裁剪、图标和交互层无需改动。
       HdsTabs({ barPosition: BarPosition.End, index: 0 }) {
         TabContent() {
           Column()
@@ -65,7 +62,7 @@ export struct ImmersiveBackButton {
         },
         systemMaterialEffect: {
           materialType: hdsMaterial.MaterialType.IMMERSIVE,
-          materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+          materialLevel: ImmersiveMaterialRuntime.materialLevel()
         },
         barSideMargin: 0,
         barBottomMargin: 0,
@@ -82,8 +79,6 @@ export struct ImmersiveBackButton {
       .width(this.materialButtonSize())
       .height(this.materialButtonSize())
 
-      // 透明标准按钮专门承载业务点击，不依赖单项 Tabs 的选中回调。
-      // Transparent 命中模式让按压同时透传给 HDS，保留系统材质光影响应。
       Button({ type: ButtonType.Circle, stateEffect: false }) {
         this.buttonContent(true)
       }
@@ -97,7 +92,6 @@ export struct ImmersiveBackButton {
     }
     .width(this.materialButtonSize())
     .height(this.materialButtonSize())
-    // 在 HDS 完成材质合成后裁剪整个承载层，消除 Tabs 的矩形合成边界。
     .borderRadius(this.materialButtonSize() / 2, RenderStrategy.OFFSCREEN)
     .clip(true)
     .translate({ x: this.startInset * this.normalizedMaterialScale() })
@@ -144,7 +138,6 @@ export struct ImmersiveBackButton {
   }
 
   materialButtonSize(): number {
-    // materialScale 应同时收紧材质底座；图标保持清晰尺寸，避免“小图标套大圆盘”的失衡观感。
     return Math.max(36, this.buttonSize * this.normalizedMaterialScale());
   }
 }

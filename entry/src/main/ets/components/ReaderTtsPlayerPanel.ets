@@ -1,5 +1,6 @@
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ReaderTtsFloatingSession } from '../utils/ReaderTtsFloatingSession';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 
 @Component
 export struct ReaderTtsPlayerPanel {
@@ -402,13 +403,16 @@ export struct ReaderTtsPlayerPanel {
         .height(40)
         .padding({ left: 0, right: 0 })
         .backgroundColor(Color.Transparent)
+        .borderRadius(16)
         .border({ width: 0 })
         .optionBgColor(Color.Transparent)
+        .divider(null)
         .optionFontColor(this.primaryTextColor)
         .selectedOptionFontColor(this.accentColor)
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.darkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.darkMode, ''))
-        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+        .menuBackgroundBlurStyle(BlurStyle.NONE)
+        .menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial())
         .onSelect((index: number) => ReaderTtsFloatingSession.selectTtsVoice(index))
     }
     .width('100%')
@@ -428,6 +432,7 @@ export struct ReaderTtsPlayerPanel {
       Slider({ value: this.globalTtsAudioPositionMs, min: 0,
         max: Math.max(1, this.globalTtsAudioDurationMs), step: 1000 })
         .width('100%')
+        .showTips(true)
         .selectedColor(this.accentColor)
         .trackColor(ThemeRuntime.inputColor(this.darkMode))
         .onChange((value: number, mode: SliderChangeMode) => {

@@ -516,6 +516,7 @@ struct AudioBookPage {
     Column() {
       Slider({ value: this.positionMs, min: 0, max: Math.max(1, this.durationMs), step: 1000 })
         .width('100%')
+        .showTips(true)
         .selectedColor(this.accentColor())
         .trackColor(this.inputColor())
         .onChange((value: number, mode: SliderChangeMode) => {

@@ -16,7 +16,9 @@ import { HttpClient } from '../core/http/HttpClient';
 import { syncSystemBars } from '../utils/SystemBars';
 import { SystemTtsReader, TtsVoiceOption } from '../utils/SystemTtsReader';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
+import { AdaptiveIconButton } from '../components/AdaptiveIconButton';
 import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 
 const TTS_CUSTOM_VOICE_IMPORT_LIMIT_BYTES: number = 2 * 1024 * 1024;
@@ -147,8 +149,9 @@ struct TtsSettingsPage {
               })
               Slider({ value: this.ttsSpeed, min: 0.5, max: 2, step: 0.1 })
                 .layoutWeight(1)
+                .showTips(true)
                 .selectedColor(this.accentColor())
-                .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
+                .sliderInteractionMode(ImmersiveMaterialRuntime.supportsHds() ? SliderInteraction.SLIDE_AND_CLICK_UP : SliderInteraction.SLIDE_ONLY)
                 .onChange((value: number) => {
                   this.applySpeed(value);
                 })
@@ -1375,18 +1378,17 @@ struct TtsSettingsPage {
 
   @Builder
   speedStepButton(icon: Resource, accessibilityText: string, enabled: boolean, action: () => void) {
-    Button({ type: ButtonType.Circle, stateEffect: true }) {
-      SymbolGlyph(icon)
-        .fontSize(16)
-        .fontColor([enabled ? this.primaryTextColor() : this.subTextColor()])
-    }
-    .width(34)
-    .height(34)
-    .padding(0)
-    .enabled(enabled)
-    .backgroundColor(this.inputColor())
-    .accessibilityText(accessibilityText)
-    .onClick(action)
+    AdaptiveIconButton({
+      icon: icon,
+      accessibilityLabel: accessibilityText,
+      buttonEnabled: enabled,
+      buttonSize: 34,
+      iconSize: 16,
+      fillColor: this.inputColor(),
+      iconColor: this.primaryTextColor(),
+      disabledIconColor: this.subTextColor(),
+      action: action
+    })
   }
 
   applySpeed(value: number): void {

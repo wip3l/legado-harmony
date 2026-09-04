@@ -1,14 +1,14 @@
 # Legado Harmony 书源开发指南
 
-> 适用版本：`3.8.902`（2026-09-01）。本文以当前工作区代码为准；规则能力、字段消费方式和限制可能随版本继续调整。
+> 适用版本：`3.9.903`（2026-09-04）。本文以当前工作区代码为准；规则能力、字段消费方式和限制可能随版本继续调整。
 
 本文面向为开源轻页编写、迁移和调试书源的开发者，描述项目当前代码中**已经实现并实际调用**的规则能力。
 
 | 项目 | 信息 |
 | --- | --- |
 | 适用项目 | `legado-harmony` |
-| 适用版本 | `3.8.902`（以 `AppScope/app.json5` 为准） |
-| 最后核对 | 2026-09-01 |
+| 适用版本 | `3.9.903`（以 `AppScope/app.json5` 为准） |
+| 最后核对 | 2026-09-04 |
 | 文档性质 | 当前实现参考，不是 Android「阅读」全部规则的等价清单 |
 
 > [!IMPORTANT]
@@ -188,6 +188,10 @@
 当文件或 URL 返回 JSON 数组、`{"value":[...]}` 等包含多个有效书源的内容时，解析完成后会打开书源选择面板，不会直接把全部项目写入数据库。面板默认全部勾选，可逐项取消或通过“全选/取消全选”批量操作；点击“导入所选”后才执行写入，点击“取消”则放弃本次导入。只有一个有效书源时仍直接导入。
 
 选择状态以 `bookSourceUrl`（书源唯一身份）为键；同一地址的重复项目会视为同一书源。导入结果中的成功、失败、锁定和需登录数量只统计最终选中的项目。
+
+#### 管理列表的快捷操作
+
+在 API 26 及以上设备，书源管理页使用 HDS 滑动列表提供启用/禁用和删除快捷操作；搜索结果列表也提供加入/移出书架和进入阅读的滑动操作。API 25 及以下设备显示等价的按钮操作。进入选择模式、批量处理期间或书源已锁定时会关闭对应快捷操作，快捷操作不会绕过锁定和批量操作限制。
 
 规则组导出时也会先保留原始规则对象中的未知键，再覆盖当前结构化字段，减少编辑后扩展规则丢失。
 
@@ -1396,6 +1400,7 @@ https://img.example/page.jpg,{"headers":{"Referer":"https://example.com/"}}
 
 - 数据模型：`entry/src/main/ets/model/data/Book.ts`
 - JSON 导入兼容：`entry/src/main/ets/pages/BookSource.ets`
+- 书源与搜索结果列表快捷操作：`entry/src/main/ets/pages/BookSource.ets`、`entry/src/main/ets/components/book/SearchBookResultList.ets`
 - URL 相对地址解析：`entry/src/main/ets/core/book/BookUrlResolver.ts`
 - 编辑器字段：`entry/src/main/ets/pages/BookSourceEdit.ets`
 - URL 和请求选项：`entry/src/main/ets/core/rule/AnalyzeUrl.ts`

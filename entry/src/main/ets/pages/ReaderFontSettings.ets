@@ -3,8 +3,10 @@ import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
-import { ColorCodePicker } from '../components/ColorCodePicker';
+import { AdaptiveColorPicker } from '../components/AdaptiveColorPicker';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
+import { AdaptiveIconButton } from '../components/AdaptiveIconButton';
+import { AdaptiveSwitch } from '../components/AdaptiveSwitch';
 import {
   ReaderRegexBubbleStyleResolver,
   ReaderRegexEmphasisContext,
@@ -16,6 +18,7 @@ import {
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
 import { ThemeAccessPolicy } from '../account/ThemeAccessPolicy';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -157,34 +160,55 @@ struct ReaderFontSettingsPage {
       Scroll() {
         Column() {
           this.sectionTitle('正文字体设置')
-          this.fontModeItem('字体类型', this.readerBodyFontMode, this.readerBodyFontFamily, (mode: string, family: string) => {
-            this.readerBodyFontMode = mode;
-            this.readerBodyFontFamily = family;
-            this.saveSettings();
-          })
-          this.bodyFontSizeSlider()
-          this.bodyPreviewItem()
+          Column() {
+            this.fontModeItem('字体类型', this.readerBodyFontMode, this.readerBodyFontFamily, (mode: string, family: string) => {
+              this.readerBodyFontMode = mode;
+              this.readerBodyFontFamily = family;
+              this.saveSettings();
+            })
+            this.bodyFontSizeStepper()
+            this.bodyPreviewItem()
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
 
           this.sectionTitle('标题字体设置')
-          this.fontModeItem('字体类型', this.readerTitleFontMode, this.readerTitleFontFamily, (mode: string, family: string) => {
-            this.readerTitleFontMode = mode;
-            this.readerTitleFontFamily = family;
-            this.saveSettings();
-          })
-          this.titleFontSizeSlider()
-          this.titlePreviewItem()
+          Column() {
+            this.fontModeItem('字体类型', this.readerTitleFontMode, this.readerTitleFontFamily, (mode: string, family: string) => {
+              this.readerTitleFontMode = mode;
+              this.readerTitleFontFamily = family;
+              this.saveSettings();
+            })
+            this.titleFontSizeStepper()
+            this.titlePreviewItem()
+          }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
 
           this.sectionTitle('正则字体设置')
-          this.regexEnableSwitchItem()
-          if (this.readerRegexFontEnabled) {
-            this.regexTemplateActions()
-            if (this.regexRules.length === 0) {
-              this.emptyRegexRule()
+          Column() {
+            this.regexEnableSwitchItem()
+            if (this.readerRegexFontEnabled) {
+              this.regexTemplateActions()
+              if (this.regexRules.length === 0) {
+                this.emptyRegexRule()
+              }
+              ForEach(this.regexRules, (rule: ReaderRegexFontRule, index: number) => {
+                this.regexRulePanel(rule, index, this.regexHighlightRefreshKey)
+              }, (rule: ReaderRegexFontRule) => rule.id)
             }
-            ForEach(this.regexRules, (rule: ReaderRegexFontRule, index: number) => {
-              this.regexRulePanel(rule, index, this.regexHighlightRefreshKey)
-            }, (rule: ReaderRegexFontRule) => rule.id)
           }
+          .width('calc(100% - 24vp)')
+          .margin({ left: 12, right: 12 })
+          .borderRadius(16)
+          .clip(true)
+          .backgroundColor(this.cardColor())
         }
         .width('100%')
         .padding({ top: 56 + this.statusBarHeight, bottom: 32 + this.navBarHeight })
@@ -475,6 +499,10 @@ struct ReaderFontSettingsPage {
     return ThemeRuntime.inputColor(this.appDarkMode);
   }
 
+  settingsDividerColor(): string {
+    return this.appDarkMode ? '#24FFFFFF' : '#14000000';
+  }
+
   primaryTextColor(): string {
     return ThemeRuntime.primaryTextColor(this.appDarkMode);
   }
@@ -485,6 +513,15 @@ struct ReaderFontSettingsPage {
 
   accentColor(): string {
     return ThemeRuntime.accentColor(this.appDarkMode);
+  }
+
+  /**
+   * Keep the font selectors on this page on the same menu material.  HDS
+   * Select menus otherwise inherit a system shadow that can differ between
+   * the top-level font rows and the nested regex rule rows.
+   */
+  selectMenuMaterial() {
+    return ImmersiveMaterialRuntime.selectMenuMaterial();
   }
 
   syncBars(): void {
@@ -535,111 +572,101 @@ struct ReaderFontSettingsPage {
         .backgroundColor(Color.Transparent)
         .arrowPosition(ArrowPosition.END)
         .padding({ left: 0, right: 0 })
-        .constraintSize({ minWidth: 140, maxWidth: 180 })
+        .borderRadius(16)
+        .border({ width: 0 })
+        .divider(null)
         .optionBgColor(Color.Transparent)
         .optionFontColor(this.primaryTextColor())
         .selectedOptionFontColor(this.accentColor())
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+        .menuBackgroundBlurStyle(BlurStyle.NONE)
+        .menuSystemMaterial(this.selectMenuMaterial())
         .onSelect((index: number) => {
           const result = this.modeAndFamilyByIndex(index);
           onChange(result[0], result[1]);
         })
     }
-    .width('100%')
-    .constraintSize({ minHeight: 56 })
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor(this.cardColor())
+    .width('calc(100% - 32vp)')
+    .constraintSize({ minHeight: 64 })
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
     .alignItems(VerticalAlign.Center)
   }
 
   @Builder
-  bodyFontSizeSlider() {
-    Column() {
-      Row() {
-        Text('字体大小')
-          .fontSize(16)
-          .fontColor(this.primaryTextColor())
-          .layoutWeight(1)
-        Text(`${this.readerFontSize}sp`)
-          .fontSize(14)
-          .fontColor(this.subTextColor())
-      }
-      .width('100%')
-      Row({ space: 10 }) {
-        this.fontSizeStepButton($r('sys.symbol.minus'), '减小正文字体', this.readerFontSize > 14, () => {
-          this.setBodyFontSize(this.readerFontSize - 1);
-        })
-        Slider({ value: this.readerFontSize, min: 14, max: 50, step: 1 })
-          .layoutWeight(1)
-          .selectedColor(this.accentColor())
-          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-          .onChange((sliderValue: number) => {
-            this.setBodyFontSize(sliderValue);
-          })
-        this.fontSizeStepButton($r('sys.symbol.plus'), '增大正文字体', this.readerFontSize !== 50, () => {
-          this.setBodyFontSize(this.readerFontSize + 1);
-        })
-      }
-      .width('100%')
-      .margin({ top: 8 })
+  bodyFontSizeStepper() {
+    Row({ space: 8 }) {
+      Text('字体大小')
+        .fontSize(16)
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
+      this.fontSizeStepButton($r('sys.symbol.minus'), '减小正文字体', this.readerFontSize > 14, () => {
+        this.setBodyFontSize(this.readerFontSize - 1);
+      })
+      Text(`${this.readerFontSize}sp`)
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .width(52)
+        .height(36)
+        .textAlign(TextAlign.Center)
+      this.fontSizeStepButton($r('sys.symbol.plus'), '增大正文字体', this.readerFontSize !== 50, () => {
+        this.setBodyFontSize(this.readerFontSize + 1);
+      })
     }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor(this.cardColor())
+    .width('calc(100% - 32vp)')
+    .constraintSize({ minHeight: 64 })
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
+    .alignItems(VerticalAlign.Center)
   }
 
   @Builder
-  titleFontSizeSlider() {
-    Column() {
-      Row() {
-        Text('字体大小')
-          .fontSize(16)
-          .fontColor(this.primaryTextColor())
-          .layoutWeight(1)
-        Text(`${this.readerTitleFontSize}sp`)
-          .fontSize(14)
-          .fontColor(this.subTextColor())
-      }
-      .width('100%')
-      Row({ space: 10 }) {
-        this.fontSizeStepButton($r('sys.symbol.minus'), '减小标题字体', this.readerTitleFontSize > 14, () => {
-          this.setTitleFontSize(this.readerTitleFontSize - 1);
-        })
-        Slider({ value: this.readerTitleFontSize, min: 14, max: 50, step: 1 })
-          .layoutWeight(1)
-          .selectedColor(this.accentColor())
-          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-          .onChange((sliderValue: number) => {
-            this.setTitleFontSize(sliderValue);
-          })
-        this.fontSizeStepButton($r('sys.symbol.plus'), '增大标题字体', this.readerTitleFontSize !== 50, () => {
-          this.setTitleFontSize(this.readerTitleFontSize + 1);
-        })
-      }
-      .width('100%')
-      .margin({ top: 8 })
+  titleFontSizeStepper() {
+    Row({ space: 8 }) {
+      Text('字体大小')
+        .fontSize(16)
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
+      this.fontSizeStepButton($r('sys.symbol.minus'), '减小标题字体', this.readerTitleFontSize > 14, () => {
+        this.setTitleFontSize(this.readerTitleFontSize - 1);
+      })
+      Text(`${this.readerTitleFontSize}sp`)
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .width(52)
+        .height(36)
+        .textAlign(TextAlign.Center)
+      this.fontSizeStepButton($r('sys.symbol.plus'), '增大标题字体', this.readerTitleFontSize !== 50, () => {
+        this.setTitleFontSize(this.readerTitleFontSize + 1);
+      })
     }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor(this.cardColor())
+    .width('calc(100% - 32vp)')
+    .constraintSize({ minHeight: 64 })
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
+    .alignItems(VerticalAlign.Center)
   }
 
   @Builder
   fontSizeStepButton(icon: Resource, accessibilityText: string, enabled: boolean, action: () => void) {
-    Button({ type: ButtonType.Circle, stateEffect: true }) {
-      SymbolGlyph(icon)
-        .fontSize(17)
-        .fontColor([enabled ? this.primaryTextColor() : this.subTextColor()])
-    }
-    .width(34)
-    .height(34)
-    .padding(0)
-    .enabled(enabled)
-    .backgroundColor(this.inputColor())
-    .accessibilityText(accessibilityText)
-    .onClick(action)
+    AdaptiveIconButton({
+      icon: icon,
+      accessibilityLabel: accessibilityText,
+      buttonEnabled: enabled,
+      buttonSize: 34,
+      iconSize: 17,
+      fillColor: this.inputColor(),
+      iconColor: this.primaryTextColor(),
+      disabledIconColor: this.subTextColor(),
+      action: action
+    })
   }
 
   @Builder
@@ -674,9 +701,11 @@ struct ReaderFontSettingsPage {
       }
       .width('100%')
     }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor(this.cardColor())
+    .width('calc(100% - 32vp)')
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
   }
 
   @Builder
@@ -684,9 +713,11 @@ struct ReaderFontSettingsPage {
     Text('暂无正则规则')
       .fontSize(13)
       .fontColor(this.subTextColor())
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-      .backgroundColor(this.cardColor())
+      .width('calc(100% - 32vp)')
+      .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+      .margin({ left: 16, right: 16 })
+      .backgroundColor(Color.Transparent)
+      .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
   }
 
   @Builder
@@ -772,16 +803,18 @@ struct ReaderFontSettingsPage {
             target.fontFamily = family;
           });
         })
-        this.regexFontSizeSlider(index, refreshKey)
+        this.regexFontSizeStepper(index)
 
         this.regexEmphasisSettings(index, refreshKey)
 
         this.regexRulePreviewItem(index, refreshKey)
       }
     }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(this.cardColor())
+    .width('calc(100% - 32vp)')
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
   }
 
   @Builder
@@ -799,9 +832,11 @@ struct ReaderFontSettingsPage {
         .maxLines(2)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor(this.cardColor())
+    .width('calc(100% - 32vp)')
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
   }
 
   @Builder
@@ -819,9 +854,11 @@ struct ReaderFontSettingsPage {
         .maxLines(2)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor(this.cardColor())
+    .width('calc(100% - 32vp)')
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
   }
 
   previewFontFamily(mode: string, family: string): string {
@@ -1221,14 +1258,17 @@ struct ReaderFontSettingsPage {
           .backgroundColor(Color.Transparent)
           .arrowPosition(ArrowPosition.END)
           .padding({ left: 0, right: 0 })
-          .constraintSize({ minWidth: 126, maxWidth: 160 })
+          .borderRadius(16)
+          .border({ width: 0 })
+          .divider(null)
           .opacity(refreshKey >= 0 ? 1 : 1)
           .optionBgColor(Color.Transparent)
           .optionFontColor(this.primaryTextColor())
           .selectedOptionFontColor(this.accentColor())
           .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
           .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-          .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+          .menuBackgroundBlurStyle(BlurStyle.NONE)
+          .menuSystemMaterial(this.selectMenuMaterial())
           .onSelect((selectedIndex: number) => {
             this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
               target.emphasisMode = this.emphasisModeByIndex(selectedIndex);
@@ -1248,12 +1288,13 @@ struct ReaderFontSettingsPage {
           });
         })
         if (this.regexRuleAt(index).customTextColorEnabled) {
-          ColorCodePicker({
+          AdaptiveColorPicker({
             value: this.regexRuleAt(index).customTextColor,
             placeholder: this.accentColor(),
             appDarkMode: this.appDarkMode,
             accentColor: this.accentColor(),
             optionTitle: '文字颜色',
+            directSelection: true,
             onColorChange: (value: string) => {
               this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
                 target.customTextColor = this.normalizeColorInput(value, target.customTextColor || this.accentColor());
@@ -1272,12 +1313,13 @@ struct ReaderFontSettingsPage {
             });
           })
         if (this.regexRuleAt(index).customHighlightEnabled) {
-          ColorCodePicker({
+          AdaptiveColorPicker({
             value: this.regexRuleAt(index).customHighlightColor,
             placeholder: this.accentColor(),
             appDarkMode: this.appDarkMode,
             accentColor: this.accentColor(),
             optionTitle: '高亮色块颜色',
+            directSelection: true,
             onColorChange: (value: string) => {
               this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
                 target.customHighlightColor = this.normalizeColorInput(value,
@@ -1310,13 +1352,16 @@ struct ReaderFontSettingsPage {
               .backgroundColor(Color.Transparent)
               .arrowPosition(ArrowPosition.END)
               .padding({ left: 0, right: 0 })
-              .constraintSize({ minWidth: 126, maxWidth: 160 })
+              .borderRadius(16)
+              .border({ width: 0 })
+              .divider(null)
               .optionBgColor(Color.Transparent)
               .optionFontColor(this.primaryTextColor())
               .selectedOptionFontColor(this.accentColor())
               .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
               .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-              .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+              .menuBackgroundBlurStyle(BlurStyle.NONE)
+              .menuSystemMaterial(this.selectMenuMaterial())
               .onSelect((selectedIndex: number) => {
                 const selectedStyleId = this.bubbleStyleByIndex(selectedIndex);
                 this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
@@ -1326,12 +1371,13 @@ struct ReaderFontSettingsPage {
           }
           .width('100%')
           .alignItems(VerticalAlign.Center)
-          ColorCodePicker({
+          AdaptiveColorPicker({
             value: this.regexRuleAt(index).customBubbleColor,
             placeholder: this.accentColor(),
             appDarkMode: this.appDarkMode,
             accentColor: this.accentColor(),
             optionTitle: '强调气泡颜色',
+            directSelection: true,
             onColorChange: (value: string) => {
               this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
                 target.customBubbleColor = this.normalizeColorInput(value,
@@ -1352,13 +1398,16 @@ struct ReaderFontSettingsPage {
         .fontSize(15)
         .fontColor(this.primaryTextColor())
         .layoutWeight(1)
-      Toggle({ type: ToggleType.Switch, isOn: enabled })
-        .selectedColor(this.accentColor())
-        .onChange((checked: boolean) => {
+      AdaptiveSwitch({ isOn: enabled, selectedColor: this.accentColor(),
+        onChange: (checked: boolean) => {
           onChange(checked);
-        })
+        },
+      })
     }
     .width('100%')
+    .constraintSize({ minHeight: 64 })
+    .padding({ top: 10, bottom: 10 })
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
     .alignItems(VerticalAlign.Center)
   }
   @Builder
@@ -1376,63 +1425,59 @@ struct ReaderFontSettingsPage {
         .backgroundColor(Color.Transparent)
         .arrowPosition(ArrowPosition.END)
         .padding({ left: 0, right: 0 })
-        .constraintSize({ minWidth: 140, maxWidth: 180 })
+        .borderRadius(16)
+        .border({ width: 0 })
+        .divider(null)
         .optionBgColor(Color.Transparent)
         .optionFontColor(this.primaryTextColor())
         .selectedOptionFontColor(this.accentColor())
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+        .menuBackgroundBlurStyle(BlurStyle.NONE)
+        .menuSystemMaterial(this.selectMenuMaterial())
         .onSelect((index: number) => {
           const result = this.modeAndFamilyByIndex(index);
           onChange(result[0], result[1]);
         })
     }
     .width('100%')
+    .constraintSize({ minHeight: 64 })
+    .padding({ top: 10, bottom: 10 })
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
     .alignItems(VerticalAlign.Center)
   }
 
   @Builder
-  regexFontSizeSlider(index: number, refreshKey: number) {
-    Column() {
-      Row() {
-        Text('字体大小')
-          .fontSize(15)
-          .fontColor(this.primaryTextColor())
-          .layoutWeight(1)
-        Text(`${Math.round(this.regexRuleAt(index).fontSize)}sp`)
-          .fontSize(13)
-          .fontColor(this.subTextColor())
-          .opacity(refreshKey >= 0 ? 1 : 1)
-      }
-      .width('100%')
-      Row({ space: 10 }) {
-        this.fontSizeStepButton($r('sys.symbol.minus'), '减小规则字体',
-          this.regexRuleAt(index).fontSize > 14, () => {
-          this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-            target.fontSize = Math.max(14, Math.round(target.fontSize) - 1);
-          });
-        })
-        Slider({ value: this.regexRuleAt(index).fontSize, min: 14, max: 50, step: 1 })
-          .layoutWeight(1)
-          .selectedColor(this.accentColor())
-          .sliderInteractionMode(SliderInteraction.SLIDE_ONLY)
-          .onChange((sliderValue: number) => {
-            this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-              target.fontSize = Math.max(14, Math.min(Math.round(sliderValue), 50));
-            });
-          })
-        this.fontSizeStepButton($r('sys.symbol.plus'), '增大规则字体',
-          this.regexRuleAt(index).fontSize !== 50, () => {
-          this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
-            target.fontSize = Math.min(50, Math.round(target.fontSize) + 1);
-          });
-        })
-      }
-      .width('100%')
-      .margin({ top: 6 })
+  regexFontSizeStepper(index: number) {
+    Row({ space: 8 }) {
+      Text('字体大小')
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
+      this.fontSizeStepButton($r('sys.symbol.minus'), '减小规则字体',
+        this.regexRuleAt(index).fontSize > 14, () => {
+        this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+          target.fontSize = Math.max(14, Math.round(target.fontSize) - 1);
+        });
+      })
+      Text(`${Math.round(this.regexRuleAt(index).fontSize)}sp`)
+        .fontSize(15)
+        .fontColor(this.primaryTextColor())
+        .width(52)
+        .height(36)
+        .textAlign(TextAlign.Center)
+      this.fontSizeStepButton($r('sys.symbol.plus'), '增大规则字体',
+        this.regexRuleAt(index).fontSize !== 50, () => {
+        this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
+          target.fontSize = Math.min(50, Math.round(target.fontSize) + 1);
+        });
+      })
     }
     .width('100%')
+    .constraintSize({ minHeight: 64 })
+    .padding({ top: 10, bottom: 10 })
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
+    .alignItems(VerticalAlign.Center)
   }
 
   @Builder
@@ -1442,48 +1487,19 @@ struct ReaderFontSettingsPage {
         .fontSize(16)
         .fontColor(this.primaryTextColor())
         .layoutWeight(1)
-      if (this.readerRegexFontEnabled) {
-        Row() {
-          Row() {}
-            .width(24)
-            .height(24)
-            .borderRadius(12)
-            .backgroundColor('#FFFFFF')
-        }
-        .width(48)
-        .height(28)
-        .padding(2)
-        .borderRadius(14)
-        .backgroundColor(this.accentColor())
-        .justifyContent(FlexAlign.End)
-        .onClick(() => {
-          this.readerRegexFontEnabled = false;
+      AdaptiveSwitch({ isOn: this.readerRegexFontEnabled, selectedColor: this.accentColor(),
+        onChange: (checked: boolean) => {
+          this.readerRegexFontEnabled = checked;
           this.saveSettings();
-        })
-      } else {
-        Row() {
-          Row() {}
-            .width(24)
-            .height(24)
-            .borderRadius(12)
-            .backgroundColor('#FFFFFF')
-        }
-        .width(48)
-        .height(28)
-        .padding(2)
-        .borderRadius(14)
-        .backgroundColor(this.inputColor())
-        .justifyContent(FlexAlign.Start)
-        .onClick(() => {
-          this.readerRegexFontEnabled = true;
-          this.saveSettings();
-        })
-      }
+        },
+      })
     }
-    .width('100%')
-    .height(56)
-    .padding({ left: 16, right: 16 })
-    .backgroundColor(this.cardColor())
+    .width('calc(100% - 32vp)')
+    .constraintSize({ minHeight: 64 })
+    .padding({ left: 0, right: 0, top: 10, bottom: 10 })
+    .margin({ left: 16, right: 16 })
+    .backgroundColor(Color.Transparent)
+    .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
     .alignItems(VerticalAlign.Center)
   }
 

@@ -1,4 +1,5 @@
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 
 class HsvColor {
   hue: number = 0;
@@ -135,6 +136,14 @@ export struct ColorCodePicker {
     this.updateHsvFromColor(this.draftColor);
     this.showPresetColors = false;
     this.pickerVisible = true;
+  }
+
+  private commitDraftColor(): void {
+    if (this.colorMode !== '') {
+      this.onColorModeChange('custom');
+    }
+    this.onColorChange(this.draftColor);
+    this.pickerVisible = false;
   }
 
   private parseAreaDimension(value: Length): number {
@@ -282,13 +291,17 @@ export struct ColorCodePicker {
             .backgroundColor(Color.Transparent)
             .arrowPosition(ArrowPosition.END)
             .padding({ left: 0, right: 0 })
+            .borderRadius(16)
+            .border({ width: 0 })
             .constraintSize({ minWidth: 112, maxWidth: 140 })
             .optionBgColor(Color.Transparent)
+            .divider(null)
             .optionFontColor(this.primaryTextColor())
             .selectedOptionFontColor(this.accentColor)
             .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
             .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-            .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+            .menuBackgroundBlurStyle(BlurStyle.NONE)
+            .menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial())
             .onSelect((index: number) => {
               if (index === 2) {
                 this.openPicker();
@@ -563,11 +576,7 @@ export struct ColorCodePicker {
           .backgroundColor(Color.Transparent)
           .layoutWeight(1)
           .onClick(() => {
-            if (this.colorMode !== '') {
-              this.onColorModeChange('custom');
-            }
-            this.onColorChange(this.draftColor);
-            this.pickerVisible = false;
+            this.commitDraftColor();
           })
       }
       .width('100%')

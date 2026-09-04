@@ -1,4 +1,4 @@
-import { router, window } from '@kit.ArkUI';
+import { router, window, uiMaterial } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
 import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
@@ -9,7 +9,7 @@ import deviceInfo from '@ohos.deviceInfo';
 import image from '@ohos.multimedia.image';
 import fs from '@ohos.file.fs';
 import fileUri from '@ohos.file.fileuri';
-import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
+import { HdsTabs } from '@kit.UIDesignKit';
 import { Book, BookChapter, BookGroup, BookSource, SearchBook, SearchKeyword } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { SearchCoordinator, SearchCallback, SearchProgress } from '../core/book/SearchCoordinator';
@@ -20,6 +20,8 @@ import { SearchBookResultList } from '../components/book/SearchBookResultList';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { WebBookFetchRuntimeHost } from '../components/WebBookFetchRuntimeHost';
 import { syncSystemSafeAreas } from '../utils/SystemBars';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
+import { HdsFeedback } from '../utils/HdsFeedback';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
 import { BookCoverCache } from '../utils/BookCoverCache';
@@ -729,7 +731,12 @@ struct Index {
   }
 
   supportsImmersiveTabs(): boolean {
-    return deviceInfo.sdkApiVersion >= 23;
+    return ImmersiveMaterialRuntime.supportsHds();
+  }
+
+  immersiveTabsBarBackgroundColor(): ResourceColor {
+    return this.supportsImmersiveTabs() ? Color.Transparent :
+      ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel');
   }
 
   @Builder
@@ -790,14 +797,16 @@ struct Index {
       .tabBar(this.bottomTabBar(this.navigationIcon('mine'), '我的'))
     }
     .key(`home_immersive_tabs_${this.themeRevision}_${this.appDarkMode ? 'dark' : 'light'}`)
-    .barBackgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+    .barBackgroundColor(this.immersiveTabsBarBackgroundColor())
     .barMode(BarMode.Fixed)
     .barHeight(this.bookshelfMultiSelectActive ? 0 : 56)
     .barOverlap(true)
+    .borderRadius(30)
+    .clip(true)
     .barFloatingStyle({
       systemMaterialEffect: {
-        materialType: hdsMaterial.MaterialType.IMMERSIVE,
-        materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+        materialType: ImmersiveMaterialRuntime.materialType(),
+        materialLevel: ImmersiveMaterialRuntime.materialLevel()
       },
       barBottomMargin: this.floatingBarBottomMargin(),
       gradientMask: {
@@ -1249,7 +1258,7 @@ struct BookshelfPage {
   aboutToAppear() {
     this.shelfComponentActive = true;
     this.reloadDisplaySettings();
-    this.scheduleLoadBooks();
+    this.restoreSortModeAndLoad();
   }
 
   aboutToDisappear(): void {
@@ -1450,6 +1459,25 @@ struct BookshelfPage {
     } catch (e) {
       console.error('更新书籍置顶状态失败:', e);
       promptAction.showToast({ message: nextPinned ? '置顶失败' : '取消置顶失败' });
+    }
+  }
+
+  private async restoreSortModeAndLoad(): Promise<void> {
+    try {
+      // Use the current AppStorage value as a migration fallback for installations that
+      // previously relied only on PersistentStorage before the explicit Preferences key existed.
+      const storageMode = AppStorage.get<string>('bookshelfSortMode');
+      const fallbackMode = BookshelfStateStore.normalizeSortMode(storageMode || this.sortMode);
+      const mode = await BookshelfStateStore.loadSortMode(getContext(this), fallbackMode);
+      if (this.shelfComponentActive) {
+        this.sortMode = mode;
+      }
+    } catch (e) {
+      console.warn('恢复书架排序设置失败:', e);
+    } finally {
+      if (this.shelfComponentActive) {
+        this.scheduleLoadBooks();
+      }
     }
   }
 
@@ -5151,7 +5179,8 @@ struct BookshelfPage {
 
   @Builder
   bookTypeCoverBadge(book: Book) {
-    Text(this.bookTypeBadgeText(book))
+    if (this.bookshelfShowTypeBadge) {
+      Text(this.bookTypeBadgeText(book))
       .fontSize(9)
       .fontWeight(FontWeight.Bold)
       .fontColor('#FFFFFF')
@@ -5165,7 +5194,8 @@ struct BookshelfPage {
       .position({ x: 5, y: '100%' })
       .translate({ x: 0, y: -21 })
       .shadow({ radius: 3, color: '#55000000', offsetX: 0, offsetY: 1 })
-      .accessibilityText(`${book.name}${this.bookTypeBadgeText(book)}类型`)
+        .accessibilityText(`${book.name}${this.bookTypeBadgeText(book)}类型`)
+    }
   }
 
   @Builder
@@ -5393,6 +5423,12 @@ struct BookshelfPage {
     } catch (e) {
       console.error('保存本地书籍信息失败:', e);
       promptAction.showToast({ message: '保存失败' });
+    }
+  }
+
+  private showCacheFeedback(message: string): void {
+    if (!HdsFeedback.show(this.getUIContext(), message)) {
+      HdsFeedback.showToast(message);
     }
   }
 
@@ -5711,12 +5747,12 @@ struct BookshelfPage {
       return;
     }
     this.closeCacheDialog();
-    promptAction.showToast({ message: '已转入后台缓存，可在通知栏取消' });
+    this.showCacheFeedback('已转入后台缓存，可在通知栏取消');
     const task = this.createShelfFullTextCacheTask(book, ++this.fullTextCacheTaskId);
     this.runShelfFullTextCache(book, task).catch((error: Error) => {
       console.error('书架全文缓存任务失败:', error);
       this.setFullTextCacheStatus(task, '全文缓存失败');
-      promptAction.showToast({ message: '全文缓存失败' });
+      this.showCacheFeedback('全文缓存失败');
       this.publishShelfFullTextCacheNotification(task, '全文缓存失败', this.shelfFullTextCacheProgressText(task), false)
         .catch((e: Error) => {
           console.warn('更新书架缓存失败通知失败:', e);
@@ -5809,7 +5845,7 @@ struct BookshelfPage {
         this.shelfFullTextCacheProgressText(task),
         false
       );
-      promptAction.showToast({ message: canceled ? '缓存已停止' : `缓存完成 ${task.done}/${total}` });
+      this.showCacheFeedback(canceled ? '缓存已停止' : `缓存完成 ${task.done}/${total}`);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     } catch (error) {
       if (!task.cancelRequested) {
@@ -6416,9 +6452,7 @@ struct BookshelfPage {
       this.cacheStatus = failedCount > 0 ?
         `缓存完成：${successCount}章成功，${failedCount}章失败` :
         (successCount > 0 ? `已缓存 ${successCount} 章` : '所选章节均已缓存');
-      promptAction.showToast({
-        message: failedCount > 0 ? `缓存完成，${failedCount} 章失败` : `已缓存 ${successCount} 章`
-      });
+      this.showCacheFeedback(failedCount > 0 ? `缓存完成，${failedCount} 章失败` : `已缓存 ${successCount} 章`);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     } catch (error) {
       console.error('缓存指定章节范围失败:', error);
@@ -6454,12 +6488,12 @@ struct BookshelfPage {
       await engine.syncChapterCacheDates();
       this.cacheChapters = [...engine.chapters];
       this.cacheStatus = ok ? '章节已缓存' : '章节缓存失败';
-      promptAction.showToast({ message: ok ? '章节已缓存' : '章节缓存失败' });
+      this.showCacheFeedback(ok ? '章节已缓存' : '章节缓存失败');
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     } catch (e) {
       console.error('缓存指定章节失败:', e);
       this.cacheStatus = '章节缓存失败';
-      promptAction.showToast({ message: '章节缓存失败' });
+      this.showCacheFeedback('章节缓存失败');
     } finally {
       if (this.activeCacheBookUrl === (this.cacheTargetBook?.bookUrl || '')) {
         this.activeCacheBookUrl = '';
@@ -6497,12 +6531,12 @@ struct BookshelfPage {
         this.cacheChapters = [...this.cacheChapters];
       }
       this.cacheStatus = '已清除缓存章节';
-      promptAction.showToast({ message: '已清除缓存章节' });
+      this.showCacheFeedback('已清除缓存章节');
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     } catch (e) {
       console.error('清除缓存章节失败:', e);
       this.cacheStatus = '清除缓存失败';
-      promptAction.showToast({ message: '清除缓存失败' });
+      this.showCacheFeedback('清除缓存失败');
     }
   }
 
@@ -7021,6 +7055,8 @@ struct BookshelfPage {
     const next = mode === 'recentAdd' || mode === 'name' ? mode : 'recentRead';
     this.showShelfSortMenu = false;
     if (this.sortMode === next) {
+      // Migrate installations that previously kept this value only in AppStorage.
+      this.persistShelfSortMode(next);
       if (this.pendingShelfSortTimer >= 0) {
         clearTimeout(this.pendingShelfSortTimer);
         this.pendingShelfSortTimer = -1;
@@ -7048,6 +7084,7 @@ struct BookshelfPage {
       this.pendingShelfSortTimer = -1;
     }
     this.pendingShelfSortMode = '';
+    this.persistShelfSortMode(next);
     this.animateShelfContentUpdate(() => {
       this.sortMode = next;
       const sorted = this.sortBooks(this.books, next);
@@ -7057,6 +7094,12 @@ struct BookshelfPage {
       this.shelfTileEntriesCacheKey = '';
       this.shelfTileEntriesSource.replace(this.getSortedTileRootEntries(sorted, next));
     }, 0);
+  }
+
+  private persistShelfSortMode(mode: string): void {
+    BookshelfStateStore.saveSortMode(getContext(this), mode).catch((e: Error) => {
+      console.warn('保存书架排序设置失败:', e);
+    });
   }
 
   sortBooks(books: Book[], mode: string = this.sortMode): Book[] {
@@ -7559,7 +7602,6 @@ struct ExplorePage {
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
-  @StorageLink('readerActiveFontFamily') readerActiveFontFamily: string = '';
   private coordinator: ExploreCoordinator = new ExploreCoordinator();
   private exploreSourceScroller: Scroller = new Scroller();
   private hasLoaded: boolean = false;
@@ -7866,7 +7908,6 @@ struct ExplorePage {
           if (this.showExploreSourcePicker) {
             TextInput({ placeholder: '输入书源关键词', text: this.exploreSourceFilterInput })
               .fontSize(15)
-              .fontFamily(this.readerActiveFontFamily)
               .fontColor(this.primaryTextColor())
               .placeholderColor(this.secondaryTextColor())
               .layoutWeight(1)
@@ -7882,7 +7923,6 @@ struct ExplorePage {
           } else {
             Text(this.selectedSourceName || '发现')
               .fontSize(16)
-              .fontFamily(this.readerActiveFontFamily)
               .fontColor(this.primaryTextColor())
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -8083,6 +8123,9 @@ struct ExplorePage {
           onOpenBook: (book: SearchBook) => {
             this.openSearchBookDetail(book);
           },
+          onReadBook: (book: SearchBook) => {
+            this.readSearchBook(book);
+          },
           onToggleShelf: (book: SearchBook) => {
             this.toggleSearchBookShelf(book);
           },
@@ -8239,7 +8282,6 @@ struct ExplorePage {
               Row() {
                 Text(this.exploreSourceDisplayName(option))
                   .fontSize(16)
-                  .fontFamily(this.readerActiveFontFamily)
                   .fontColor(option.sourceUrl === this.selectedSourceUrl ? this.accentColor() : this.primaryTextColor())
                   .fontWeight(option.sourceUrl === this.selectedSourceUrl ? FontWeight.Medium : FontWeight.Regular)
                   .maxLines(1)
@@ -8249,7 +8291,6 @@ struct ExplorePage {
                 if (this.activeExploreSourceGroup === '__all__') {
                   Text(this.exploreSourceGroupLabel(option.sourceGroup))
                     .fontSize(10)
-                    .fontFamily(this.readerActiveFontFamily)
                     .fontColor(this.secondaryTextColor())
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -8263,7 +8304,6 @@ struct ExplorePage {
                 if (option.sourceUrl === this.selectedSourceUrl) {
                   Text('✓')
                     .fontSize(15)
-                    .fontFamily(this.readerActiveFontFamily)
                     .fontColor(this.accentColor())
                     .margin({ left: 10 })
                 }
@@ -8501,7 +8541,6 @@ struct ExplorePage {
   exploreSourceGroupChip(label: string, groupKey: string) {
     Text(label)
       .fontSize(12)
-      .fontFamily(this.readerActiveFontFamily)
       .fontColor(this.activeExploreSourceGroup === groupKey ? '#FFFFFF' : this.secondaryTextColor())
       .height(30)
       .maxLines(1)
@@ -8531,6 +8570,20 @@ struct ExplorePage {
     } finally {
       this.unmarkSearchBookJoining(searchKey);
     }
+  }
+
+  async readSearchBook(searchBook: SearchBook): Promise<void> {
+    if (this.isSearchBookJoiningShelf(searchBook)) return;
+    if (!this.isSearchBookInShelf(searchBook)) {
+      await this.addSearchBookToShelf(searchBook);
+    }
+    const shelfBook = await SearchBookShelfHelper.findShelfBookByKey(
+      SearchBookShelfHelper.keyOf(searchBook), true);
+    if (!shelfBook?.bookUrl) {
+      promptAction.showToast({ message: '书籍准备失败，请稍后重试' });
+      return;
+    }
+    router.pushUrl({ url: 'pages/ReadBook', params: { bookUrl: shelfBook.bookUrl } });
   }
 
   openExploreSourcePicker(): void {
@@ -9789,30 +9842,19 @@ struct SearchPage {
       Column() {
         Column() {
         Row() {
+        if (ImmersiveMaterialRuntime.supportsHds()) {
           Row() {
-            TextInput({ placeholder: '搜索书籍', text: this.keyword })
-              .layoutWeight(1)
-              .height(40)
-              .enterKeyType(EnterKeyType.Search)
-              .backgroundColor('#00000000')
-              .fontColor(this.primaryTextColor())
-              .placeholderColor(this.subTextColor())
-              .padding({ left: 16, right: 4 })
-              .onFocus(() => {
-                this.showSearchHistoryDropdown = this.keyword.trim().length === 0 && this.searchHistory.length > 0;
-              })
-              .onClick(() => {
-                this.showSearchHistoryDropdown = this.keyword.trim().length === 0 && this.searchHistory.length > 0;
-              })
-              .onChange((value: string) => {
-                this.keyword = value;
-                this.showSearchHistoryDropdown = value.trim().length === 0 && this.searchHistory.length > 0;
-              })
-              .onSubmit(() => {
-                this.submitKeywordSearch();
-              })
-
-            this.searchSettingIcon()
+            this.searchFieldContent()
+          }
+          .layoutWeight(1)
+          .height(40)
+          .borderRadius(20)
+          .systemMaterial(this.searchFieldMaterial())
+          .border({ width: 1, color: this.glassBorderColor() })
+          .alignItems(VerticalAlign.Center)
+        } else {
+          Row() {
+            this.searchFieldContent()
           }
           .layoutWeight(1)
           .height(40)
@@ -9821,8 +9863,9 @@ struct SearchPage {
           .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
           .shadow({ radius: ThemeRuntime.glassShadowRadius(), color: this.glassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX(), offsetY: ThemeRuntime.glassShadowOffsetY() })
           .alignItems(VerticalAlign.Center)
+        }
 
-          ImmersiveBackButton({
+        ImmersiveBackButton({
             icon: this.isSearching ? $r('sys.symbol.xmark') : $r('sys.symbol.magnifyingglass'),
             iconOffsetX: 0,
             iconColor: this.isSearching ? '#E53935' : this.primaryTextColor(),
@@ -9847,8 +9890,8 @@ struct SearchPage {
                 this.doSearch();
               }
             }
-          })
-            .margin({ left: 8, right: -24 })
+        })
+          .margin({ left: 8, right: -24 })
         }
         .width('100%')
         .height(56 + this.statusBarHeight)
@@ -9936,6 +9979,9 @@ struct SearchPage {
             onOpenBook: (book: SearchBook) => {
               this.openSearchBookOrGroup(book);
             },
+            onReadBook: (book: SearchBook) => {
+              this.readSearchBook(book);
+            },
             onToggleShelf: (book: SearchBook) => {
               this.toggleSearchBookShelf(book);
             }
@@ -10002,6 +10048,43 @@ struct SearchPage {
       }
     })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  searchFieldContent() {
+    TextInput({ placeholder: '搜索书籍', text: this.keyword })
+      .layoutWeight(1)
+      .height(40)
+      .enterKeyType(EnterKeyType.Search)
+      .backgroundColor('#00000000')
+      .fontColor(this.primaryTextColor())
+      .placeholderColor(this.subTextColor())
+      .padding({ left: 16, right: 4 })
+      .onFocus(() => {
+        this.showSearchHistoryDropdown = this.keyword.trim().length === 0 && this.searchHistory.length > 0;
+      })
+      .onClick(() => {
+        this.showSearchHistoryDropdown = this.keyword.trim().length === 0 && this.searchHistory.length > 0;
+      })
+      .onChange((value: string) => {
+        this.keyword = value;
+        this.showSearchHistoryDropdown = value.trim().length === 0 && this.searchHistory.length > 0;
+      })
+      .onSubmit(() => {
+        this.submitKeywordSearch();
+      })
+
+    this.searchSettingIcon()
+  }
+
+  private searchFieldMaterial(): uiMaterial.ImmersiveMaterial {
+    return new uiMaterial.ImmersiveMaterial({
+      style: uiMaterial.ImmersiveStyle.THIN,
+      materialColor: this.appDarkMode ? '#351B1D22' : '#35FFFFFF',
+      applyShadow: true,
+      interactive: true,
+      lightEffect: { color: '#66FFFFFF' }
+    });
   }
 
   searchHistoryPopupPanelWidth(): number {
@@ -10599,6 +10682,20 @@ struct SearchPage {
     } finally {
       this.unmarkSearchBookJoining(searchKey);
     }
+  }
+
+  async readSearchBook(searchBook: SearchBook): Promise<void> {
+    if (this.isSearchBookJoiningShelf(searchBook)) return;
+    if (!this.isSearchBookInShelf(searchBook)) {
+      await this.addSearchBookToShelf(searchBook);
+    }
+    const shelfBook = await SearchBookShelfHelper.findShelfBookByKey(
+      SearchBookShelfHelper.keyOf(searchBook), true);
+    if (!shelfBook?.bookUrl) {
+      promptAction.showToast({ message: '书籍准备失败，请稍后重试' });
+      return;
+    }
+    router.pushUrl({ url: 'pages/ReadBook', params: { bookUrl: shelfBook.bookUrl } });
   }
 
   async removeSearchBookFromShelf(searchBook: SearchBook): Promise<void> {

@@ -18,6 +18,10 @@ import { CookieStore } from '../core/http/CookieStore';
 import { TlsTrustStore } from '../core/http/TlsTrustStore';
 import { BookSourceGroupStore } from '../utils/BookSourceGroupStore';
 import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
+import deviceInfo from '@ohos.deviceInfo';
+import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
+import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { VirtualListScrollbar } from '../utils/VirtualListScrollbar';
 import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
 import { request } from '@kit.BasicServicesKit';
@@ -433,6 +437,15 @@ struct BookSourcePage {
             }
 
             LazyForEach(this.currentSourceListDataSource(), (source: BookSource) => {
+              if (deviceInfo.sdkApiVersion >= 26) {
+                HdsListItem({
+                  customItemBuilder: () => {
+                    this.sourceSwipeCard(source)
+                  },
+                  swipeActionOptions: this.sourceSwipeActions(source)
+                })
+              }
+              if (deviceInfo.sdkApiVersion < 26) {
               ListItem() {
                 Row() {
                   if (this.selectionMode) {
@@ -440,14 +453,16 @@ struct BookSourcePage {
                   }
 
                   if (!this.selectionMode) {
-                    Text('☰')
-                      .fontSize(18)
-                      .fontColor(this.subTextColor())
-                      .width(28)
-                      .height(40)
-                      .textAlign(TextAlign.Center)
-                      .margin({ right: 8 })
-                      .accessibilityText(`拖动排序：${source.bookSourceName}`)
+                    Stack({ alignContent: Alignment.Center }) {
+                      Text('☰')
+                        .fontSize(18)
+                        .fontColor(this.subTextColor())
+                    }
+                    .width(52)
+                    .height(56)
+                    .margin({ left: -8, right: 4 })
+                    .hitTestBehavior(HitTestMode.Transparent)
+                    .accessibilityText(`长按拖动排序：${source.bookSourceName}`)
                   }
 
                   Column() {
@@ -529,6 +544,17 @@ struct BookSourcePage {
                     }
                     .alignItems(HorizontalAlign.End)
                   }
+                  if (!this.selectionMode && !source.isLocked && deviceInfo.sdkApiVersion < 26) {
+                    Row({ space: 4 }) {
+                      Button(source.enabled ? '禁用' : '启用').fontSize(11).width(60).height(30)
+                        .fontColor('#FFFFFF').backgroundColor(this.buttonColor())
+                        .onClick(() => this.toggleSourceEnabled(source))
+                      Button('删除').fontSize(11).width(60).height(30)
+                        .fontColor('#FFFFFF').backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode))
+                        .onClick(() => this.deleteSourceFromSwipe(source))
+                    }
+                    .margin({ left: 8 })
+                  }
                 }
                 .width('100%')
                 .padding(12)
@@ -554,19 +580,8 @@ struct BookSourcePage {
                 if (this.selectionMode) this.rememberSourceSelectionArea(source.bookSourceUrl, area);
               })
               .swipeAction(this.selectionMode || source.isLocked ? {} : {
-                start: {
-                  builder: () => {
-                    this.sourceDisableSwipeAction(source)
-                  },
-                  actionAreaDistance: 64,
-                  onAction: () => {
-                    if (!this.selectionMode && !this.isBatchOperating) this.toggleSourceEnabled(source);
-                  }
-                },
                 end: {
-                  builder: () => {
-                    this.sourceDeleteSwipeAction(source)
-                  },
+                  builder: this.sourceDeleteSwipeAction.bind(this, source),
                   actionAreaDistance: 64,
                   onAction: () => {
                     if (!this.selectionMode && !this.isBatchOperating) this.deleteSourceFromSwipe(source);
@@ -574,6 +589,7 @@ struct BookSourcePage {
                 },
                 edgeEffect: SwipeEdgeEffect.Spring
               })
+              }
             }, (source: BookSource) => this.sourceListItemKey(source))
 
             ListItem() {
@@ -1934,6 +1950,10 @@ struct BookSourcePage {
                     .fontColor(this.primaryTextColor())
                     .selectedOptionFontColor(this.accentColor())
                     .backgroundColor(this.cardColor())
+                    .divider(null)
+                    .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+                    .menuBackgroundBlurStyle(BlurStyle.NONE)
+                    .menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial())
                     .enabled(!this.isExecutingLoginAction)
                     .onSelect((selectedIndex: number) => {
                       this.updateSourceLoginSelect(index, selectedIndex);
@@ -2104,10 +2124,89 @@ struct BookSourcePage {
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor(source.enabled ? '#F39C3D' : '#1E8E3E')
+    .backgroundColor(this.buttonColor())
     .onClick(() => {
       if (!this.selectionMode && !this.isBatchOperating) this.toggleSourceEnabled(source);
     })
+  }
+
+  @Builder
+  sourceSwipeCard(source: BookSource) {
+    Row() {
+      if (this.selectionMode) {
+        this.sourceSelectionSafeArea(source)
+      }
+      if (!this.selectionMode) {
+        Stack({ alignContent: Alignment.Center }) {
+          Text('☰')
+            .fontSize(18)
+            .fontColor(this.subTextColor())
+        }
+        .width(52)
+        .height(56)
+        .margin({ left: -8, right: 4 })
+        .hitTestBehavior(HitTestMode.Transparent)
+        .accessibilityText(`长按拖动排序：${source.bookSourceName}`)
+      }
+      Column() {
+        Row() {
+          Text(source.bookSourceName)
+            .fontSize(16).fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          if (source.isPinned) this.sourceStatusIcon($r('sys.symbol.pin'), this.accentColor(), '已置顶')
+          if (source.isLocked) this.sourceStatusIcon($r('sys.symbol.lock'), this.accentColor(), '已锁定')
+          if (source.bookSourceGroup) {
+            Text(source.bookSourceGroup).fontSize(11).fontColor(this.accentColor())
+              .constraintSize({ maxWidth: 72 }).padding({ left: 7, right: 7, top: 3, bottom: 3 })
+              .backgroundColor(this.inputColor()).borderRadius(4).margin({ left: 6 })
+          }
+          if (this.sourceNeedsLogin(source)) {
+            this.sourceLoginStatusBadge(this.sourceLoggedIn(source) ? '#1E8E3E' : '#C62828', this.sourceLoggedIn(source) ? '已登录' : '未登录')
+          }
+        }.width('100%')
+        Row({ space: 7 }) {
+          this.sourceValidationStatusBadge(source.validationStatus)
+          Text(source.bookSourceUrl)
+            .fontSize(12).fontColor(this.subTextColor())
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+        }.width('100%').margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .gesture(LongPressGesture({ repeat: false }).onAction((event: GestureEvent) => {
+        if (!this.selectionMode && !this.isBatchOperating) this.openSourceActions(source, event)
+      }))
+      Column() {
+        Text(source.enabled ? '已启用' : '已禁用').fontSize(12)
+          .fontColor(source.enabled ? '#1E8E3E' : this.subTextColor())
+        Text(source.enabledExplore ? '发现已启用' : '发现已禁用').fontSize(12)
+          .fontColor(source.enabledExplore ? '#1E8E3E' : this.subTextColor()).margin({ top: 4 })
+      }.alignItems(HorizontalAlign.End)
+    }
+    .width('100%')
+    .padding(12)
+    .backgroundColor(this.glassCardColor())
+    .borderRadius(8)
+    .opacity(source.enabled ? 1 : 0.45)
+    .onClick(() => {
+      if (this.isBatchOperating) return;
+      if (this.selectionMode) {
+        this.toggleSourceSelected(source.bookSourceUrl)
+      } else {
+        this.openSourceActions(source)
+      }
+    })
+  }
+
+  private sourceSwipeActions(source: BookSource): HdsSwipeActionOptions {
+    if (this.selectionMode || source.isLocked) return { icons: [] };
+    return { icons: [
+      { icon: new SymbolGlyphModifier(source.enabled ? $r('sys.symbol.minus_circle') : $r('sys.symbol.checkmark_circle')), backgroundColor: this.buttonColor(), iconOptions: { accessibilityText: source.enabled ? '禁用书源' : '启用书源' }, onAction: () => this.toggleSourceEnabled(source) },
+      { icon: new SymbolGlyphModifier($r('sys.symbol.trash')), backgroundColor: ThemeRuntime.dangerColor(this.appDarkMode), iconOptions: { accessibilityText: '删除书源' }, onAction: () => this.deleteSourceFromSwipe(source) }
+    ] };
   }
 
   @Builder
@@ -2124,7 +2223,7 @@ struct BookSourcePage {
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#E53935')
+    .backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode))
     .onClick(() => {
       if (!this.selectionMode && !this.isBatchOperating) this.deleteSourceFromSwipe(source);
     })
@@ -3289,15 +3388,26 @@ struct BookSourcePage {
     if (this.isBatchOperating) {
       return;
     }
-    const occupiedGroups = this.sourceGroupsFromSources();
-    const emptyGroups = this.getSourceGroups().filter((group: string) => !occupiedGroups.includes(group));
-    if (emptyGroups.length === 0) {
-      promptAction.showToast({ message: '没有空分组' });
-      return;
-    }
     this.isBatchOperating = true;
     this.batchOperationText = '正在清除空分组...';
     try {
+      // 书源导入、分组修改或删除后，内存中的 allSources 可能尚未完成同步。
+      // 清理前重新读取数据库，避免把仍在使用的分组误判为空，或漏掉刚产生的空分组。
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      this.allSources = await db.getBookSourceSummaries();
+      this.sourceGroups = await BookSourceGroupStore.load(
+        getContext(this), this.sourceGroupsFromSources());
+      this.ensureActiveSourceGroup();
+      this.applySourceFilters();
+
+      const occupiedGroups = this.sourceGroupsFromSources();
+      const emptyGroups = this.getSourceGroups().filter((group: string) => !occupiedGroups.includes(group));
+      if (emptyGroups.length === 0) {
+        promptAction.showToast({ message: '没有空分组' });
+        return;
+      }
+
       let groups = this.sourceGroups;
       for (const group of emptyGroups) {
         groups = await BookSourceGroupStore.remove(getContext(this), group, groups);

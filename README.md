@@ -5,10 +5,10 @@
 | 项目 | 信息 |
 | --- | --- |
 | 应用包名 | `io.legado.read` |
-| 当前版本 | `3.8.902`（以 `AppScope/app.json5` 为准） |
+| 当前版本 | `3.9.903`（以 `AppScope/app.json5` 为准） |
 | 支持设备 | `phone`、`tablet`、`2in1` |
 | 最低 API | HarmonyOS API 12 |
-| 目标 API | HarmonyOS API 23 |
+| 目标 API | HarmonyOS API 26 |
 | 开源协议 | GPL-3.0 |
 
 > [!IMPORTANT]
@@ -78,6 +78,11 @@
 - 系统 TTS 与 HTTP TTS 优先通过 PCM 和 `AudioRenderer` 输出，并结合音频预取与播放状态保护提升连续性；音频合成或写入失败时停在当前段落，不再用静音占位后跳过未朗读内容。
 - 有声书使用独立远程播放器，支持进度、倍速、目录跳转、定时停止和音色代码；听书目录支持正序/倒序显示并自动滚动到当前章节，简介支持系统文本选择和复制。
 - 有声书可在返回书架或进入后台后继续播放，并复用全局播放胶囊与 AVSession；书架全局朗读目录同样支持正序/倒序和当前章节定位。锁屏媒体卡片由系统策略决定，应用无法强制使用音乐播放器样式。
+
+### 局域网浏览器阅读
+
+- 可在 App 内启动局域网浏览器阅读服务，在同一局域网的浏览器中查看书架、搜索和发现书籍，打开小说或漫画章节并同步章节进度。
+- 可为浏览器访问设置密码；服务启动时会显示访问地址，端口冲突时会自动尝试备用端口。浏览器端暂不支持有声书播放，有声书仍需在 App 内使用听书功能。
 
 ### 数据、同步与个性化
 
@@ -153,7 +158,7 @@ legado-harmony/
 ### 环境要求
 
 - DevEco Studio
-- HarmonyOS SDK `6.1.0(23)`
+- HarmonyOS SDK `26.0.0`（API 26）
 - ArkTS / ArkUI
 - hvigor
 
@@ -163,11 +168,11 @@ legado-harmony/
 | --- | --- |
 | 主模块 | `entry` |
 | 入口 Ability | `EntryAbility` |
-| `versionName` | `3.7.835` |
-| `versionCode` / `buildVersion` | `370835` |
+| `versionName` | `3.9.903` |
+| `versionCode` / `buildVersion` | `390903` |
 | `minAPIVersion` | `12` |
-| `targetAPIVersion` | `23` |
-| 权限 | `INTERNET`、`KEEP_BACKGROUND_RUNNING`、`CAMERA`（仅在用户启用眼动翻页时请求） |
+| `targetAPIVersion` | `26` |
+| 权限 | `INTERNET`、`GET_NETWORK_INFO`、`KEEP_BACKGROUND_RUNNING`、`CAMERA`（仅在用户启用眼动翻页时请求） |
 
 ### 命令行构建
 

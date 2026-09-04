@@ -27,6 +27,9 @@ import {
 } from '../model/reader/ReaderRegexFontRule';
 import fs from '@ohos.file.fs';
 import { StartupCoverTextStore } from '../utils/StartupCoverTextStore';
+import deviceInfo from '@ohos.deviceInfo';
+import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
+import { SymbolGlyphModifier } from '@kit.ArkUI';
 
 @Entry
 @Component
@@ -126,24 +129,21 @@ struct ThemeSettingsPage {
           this.customThemeSectionTitle()
         }
         ForEach(this.customSchemes, (scheme: CustomThemeScheme) => {
-          ListItem() {
-            this.themeCard(this.customTheme(scheme), scheme.id)
-          }
-          .width('100%')
-          .borderRadius(this.customTheme(scheme).radius.card)
-          .clip(true)
-          .swipeAction({
-            end: {
-              builder: () => {
-                this.customThemeDeleteSwipeAction(scheme)
+          if (deviceInfo.sdkApiVersion >= 26) {
+            HdsListItem({
+              customItemBuilder: () => {
+                this.themeCard(this.customTheme(scheme), scheme.id)
               },
-              actionAreaDistance: 64,
-              onAction: () => {
-                this.deleteCustomThemeFromSwipe(scheme);
+              swipeActionOptions: this.themeSwipeActions(scheme)
+            })
+          } else {
+            ListItem() {
+              Row() {
+                this.themeCard(this.customTheme(scheme), scheme.id)
+                Button('删除').fontSize(11).width(64).height(32).fontColor('#FFFFFF').backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode)).onClick(() => this.deleteCustomThemeFromSwipe(scheme))
               }
-            },
-            edgeEffect: SwipeEdgeEffect.Spring
-          })
+            }
+          }
         }, (scheme: CustomThemeScheme) => `${scheme.id}_${scheme.revision}`)
         ListItem() {
           this.sectionTitle('更多主题')
@@ -197,6 +197,15 @@ struct ThemeSettingsPage {
     .onAreaChange((_oldValue: Area, newValue: Area) => {
       this.updateContextViewport(newValue);
     })
+  }
+
+  private themeSwipeActions(scheme: CustomThemeScheme): HdsSwipeActionOptions {
+    return { icons: [{
+      icon: new SymbolGlyphModifier($r('sys.symbol.trash')),
+      backgroundColor: ThemeRuntime.dangerColor(this.appDarkMode),
+      iconOptions: { accessibilityText: '删除主题' },
+      onAction: () => this.deleteCustomThemeFromSwipe(scheme)
+    }] };
   }
 
   async initializeAccount(): Promise<void> {
@@ -592,7 +601,7 @@ struct ThemeSettingsPage {
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#E53935')
+    .backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode))
     .onClick(() => {
       this.deleteCustomThemeFromSwipe(scheme);
     })

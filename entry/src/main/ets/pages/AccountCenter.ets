@@ -728,6 +728,7 @@ struct AccountCenterPage {
           .fontColor(this.subTextColor())
         Slider({ value: this.cropZoom, min: 1, max: 4, step: 0.05 })
           .layoutWeight(1)
+          .showTips(true)
           .selectedColor(this.accentColor())
           .trackColor(this.dividerColor())
           .onChange((value: number) => {

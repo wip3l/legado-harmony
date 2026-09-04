@@ -28,6 +28,7 @@ import { TlsTrustStore } from '../core/http/TlsTrustStore';
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
 import { FullTextCacheCancelCoordinator } from '../utils/FullTextCacheCancelCoordinator';
+import { lanReaderServer } from '../core/lan/LanReaderServer';
 
 export default class EntryAbility extends UIAbility {
   private appliedColorMode: number = -1;
@@ -94,6 +95,12 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('readerRegexFontSize', 20);
     PersistentStorage.persistProp('readerRegexShadowColor', '');
     PersistentStorage.persistProp('readerRegexFontRulesRaw', '');
+    PersistentStorage.persistProp('lanReaderEnabled', false);
+    PersistentStorage.persistProp('lanReaderPassword', '');
+    AppStorage.setOrCreate('lanReaderAddress', '');
+    AppStorage.setOrCreate('lanReaderStatus', '已关闭');
+    AppStorage.setOrCreate('lanReaderToken', '');
+    AppStorage.setOrCreate('lanReaderBackgroundStatus', '未启动');
     if (AppStorage.get<number>('statusBarHeight') === undefined) {
       AppStorage.setOrCreate('statusBarHeight', 32);
     }
@@ -160,6 +167,8 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('appDarkAccentColor', '#4E9BFF');
     PersistentStorage.persistProp('appLightButtonColor', '#007DFF');
     PersistentStorage.persistProp('appDarkButtonColor', '#3F8CFF');
+    // Immersive light strength: adaptive follows the system by default.
+    PersistentStorage.persistProp('immersiveLightLevel', 'adaptive');
     PersistentStorage.persistProp('appIconId', AppIconSettingsStore.DEFAULT_ICON_ID);
     PersistentStorage.persistProp('explorePlatform', '');
     PersistentStorage.persistProp('exploreSourceUrl', '');
@@ -207,6 +216,10 @@ export default class EntryAbility extends UIAbility {
     // but do not make the first application content wait for them.
     this.readerBootstrapPromise = ReaderSettingsStore.load(this.context).then((settings) => {
       ReaderSettingsStore.applyToStorage(settings);
+      if (AppStorage.get<boolean>('lanReaderEnabled')) {
+        return lanReaderServer.start(this.context);
+      }
+      return Promise.resolve();
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Sync reader settings failed: %{public}s', JSON.stringify(e));
     });
@@ -219,6 +232,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    lanReaderServer.stop().catch(() => undefined);
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onDestroy');
   }
 
@@ -282,6 +296,11 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onForeground');
     AppStorage.setOrCreate<number>('appLifecycleForegroundRevision', Date.now());
+    if (AppStorage.get<boolean>('lanReaderEnabled') && !lanReaderServer.isRunning()) {
+      lanReaderServer.start(this.context).catch((e: Error) => {
+        hilog.warn(0x0000, 'testTag', 'Restart LAN reader failed: %{public}s', JSON.stringify(e));
+      });
+    }
     ThemeTrialManager.stopIfExpired();
     this.syncSystemColorMode(this.context.config);
     this.accountBootstrapPromise

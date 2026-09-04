@@ -111,32 +111,6 @@ class ReaderV2PageFrameNode extends FrameNode {
     canvas.attachBrush(brush);
     canvas.drawRoundRect(roundRect);
     canvas.detachBrush();
-
-    // The original cap is a tiny decorative diamond. Draw it directly so it remains page-atomic without adding
-    // Image components back to the snapshot tree.
-    const capHalf = Math.max(2, Math.min(6, segment.capSizePx * 0.18));
-    if (segment.leading) {
-      const centerX = left + Math.max(capHalf + 1, segment.leadingCapWidthPx * 0.5);
-      this.drawRegexBubbleCap(canvas, centerX, (top + bottom) / 2, capHalf);
-    }
-    if (segment.trailing) {
-      const centerX = right - Math.max(capHalf + 1, segment.trailingCapWidthPx * 0.5);
-      this.drawRegexBubbleCap(canvas, centerX, (top + bottom) / 2, capHalf);
-    }
-  }
-
-  private drawRegexBubbleCap(canvas: drawing.Canvas, centerX: number, centerY: number, half: number): void {
-    const path = new drawing.Path();
-    path.moveTo(centerX, centerY - half);
-    path.lineTo(centerX + half, centerY);
-    path.lineTo(centerX, centerY + half);
-    path.lineTo(centerX - half, centerY);
-    path.close();
-    const brush = new drawing.Brush();
-    brush.setColor(0xFFC4544D);
-    canvas.attachBrush(brush);
-    canvas.drawPath(path);
-    canvas.detachBrush();
   }
 
   private drawRange(canvas: drawing.Canvas, fragment: ReaderV2PageFragment,

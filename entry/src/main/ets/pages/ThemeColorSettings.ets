@@ -2,7 +2,7 @@ import { promptAction, router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { AppThemeSettings, AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 import { CustomThemeScheme, CustomThemeSchemeStore } from '../utils/CustomThemeSchemeStore';
-import { ColorCodePicker } from '../components/ColorCodePicker';
+import { AdaptiveColorPicker } from '../components/AdaptiveColorPicker';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ThemeComponentSourceIds, ThemeIds, ThemePack, ThemeVariant } from '../theme/ThemeModels';
 import { BuiltinThemeRegistry } from '../theme/BuiltinThemeRegistry';
@@ -12,6 +12,7 @@ import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeStartupCover } from '../components/ThemeStartupCover';
 import { ReaderThemeBackground } from '../components/ReaderThemeBackground';
 import { StartupCoverImageStore } from '../utils/StartupCoverImageStore';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 
 @Component
 struct ThemeColorOption {
@@ -45,7 +46,7 @@ struct ThemeColorOption {
       .border({ width: { bottom: 0.5 }, color: this.appDarkMode ? '#24FFFFFF' : '#14000000' })
       .alignItems(VerticalAlign.Center)
 
-      ColorCodePicker({
+      AdaptiveColorPicker({
         value: this.color,
         placeholder: this.color,
         appDarkMode: this.appDarkMode,
@@ -609,14 +610,16 @@ struct ThemeColorSettingsPage {
         .backgroundColor(Color.Transparent)
         .arrowPosition(ArrowPosition.END)
         .padding({ left: 0, right: 0 })
-        .borderRadius(0)
+        .borderRadius(16)
         .border({ width: 0 })
         .optionBgColor(Color.Transparent)
+        .divider(null)
         .optionFontColor(this.primaryTextColor())
         .selectedOptionFontColor(ThemeRuntime.accentColor(this.appDarkMode))
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-        .menuBackgroundBlurStyle(BlurStyle.BACKGROUND_THIN)
+        .menuBackgroundBlurStyle(BlurStyle.NONE)
+        .menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial())
         .onSelect((index: number) => {
           if (index >= 0 && index < this.availableThemes.length) {
             this.setComponentSource(category, this.availableThemes[index].id);

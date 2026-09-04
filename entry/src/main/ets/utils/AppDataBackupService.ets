@@ -26,6 +26,7 @@ import { BackupCrypto } from './BackupCrypto';
 import { BookSourceGroupStore } from './BookSourceGroupStore';
 import { ReaderReplaceRule, ReaderReplaceRuleStore } from './ReaderReplaceRuleStore';
 import { TtsSettingsStore } from './TtsSettingsStore';
+import { BookshelfStateStore } from './BookshelfStateStore';
 
 export class AppDataBackupSelection {
   sources: boolean = true;
@@ -478,7 +479,9 @@ export class AppDataBackupService {
         await AppDataBackupService.restoreBookWithoutUnexpectedProgress(db, book, selection.progress);
         result.books++;
       }
-      AppStorage.setOrCreate('bookshelfSortMode', manifest.bookshelfSortMode || 'recentRead');
+      const restoredSortMode = BookshelfStateStore.normalizeSortMode(manifest.bookshelfSortMode);
+      AppStorage.setOrCreate('bookshelfSortMode', restoredSortMode);
+      await BookshelfStateStore.saveSortMode(context, restoredSortMode);
     }
 
     if (selection.localBooks && AppDataBackupService.hasCategory(manifest, AppDataBackupService.CATEGORY_LOCAL_BOOKS)) {
