@@ -354,9 +354,19 @@ assert(reader.includes('this.getEffectiveReaderMarginLeft() + this.getEffectiveR
   reader.includes('this.getEffectiveReaderMarginTop() + this.getReaderContentBottomPadding()') &&
   reader.includes('this.getEffectiveReaderMarginBottom() + this.getReaderContentBottomReserve()'),
   'Reader pagination does not account for configured margins');
-assert(reader.includes('.textAlign(TextAlign.JUSTIFY)') &&
-  reader.includes('align: graphicsText.TextAlign.JUSTIFY'),
-  'Reader body rendering and pagination measurement must both use justified alignment');
+// Body rendering and pagination must resolve alignment from the same reader
+// setting.  The reader intentionally supports start/end/justify now, so do
+// not require the old hard-coded JUSTIFY literals here.
+assert(reader.includes('readerTextAlignValue(): TextAlign') &&
+  reader.includes("if (this.readerTextAlign === 'start') return TextAlign.Start") &&
+  reader.includes("if (this.readerTextAlign === 'end') return TextAlign.End") &&
+  reader.includes('.textAlign(this.readerTextAlignValue())') &&
+  reader.includes('readerGraphicsTextAlignValue(): graphicsText.TextAlign') &&
+  reader.includes("if (this.readerTextAlign === 'start') return graphicsText.TextAlign.LEFT") &&
+  reader.includes("if (this.readerTextAlign === 'end') return graphicsText.TextAlign.RIGHT") &&
+  reader.includes('align: this.readerGraphicsTextAlignValue()') &&
+  reader.includes('input.textAlign = this.readerTextAlign'),
+  'Reader body rendering and pagination measurement must use the shared text alignment setting');
 assert(reader.includes('const safeBest = Math.max(start + 1, Math.min(best, source.length))') &&
   !reader.includes('Math.floor((best - start) * 0.96)'),
   'Reader pagination must not roll back a full line merely to prefer sentence boundaries');
