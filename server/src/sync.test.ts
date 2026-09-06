@@ -48,6 +48,26 @@ test('non-book-source payloads keep the 64KB limit', () => {
     error.code === 'SYNC_PAYLOAD_TOO_LARGE');
 });
 
+test('local reading progress payloads remain metadata-only JSON', () => {
+  const normalized = normalizeOperation({
+    opId: OP_ID,
+    entityType: 'reading_progress',
+    entityId: 'book_local_content_fingerprint',
+    operation: 'upsert',
+    baseRevision: 0,
+    payload: {
+      origin: 'local',
+      localContentHash: 'a'.repeat(64),
+      chapterTitle: '第一章',
+      chapterIndex: 3,
+      chapterPos: 2,
+      updatedAt: Date.now()
+    }
+  });
+  assert.equal(normalized.entityType, 'reading_progress');
+  assert.equal((normalized.payload as { localContentHash: string }).localContentHash.length, 64);
+});
+
 test('book source payloads up to 512KB are accepted', () => {
   assert.doesNotThrow(() => normalizeOperation({
     opId: OP_ID,

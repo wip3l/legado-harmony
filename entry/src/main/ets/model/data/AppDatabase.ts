@@ -1083,6 +1083,23 @@ export class AppDatabase {
     }
   }
 
+  /**
+   * Local books use a content fingerprint for cross-device progress sync. The
+   * fingerprint lives in the variable JSON rather than in the source-facing
+   * schema, so older databases remain compatible.
+   */
+  async getBookByLocalContentHash(contentHash: string): Promise<Book | null> {
+    const normalized = (contentHash || '').trim();
+    if (!this.store || !normalized) return null;
+    const books = await this.getAllBooks();
+    for (const book of books) {
+      if (book.origin === 'local' && book.getVariable('localContentHash') === normalized) {
+        return book;
+      }
+    }
+    return null;
+  }
+
   async restoreBook(book: Book): Promise<void> {
     if (!this.store || !book.bookUrl) return;
     book.identityKey = BookIdentity.keyOfBook(book);

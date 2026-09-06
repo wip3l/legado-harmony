@@ -79,6 +79,13 @@ export class BookIdentity {
 
   /** Keeps legacy cloud IDs for ordinary sources and switches only host-volatile logical URLs to v2. */
   static cloudIdentityValue(book: Book): string {
+    // A local source URI is device-specific (picker providers and sandbox paths
+    // differ across devices). Use the imported file's content fingerprint when
+    // available so progress entities can match the same local edition remotely.
+    if (book.origin === 'local') {
+      const contentHash = book.getVariable('localContentHash').trim();
+      if (contentHash) return `local-content-v1\n${contentHash}`;
+    }
     if (!BookIdentity.hasLogicalIdentity(book.bookUrl)) {
       return `${book.origin}\n${book.bookUrl}`;
     }

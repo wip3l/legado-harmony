@@ -14,6 +14,7 @@ import deviceInfo from '@ohos.deviceInfo';
 import display from '@ohos.display';
 import Animator, { AnimatorResult } from '@ohos.animator';
 import { HdsTabs, HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
+import { ARView } from '@kit.AREngine';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { AccountCommerceApi } from '../account/AccountCommerceApi';
 import { AccountSessionStore } from '../account/AccountSessionStore';
@@ -42,7 +43,6 @@ import { ReaderThemeHelper, ReaderThemeItem } from '../utils/ReaderThemeHelper';
 import { ReaderCustomThemeData, ReaderCustomThemeHelper, ReaderCustomThemeScheme } from '../utils/ReaderCustomThemeHelper';
 import { ReaderBackgroundImageStore } from '../utils/ReaderBackgroundImageStore';
 import { AdaptiveColorPicker } from '../components/AdaptiveColorPicker';
-import { AdaptiveIconButton } from '../components/AdaptiveIconButton';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ReaderThemeBackground } from '../components/ReaderThemeBackground';
 import { ReaderPageCurlPainter } from '../components/ReaderPageCurlPainter';
@@ -93,7 +93,12 @@ import { ReaderV2PageNodeController } from '../core/reader/ReaderV2RenderNode';
 import { ReaderV2GestureRouter, ReaderV2TapResult } from '../core/reader/ReaderV2Interaction';
 import { ReaderOpenTrace } from '../utils/ReaderOpenTrace';
 import { EyeTurnCalibration, EyeTurnController, EyeTurnSample } from '../core/reader/EyeTurnController';
+import { ArEngineEyeTracker, ArEngineFaceSession, ArEyeSignal } from '../core/reader/ArEngineEyeTracker';
 import { FullTextCacheCancelCoordinator, FullTextCacheCancelSignal } from '../utils/FullTextCacheCancelCoordinator';
+import { ReaderComicPageDataSource, ReaderFloatingCatalogDataSource } from '../core/reader/ReaderDataSources';
+import { ReaderCustomFontItem, ReaderCustomFontData, ReaderTxtCharsetOption } from '../core/reader/ReaderSettingsModels';
+import { PageTurnPreview, ReaderParagraphMetrics, ReaderInlineActionBoundsTask, ReaderMergedActionBoundsTask, ReaderTextParagraph, ReadTextSlice, ReaderPaginationResult, ReaderViewportSize, ReaderTextParagraphGroup, ReaderParagraphMeasureFallback, ReaderV2HighlightRect, ReaderContinuousSelectionChunk } from '../core/reader/ReaderPageModels';
+import { ReaderEyeCalibrationPoint, ReaderEyeCalibrationFit } from '../core/reader/ReaderEyeModels';
 
 const READER_EYE_CALIBRATION_SWEEP_MS: number = 4000;
 const READER_EYE_CALIBRATION_CENTER_MS: number = 1500;
@@ -119,222 +124,18 @@ const READER_PAGE_CURL_SNAPSHOT_SCALE = 0.42;
 const READER_PROGRESS_OFFSET_KEY = 'readProgressCharOffsetV2';
 const READER_PROGRESS_OFFSET_CHAPTER_KEY = 'readProgressCharOffsetChapterV2';
 const READER_PAGINATION_HEIGHT_SCALE_CACHE: Map<string, number> = new Map<string, number>();
+const READER_PAGINATION_HEIGHT_SCALE_CACHE_LIMIT: number = 64;
 
-interface ReadTextSlice {
-  text: string;
-  start: number;
-  end: number;
-  highlighted: boolean;
-  ruleIndex: number;
-  ttsHighlighted?: boolean;
-  key: string;
-}
-
-interface ReaderTextParagraph {
-  text: string;
-  start: number;
-  end: number;
-  index: number;
-  isLast: boolean;
-  key: string;
-}
-
-interface ReaderTextParagraphGroup {
-  paragraphs: ReaderTextParagraph[];
-  mergeable: boolean;
-  key: string;
-}
-
-interface ReaderPaginationResult {
-  source: string;
-  pages: string[];
-  starts: number[];
-  ends: number[];
-  cursor?: number;
-  complete?: boolean;
-  v2Session?: ReaderV2PaginationSession;
-}
-
-interface ReaderViewportSize {
-  width: number;
-  height: number;
-}
-
-class ReaderEyeCalibrationPoint {
-  score: number = 0;
-  pitch: number = 0;
-  eyeRatio: number = 0.5;
-  eyeAvailable: boolean = false;
-  targetY: number = 0;
-  phase: number = 0;
-  confidence: number = 0;
-}
-
-class ReaderEyeCalibrationFit {
-  slope: number = 0;
-  intercept: number = 0;
-  correlation: number = 0;
-}
-
-interface ReaderParagraphMeasureFallback {
-  fontSize: number;
-  fontFamily: string;
-}
-
-interface ReaderV2HighlightRect {
-  leftPx: number;
-  topPx: number;
-  widthPx: number;
-  heightPx: number;
-  key: string;
-}
-
-interface ReaderContinuousSelectionChunk {
-  pageIndex: number;
-  key: string;
-  text: string;
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
-interface ReaderParagraphMetrics {
-  heightPx: number;
-  lineEnds: number[];
-  lineBottomsPx: number[];
-  lineCount: number;
-}
-
-interface ReaderInlineActionBoundsTask {
-  text: string;
-  marker: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  pageIdentity: string;
-  attempts: number;
-}
-
-interface ReaderMergedActionBoundsTask {
-  paragraphs: ReaderTextParagraph[];
-  selectableKey: string;
-  left: number;
-  top: number;
-  pageIdentity: string;
-  attempts: number;
-}
-
-class ReaderComicPageDataSource implements IDataSource {
-  private pages: string[] = [];
-  private listeners: DataChangeListener[] = [];
-
-  totalCount(): number {
-    return this.pages.length;
+function cacheReaderPaginationHeightScale(key: string, value: number): void {
+  if (!key) return;
+  if (READER_PAGINATION_HEIGHT_SCALE_CACHE.has(key)) READER_PAGINATION_HEIGHT_SCALE_CACHE.delete(key);
+  while (READER_PAGINATION_HEIGHT_SCALE_CACHE.size >= READER_PAGINATION_HEIGHT_SCALE_CACHE_LIMIT) {
+    const keys: string[] = Array.from(READER_PAGINATION_HEIGHT_SCALE_CACHE.keys());
+    const oldest: string = keys[0] || '';
+    if (!oldest) break;
+    READER_PAGINATION_HEIGHT_SCALE_CACHE.delete(oldest);
   }
-
-  getData(index: number): string {
-    return this.pages[index] || '';
-  }
-
-  registerDataChangeListener(listener: DataChangeListener): void {
-    if (!this.listeners.includes(listener)) {
-      this.listeners.push(listener);
-    }
-  }
-
-  unregisterDataChangeListener(listener: DataChangeListener): void {
-    const index = this.listeners.indexOf(listener);
-    if (index >= 0) {
-      this.listeners.splice(index, 1);
-    }
-  }
-
-  replace(pages: string[]): void {
-    const previousCount = this.pages.length;
-    let appendsExistingPrefix = pages.length >= previousCount;
-    if (appendsExistingPrefix) {
-      for (let index = 0; index < previousCount; index++) {
-        if (this.pages[index] !== pages[index]) {
-          appendsExistingPrefix = false;
-          break;
-        }
-      }
-    }
-    if (appendsExistingPrefix && pages.length === previousCount) return;
-    this.pages = [...pages];
-    for (const listener of this.listeners) {
-      if (appendsExistingPrefix) {
-        for (let index = previousCount; index < pages.length; index++) {
-          listener.onDataAdd(index);
-        }
-      } else {
-        listener.onDataReloaded();
-      }
-    }
-  }
-
-  notifyChanged(index: number): void {
-    if (index < 0 || index >= this.pages.length) return;
-    for (const listener of this.listeners) {
-      listener.onDataChange(index);
-    }
-  }
-}
-
-class ReaderFloatingCatalogDataSource implements IDataSource {
-  private titles: string[] = [];
-  private listeners: DataChangeListener[] = [];
-
-  totalCount(): number { return this.titles.length; }
-  getData(index: number): string { return this.titles[index] || ''; }
-
-  registerDataChangeListener(listener: DataChangeListener): void {
-    if (!this.listeners.includes(listener)) this.listeners.push(listener);
-  }
-
-  unregisterDataChangeListener(listener: DataChangeListener): void {
-    const index = this.listeners.indexOf(listener);
-    if (index >= 0) this.listeners.splice(index, 1);
-  }
-
-  replace(titles: string[]): void {
-    this.titles = titles.slice();
-    for (const listener of this.listeners) listener.onDataReloaded();
-  }
-}
-
-class ReaderCustomFontItem {
-  familyName: string = '';
-  filePath: string = '';
-  sourceName: string = '';
-}
-
-class ReaderCustomFontData {
-  fonts: ReaderCustomFontItem[] = [];
-}
-
-class ReaderTxtCharsetOption {
-  value: string = '';
-  label: string = '';
-  description: string = '';
-
-  constructor(value: string, label: string, description: string) {
-    this.value = value;
-    this.label = label;
-    this.description = description;
-  }
-}
-
-interface PageTurnPreview {
-  text: string;
-  secondaryText?: string;
-  pageIndex: number;
-  chapterIndex: number;
-  pageStart?: number;
-  secondaryPageStart?: number;
-  documentSource?: string;
+  READER_PAGINATION_HEIGHT_SCALE_CACHE.set(key, value);
 }
 
 @Entry
@@ -730,6 +531,7 @@ struct ReadBookPage {
   private slideResetSerial: number = 0;
   @StorageLink('readerFontSize') @Watch('onReadLayoutChanged') readerFontSize: number = 20;
   @StorageLink('readerLetterSpacing') @Watch('onReadLayoutChanged') readerLetterSpacing: number = 0;
+  @StorageLink('readerTextAlign') @Watch('onReadLayoutChanged') readerTextAlign: string = 'justify';
   @StorageLink('readerLineHeight') @Watch('onReadLayoutChanged') readerLineHeight: number = 12;
   @StorageLink('readerParagraphSpacing') @Watch('onReadLayoutChanged') readerParagraphSpacing: number = 0;
   @StorageLink('readerMarginLeft') @Watch('onReadLayoutChanged') readerMarginLeft: number = 18;
@@ -901,6 +703,8 @@ struct ReadBookPage {
   private readerCommentPageAreaHeight: number = 0;
   private readerCommentPanelController: webview.WebviewController = new webview.WebviewController();
   private readerEyeTurnController: EyeTurnController = new EyeTurnController();
+  private arEngineFaceSession: ArEngineFaceSession = new ArEngineFaceSession();
+  private arEngineFaceActive: boolean = false;
   private readerEyeTurnSurfaceController: XComponentController = new XComponentController();
   private readerEyeTurnSurfaceId: string = '';
   private readerEyeTurnConfiguredLandscape: boolean = false;
@@ -1152,6 +956,7 @@ struct ReadBookPage {
     AppStorage.setOrCreate<boolean>('shelfReaderDirectTransition', false);
     this.resetReaderScreenOrientation();
     this.readerPageVisible = false;
+    this.arEngineFaceSession.stop().catch((): void => {});
     this.readerEyeTurnController.stop().catch((error: Error): void => {
       console.warn('[EyeTurn] reader disappear release failed:', error.message);
     });
@@ -1219,6 +1024,7 @@ struct ReadBookPage {
   onPageHide(): void {
     this.shortcutRoutingActive = false;
     this.readerPageVisible = false;
+    this.arEngineFaceSession.stop().catch((): void => {});
     this.readerEyeTurnController.stop().catch((error: Error): void => {
       console.warn('[EyeTurn] reader background release failed:', error.message);
     });
@@ -2720,7 +2526,8 @@ struct ReadBookPage {
           })
           .onDestroy((): void => {
             this.readerEyeTurnSurfaceId = '';
-            this.readerEyeTurnController.stop().catch((error: Error): void => {
+            this.arEngineFaceSession.stop().catch((): void => {});
+    this.readerEyeTurnController.stop().catch((error: Error): void => {
               console.warn('[EyeTurn] release surface failed:', error.message);
             });
           })
@@ -7103,6 +6910,7 @@ struct ReadBookPage {
   applyLoadedReaderSettings(settings: ReaderSettings): void {
     this.readerFontSize = settings.fontSize;
     this.readerLetterSpacing = settings.letterSpacing;
+    this.readerTextAlign = settings.textAlign;
     this.readerLineHeight = settings.lineHeight;
     this.readerParagraphSpacing = settings.paragraphSpacing;
     this.readerMarginLeft = settings.marginLeft;
@@ -8823,6 +8631,18 @@ struct ReadBookPage {
 
   getReaderDoublePageRightOrigin(): number {
     return this.getReaderPageColumnWidth() + READER_DOUBLE_PAGE_DIVIDER_WIDTH;
+  }
+
+  readerTextAlignValue(): TextAlign {
+    if (this.readerTextAlign === 'start') return TextAlign.Start;
+    if (this.readerTextAlign === 'end') return TextAlign.End;
+    return TextAlign.JUSTIFY;
+  }
+
+  readerGraphicsTextAlignValue(): graphicsText.TextAlign {
+    if (this.readerTextAlign === 'start') return graphicsText.TextAlign.LEFT;
+    if (this.readerTextAlign === 'end') return graphicsText.TextAlign.RIGHT;
+    return graphicsText.TextAlign.JUSTIFY;
   }
 
   getReaderAdaptiveLetterSpacing(): number {
@@ -11361,6 +11181,10 @@ struct ReadBookPage {
     Column({ space: 4 }) {
       // 正文排版作为面板首项，统一调整字号、字距、行距、段距及四侧边距。
       this.readerTypographyCombinedSettings()
+      this.readerSelectSettingItem('正文对齐方式', '设置正文段落的水平对齐方式',
+        this.readerTextAlignOptions(), this.readerTextAlignSelectedIndex(), (index: number) => {
+          this.setReaderTextAlignByIndex(index);
+        }, 'reader_text_align_select')
       this.readerHeaderFooterSettingsPanel()
       this.readerFontEntryItem()
 
@@ -11395,6 +11219,25 @@ struct ReadBookPage {
     if (this.readerTypographySelection === 6) return '上边距';
     if (this.readerTypographySelection === 7) return '下边距';
     return '字号';
+  }
+
+  readerTextAlignOptions(): SelectOption[] {
+    return [{ value: '两端对齐' }, { value: '左对齐' }, { value: '右对齐' }];
+  }
+
+  readerTextAlignValues(): string[] {
+    return ['justify', 'start', 'end'];
+  }
+
+  readerTextAlignSelectedIndex(): number {
+    const index = this.readerTextAlignValues().indexOf(this.readerTextAlign);
+    return index >= 0 ? index : 0;
+  }
+
+  setReaderTextAlignByIndex(index: number): void {
+    const values = this.readerTextAlignValues();
+    this.readerTextAlign = index >= 0 && index < values.length ? values[index] : 'justify';
+    this.saveReaderLayoutSettings();
   }
 
   @Builder
@@ -11665,6 +11508,10 @@ struct ReadBookPage {
         })
 
       if (this.readerEyeTurnEnabled) {
+        if (ArEngineEyeTracker.isAvailable()) {
+          ARView({ context: this.arEngineFaceSession.context })
+            .width(1).height(1).opacity(0.001).hitTestBehavior(HitTestMode.None)
+        }
         this.readerEyeTurnCalibrationSettingItem()
         this.readerSwitchSettingItem('眼动向前翻页', '注视上侧边缘后翻到上一页', this.readerEyeTurnPreviousEnabled,
           (checked: boolean) => {
@@ -12207,16 +12054,19 @@ struct ReadBookPage {
 
   @Builder
   readerSliderStepButton(icon: Resource, accessibilityText: string, enabled: boolean, action: () => void) {
-    AdaptiveIconButton({
+    ImmersiveBackButton({
       icon: icon,
       accessibilityLabel: accessibilityText,
-      buttonEnabled: enabled,
-      buttonSize: 34,
-      iconSize: 16,
-      fillColor: ThemeRuntime.inputColor(this.isReaderThemeDark()),
       iconColor: this.getTextColor(),
       disabledIconColor: this.getSubTextColor(),
-      action: action
+      darkMode: this.isReaderThemeDark(),
+      buttonEnabled: enabled,
+      buttonSize: 34,
+      containerWidth: 34,
+      containerHeight: 34,
+      startInset: 0,
+      compactLayout: true,
+      onBack: action
     })
   }
 
@@ -12890,7 +12740,8 @@ struct ReadBookPage {
       this.readerMarginRight,
       this.readerMarginTop,
       this.readerMarginBottom,
-      this.readerLetterSpacing
+      this.readerLetterSpacing,
+      this.readerTextAlign
     ).catch((e: Error) => {
       console.warn('保存阅读排版设置失败:', e);
     });
@@ -13075,7 +12926,8 @@ struct ReadBookPage {
       this.readerEyeTurnEnabled = false;
       this.readerEyeTurnStatus = '未启用';
       this.showReaderEyeCalibration = false;
-      this.readerEyeTurnController.stop().catch((error: Error): void => {
+      this.arEngineFaceSession.stop().catch((): void => {});
+    this.readerEyeTurnController.stop().catch((error: Error): void => {
         console.warn('[EyeTurn] disable release failed:', error.message);
       });
       this.saveReaderEyeTurnSettings();
@@ -13229,6 +13081,20 @@ struct ReadBookPage {
   startReaderEyeTurnIfReady(): void {
     if (!this.readerEyeTurnEnabled || !this.readerPageVisible || !this.readerEyeTurnSurfaceId) return;
     this.configureReaderEyeTurnController();
+    if (ArEngineEyeTracker.isAvailable()) {
+      this.arEngineFaceSession.start((signal: ArEyeSignal): void => {
+        if (signal.blink > 0.65) return;
+        const score = signal.lookDown - signal.lookUp;
+        this.readerEyeTurnController.submitExternalScore(score, signal.confidence);
+      }).then((active: boolean): void => {
+        this.arEngineFaceActive = active;
+        if (active && !this.showReaderEyeCalibration) {
+          this.readerEyeTurnController.stop().catch((): void => {});
+        }
+      }).catch((): void => {
+        this.arEngineFaceActive = false;
+      });
+    }
     this.readerEyeTurnController.start(
       getContext(this) as common.UIAbilityContext,
       this.readerEyeTurnSurfaceId
@@ -13589,7 +13455,8 @@ struct ReadBookPage {
     if (!this.currentReaderEyeCalibrationRaw()) {
       this.readerEyeTurnEnabled = false;
       this.readerEyeTurnStatus = '未启用';
-      this.readerEyeTurnController.stop().catch((error: Error): void => {
+      this.arEngineFaceSession.stop().catch((): void => {});
+    this.readerEyeTurnController.stop().catch((error: Error): void => {
         console.warn('[EyeTurn] cancel calibration release failed:', error.message);
       });
       this.saveReaderEyeTurnSettings();
@@ -15799,12 +15666,12 @@ struct ReadBookPage {
       actualHeightPx / rawParagraphHeightPx : actualHeightPx / rawTotalHeightPx));
     this.readerPaginationHeightCalibrationResolvedIdentity = identity;
     if (!Number.isFinite(targetScale) || Math.abs(targetScale - currentScale) < 0.012) {
-      READER_PAGINATION_HEIGHT_SCALE_CACHE.set(identity, currentScale);
+      cacheReaderPaginationHeightScale(identity, currentScale);
       return;
     }
 
     this.readerPaginationHeightScale = targetScale;
-    READER_PAGINATION_HEIGHT_SCALE_CACHE.set(identity, targetScale);
+    cacheReaderPaginationHeightScale(identity, targetScale);
     console.warn(`[ReaderPaginationCalibration] actual=${Math.round(actualHeightPx)} ` +
       `raw=${Math.round(rawTotalHeightPx)} lineHeight=${pageLineHeight.toFixed(2)} ` +
       `scale=${targetScale.toFixed(4)}`);
@@ -15853,7 +15720,7 @@ struct ReadBookPage {
       this.readerPaginationHeightScale = nextScale;
       this.readerPaginationHeightScaleIdentity = identity;
       this.readerPaginationHeightCalibrationResolvedIdentity = identity;
-      READER_PAGINATION_HEIGHT_SCALE_CACHE.set(identity, nextScale);
+      cacheReaderPaginationHeightScale(identity, nextScale);
       console.warn(`[ReaderPaginationBottomFit] overflow=${overflow.toFixed(2)} ` +
         `scale=${currentScale.toFixed(4)}->${nextScale.toFixed(4)}`);
       const readingOffset = this.getReaderStableReflowOffset();
@@ -15947,7 +15814,7 @@ struct ReadBookPage {
         lineHeight: this.getEffectiveReaderLineHeight(),
         letterSpacing: this.getReaderAdaptiveLetterSpacing(),
       fontWeight: FontWeight.Normal,
-      textAlign: TextAlign.JUSTIFY,
+      textAlign: this.readerTextAlignValue(),
       wordBreak: WordBreak.BREAK_WORD
     };
     try {
@@ -16044,7 +15911,7 @@ struct ReadBookPage {
     const bodyStyle = this.buildReaderMeasureTextStyle(this.readerFontSize, this.getBodyReaderFontFamily());
     const paragraphStyle: graphicsText.ParagraphStyle = {
       textStyle: bodyStyle,
-      align: graphicsText.TextAlign.JUSTIFY,
+      align: this.readerGraphicsTextAlignValue(),
       textDirection: graphicsText.TextDirection.LTR,
       wordBreak: graphicsText.WordBreak.BREAK_WORD,
       // Keep native page measurement on the same bounded breaker as the ArkUI Text nodes.
@@ -16065,7 +15932,7 @@ struct ReadBookPage {
     const bodyStyle = this.buildReaderMeasureTextStyle(this.readerFontSize, this.getBodyReaderFontFamily());
     const paragraphStyle: graphicsText.ParagraphStyle = {
       textStyle: bodyStyle,
-      align: graphicsText.TextAlign.JUSTIFY,
+      align: this.readerGraphicsTextAlignValue(),
       textDirection: graphicsText.TextDirection.LTR,
       wordBreak: graphicsText.WordBreak.BREAK_WORD,
       breakStrategy: graphicsText.BreakStrategy.GREEDY,
@@ -17702,7 +17569,7 @@ struct ReadBookPage {
     .includeFontPadding(false)
     .fontColor(this.getTextColor())
     .letterSpacing(this.getReaderAdaptiveLetterSpacing())
-    .textAlign(TextAlign.JUSTIFY)
+    .textAlign(this.readerTextAlignValue())
     .wordBreak(WordBreak.BREAK_WORD)
     .lineBreakStrategy(LineBreakStrategy.GREEDY)
     .copyOption(CopyOptions.LocalDevice)
@@ -17836,7 +17703,7 @@ struct ReadBookPage {
       .includeFontPadding(false)
       .fontColor(this.getTextColor())
       .letterSpacing(this.getReaderAdaptiveLetterSpacing())
-      .textAlign(TextAlign.JUSTIFY)
+      .textAlign(this.readerTextAlignValue())
       .wordBreak(WordBreak.BREAK_WORD)
       .lineBreakStrategy(LineBreakStrategy.GREEDY)
       .copyOption(CopyOptions.LocalDevice)
@@ -17880,7 +17747,7 @@ struct ReadBookPage {
         .includeFontPadding(false)
         .fontColor(this.getTextColor())
         .letterSpacing(this.getReaderAdaptiveLetterSpacing())
-        .textAlign(TextAlign.JUSTIFY)
+        .textAlign(this.readerTextAlignValue())
         .wordBreak(WordBreak.BREAK_WORD)
         .lineBreakStrategy(LineBreakStrategy.GREEDY)
         .copyOption(CopyOptions.LocalDevice)
@@ -18021,7 +17888,7 @@ struct ReadBookPage {
     .includeFontPadding(false)
     .fontColor(this.getTextColor())
     .letterSpacing(this.getReaderAdaptiveLetterSpacing())
-    .textAlign(TextAlign.JUSTIFY)
+    .textAlign(this.readerTextAlignValue())
     .wordBreak(WordBreak.BREAK_WORD)
     .lineBreakStrategy(LineBreakStrategy.GREEDY)
     .copyOption(CopyOptions.LocalDevice)
@@ -18509,7 +18376,7 @@ struct ReadBookPage {
         length: text.length,
         styledKey: StyledStringKey.PARAGRAPH_STYLE,
         styledValue: new ParagraphStyle({
-          textAlign: TextAlign.JUSTIFY,
+          textAlign: this.readerTextAlignValue(),
           wordBreak: WordBreak.BREAK_WORD,
           paragraphSpacing: LengthMetrics.vp(this.readerParagraphSpacing)
         })
@@ -18535,7 +18402,7 @@ struct ReadBookPage {
           this.getPageStartOffset(pageIndex), this.pagedContentText))), { onlyBetweenLines: true })
       .halfLeading(false)
       .includeFontPadding(false)
-      .textAlign(TextAlign.JUSTIFY)
+      .textAlign(this.readerTextAlignValue())
       .wordBreak(WordBreak.BREAK_WORD)
       .lineBreakStrategy(LineBreakStrategy.GREEDY)
       .copyOption(CopyOptions.LocalDevice)
@@ -18629,7 +18496,7 @@ struct ReadBookPage {
           { onlyBetweenLines: true })
         .halfLeading(false)
         .includeFontPadding(false)
-        .textAlign(TextAlign.JUSTIFY)
+        .textAlign(this.readerTextAlignValue())
         .wordBreak(WordBreak.BREAK_WORD)
         .lineBreakStrategy(LineBreakStrategy.GREEDY)
         .copyOption(CopyOptions.LocalDevice)
@@ -19148,7 +19015,7 @@ struct ReadBookPage {
     .includeFontPadding(false)
     .fontColor(this.getTextColor())
     .letterSpacing(this.getReaderAdaptiveLetterSpacing())
-    .textAlign(TextAlign.JUSTIFY)
+    .textAlign(this.readerTextAlignValue())
     .wordBreak(WordBreak.BREAK_WORD)
     .lineBreakStrategy(LineBreakStrategy.GREEDY)
     .copyOption(CopyOptions.LocalDevice)
@@ -19611,7 +19478,7 @@ struct ReadBookPage {
     .includeFontPadding(false)
     .fontColor(this.getTextColor())
     .letterSpacing(this.getReaderAdaptiveLetterSpacing())
-    .textAlign(TextAlign.JUSTIFY)
+    .textAlign(this.readerTextAlignValue())
     .wordBreak(WordBreak.BREAK_WORD)
     .lineBreakStrategy(LineBreakStrategy.GREEDY)
     .copyOption(CopyOptions.LocalDevice)
@@ -20495,6 +20362,7 @@ struct ReadBookPage {
     input.lineSpacingPx = this.toMeasureNonNegativePx(this.readerLineHeight);
     input.paragraphSpacingPx = this.toMeasureNonNegativePx(this.readerParagraphSpacing);
     input.letterSpacingPx = this.toMeasureFontOffsetPx(this.getReaderAdaptiveLetterSpacing());
+    input.textAlign = this.readerTextAlign;
     input.bodyFontFamily = this.getBodyReaderFontFamily();
     input.titleFontFamily = this.getTitleReaderFontFamily();
     input.textColor = ReaderV2Color.parse(this.getTextColor(), 0xFF202124);
@@ -21185,7 +21053,7 @@ struct ReadBookPage {
           length: paragraphLength,
           styledKey: StyledStringKey.PARAGRAPH_STYLE,
           styledValue: new ParagraphStyle({
-            textAlign: TextAlign.JUSTIFY,
+            textAlign: this.readerTextAlignValue(),
             wordBreak: WordBreak.BREAK_WORD,
             paragraphSpacing: LengthMetrics.px(snapshot.paragraphSpacingPx)
           })
@@ -21313,7 +21181,7 @@ struct ReadBookPage {
         { onlyBetweenLines: true })
         .halfLeading(false)
         .includeFontPadding(true)
-        .textAlign(TextAlign.JUSTIFY)
+        .textAlign(this.readerTextAlignValue())
         .wordBreak(WordBreak.BREAK_WORD)
         .lineBreakStrategy(LineBreakStrategy.GREEDY)
         .copyOption(CopyOptions.LocalDevice)
@@ -21693,7 +21561,7 @@ struct ReadBookPage {
       `${this.readerRegexFontPattern}_${this.readerRegexFontMode}_${this.readerRegexFontFamily}_` +
       `${this.readerRegexFontSize}_${this.readerRegexShadowColor}_${this.themeRevision}_` +
       `${this.themeRegexEmphasisMode()}_${this.themeRegexBubbleStyleId()}_reader_action_layout_v5`;
-    return `${this.readerFontSize}_${this.readerLetterSpacing}_${this.readerLineHeight}_${this.readerParagraphSpacing}_` +
+    return `${this.readerFontSize}_${this.readerLetterSpacing}_${this.readerTextAlign}_${this.readerLineHeight}_${this.readerParagraphSpacing}_` +
       `${this.readerMarginLeft}_${this.readerMarginRight}_${this.readerMarginTop}_${this.readerMarginBottom}_` +
       `${this.readerBodyFontMode}_${this.readerBodyFontFamily}_${this.getBodyReaderFontFamily()}_` +
       `${this.readerTitleFontSize}_${this.readerTitleFontMode}_${this.readerTitleFontFamily}_` +
@@ -23960,3 +23828,5 @@ struct ReadBookPage {
     this.saveReadingProgress();
   }
 }
+
+

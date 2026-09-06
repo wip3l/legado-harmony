@@ -43,6 +43,7 @@ export class ReaderV2LayoutInput {
   lineSpacingPx: number = 0;
   paragraphSpacingPx: number = 0;
   letterSpacingPx: number = 0;
+  textAlign: string = 'justify';
   bodyFontFamily: string = '';
   titleFontFamily: string = '';
   textColor: number = 0xFF202124;
@@ -67,6 +68,7 @@ export class ReaderV2LayoutSnapshot {
   lineSpacingPx: number = 0;
   paragraphSpacingPx: number = 0;
   letterSpacingPx: number = 0;
+  textAlign: string = 'justify';
   bodyFontFamily: string = '';
   titleFontFamily: string = '';
   textColor: number = 0xFF202124;
@@ -110,6 +112,7 @@ export class ReaderV2LayoutSnapshot {
     snapshot.lineSpacingPx = Math.max(0, input.lineSpacingPx);
     snapshot.paragraphSpacingPx = Math.max(0, input.paragraphSpacingPx);
     snapshot.letterSpacingPx = input.letterSpacingPx;
+    snapshot.textAlign = input.textAlign === 'start' || input.textAlign === 'end' ? input.textAlign : 'justify';
     snapshot.bodyFontFamily = input.bodyFontFamily;
     snapshot.titleFontFamily = input.titleFontFamily || input.bodyFontFamily;
     snapshot.textColor = input.textColor;
@@ -130,10 +133,11 @@ export class ReaderV2LayoutSnapshot {
       snapshot.viewport.width(), snapshot.viewport.height(), snapshot.contentRect.left, snapshot.contentRect.top,
       snapshot.contentRect.right, snapshot.contentRect.bottom, snapshot.columnRects.length,
       snapshot.fontSizePx, snapshot.titleFontSizePx, snapshot.lineSpacingPx, snapshot.paragraphSpacingPx,
-      snapshot.letterSpacingPx, snapshot.commentFontSizePx, snapshot.commentRadiusPx,
+      snapshot.letterSpacingPx, snapshot.textAlign, snapshot.commentFontSizePx, snapshot.commentRadiusPx,
       snapshot.commentsEnabled ? 1 : 0, snapshot.regexEnabled ? 1 : 0
     ];
-    const rounded = values.map((value: number): string => `${Math.round(value * 100) / 100}`).join('_');
+    const rounded = values.map((value: string | number): string =>
+      typeof value === 'number' ? `${Math.round(value * 100) / 100}` : value).join('_');
     return `reader_layout_v2_${rounded}_${input.bodyFontFamily}_${input.titleFontFamily}_${input.styleIdentity}`;
   }
 }

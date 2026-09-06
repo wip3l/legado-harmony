@@ -105,7 +105,7 @@ struct DataSyncPage {
 
             this.sectionTitle('同步内容')
             Column() {
-              this.switchItem('阅读数据', '在线书架、分组、排序、阅读进度、书签',
+              this.switchItem('阅读数据', '在线书架、分组、排序、阅读进度、书签；本地书仅同步阅读进度',
                 this.readingDataEnabled, true, (value: boolean) => {
                   this.setScopeEnabled(true, value);
                 })
@@ -210,7 +210,7 @@ struct DataSyncPage {
       .width('100%')
 
       if (!this.accountLoggedIn) {
-        Text('登录华为账号后，可跨设备同步书架、阅读进度和阅读设置。')
+        Text('登录华为账号后，可跨设备同步书架、阅读进度和阅读设置；本地书不会上传文件。')
           .fontSize(13)
           .fontColor(this.subTextColor())
           .lineHeight(20)

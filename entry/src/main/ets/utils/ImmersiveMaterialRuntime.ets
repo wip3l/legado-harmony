@@ -94,13 +94,18 @@ export class ImmersiveMaterialRuntime {
   /**
    * Component-level immersive materials do not expose HDS MaterialLevel. Their
    * light-sense feedback is therefore mapped to the same app setting instead.
-   * Undefined preserves the platform follow-system behavior, null disables it.
+   * Undefined leaves the component-level light feedback unset, while null
+   * disables it explicitly.
    */
-  static lightEffect(): uiMaterial.LightEffectOptions | null | undefined {
+  static lightEffect(forceAdaptive: boolean = false): uiMaterial.LightEffectOptions | null | undefined {
     const configured = ImmersiveMaterialRuntime.configuredLightLevel();
     if (configured === 'high') return { color: '#88FFFFFF' };
     if (configured === 'balanced') return { color: '#55FFFFFF' };
     if (configured === 'weak') return null;
+    // An undefined lightEffect means "do not enable light feedback" for a
+    // component-level material. Stepper buttons opt in explicitly so the
+    // default follow-system setting still provides the expected touch glow.
+    if (forceAdaptive) return { color: '#55FFFFFF' };
     return undefined;
   }
 

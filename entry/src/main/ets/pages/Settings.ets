@@ -7,7 +7,6 @@ import { ReaderCustomThemeData, ReaderCustomThemeHelper, ReaderCustomThemeScheme
 import { ReaderBackgroundImageStore } from '../utils/ReaderBackgroundImageStore';
 import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
-import { AdaptiveIconButton } from '../components/AdaptiveIconButton';
 import { AdaptiveSwitch } from '../components/AdaptiveSwitch';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
 import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
@@ -36,6 +35,7 @@ struct SettingsPage {
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageLink('readerFontSize') readerFontSize: number = 20;
   @StorageLink('readerLetterSpacing') readerLetterSpacing: number = 0;
+  @StorageLink('readerTextAlign') readerTextAlign: string = 'justify';
   @StorageLink('readerLineHeight') readerLineHeight: number = 12;
   @StorageLink('readerParagraphSpacing') readerParagraphSpacing: number = 0;
   @StorageLink('readerMarginLeft') readerMarginLeft: number = 18;
@@ -156,6 +156,10 @@ struct SettingsPage {
           this.sectionTitle('排版')
           Column() {
             this.typographyStepper()
+            this.selectItem('正文对齐方式', '设置正文段落的水平对齐方式',
+              this.readerTextAlignOptions(), this.readerTextAlignSelectedIndex(), (index: number) => {
+                this.setReaderTextAlignByIndex(index);
+              }, 'settings_reader_text_align_select')
             this.readerHeaderFooterSettingsPanel()
             this.readerFontEntryItem()
             this.readerReplaceRulesEntryItem()
@@ -565,6 +569,7 @@ struct SettingsPage {
   applyLoadedReaderSettings(settings: ReaderSettings): void {
     this.readerFontSize = settings.fontSize;
     this.readerLetterSpacing = settings.letterSpacing;
+    this.readerTextAlign = settings.textAlign;
     this.readerLineHeight = settings.lineHeight;
     this.readerParagraphSpacing = settings.paragraphSpacing;
     this.readerMarginLeft = settings.marginLeft;
@@ -1075,7 +1080,8 @@ struct SettingsPage {
       this.readerMarginRight,
       this.readerMarginTop,
       this.readerMarginBottom,
-      this.readerLetterSpacing
+      this.readerLetterSpacing,
+      this.readerTextAlign
     ).catch((e: Error) => {
       console.warn('保存阅读排版设置失败:', e);
     });
@@ -1088,6 +1094,25 @@ struct SettingsPage {
 
   setReaderLetterSpacing(letterSpacing: number): void {
     this.readerLetterSpacing = Math.max(0, Math.min(Math.round(letterSpacing), 8));
+    this.saveReaderLayoutSettings();
+  }
+
+  readerTextAlignOptions(): SelectOption[] {
+    return [{ value: '两端对齐' }, { value: '左对齐' }, { value: '右对齐' }];
+  }
+
+  readerTextAlignValues(): string[] {
+    return ['justify', 'start', 'end'];
+  }
+
+  readerTextAlignSelectedIndex(): number {
+    const index = this.readerTextAlignValues().indexOf(this.readerTextAlign);
+    return index >= 0 ? index : 0;
+  }
+
+  setReaderTextAlignByIndex(index: number): void {
+    const values = this.readerTextAlignValues();
+    this.readerTextAlign = index >= 0 && index < values.length ? values[index] : 'justify';
     this.saveReaderLayoutSettings();
   }
 
@@ -2487,16 +2512,19 @@ struct SettingsPage {
 
   @Builder
   settingsSliderStepButton(icon: Resource, accessibilityText: string, enabled: boolean, action: () => void) {
-    AdaptiveIconButton({
+    ImmersiveBackButton({
       icon: icon,
       accessibilityLabel: accessibilityText,
-      buttonEnabled: enabled,
-      buttonSize: 34,
-      iconSize: 16,
-      fillColor: this.inputColor(),
       iconColor: this.primaryTextColor(),
       disabledIconColor: this.subTextColor(),
-      action: action
+      darkMode: this.appDarkMode,
+      buttonEnabled: enabled,
+      buttonSize: 34,
+      containerWidth: 34,
+      containerHeight: 34,
+      startInset: 0,
+      compactLayout: true,
+      onBack: action
     })
   }
 

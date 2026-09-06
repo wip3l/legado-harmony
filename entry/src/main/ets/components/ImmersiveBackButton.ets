@@ -17,6 +17,8 @@ export struct ImmersiveBackButton {
   @Prop materialScale: number = 1;
   @Prop compactLayout: boolean = false;
   @Prop accessibilityLabel: string = '返回';
+  @Prop buttonEnabled: boolean = true;
+  @Prop disabledIconColor: ResourceColor = '#999999';
   onBack: () => void = () => {};
 
   build() {
@@ -30,6 +32,7 @@ export struct ImmersiveBackButton {
         .width(this.materialButtonSize())
         .height(this.materialButtonSize())
         .padding(0)
+        .enabled(this.buttonEnabled)
         .backgroundColor(Color.Transparent)
         .accessibilityText(this.accessibilityLabel)
         .onClick(() => this.onBack())
@@ -84,6 +87,7 @@ export struct ImmersiveBackButton {
       .width(this.materialButtonSize())
       .height(this.materialButtonSize())
       .padding(0)
+      .enabled(this.buttonEnabled)
       .backgroundColor(Color.Transparent)
       .hitTestBehavior(HitTestMode.Transparent)
       .accessibilityText(this.accessibilityLabel)
@@ -115,7 +119,7 @@ export struct ImmersiveBackButton {
         SymbolGlyph(this.icon)
           .fontSize(this.iconSize)
           .fontWeight(FontWeight.Medium)
-          .fontColor([this.iconColor])
+          .fontColor([this.buttonEnabled ? this.iconColor : this.disabledIconColor])
           .translate({ x: this.iconOffsetX })
       }
     }

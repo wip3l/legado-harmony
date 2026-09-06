@@ -269,6 +269,18 @@ export class EyeTurnController {
     this.resetDwellState();
   }
 
+  submitExternalScore(score: number, confidence: number = 1): void {
+    if (!Number.isFinite(score)) return;
+    const normalized = Math.max(-1.8, Math.min(1.8, score));
+    const sample = new EyeTurnSample();
+    sample.rawScore = normalized;
+    sample.pitch = normalized;
+    sample.confidence = confidence;
+    sample.capturedAt = Date.now();
+    this.onSample(sample);
+    this.consumeScore(normalized);
+  }
+
   setCalibration(raw: string): void {
     this.calibration = EyeTurnCalibration.parse(raw);
     this.resetDwellState();

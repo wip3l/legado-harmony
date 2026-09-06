@@ -55,6 +55,7 @@ import {
   CustomThemeSchemeStore
 } from '../utils/CustomThemeSchemeStore';
 import { BookIdentity } from '../utils/BookIdentity';
+import { LocalBookService } from '../core/book/LocalBookService';
 
 class BookshelfSyncPayload {
   bookUrl: string = '';
@@ -89,6 +90,8 @@ class BookshelfSyncPayload {
 class ReadingProgressSyncPayload {
   bookUrl: string = '';
   origin: string = '';
+  /** Only populated for local books; device-specific local:// URLs stay local. */
+  localContentHash: string = '';
   chapterTitle: string = '';
   chapterIndex: number = 0;
   chapterPos: number = 0;
@@ -530,6 +533,32 @@ export class CloudSyncCoordinator {
       result.push(CloudSyncCoordinator.entity('reading_progress', bookId, progress, book.bookUrl));
     }
 
+    // Local files are deliberately never uploaded. Publish only a compact
+    // progress snapshot keyed by a content fingerprint so another device that
+    // has imported the same edition can apply it.
+    const localBooks = allBooks.filter((book: Book) =>
+      book.origin === 'local' && !book.pendingAddToShelf);
+    for (const book of localBooks) {
+      const hadContentHash = book.getVariable(LocalBookService.LOCAL_CONTENT_HASH_KEY).trim().length > 0;
+      const contentHash = await LocalBookService.ensureContentHash(book);
+      if (!contentHash) continue;
+      // Persist fingerprints for books imported by older app versions.
+      if (!hadContentHash) {
+        await db.updateBook(book, false, 'backfill_local_content_hash');
+      }
+      const localBookId = CloudSyncCoordinator.identity(
+        'book', BookIdentity.cloudIdentityValue(book));
+      const progress = new ReadingProgressSyncPayload();
+      progress.origin = book.origin;
+      progress.localContentHash = contentHash;
+      progress.chapterTitle = book.durChapterTitle;
+      progress.chapterIndex = book.durChapterIndex;
+      progress.chapterPos = book.durChapterPos;
+      progress.updatedAt = book.durChapterTime;
+      result.push(CloudSyncCoordinator.entity(
+        'reading_progress', localBookId, progress, `local:${contentHash}`));
+    }
+
     const bookmarks = await db.getAllBookmarks();
     for (const bookmark of bookmarks) {
       if (!onlineBookUrls.has(bookmark.bookUrl)) {
@@ -670,6 +699,12 @@ export class CloudSyncCoordinator {
       if (!CloudSyncCoordinator.scopeAllows(settings, entityType)) {
         continue;
       }
+      // A local progress entity is retained when this device has not imported
+      // the corresponding file yet. Otherwise a normalisation pass would
+      // delete another device's progress before the file becomes available.
+      if (entityType === 'reading_progress' && previous.localKey.startsWith('local:')) {
+        continue;
+      }
       const operation = new CloudSyncOperation();
       operation.opId = util.generateRandomUUID();
       operation.entityType = entityType;
@@ -805,6 +840,16 @@ export class CloudSyncCoordinator {
           CloudSyncCoordinator.protectedLocalBookEntityIdsDuringSync.add(local.entityId);
           continue;
         }
+        if (local.entityType === 'reading_progress' && conflict?.payload) {
+          // If a device imported the local file after the remote progress was
+          // created, use the conflict payload to catch it up on this sync.
+          const appliedBook = await CloudSyncCoordinator.applyReadingProgressPayload(
+            db, conflict.payload);
+          entityState.contentHash = CloudSyncCoordinator.digest(JSON.stringify(conflict.payload));
+          entityState.deleted = false;
+          entityState.localKey = appliedBook?.bookUrl || local.localKey || entityState.localKey;
+          continue;
+        }
         await CloudSyncCoordinator.applyEntity(
           context,
           db,
@@ -902,19 +947,9 @@ export class CloudSyncCoordinator {
       entityState.localKey = shelf.bookUrl;
     } else if (entityType === 'reading_progress') {
       const progress = JSON.parse(raw) as ReadingProgressSyncPayload;
-      const book = await db.getBook(progress.bookUrl);
-      if (book && progress.updatedAt >= book.durChapterTime) {
-        await db.updateBookReadingProgress(
-          progress.bookUrl,
-          progress.chapterTitle,
-          progress.chapterIndex,
-          progress.chapterPos,
-          progress.updatedAt,
-          book.variable,
-          false
-        );
-      }
-      entityState.localKey = progress.bookUrl;
+      const book = await CloudSyncCoordinator.applyReadingProgressPayload(db, progress);
+      entityState.localKey = book?.bookUrl ||
+        (progress.localContentHash ? `local:${progress.localContentHash}` : progress.bookUrl);
     } else if (entityType === 'bookmark') {
       const bookmarkPayload = JSON.parse(raw) as BookmarkSyncPayload;
       const bookmark = CloudSyncCoordinator.bookmarkFromPayload(bookmarkPayload);
@@ -1028,6 +1063,32 @@ export class CloudSyncCoordinator {
     entityState.deleted = false;
     entityState.contentHash = CloudSyncCoordinator.digest(raw);
     state.entities[key] = entityState;
+  }
+
+  private static async applyReadingProgressPayload(
+    db: AppDatabase, payload: Object
+  ): Promise<Book | null> {
+    const progress = JSON.parse(JSON.stringify(payload)) as ReadingProgressSyncPayload;
+    const contentHash = (progress.localContentHash || '').trim();
+    const book = contentHash ?
+      await db.getBookByLocalContentHash(contentHash) :
+      await db.getBook(progress.bookUrl);
+    // A freshly imported book receives a construction timestamp even though
+    // it has never been read. Do not treat that timestamp as a newer reading
+    // checkpoint than a remote progress snapshot.
+    if (!book || (book.hasStartedReading() && progress.updatedAt < book.durChapterTime)) {
+      return book;
+    }
+    await db.updateBookReadingProgress(
+      book.bookUrl,
+      progress.chapterTitle,
+      progress.chapterIndex,
+      progress.chapterPos,
+      progress.updatedAt,
+      book.variable,
+      false
+    );
+    return book;
   }
 
   private static async applyDelete(

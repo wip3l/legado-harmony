@@ -49,6 +49,7 @@ import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 import { ReaderOpenTrace } from '../utils/ReaderOpenTrace';
 import { FullTextCacheCancelCoordinator, FullTextCacheCancelSignal } from '../utils/FullTextCacheCancelCoordinator';
+import { ShelfTileSortEntry, ShelfBookDataSource, FloatingCatalogDataSource, ShelfTileEntryDataSource, ExploreSourceOptionDataSource, ExploreMetadataTask } from '../core/book/ShelfDataSources';
 
 const SHELF_FULL_TEXT_CACHE_NOTIFICATION_INTERVAL_MS: number = 5000;
 const SHELF_COVER_INITIAL_PREFETCH_COUNT: number = 16;
@@ -75,119 +76,6 @@ interface ShelfFullTextCacheTask {
   stoppingNotificationTask: Promise<void> | null;
 }
 
-class ShelfTileSortEntry {
-  kind: string = 'book';
-  key: string = '';
-  book: Book | null = null;
-  group: BookGroup | null = null;
-  readTime: number = 0;
-  addTime: number = 0;
-  name: string = '';
-  pinned: boolean = false;
-  originalOrder: number = 0;
-}
-
-class ShelfBookDataSource implements IDataSource {
-  private books: Book[] = [];
-  private listeners: DataChangeListener[] = [];
-
-  totalCount(): number { return this.books.length; }
-  getData(index: number): Book { return this.books[index]; }
-
-  registerDataChangeListener(listener: DataChangeListener): void {
-    if (!this.listeners.includes(listener)) this.listeners.push(listener);
-  }
-
-  unregisterDataChangeListener(listener: DataChangeListener): void {
-    const index = this.listeners.indexOf(listener);
-    if (index >= 0) this.listeners.splice(index, 1);
-  }
-
-  replace(books: Book[], force: boolean = false): void {
-    if (!force && this.books.length === books.length &&
-      this.books.every((book: Book, index: number) => book === books[index])) {
-      return;
-    }
-    this.books = [...books];
-    for (const listener of this.listeners) listener.onDataReloaded();
-  }
-}
-
-class FloatingCatalogDataSource implements IDataSource {
-  private titles: string[] = [];
-  private listeners: DataChangeListener[] = [];
-
-  totalCount(): number { return this.titles.length; }
-  getData(index: number): string { return this.titles[index]; }
-
-  registerDataChangeListener(listener: DataChangeListener): void {
-    if (!this.listeners.includes(listener)) this.listeners.push(listener);
-  }
-
-  unregisterDataChangeListener(listener: DataChangeListener): void {
-    const index = this.listeners.indexOf(listener);
-    if (index >= 0) this.listeners.splice(index, 1);
-  }
-
-  replace(titles: string[]): void {
-    this.titles = titles.slice();
-    for (const listener of this.listeners) listener.onDataReloaded();
-  }
-}
-
-class ShelfTileEntryDataSource implements IDataSource {
-  private entries: ShelfTileSortEntry[] = [];
-  private listeners: DataChangeListener[] = [];
-
-  totalCount(): number { return this.entries.length; }
-  getData(index: number): ShelfTileSortEntry { return this.entries[index]; }
-
-  registerDataChangeListener(listener: DataChangeListener): void {
-    if (!this.listeners.includes(listener)) this.listeners.push(listener);
-  }
-
-  unregisterDataChangeListener(listener: DataChangeListener): void {
-    const index = this.listeners.indexOf(listener);
-    if (index >= 0) this.listeners.splice(index, 1);
-  }
-
-  replace(entries: ShelfTileSortEntry[], force: boolean = false): void {
-    if (!force && this.entries.length === entries.length &&
-      this.entries.every((entry: ShelfTileSortEntry, index: number) => entry.key === entries[index].key &&
-        entry.book === entries[index].book && entry.group === entries[index].group)) {
-      return;
-    }
-    this.entries = [...entries];
-    for (const listener of this.listeners) listener.onDataReloaded();
-  }
-}
-
-class ExploreSourceOptionDataSource implements IDataSource {
-  private options: ExploreSourceOption[] = [];
-  private listeners: DataChangeListener[] = [];
-
-  totalCount(): number { return this.options.length; }
-  getData(index: number): ExploreSourceOption { return this.options[index]; }
-
-  registerDataChangeListener(listener: DataChangeListener): void {
-    if (!this.listeners.includes(listener)) this.listeners.push(listener);
-  }
-
-  unregisterDataChangeListener(listener: DataChangeListener): void {
-    const index = this.listeners.indexOf(listener);
-    if (index >= 0) this.listeners.splice(index, 1);
-  }
-
-  replace(options: ExploreSourceOption[]): void {
-    this.options = options.slice();
-    for (const listener of this.listeners) listener.onDataReloaded();
-  }
-}
-
-class ExploreMetadataTask {
-  book: SearchBook = new SearchBook();
-  loadVersion: number = 0;
-}
 
 @Entry
 @Component
@@ -11250,3 +11138,4 @@ struct SettingsPage {
   }
 
 }
+

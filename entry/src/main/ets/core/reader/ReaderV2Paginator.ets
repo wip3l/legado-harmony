@@ -197,7 +197,7 @@ export class ReaderV2Paginator {
     const baseStyle = ReaderV2Paginator.baseTextStyle(block, snapshot);
     const paragraphStyle: graphicsText.ParagraphStyle = {
       textStyle: baseStyle,
-      align: graphicsText.TextAlign.JUSTIFY,
+      align: ReaderV2Paginator.textAlign(snapshot.textAlign),
       textDirection: graphicsText.TextDirection.LTR,
       wordBreak: graphicsText.WordBreak.BREAK_WORD,
       breakStrategy: graphicsText.BreakStrategy.GREEDY,
@@ -227,6 +227,12 @@ export class ReaderV2Paginator {
     const paragraph = builder.build();
     paragraph.layoutSync(width);
     return paragraph;
+  }
+
+  private static textAlign(value: string): graphicsText.TextAlign {
+    if (value === 'start') return graphicsText.TextAlign.LEFT;
+    if (value === 'end') return graphicsText.TextAlign.RIGHT;
+    return graphicsText.TextAlign.JUSTIFY;
   }
 
   private static baseTextStyle(block: ReaderV2Block, snapshot: ReaderV2LayoutSnapshot): graphicsText.TextStyle {

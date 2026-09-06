@@ -3,6 +3,7 @@ import fs from '@ohos.file.fs';
 import fileUri from '@ohos.file.fileuri';
 import picker from '@ohos.file.picker';
 import util from '@ohos.util';
+import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import zlib from '@ohos.zlib';
 import xml from '@ohos.xml';
 import { appDb } from '../../model/data/AppDatabase';
@@ -72,6 +73,7 @@ export class LocalBookService {
   static readonly ORIGIN: string = 'local';
   static readonly TYPE_TXT: number = 1;
   static readonly TYPE_EPUB: number = 2;
+  static readonly LOCAL_CONTENT_HASH_KEY: string = 'localContentHash';
   static readonly EPUB_IMAGE_MARKER_PREFIX: string = ReaderImageMarker.PREFIX;
   static readonly EPUB_IMAGE_MARKER_SUFFIX: string = ReaderImageMarker.SUFFIX;
 
@@ -289,6 +291,18 @@ export class LocalBookService {
       oldBook.getVariable('localSourceMtime') === `${sourceStat.mtime}` &&
       oldBook.getVariable('localSourceSize') === `${sourceStat.size}` &&
       LocalBookService.exists(localPath) && oldChapterCount > 0) {
+      if (!oldBook.getVariable(LocalBookService.LOCAL_CONTENT_HASH_KEY)) {
+        let contentHash = '';
+        try {
+          contentHash = await LocalBookService.hashFile(localPath);
+        } catch (e) {
+          console.warn('[LocalBookService] Unable to backfill local content hash:', e);
+        }
+        if (contentHash) {
+          oldBook.putVariable(LocalBookService.LOCAL_CONTENT_HASH_KEY, contentHash);
+          await appDb.updateBook(oldBook, false, 'backfill_local_content_hash');
+        }
+      }
       return oldBook;
     }
     if (LocalBookService.exists(localPath)) {
@@ -311,6 +325,17 @@ export class LocalBookService {
     book.putVariable('localParserVersion', 'importing');
     book.putVariable('localSourceMtime', `${sourceStat.mtime}`);
     book.putVariable('localSourceSize', `${sourceStat.size}`);
+    let contentHash = '';
+    try {
+      contentHash = await LocalBookService.hashFile(localPath);
+    } catch (e) {
+      // Fingerprinting is an enhancement for cross-device progress sync; a
+      // crypto capability issue must not make the local import fail.
+      console.warn('[LocalBookService] Unable to fingerprint local book:', e);
+    }
+    if (contentHash) {
+      book.putVariable(LocalBookService.LOCAL_CONTENT_HASH_KEY, contentHash);
+    }
     book.putVariable('bookAddTime', oldBook?.getVariable('bookAddTime') || `${Date.now()}`);
     if (webDavConnectionId) {
       book.originName = 'WebDAV';
@@ -434,6 +459,23 @@ export class LocalBookService {
     await appDb.updateBook(book);
     await LocalBookService.rebuildEpubIndex(context, book, localPath);
     return true;
+  }
+
+  /** Ensures a local book has a device-independent content fingerprint. */
+  static async ensureContentHash(book: Book): Promise<string> {
+    if (!book || !LocalBookService.isLocalBook(book)) return '';
+    const existing = book.getVariable(LocalBookService.LOCAL_CONTENT_HASH_KEY).trim();
+    if (existing) return existing;
+    const localPath = book.getVariable('localFilePath');
+    if (!localPath || !LocalBookService.exists(localPath)) return '';
+    let contentHash = '';
+    try {
+      contentHash = await LocalBookService.hashFile(localPath);
+    } catch (e) {
+      console.warn('[LocalBookService] Unable to fingerprint local book:', e);
+    }
+    if (contentHash) book.putVariable(LocalBookService.LOCAL_CONTENT_HASH_KEY, contentHash);
+    return contentHash;
   }
 
   private static async rebuildEpubIndex(context: Context, book: Book, localPath: string): Promise<void> {
@@ -1379,5 +1421,25 @@ export class LocalBookService {
       hash = Math.imul(hash, 16777619);
     }
     return (hash >>> 0).toString(16);
+  }
+
+  private static async hashFile(path: string): Promise<string> {
+    const file = await fs.open(path, fs.OpenMode.READ_ONLY);
+    const digest = cryptoFramework.createMd('SHA256');
+    const chunkSize = 256 * 1024;
+    try {
+      while (true) {
+        const buffer = new ArrayBuffer(chunkSize);
+        const readSize = await fs.read(file.fd, buffer);
+        if (readSize <= 0) break;
+        digest.updateSync({ data: new Uint8Array(buffer, 0, readSize) });
+      }
+      const data = digest.digestSync().data;
+      let result = '';
+      for (const byte of data) result += byte.toString(16).padStart(2, '0');
+      return result;
+    } finally {
+      await fs.close(file);
+    }
   }
 }
