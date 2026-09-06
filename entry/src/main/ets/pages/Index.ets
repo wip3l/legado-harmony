@@ -731,7 +731,7 @@ struct Index {
   }
 
   supportsImmersiveTabs(): boolean {
-    return ImmersiveMaterialRuntime.supportsHds();
+    return ImmersiveMaterialRuntime.supportsHdsTabs();
   }
 
   immersiveTabsBarBackgroundColor(): ResourceColor {
@@ -8236,7 +8236,7 @@ struct ExplorePage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
-  openSearchBookDetail(book: SearchBook) {
+  openSearchBookDetail(book: SearchBook, autoStartRead: boolean = false) {
     router.pushUrl({
       url: 'pages/SearchBookDetail',
       params: {
@@ -8255,7 +8255,8 @@ struct ExplorePage {
         wordCount: book.wordCount,
         type: String(book.type || 0),
         variable: book.variable || '',
-        promptAddToShelfOnBack: this.searchExplorePromptAddToShelfOnBack ? 'true' : 'false'
+        promptAddToShelfOnBack: !autoStartRead && this.searchExplorePromptAddToShelfOnBack ? 'true' : 'false',
+        autoStartRead: autoStartRead ? 'true' : 'false'
       }
     });
   }
@@ -8575,7 +8576,9 @@ struct ExplorePage {
   async readSearchBook(searchBook: SearchBook): Promise<void> {
     if (this.isSearchBookJoiningShelf(searchBook)) return;
     if (!this.isSearchBookInShelf(searchBook)) {
-      await this.addSearchBookToShelf(searchBook);
+      // Use the transient reader flow; reading a search result must not add it to the shelf.
+      this.openSearchBookDetail(searchBook, true);
+      return;
     }
     const shelfBook = await SearchBookShelfHelper.findShelfBookByKey(
       SearchBookShelfHelper.keyOf(searchBook), true);
@@ -10687,7 +10690,9 @@ struct SearchPage {
   async readSearchBook(searchBook: SearchBook): Promise<void> {
     if (this.isSearchBookJoiningShelf(searchBook)) return;
     if (!this.isSearchBookInShelf(searchBook)) {
-      await this.addSearchBookToShelf(searchBook);
+      // Use the transient reader flow; reading a search result must not add it to the shelf.
+      this.openSearchBookDetail(searchBook, true);
+      return;
     }
     const shelfBook = await SearchBookShelfHelper.findShelfBookByKey(
       SearchBookShelfHelper.keyOf(searchBook), true);
@@ -10731,7 +10736,7 @@ struct SearchPage {
     }
   }
 
-  openSearchBookDetail(book: SearchBook) {
+  openSearchBookDetail(book: SearchBook, autoStartRead: boolean = false) {
     router.pushUrl({
       url: 'pages/SearchBookDetail',
       params: {
@@ -10750,7 +10755,8 @@ struct SearchPage {
         wordCount: book.wordCount,
         type: String(book.type || 0),
         variable: book.variable || '',
-        promptAddToShelfOnBack: this.searchExplorePromptAddToShelfOnBack ? 'true' : 'false'
+        promptAddToShelfOnBack: !autoStartRead && this.searchExplorePromptAddToShelfOnBack ? 'true' : 'false',
+        autoStartRead: autoStartRead ? 'true' : 'false'
       }
     });
   }

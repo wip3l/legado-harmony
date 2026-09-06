@@ -225,9 +225,9 @@ export class ReadBookEngine {
         this.book.lastCheckTime = Date.now();
         this.book.coverUrl = CoverUrlNormalizer.prefer(oldCoverUrl, this.book.coverUrl);
         this.preserveReadingState(this.book, oldBook);
-        console.log('[RE] getBookInfo done, tocUrl:', this.book.tocUrl);
+        console.log('[RE] getBookInfo done');
       } else {
-        console.log('[RE] reuse recently resolved book info, tocUrl:', this.book.tocUrl);
+        console.log('[RE] reuse recently resolved book info');
       }
       if (!this.book.tocUrl && oldTocUrl) {
         this.book.tocUrl = oldTocUrl;

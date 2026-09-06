@@ -138,11 +138,18 @@ struct ThemeSettingsPage {
             })
           } else {
             ListItem() {
-              Row() {
-                this.themeCard(this.customTheme(scheme), scheme.id)
-                Button('删除').fontSize(11).width(64).height(32).fontColor('#FFFFFF').backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode)).onClick(() => this.deleteCustomThemeFromSwipe(scheme))
-              }
+              this.themeCard(this.customTheme(scheme), scheme.id)
             }
+            .swipeAction({
+              end: {
+                builder: () => {
+                  this.customThemeDeleteSwipeAction(scheme)
+                },
+                actionAreaDistance: 64,
+                onAction: () => this.deleteCustomThemeFromSwipe(scheme)
+              },
+              edgeEffect: SwipeEdgeEffect.Spring
+            })
           }
         }, (scheme: CustomThemeScheme) => `${scheme.id}_${scheme.revision}`)
         ListItem() {

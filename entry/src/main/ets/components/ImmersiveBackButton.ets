@@ -1,5 +1,4 @@
-import deviceInfo from '@ohos.deviceInfo';
-import { HdsTabs, hdsMaterial } from '@kit.UIDesignKit';
+import { HdsTabs } from '@kit.UIDesignKit';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 
 @Component
@@ -22,7 +21,7 @@ export struct ImmersiveBackButton {
 
   build() {
     Stack() {
-      if (deviceInfo.sdkApiVersion >= 23) {
+      if (ImmersiveMaterialRuntime.supportsHdsTabs()) {
         this.linkedSystemMaterialButton()
       } else {
         Button({ type: ButtonType.Circle, stateEffect: true }) {
@@ -38,7 +37,7 @@ export struct ImmersiveBackButton {
     }
     .width(this.effectiveContainerWidth())
     .height(this.containerHeight)
-    .alignContent(deviceInfo.sdkApiVersion >= 23 ? Alignment.Start : Alignment.Center)
+    .alignContent(ImmersiveMaterialRuntime.supportsHdsTabs() ? Alignment.Start : Alignment.Center)
   }
 
   @Builder
@@ -61,7 +60,7 @@ export struct ImmersiveBackButton {
           largeWidth: this.materialButtonSize()
         },
         systemMaterialEffect: {
-          materialType: hdsMaterial.MaterialType.IMMERSIVE,
+          materialType: ImmersiveMaterialRuntime.materialType(),
           materialLevel: ImmersiveMaterialRuntime.materialLevel()
         },
         barSideMargin: 0,
@@ -128,7 +127,7 @@ export struct ImmersiveBackButton {
   effectiveContainerWidth(): number {
     if (this.compactLayout) {
       return Math.max(this.containerWidth,
-        deviceInfo.sdkApiVersion >= 23 ? this.materialButtonSize() : this.buttonSize);
+        ImmersiveMaterialRuntime.supportsHdsTabs() ? this.materialButtonSize() : this.buttonSize);
     }
     return Math.max(this.containerWidth, 64 * this.normalizedMaterialScale());
   }

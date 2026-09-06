@@ -77,41 +77,7 @@ import {
   sessionExpiresAt,
   signSessionToken
 } from './sessionTokens.js';
-
-interface AuthBody {
-  authorizationCode?: string;
-}
-
-interface RedeemBody {
-  requestId?: string;
-  expectedPricePoints?: number;
-  expectedValidDays?: number;
-}
-
-interface TtsRedeemBody {
-  requestId?: string;
-}
-
-interface TtsSynthesizeBody {
-  requestId?: string;
-  voiceId?: string;
-  text?: string;
-  speed?: number;
-  pitch?: number;
-  volume?: number;
-  timed?: boolean;
-  transport?: string;
-}
-
-interface IapBody {
-  purchaseData?: string;
-}
-
-interface ProfileBody {
-  displayName?: string;
-  avatarBase64?: string;
-  removeAvatar?: boolean;
-}
+import { AuthBody, RedeemBody, TtsRedeemBody, TtsSynthesizeBody, IapBody, ProfileBody } from './apiModels.js';
 
 interface AuthenticatedRequest extends FastifyRequest {
   userId?: string;

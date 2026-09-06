@@ -146,12 +146,18 @@ struct CustomTtsVoiceManagerPage {
                 })
               } else {
                 ListItem() {
-                  Row() {
-                    this.voiceListItem(voice)
-                    Button(voice.enabled ? '禁用' : '启用').fontSize(11).width(64).height(32).fontColor('#FFFFFF').backgroundColor(this.buttonColor()).onClick(() => this.toggleVoiceState(voice))
-                    Button('删除').fontSize(11).width(64).height(32).fontColor('#FFFFFF').backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode)).onClick(() => this.deleteVoice(voice))
-                  }
+                  this.voiceListItem(voice)
                 }
+                .swipeAction({
+                  end: {
+                    builder: () => {
+                      this.voiceFallbackSwipeActions(voice)
+                    },
+                    actionAreaDistance: 128,
+                    onAction: () => this.deleteVoice(voice)
+                  },
+                  edgeEffect: SwipeEdgeEffect.Spring
+                })
               }
             }, (voice: HttpTTS) => this.voiceKey(voice))
 
@@ -226,6 +232,15 @@ struct CustomTtsVoiceManagerPage {
       },
       { icon: new SymbolGlyphModifier($r('sys.symbol.trash')), backgroundColor: ThemeRuntime.dangerColor(this.appDarkMode), iconOptions: { accessibilityText: '删除音色' }, onAction: () => this.deleteVoice(voice) }
     ] };
+  }
+
+  @Builder
+  voiceFallbackSwipeActions(voice: HttpTTS) {
+    Row() {
+      this.voiceDisableSwipeAction(voice)
+      this.voiceDeleteSwipeAction(voice)
+    }
+    .height('100%')
   }
 
   loadSettings(): void {

@@ -13,7 +13,7 @@ import { LengthMetrics } from '@ohos.arkui.node';
 import deviceInfo from '@ohos.deviceInfo';
 import display from '@ohos.display';
 import Animator, { AnimatorResult } from '@ohos.animator';
-import { HdsTabs, HdsListItem, HdsSwipeActionOptions, hdsMaterial } from '@kit.UIDesignKit';
+import { HdsTabs, HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { AccountCommerceApi } from '../account/AccountCommerceApi';
 import { AccountSessionStore } from '../account/AccountSessionStore';
@@ -3162,7 +3162,7 @@ struct ReadBookPage {
   }
 
   supportsReaderImmersiveMaterial(): boolean {
-    return deviceInfo.sdkApiVersion >= 23;
+    return ImmersiveMaterialRuntime.supportsHdsMaterial();
   }
 
   @Builder
@@ -3207,7 +3207,7 @@ struct ReadBookPage {
           largeWidth: this.readerFloatingBarWidth()
         },
         systemMaterialEffect: {
-          materialType: hdsMaterial.MaterialType.IMMERSIVE,
+          materialType: ImmersiveMaterialRuntime.materialType(),
           materialLevel: ImmersiveMaterialRuntime.materialLevel()
         },
         barSideMargin: 0,
@@ -3363,7 +3363,7 @@ struct ReadBookPage {
         largeWidth: this.readerFloatingBarWidth()
       },
       systemMaterialEffect: {
-        materialType: hdsMaterial.MaterialType.IMMERSIVE,
+        materialType: ImmersiveMaterialRuntime.materialType(),
         materialLevel: ImmersiveMaterialRuntime.materialLevel()
       },
       barSideMargin: 0,
@@ -4176,24 +4176,34 @@ struct ReadBookPage {
     } else {
       List({ space: 0, scroller: this.bookmarkScroller }) {
         ForEach(this.bookmarks, (bookmark: Bookmark) => {
-          ListItem() {
-            this.bookmarkSwipeCard(bookmark)
+          if (deviceInfo.sdkApiVersion >= 26) {
+            // API 26+ uses one left-swipe action panel. Keep multi-select and
+            // delete together instead of exposing multi-select on right swipe.
+            HdsListItem({
+              customItemBuilder: () => {
+                this.bookmarkSwipeCard(bookmark)
+              },
+              swipeActionOptions: this.bookmarkSwipeActions(bookmark)
+            })
+          } else {
+            // Older systems use the native ListItem fallback with the same
+            // two-button left-swipe action panel.
+            ListItem() {
+              this.bookmarkSwipeCard(bookmark)
+            }
+            .width('100%')
+            .clip(true)
+            .swipeAction({
+              end: {
+                builder: () => {
+                  this.bookmarkFallbackSwipeActions(bookmark)
+                },
+                actionAreaDistance: 128,
+                onAction: () => this.deleteBookmark(bookmark)
+              },
+              edgeEffect: SwipeEdgeEffect.Spring
+            })
           }
-          .width('100%')
-          .clip(true)
-          .swipeAction({
-            start: {
-              builder: this.bookmarkMultiSelectAction.bind(this, bookmark),
-              actionAreaDistance: 64,
-              onAction: () => this.enterBookmarkMultiSelect(bookmark.id)
-            },
-            end: {
-              builder: this.bookmarkDeleteAction.bind(this, bookmark),
-              actionAreaDistance: 64,
-              onAction: () => this.deleteBookmark(bookmark)
-            },
-            edgeEffect: SwipeEdgeEffect.Spring
-          })
         }, (bookmark: Bookmark) => `${bookmark.id}`)
       }
       .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
@@ -4400,6 +4410,15 @@ struct ReadBookPage {
       { icon: new SymbolGlyphModifier($r('sys.symbol.checkmark_circle')), backgroundColor: this.buttonColor(), iconOptions: { accessibilityText: '多选' }, onAction: () => this.enterBookmarkMultiSelect(bookmark.id) },
       { icon: new SymbolGlyphModifier($r('sys.symbol.trash')), backgroundColor: ThemeRuntime.dangerColor(this.appDarkMode), iconOptions: { accessibilityText: '删除书签' }, onAction: () => this.deleteBookmark(bookmark) }
     ] };
+  }
+
+  @Builder
+  bookmarkFallbackSwipeActions(bookmark: Bookmark) {
+    Row() {
+      this.bookmarkMultiSelectAction(bookmark)
+      this.bookmarkDeleteAction(bookmark)
+    }
+    .height('100%')
   }
 
   @Builder
@@ -10278,7 +10297,7 @@ struct ReadBookPage {
         largeWidth: this.readerTtsExpandedControlWidth()
       },
       systemMaterialEffect: {
-        materialType: hdsMaterial.MaterialType.IMMERSIVE,
+        materialType: ImmersiveMaterialRuntime.materialType(),
         materialLevel: ImmersiveMaterialRuntime.materialLevel()
       },
       barSideMargin: 0,

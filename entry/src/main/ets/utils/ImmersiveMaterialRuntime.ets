@@ -7,12 +7,12 @@ export class ImmersiveMaterialRuntime {
   static readonly KEY_LIGHT_LEVEL: string = 'immersiveLightLevel';
   private static resolved: boolean = false;
   private static resolvedType: hdsMaterial.MaterialType = hdsMaterial.MaterialType.ADAPTIVE;
+  private static hdsMaterialSupported: boolean | null = null;
   private static immersiveSupported: boolean | null = null;
 
   static supportsHds(): boolean {
-    // Immersive material is enabled only on API 26+ and only when the device
-    // reports support. Older versions, and API 26 devices without the
-    // capability, continue to use the existing standard ArkUI components.
+    // ArkUI uiMaterial.ImmersiveMaterial is an API 26 feature. Keep this
+    // capability separate from HDS tabs/material, which starts at API 23.
     if (deviceInfo.sdkApiVersion < 26) return false;
     if (ImmersiveMaterialRuntime.immersiveSupported !== null) {
       return ImmersiveMaterialRuntime.immersiveSupported;
@@ -26,17 +26,45 @@ export class ImmersiveMaterialRuntime {
     return ImmersiveMaterialRuntime.immersiveSupported;
   }
 
+  /** HDS tabs/floating bars and HDS system materials start at HarmonyOS 6/API 23. */
+  static supportsHdsTabs(): boolean {
+    return deviceInfo.sdkApiVersion >= 23;
+  }
+
+  /**
+   * HDS system material (used by HdsTabs floating bars) is available from
+   * HarmonyOS 6/API 23. This is intentionally separate from supportsHds(),
+   * which checks the API 26 ArkUI uiMaterial namespace used by menus/buttons.
+   */
+  static supportsHdsMaterial(): boolean {
+    if (!ImmersiveMaterialRuntime.supportsHdsTabs()) return false;
+    if (ImmersiveMaterialRuntime.hdsMaterialSupported !== null) {
+      return ImmersiveMaterialRuntime.hdsMaterialSupported;
+    }
+    try {
+      const supportedTypes: Array<hdsMaterial.MaterialType> = hdsMaterial.getSystemMaterialTypes();
+      ImmersiveMaterialRuntime.hdsMaterialSupported = supportedTypes.indexOf(hdsMaterial.MaterialType.IMMERSIVE) >= 0 ||
+        supportedTypes.indexOf(hdsMaterial.MaterialType.ADAPTIVE) >= 0;
+    } catch (error) {
+      console.warn('读取 HDS 系统材质能力失败，使用兼容底栏:', error);
+      ImmersiveMaterialRuntime.hdsMaterialSupported = false;
+    }
+    return ImmersiveMaterialRuntime.hdsMaterialSupported;
+  }
+
   static materialType(): hdsMaterial.MaterialType {
-    if (!ImmersiveMaterialRuntime.supportsHds()) return hdsMaterial.MaterialType.NONE;
+    if (!ImmersiveMaterialRuntime.supportsHdsMaterial()) return hdsMaterial.MaterialType.NONE;
     if (ImmersiveMaterialRuntime.resolved) return ImmersiveMaterialRuntime.resolvedType;
     ImmersiveMaterialRuntime.resolved = true;
     try {
       const supportedTypes: Array<hdsMaterial.MaterialType> = hdsMaterial.getSystemMaterialTypes();
       ImmersiveMaterialRuntime.resolvedType = supportedTypes.indexOf(hdsMaterial.MaterialType.IMMERSIVE) >= 0 ?
-        hdsMaterial.MaterialType.IMMERSIVE : hdsMaterial.MaterialType.ADAPTIVE;
+        hdsMaterial.MaterialType.IMMERSIVE :
+        supportedTypes.indexOf(hdsMaterial.MaterialType.ADAPTIVE) >= 0 ?
+          hdsMaterial.MaterialType.ADAPTIVE : hdsMaterial.MaterialType.NONE;
     } catch (error) {
-      console.warn('读取系统沉浸光感材质能力失败，使用自适应材质:', error);
-      ImmersiveMaterialRuntime.resolvedType = hdsMaterial.MaterialType.ADAPTIVE;
+      console.warn('读取系统沉浸光感材质能力失败，使用兼容底栏:', error);
+      ImmersiveMaterialRuntime.resolvedType = hdsMaterial.MaterialType.NONE;
     }
     return ImmersiveMaterialRuntime.resolvedType;
   }

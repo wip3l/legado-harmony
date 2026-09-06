@@ -18,8 +18,12 @@ export class ReaderOpenTrace {
   static begin(bookUrl: string): void {
     if (!bookUrl) return;
     const now = Date.now();
+    if (ReaderOpenTrace.entries.size >= 32) {
+      const oldest = ReaderOpenTrace.entries.keys().next().value;
+      if (oldest) ReaderOpenTrace.entries.delete(oldest);
+    }
     ReaderOpenTrace.entries.set(bookUrl, new ReaderOpenTraceEntry(now));
-    console.info(`[ReaderOpen] begin book=${ReaderOpenTrace.shortBookUrl(bookUrl)}`);
+    console.info(`[ReaderOpen] begin book=${ReaderOpenTrace.fingerprint(bookUrl)}`);
   }
 
   static beginIfNeeded(bookUrl: string): void {
@@ -50,8 +54,12 @@ export class ReaderOpenTrace {
     ReaderOpenTrace.entries.delete(bookUrl);
   }
 
-  private static shortBookUrl(bookUrl: string): string {
-    if (bookUrl.length <= 96) return bookUrl;
-    return `${bookUrl.substring(0, 48)}...${bookUrl.substring(bookUrl.length - 32)}`;
+  private static fingerprint(bookUrl: string): string {
+    let hash = 2166136261;
+    for (let i = 0; i < bookUrl.length; i++) {
+      hash ^= bookUrl.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
   }
 }

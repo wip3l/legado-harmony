@@ -601,12 +601,18 @@ struct ReaderReplaceRulesPage {
               })
               } else {
                 ListItem() {
-                  Row() {
-                    this.ruleCard(rule)
-                    Button(rule.enabled ? '禁用' : '启用').fontSize(11).width(64).height(32).fontColor('#FFFFFF').backgroundColor(this.buttonColor()).onClick(() => this.setRuleEnabled(rule.id, !rule.enabled))
-                    Button('删除').fontSize(11).width(64).height(32).fontColor('#FFFFFF').backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode)).onClick(() => this.confirmDelete(rule))
-                  }
+                  this.ruleCard(rule)
                 }
+                .swipeAction({
+                  end: {
+                    builder: () => {
+                      this.ruleFallbackSwipeActions(rule)
+                    },
+                    actionAreaDistance: 128,
+                    onAction: () => this.confirmDelete(rule)
+                  },
+                  edgeEffect: SwipeEdgeEffect.Spring
+                })
             }
           }, (rule: ReaderReplaceRule) =>
             `${rule.id}_${rule.enabled ? '1' : '0'}_${this.selectionMode ? 'select' : 'normal'}`)
@@ -650,6 +656,15 @@ struct ReaderReplaceRulesPage {
       },
       { icon: new SymbolGlyphModifier($r('sys.symbol.trash')), backgroundColor: ThemeRuntime.dangerColor(this.appDarkMode), iconOptions: { accessibilityText: '删除规则' }, onAction: () => this.confirmDelete(rule) }
     ] };
+  }
+
+  @Builder
+  ruleFallbackSwipeActions(rule: ReaderReplaceRule) {
+    Row() {
+      this.ruleEnableSwipeAction(rule)
+      this.ruleDeleteSwipeAction(rule)
+    }
+    .height('100%')
   }
 
   @Builder

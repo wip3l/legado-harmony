@@ -61,7 +61,7 @@ export class WebBookService {
     if (BookSourceDataUrlSupport.isEncodedSource(book.bookUrl)) {
       return await BookSourceDataUrlSupport.getBookInfo(this.http, source, book);
     }
-    console.log('[WS] getBookInfo, URL:', book.bookUrl);
+    console.log('[WS] getBookInfo');
     const au = new AnalyzeUrl(source, this.http);
     const resp = EncodedSourceUrl.canHandle(book.bookUrl) ?
       await this.fetchEncodedDataUrl(book.bookUrl, source) : await au.fetch(book.bookUrl, undefined, debugContext);
@@ -275,7 +275,7 @@ export class WebBookService {
       const encodedChapters = await BookSourceDataUrlSupport.getChapterList(this.http, source, book);
       return chapterLimit > 0 ? encodedChapters.slice(0, chapterLimit) : encodedChapters;
     }
-    console.log('[WS] getChapterList, tocUrl:', book.tocUrl);
+    console.log('[WS] getChapterList');
     const tocUrl = this.resolveTocUrl(source, book);
     const au = new AnalyzeUrl(source, this.http);
     let resp = EncodedSourceUrl.canHandle(tocUrl) ?
@@ -518,7 +518,7 @@ export class WebBookService {
       // with the synchronous compatibility engine is precisely the path that can trigger AppFreeze.
       return '';
     }
-    console.log('[WS] getContent, url:', chapter.url);
+    console.log('[WS] getContent');
     if (this.contentRequestCanceled(shouldCancel)) return '';
     const au = new AnalyzeUrl(source, this.http);
     let resp = EncodedSourceUrl.canHandle(chapter.url) ?
@@ -748,7 +748,7 @@ export class WebBookService {
         WebBookService.GENERIC_TOC_FALLBACK_KEY, 'true');
       if (chapter.title && chapter.url) chapters.push(chapter);
     }
-    console.log('[WS] 通用目录兜底:', chapters.length, 'from:', book.name || book.bookUrl);
+    console.log('[WS] 通用目录兜底:', chapters.length);
     return chapters;
   }
 

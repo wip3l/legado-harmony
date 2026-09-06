@@ -544,17 +544,6 @@ struct BookSourcePage {
                     }
                     .alignItems(HorizontalAlign.End)
                   }
-                  if (!this.selectionMode && !source.isLocked && deviceInfo.sdkApiVersion < 26) {
-                    Row({ space: 4 }) {
-                      Button(source.enabled ? '禁用' : '启用').fontSize(11).width(60).height(30)
-                        .fontColor('#FFFFFF').backgroundColor(this.buttonColor())
-                        .onClick(() => this.toggleSourceEnabled(source))
-                      Button('删除').fontSize(11).width(60).height(30)
-                        .fontColor('#FFFFFF').backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode))
-                        .onClick(() => this.deleteSourceFromSwipe(source))
-                    }
-                    .margin({ left: 8 })
-                  }
                 }
                 .width('100%')
                 .padding(12)
@@ -581,8 +570,10 @@ struct BookSourcePage {
               })
               .swipeAction(this.selectionMode || source.isLocked ? {} : {
                 end: {
-                  builder: this.sourceDeleteSwipeAction.bind(this, source),
-                  actionAreaDistance: 64,
+                  builder: () => {
+                    this.sourceFallbackSwipeActions(source)
+                  },
+                  actionAreaDistance: 128,
                   onAction: () => {
                     if (!this.selectionMode && !this.isBatchOperating) this.deleteSourceFromSwipe(source);
                   }
@@ -2207,6 +2198,15 @@ struct BookSourcePage {
       { icon: new SymbolGlyphModifier(source.enabled ? $r('sys.symbol.minus_circle') : $r('sys.symbol.checkmark_circle')), backgroundColor: this.buttonColor(), iconOptions: { accessibilityText: source.enabled ? '禁用书源' : '启用书源' }, onAction: () => this.toggleSourceEnabled(source) },
       { icon: new SymbolGlyphModifier($r('sys.symbol.trash')), backgroundColor: ThemeRuntime.dangerColor(this.appDarkMode), iconOptions: { accessibilityText: '删除书源' }, onAction: () => this.deleteSourceFromSwipe(source) }
     ] };
+  }
+
+  @Builder
+  sourceFallbackSwipeActions(source: BookSource) {
+    Row() {
+      this.sourceDisableSwipeAction(source)
+      this.sourceDeleteSwipeAction(source)
+    }
+    .height('100%')
   }
 
   @Builder

@@ -63,3 +63,5 @@ ehthumbs.db
 Thumbs.db
 
 /.*/
+!/.github/
+!/.github/**

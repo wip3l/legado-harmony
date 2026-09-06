@@ -364,8 +364,11 @@ assert(reader.includes('buildReaderMeasureTextStyle(this.readerFontSize, this.ge
   reader.includes('fontFamily: this.getBodyReaderFontFamily()'),
   'Reader pagination measurement must use the same body font as rendering');
 assert(reader.includes('this.readerTypographySettingsPanel()') &&
-  reader.includes("this.readerTypographySlider('左边距'") &&
-  reader.includes("this.readerTypographySlider('右边距'") &&
+  reader.includes('readerTypographyCombinedSettings()') &&
+  reader.includes("{ value: '左边距' }") &&
+  reader.includes("{ value: '右边距' }") &&
+  reader.includes("{ value: '上边距' }") &&
+  reader.includes("{ value: '下边距' }") &&
   reader.includes('applyReaderTypographyValue') &&
   reader.includes('commitReaderTypographyDraft'),
   'In-reader settings do not provide the shared typography controls');

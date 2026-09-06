@@ -292,7 +292,7 @@ export class SearchCoordinator {
         return this.sourceResult([], BookSource.VALIDATION_FAILED, '搜索地址无法解析');
       }
       if (ENABLE_SEARCH_DEBUG_LOG) {
-        console.log('[SC] search source:', source.bookSourceName, 'url:', urlTemplate);
+        console.log('[SC] search source:', source.bookSourceName);
       }
       const resp = EncodedSourceUrl.canHandle(urlTemplate) ?
         await this.fetchEncodedDataUrl(urlTemplate, source, responseLimit) :
@@ -497,7 +497,7 @@ export class SearchCoordinator {
         if (book.name && book.bookUrl && !seenBookKeys.has(bookKey)) {
           seenBookKeys.add(bookKey);
           if (ENABLE_SEARCH_DEBUG_LOG && books.length === 0) {
-            console.log('[SC] 第一条结果:', book.name, book.bookUrl, 'from:', source.bookSourceName);
+            console.log('[SC] 第一条结果:', book.name, 'from:', source.bookSourceName);
           }
           books.push(book);
           if (books.length >= resultLimit) {

@@ -48,6 +48,8 @@ struct SearchBookDetailPage {
   @State updateTime: string = '';
   @State bookType: number = 0;
   private bookVariable: string = '';
+  private autoStartRead: boolean = false;
+  private autoStartReadTriggered: boolean = false;
   @State isInShelf: boolean = false;
   @State isSaving: boolean = false;
   @State isLoadingBookInfo: boolean = false;
@@ -89,6 +91,7 @@ struct SearchBookDetailPage {
       this.bookType = Number(params['type'] || 0) || 0;
       this.bookVariable = params['variable'] || '';
       this.promptAddToShelfOnBackFromResult = params['promptAddToShelfOnBack'] === 'true';
+      this.autoStartRead = params['autoStartRead'] === 'true';
       // Both operations initialize/read the same AppDatabase instance. Starting them at the
       // same time can make getBookSource() observe the store before initialization has completed,
       // leaving the detail page with an empty intro until the reader opens the book again.
@@ -96,6 +99,7 @@ struct SearchBookDetailPage {
       // the same initialized database path as the reader.
       this.checkShelf().then((): void => {
         this.loadBookInfo();
+        this.triggerAutoStartRead();
       });
     }
   }
@@ -897,6 +901,15 @@ struct SearchBookDetailPage {
       url: 'pages/ReadBook',
       params: { bookUrl: this.bookUrl }
     });
+  }
+
+  triggerAutoStartRead(): void {
+    if (!this.autoStartRead || this.autoStartReadTriggered || !this.bookUrl) return;
+    this.autoStartReadTriggered = true;
+    // Let the detail page mount before preparing the transient reader record and routing to ReadBook.
+    setTimeout((): void => {
+      this.startRead();
+    }, 0);
   }
 
   getTags(): string[] {
