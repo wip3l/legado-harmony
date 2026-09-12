@@ -78,6 +78,7 @@ export class ReaderSettingsStore {
   static readonly PAGE_TURN_ANIMATION_STACK: number = 4;
   static readonly PAGE_TURN_ANIMATION_VERTICAL: number = 5;
   static readonly PAGE_TURN_ANIMATION_SIMULATION: number = 6;
+  static readonly PAGE_TURN_ANIMATION_3D: number = 7;
   static readonly SCREEN_TIMEOUT_FOLLOW_SYSTEM: number = 0;
   static readonly SCREEN_TIMEOUT_ALWAYS_ON: number = -1;
   static readonly SCREEN_ORIENTATION_SYSTEM: string = 'system';
@@ -1247,7 +1248,8 @@ export class ReaderSettingsStore {
       value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE ||
       value === ReaderSettingsStore.PAGE_TURN_ANIMATION_FADE ||
       value === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK ||
-      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION) {
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION ||
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_3D) {
       return value;
     }
     return ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE;
@@ -1255,9 +1257,13 @@ export class ReaderSettingsStore {
 
   private static normalizePageTurnAnimationForMode(mode: number, type: number): number {
     const value = ReaderSettingsStore.normalizePageTurnAnimationType(type);
-    return ReaderSettingsStore.normalizePageTurnMode(mode) === 0 &&
-      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION ?
-      ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK : value;
+    // 仿真与 3D 仿真依赖横向页面的左右翻转，上下滑动模式下没有对应运动轨迹，统一降级为叠页。
+    if (ReaderSettingsStore.normalizePageTurnMode(mode) === 0 &&
+      (value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION ||
+        value === ReaderSettingsStore.PAGE_TURN_ANIMATION_3D)) {
+      return ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK;
+    }
+    return value;
   }
 
   private static normalizePreloadChapterCount(count: number): number {

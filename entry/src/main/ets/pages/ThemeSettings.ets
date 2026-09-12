@@ -31,6 +31,16 @@ import deviceInfo from '@ohos.deviceInfo';
 import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 
+/** User choice from the "apply theme" prompt. */
+class ThemeApplyChoice {
+  applyLayout: boolean = false;
+  applyCover: boolean = false;
+
+  static preserve(): ThemeApplyChoice {
+    return new ThemeApplyChoice();
+  }
+}
+
 @Entry
 @Component
 struct ThemeSettingsPage {
@@ -85,6 +95,13 @@ struct ThemeSettingsPage {
   @State startupTextThemeId: string = '';
   @State startupTextTitle: string = '';
   @State startupTextSubtitle: string = '';
+  @State showThemeApplyDialog: boolean = false;
+  @State applyDialogThemeName: string = '';
+  @State applyDialogLayoutHint: string = '';
+  @State applyDialogHasCover: boolean = false;
+  @State applyDialogApplyLayout: boolean = false;
+  @State applyDialogApplyCover: boolean = false;
+  private pendingApplyChoice: ((choice: ThemeApplyChoice | null) => void) | null = null;
   @State themeCatalog: ThemeCatalogItem[] = [];
   @State themeCatalogLoaded: boolean = false;
   private customSchemeRefreshSerial: number = 0;
@@ -196,6 +213,9 @@ struct ThemeSettingsPage {
       if (this.showStartupTextDialog) {
         this.startupTextDialog()
       }
+      if (this.showThemeApplyDialog) {
+        this.themeApplyDialog()
+      }
     }
     .width('100%')
     .height('100%')
@@ -272,7 +292,8 @@ struct ThemeSettingsPage {
     }
   }
 
-  async selectTheme(themeId: string, customSchemeId: string = ''): Promise<void> {
+  async selectTheme(themeId: string, customSchemeId: string = '',
+    askApplyOptions: boolean = true): Promise<void> {
     if (this.applyingThemeId) {
       return;
     }
@@ -303,24 +324,20 @@ struct ThemeSettingsPage {
     this.applyingThemeId = customSchemeId || themeId;
     try {
       const theme = customScheme ? this.customTheme(customScheme) : BuiltinThemeRegistry.findById(themeId);
-      let enableThemeBookCover = false;
-      if (this.themeHasBookCover(theme)) {
-        const coverDialog = await promptAction.showDialog({
-          title: `启用「${theme.name}」主题封面？`,
-          message: '启用后，书架会忽略图书原封面，改用这套主题封面与配套书籍边框。之后可在本页随时关闭。',
-          buttons: [
-            { text: '保留原封面', color: this.subTextColor() },
-            { text: '启用主题封面', color: this.accentColor() }
-          ]
-        });
-        enableThemeBookCover = coverDialog.index === 1;
-      }
       const previous: AppThemeSettings = await AppThemeSettingsStore.load(getContext(this));
+      // Applying a theme used to always overwrite the reader layout. Ask first so the
+      // user decides whether the theme's typography and cover come along.
+      const choice: ThemeApplyChoice | null = askApplyOptions ?
+        await this.promptThemeApplyOptions(theme, previous) : ThemeApplyChoice.preserve();
+      if (!choice) {
+        return;
+      }
       let settings: AppThemeSettings = AppThemeSettingsStore.activateTheme(themeId, previous);
       if (customScheme) {
         settings = AppThemeSettingsStore.applyCustomSnapshot(settings, customScheme.settings);
       }
-      settings.themeBookCoverEnabled = enableThemeBookCover;
+      settings.themeBookCoverEnabled = choice.applyCover;
+      settings.themeApplyLayoutEnabled = choice.applyLayout;
       AppThemeSettingsStore.applyToStorage(settings);
       await AppThemeSettingsStore.save(getContext(this), settings);
       if (customScheme) {
@@ -332,10 +349,12 @@ struct ThemeSettingsPage {
       this.themeBookCoverEnabled = settings.themeBookCoverEnabled;
       const readerSettings = await ReaderSettingsStore.switchThemeProfile(
         getContext(this), previous.themeId, settings.themeId);
-      const layout = theme.readerLayout;
-      await ReaderSettingsStore.saveLayoutSettings(getContext(this), layout.fontSize, layout.lineHeight,
-        layout.paragraphSpacing, layout.marginLeft, layout.marginRight, layout.marginTop, layout.marginBottom,
-        layout.letterSpacing, readerSettings.textAlign);
+      if (choice.applyLayout) {
+        const layout = theme.readerLayout;
+        await ReaderSettingsStore.saveLayoutSettings(getContext(this), layout.fontSize, layout.lineHeight,
+          layout.paragraphSpacing, layout.marginLeft, layout.marginRight, layout.marginTop, layout.marginBottom,
+          layout.letterSpacing, readerSettings.textAlign);
+      }
       await ReaderSettingsStore.saveThemeSettings(getContext(this), ReaderThemeHelper.APP_THEME_INDEX,
         ReaderThemeHelper.APP_THEME_INDEX, readerSettings.lightCustomThemeBackgroundColor,
         readerSettings.lightCustomThemeTextColor, readerSettings.darkCustomThemeBackgroundColor,
@@ -346,13 +365,57 @@ struct ThemeSettingsPage {
       await this.applyThemeFontWhenAvailable();
       this.refreshRecentReadCard();
       this.syncBars();
-      promptAction.showToast({ message: `已应用「${theme.name}」主题` });
+      promptAction.showToast({
+        message: choice.applyLayout ? `已应用「${theme.name}」主题` :
+          `已应用「${theme.name}」主题，排版保持不变`
+      });
     } catch (e) {
       console.error('应用主题失败:', e);
       promptAction.showToast({ message: '应用主题失败，请稍后重试' });
     } finally {
       this.applyingThemeId = '';
     }
+  }
+
+  promptThemeApplyOptions(theme: ThemePack, previous: AppThemeSettings): Promise<ThemeApplyChoice | null> {
+    this.applyDialogThemeName = theme.name;
+    this.applyDialogLayoutHint = `字号 ${theme.readerLayout.fontSize} · 行距 ${theme.readerLayout.lineHeight} · ` +
+      `段距 ${theme.readerLayout.paragraphSpacing} · 边距 ${theme.readerLayout.marginLeft}/${theme.readerLayout.marginRight}`;
+    this.applyDialogHasCover = this.themeHasBookCover(theme);
+    this.applyDialogApplyLayout = previous.themeApplyLayoutEnabled;
+    this.applyDialogApplyCover = this.applyDialogHasCover && previous.themeBookCoverEnabled;
+    this.showThemeApplyDialog = true;
+    return new Promise<ThemeApplyChoice | null>(
+      (resolve: (choice: ThemeApplyChoice | null) => void) => {
+        this.pendingApplyChoice = resolve;
+      });
+  }
+
+  confirmThemeApply(): void {
+    const choice = new ThemeApplyChoice();
+    choice.applyLayout = this.applyDialogApplyLayout;
+    choice.applyCover = this.applyDialogHasCover && this.applyDialogApplyCover;
+    const resolve = this.pendingApplyChoice;
+    this.closeThemeApplyDialog();
+    if (resolve) {
+      resolve(choice);
+    }
+  }
+
+  cancelThemeApply(): void {
+    const resolve = this.pendingApplyChoice;
+    this.closeThemeApplyDialog();
+    if (resolve) {
+      resolve(null);
+    }
+  }
+
+  closeThemeApplyDialog(): void {
+    this.showThemeApplyDialog = false;
+    this.pendingApplyChoice = null;
+    this.applyDialogThemeName = '';
+    this.applyDialogLayoutHint = '';
+    this.applyDialogHasCover = false;
   }
 
   async ensureThemeAccess(themeId: string): Promise<boolean> {
@@ -888,6 +951,95 @@ struct ThemeSettingsPage {
     .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
   }
 
+  @Builder
+  themeApplyDialog() {
+    Column() {
+      Column({ space: 14 }) {
+        Text(`应用「${this.applyDialogThemeName}」`)
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+        Text('选择要随主题一起应用的内容，关闭的选项会保留当前设置。')
+          .fontSize(13)
+          .fontColor(this.subTextColor())
+          .width('100%')
+        this.themeApplyToggleRow('layout')
+        if (this.applyDialogHasCover) {
+          this.themeApplyToggleRow('cover')
+        }
+        Row({ space: 12 }) {
+          Button('取消', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor(this.cardColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => this.cancelThemeApply())
+          Button('应用', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(10)
+            .backgroundColor(this.accentColor())
+            .fontColor('#FFFFFF')
+            .onClick(() => this.confirmThemeApply())
+        }
+        .width('100%')
+      }
+      .width('calc(100% - 48vp)')
+      .constraintSize({ maxWidth: 360 })
+      .padding(20)
+      .borderRadius(ThemeRuntime.glassCornerRadius(18, 'panel'))
+      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
+      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+      .border({
+        width: ThemeRuntime.glassBorderWidth('panel'),
+        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel')
+      })
+      .shadow({
+        radius: ThemeRuntime.glassShadowRadius('panel'),
+        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'),
+        offsetX: ThemeRuntime.glassShadowOffsetX('panel'),
+        offsetY: ThemeRuntime.glassShadowOffsetY('panel')
+      })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor(this.appDarkMode ? '#76000000' : '#52000000')
+    .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
+  }
+
+  @Builder
+  themeApplyToggleRow(category: string) {
+    Row({ space: 12 }) {
+      Column({ space: 3 }) {
+        Text(category === 'layout' ? '应用主题排版' : '应用主题封面')
+          .fontSize(15)
+          .fontColor(this.primaryTextColor())
+        Text(category === 'layout' ? this.applyDialogLayoutHint : '书架使用主题封面与配套书籍边框')
+          .fontSize(11)
+          .fontColor(this.subTextColor())
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Toggle({ type: ToggleType.Switch,
+        isOn: category === 'layout' ? this.applyDialogApplyLayout : this.applyDialogApplyCover })
+        .selectedColor(this.accentColor())
+        .onChange((enabled: boolean) => {
+          if (category === 'layout') {
+            this.applyDialogApplyLayout = enabled;
+          } else {
+            this.applyDialogApplyCover = enabled;
+          }
+        })
+    }
+    .width('100%')
+    .padding({ top: 2, bottom: 2 })
+    .alignItems(VerticalAlign.Center)
+  }
+
   openStartupTextDialog(themeId: string): void {
     if (themeId === ThemeIds.PLAIN_DEFAULT || themeId === ThemeIds.CUSTOM) return;
     this.startupTextThemeId = themeId;
@@ -1014,7 +1166,7 @@ struct ThemeSettingsPage {
     }
     try {
       if (this.appThemeId === ThemeIds.CUSTOM && this.activeCustomSchemeId === schemeId) {
-        await this.selectTheme(ThemeIds.PLAIN_DEFAULT);
+        await this.selectTheme(ThemeIds.PLAIN_DEFAULT, '', false);
         if (this.appThemeId === ThemeIds.CUSTOM) {
           return;
         }

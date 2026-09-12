@@ -1,6 +1,6 @@
 import { ThemeRuntime } from '../theme/ThemeRuntime';
-import { ReaderTtsFloatingSession } from '../utils/ReaderTtsFloatingSession';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
+import { ReaderTtsFloatingSession } from '../utils/ReaderTtsFloatingSession';
 
 @Component
 export struct ReaderTtsPlayerPanel {
@@ -410,8 +410,15 @@ export struct ReaderTtsPlayerPanel {
         .optionFontColor(this.primaryTextColor)
         .selectedOptionFontColor(this.accentColor)
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.darkMode))
+        // This menu floats over the page image, so it needs a genuinely frosted
+        // surface: the opaque card color used by the settings dropdowns hides
+        // the API 26 menu material completely, and the translucent tint alone
+        // reads as see-through. Keep the translucent dropdown tint used by every
+        // other menu (so menuSystemMaterial can frost the page behind it) and add
+        // an explicit component blur so the frost also works on devices where the
+        // immersive menu material is unavailable.
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.darkMode, ''))
-        .menuBackgroundBlurStyle(BlurStyle.NONE)
+        .menuBackgroundBlurStyle(ThemeRuntime.glassEnabled() ? BlurStyle.COMPONENT_THICK : BlurStyle.NONE)
         .menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial())
         .onSelect((index: number) => ReaderTtsFloatingSession.selectTtsVoice(index))
     }

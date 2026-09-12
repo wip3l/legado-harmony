@@ -217,28 +217,12 @@ struct SettingsPage {
             this.switchItem('快速添加书签', '正文下拉时快速添加或删除当前页书签', this.readerQuickBookmarkEnabled, (value: boolean) => {
               this.setReaderQuickBookmarkEnabled(value);
             })
-            this.switchItem('眼动翻页（beta）', '注视屏幕上/下边缘并停留翻页；摄像头图像仅在本机处理',
+            this.switchItem('眼动翻页（beta）', '视线到达正文底部后提示向上看，向上看即翻到下一页；摄像头图像仅在本机处理',
               this.readerEyeTurnEnabled, (value: boolean) => {
                 this.setReaderEyeTurnEnabled(value);
               })
             if (this.readerEyeTurnEnabled) {
               this.eyeTurnCalibrationStatusItem()
-              this.switchItem('眼动向前翻页', '注视上侧边缘后翻到上一页', this.readerEyeTurnPreviousEnabled,
-                (value: boolean) => {
-                  this.setReaderEyeTurnDirectionEnabled(true, value);
-                })
-              this.switchItem('眼动向后翻页', '注视下侧边缘后翻到下一页', this.readerEyeTurnNextEnabled,
-                (value: boolean) => {
-                  this.setReaderEyeTurnDirectionEnabled(false, value);
-                })
-              this.selectItem('注视上侧停留', '达到上侧边缘后翻到上一页', this.readerEyeDwellOptions(),
-                this.readerEyeDwellSelectedIndex(this.readerEyeTurnPreviousDwellMs), (index: number) => {
-                  this.setReaderEyeDwell(true, index);
-                }, 'settings_eye_previous_dwell_select')
-              this.selectItem('注视下侧停留', '达到下侧边缘后翻到下一页', this.readerEyeDwellOptions(),
-                this.readerEyeDwellSelectedIndex(this.readerEyeTurnNextDwellMs), (index: number) => {
-                  this.setReaderEyeDwell(false, index);
-                }, 'settings_eye_next_dwell_select')
             }
           }
           .width('calc(100% - 24vp)')
@@ -991,7 +975,10 @@ struct SettingsPage {
       { value: '淡入' },
       { value: '叠页' }
     ];
-    if (this.readerPageTurnMode === 2) options.push({ value: '仿真' });
+    if (this.readerPageTurnMode === 2) {
+      options.push({ value: '仿真' });
+      options.push({ value: '3D仿真' });
+    }
     return options;
   }
 
@@ -1002,7 +989,10 @@ struct SettingsPage {
       ReaderSettingsStore.PAGE_TURN_ANIMATION_FADE,
       ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK
     ];
-    if (this.readerPageTurnMode === 2) types.push(ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION);
+    if (this.readerPageTurnMode === 2) {
+      types.push(ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION);
+      types.push(ReaderSettingsStore.PAGE_TURN_ANIMATION_3D);
+    }
     return types;
   }
 
@@ -1410,8 +1400,9 @@ struct SettingsPage {
 
   setReaderPageTurnMode(mode: number): void {
     this.readerPageTurnMode = mode;
-    if (mode === 0 && Math.round(this.readerPageTurnAnimationType) ===
-      ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION) {
+    if (mode === 0 && (Math.round(this.readerPageTurnAnimationType) ===
+      ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION ||
+      Math.round(this.readerPageTurnAnimationType) === ReaderSettingsStore.PAGE_TURN_ANIMATION_3D)) {
       this.readerPageTurnAnimationType = ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK;
       ReaderSettingsStore.savePageTurnAnimationType(getContext(this), this.readerPageTurnAnimationType)
         .catch((e: Error) => {
@@ -1472,14 +1463,16 @@ struct SettingsPage {
 
   normalizePageTurnAnimationType(type: number): number {
     const value = Math.round(type);
-    if (this.readerPageTurnMode === 0 && value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION) {
+    if (this.readerPageTurnMode === 0 && (value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION ||
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_3D)) {
       return ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK;
     }
     if (value === ReaderSettingsStore.PAGE_TURN_ANIMATION_NONE ||
       value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE ||
       value === ReaderSettingsStore.PAGE_TURN_ANIMATION_FADE ||
       value === ReaderSettingsStore.PAGE_TURN_ANIMATION_STACK ||
-      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION) {
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_SIMULATION ||
+      value === ReaderSettingsStore.PAGE_TURN_ANIMATION_3D) {
       return value;
     }
     return ReaderSettingsStore.PAGE_TURN_ANIMATION_SLIDE;

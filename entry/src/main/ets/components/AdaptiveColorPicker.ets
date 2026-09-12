@@ -1,4 +1,3 @@
-import deviceInfo from '@ohos.deviceInfo';
 import { HdsColorPicker, HdsColorPickerOptions, HdsColorPickerTabType } from '@kit.UIDesignKit';
 import { ColorCodePicker } from './ColorCodePicker';
 
@@ -22,9 +21,14 @@ export struct AdaptiveColorPicker {
   onColorModeChange: (mode: string) => void = (_mode: string): void => {};
 
   private supportsHdsPicker(): boolean {
-    // The legacy picker also provides the custom/accent/off mode selector.
-    // Keep that richer mode UI intact when a caller uses colorMode.
-    return deviceInfo.sdkApiVersion >= 26 && this.colorMode === '' && !this.directSelection;
+    // HdsColorPicker is embedded as a transparent overlay here. On affected
+    // HarmonyOS builds that overlay never receives the tap that opens the
+    // palette, so color settings look inert. Keep using the proven
+    // sheet-based ColorCodePicker, which also preserves the richer mode UI
+    // that colorMode/directSelection callers rely on.
+    // TODO(hds): re-enable once the picker has an explicit, reliable trigger;
+    // restore the deviceInfo API gate that used to guard this.
+    return false;
   }
 
   private hdsOptions(): HdsColorPickerOptions {

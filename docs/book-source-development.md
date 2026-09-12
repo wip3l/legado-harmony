@@ -1,14 +1,14 @@
 # Legado Harmony 书源开发指南
 
-> 适用版本：`3.9.905`（2026-09-07）。本文以当前工作区代码为准；规则能力、字段消费方式和限制可能随版本继续调整。
+> 适用版本：`3.9.906`（2026-09-12）。本文以当前工作区代码为准；规则能力、字段消费方式和限制可能随版本继续调整。
 
 本文面向为开源轻页编写、迁移和调试书源的开发者，描述项目当前代码中**已经实现并实际调用**的规则能力。
 
 | 项目 | 信息 |
 | --- | --- |
 | 适用项目 | `legado-harmony` |
-| 适用版本 | `3.9.905`（以 `AppScope/app.json5` 为准） |
-| 最后核对 | 2026-09-07 |
+| 适用版本 | `3.9.906`（以 `AppScope/app.json5` 为准） |
+| 最后核对 | 2026-09-12 |
 | 文档性质 | 当前实现参考，不是 Android「阅读」全部规则的等价清单 |
 
 > [!IMPORTANT]
@@ -735,7 +735,7 @@ QuickJS 不能直接替代 JSONPath/CSS/XPath：选择器需要解析 HTML/JSON 
 - Base64、Hex、MD5、SHA-1、SHA-256；
 - SHA-512、Base64 URL、HTML 实体编解码；
 - AES、DES/3DES 的常见 Base64 加解密；
-- `java.getString`、`java.getStringList` 读取当前 JSON；
+- `java.getString`、`java.getStringList` 读取当前内容：`$.` 开头的 JSON 路径直接取值，其他规则由原生规则引擎按完整规则语法求值；
 - `java.timeFormat`；
 - `java.getCookie`、`cookie.getCookie/setCookie/removeCookie`；
 - `java.randomUUID()`、`java.androidId()`；
@@ -747,6 +747,8 @@ QuickJS 不能直接替代 JSONPath/CSS/XPath：选择器需要解析 HTML/JSON 
 - 使用 `MessageDigest` 或 `Cipher/SecretKeySpec/IvParameterSpec` 封装的常见摘要、AES、DES/3DES 函数。
 
 ArkWeb 提供真实 ECMAScript 语义，但**不等于完整 Android、Rhino、Node.js 或无限制浏览器环境**。阶段脚本的网络必须经过 `java.ajax` 等受控桥接；`fetch`、`XMLHttpRequest`、`WebSocket` 会被判定为未托管网络。任意 Java 导入、文件、进程、反射、系统组件和第三方原生库不会自动可用。DOM 主要用于登录面板生成的页面；普通搜索/目录/正文规则不应假定目标网页已在可操作 DOM 中。
+
+`java.getString`/`java.getStringList` 支持完整规则语法（CSS/`class.`/`id.`/`tag.` 选择器、`@text`/`@html`/`@@`、`##` 替换链），由原生规则引擎按“收集规则 → 求值 → 重放脚本”的同一套主机动作机制执行，结果按规则缓存；`$.` 开头的 JSON 路径仍直接取值，不需要重放。若阶段脚本最终没有返回任何内容，应用不会再静默地把它替换成规则输入内容（例如把正文规则变成章节页本身），而是记录警告，并在正文阶段把服务端返回的错误信息（如“仅支持网页端访问”“Token验证失败”）作为正文错误上报。
 
 能力路由会分析 `java`、`source`、`cache` 和 `cookie` 方法，并在登录动作失败时提示缺少的桥接方法。复杂源仍应逐阶段实机验证；书源中的私有函数、接口和凭据始终属于该书源配置，不会成为应用内置 API。
 
@@ -1212,8 +1214,9 @@ https://img.example/page.jpg,{"headers":{"Referer":"https://example.com/"}}
 | 发现页显示 `renderCount('...')万字` | 普通 HTTP 不执行页面内脚本；从局部 `@html` 提取数字并用 `<js>` 换算，或在确实依赖渲染时使用 `webView`/`webJs`。同时确认它来自 `wordCount`，而不是宽泛的 `author` 多命中。 |
 | `wordCount`、`lastChapter` 或 `updateTime` 已解析但卡片没有显示 | 确认使用的是当前版本的搜索/发现组件，并检查字段规则是否返回空字符串；卡片会以元数据行显示字数、最新章节和更新时间。不要误把多个同 class 元素都塞进 `author`，除非明确接受元数据污染。 |
 | 发现有封面、详情后封面仍错误 | 详情规则不会覆盖非空列表封面；先修正 `ruleSearch`/`ruleExplore.coverUrl`，或让不可靠的列表封面返回空值。 |
-| 正文返回整页文字 | `content` 选择器太宽；先缩到正文容器，再用 `replaceRegex`。 |
-| 正文是空字符串 | 请求失败、被验证拦截、提取规则为空，或提取结果被净化正则全部删除。 |
+| 正文返回整页文字 | `content` 选择器太宽；先缩到正文容器，再用 `replaceRegex`。若脚本最终没有返回内容，应用会改为上报正文错误而不是返回输入页。 |
+| 正文是空字符串 | 请求失败、被验证拦截、提取规则为空，或提取结果被净化正则全部删除。若错误提示是服务端原文（如“仅支持网页端访问”“Token验证失败”），说明阶段脚本的 `java.ajax` 已被调用但接口拒绝了本次请求，应检查该接口要求的 UA、`Referer`、`X-Requested-With` 等请求头是否由书源写全。 |
+| `java.getString`/`getStringList` 一直返回空 | 确认规则语法正确（选择器 + `@text`/`@html`，`@@` 取全部）；`$.` 开头的 JSON 路径会直接取值。规则由原生引擎在阶段重放中求值，规则过多或依赖 DOM 渲染的站点仍需检查。 |
 | `text.下一页@href` 没有继续翻页 | 检查链接的“下一页”是否为 `<a>` 自身直接文本；若文字包在子元素中，改用稳定 CSS 或 `:contains()`。还要确认下一页不是 JavaScript 点击事件。 |
 | 有下一页规则但正文仍不完整 | `nextContentUrl` 只能跟随真实分页链接；若服务端 HTML 已截断而完整正文位于页面脚本状态/渲染 DOM，改用显式 `webView: true` / `webJs` 返回完整内容。 |
 | 正文显示 `JSON.parse(undefined)` | 检查脚本变量是否由 `data:` 负载、`java.ajax` 或上一条规则提供；不要假定不存在的字段会自动变成 `{}`。 |

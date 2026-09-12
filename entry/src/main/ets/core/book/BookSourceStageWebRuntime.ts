@@ -5,6 +5,8 @@ import { AppDatabase } from '../../model/data/AppDatabase';
 import { CookieStore } from '../http/CookieStore';
 import { HttpClient, HttpResponse } from '../http/HttpClient';
 import { AnalyzeUrl } from '../rule/AnalyzeUrl';
+import { AnalyzeRule } from '../rule/AnalyzeRule';
+import { RuleContext } from '../rule/RuleContext';
 import { SourceRuntimeStage } from './BookSourceRuntimeRouter';
 import { BookSourceLoginCrypto } from './BookSourceLoginCrypto';
 import { BookSourceExecutionJournal, BookSourceHostActionKind } from './BookSourceExecutionJournal';
@@ -76,6 +78,8 @@ export class StageWebRuntimeResult {
 
 class StageWebRuntimeStep extends StageWebRuntimeResult {
   pendingAjax: string = '';
+  pendingStringRules: string = '[]';
+  inputFallbackUsed: boolean = false;
   pendingHeaders: string = '{}';
   pendingCookie: string = '';
   pendingCrypto: string = '';
@@ -288,6 +292,11 @@ export class BookSourceStageWebRuntime {
     const sourceKey = request.source.bookSourceUrl || request.source.bookSourceName || 'source';
     const journal = new BookSourceExecutionJournal();
     const responses: Record<string, string> = journal.responses;
+    // java.getString()/getStringList() accept the full Legado rule syntax (CSS, @text/@html,
+    // ## 替换链), which only the native rule engine implements. The ArkWeb bridge records every
+    // distinct rule here and replays the script once the values are available, exactly like the
+    // java.ajax/cookie/crypto host actions.
+    const stringResults: Record<string, string> = {};
     const cookies: Record<string, string> = {};
     let cacheState = this.caches[sourceKey] || {};
     const fixedNow = Date.now();
@@ -297,7 +306,8 @@ export class BookSourceStageWebRuntime {
     let lastResponseBody = '';
     for (let stepIndex = 0; stepIndex < 20; stepIndex++) {
       this.ensureNotCancelled(request);
-      const script = this.buildScript(request, responses, cookies, cacheState, fixedNow, randomSeed);
+      const script = this.buildScript(request, responses, stringResults, cookies, cacheState,
+        fixedNow, randomSeed);
       const raw = await this.runJavaScript(script);
       this.ensureNotCancelled(request);
       const step = this.parseStep(raw);
@@ -371,6 +381,12 @@ export class BookSourceStageWebRuntime {
         // does not consistently discard U+FEFF. Normalize it once at the native bridge boundary.
         const responseBody = (response.body || '').replace(/^\uFEFF/, '');
         lastResponseBody = responseBody;
+        // A content rule that hides its failures behind a fallback selector would otherwise leave no
+        // trace of *why* nothing was extracted. Record the server's own message in the debug log.
+        if (request.debugContext && request.stage === SourceRuntimeStage.CONTENT) {
+          const apiMessage = this.responseMessage(responseBody);
+          if (apiMessage) request.debugContext.addLog('warn', `接口返回：${apiMessage}`);
+        }
         // ArkTS/ArkWeb exchange response bodies as UTF-16 strings. Count their in-memory
         // footprint instead of only character count so the cumulative guard remains useful.
         totalResponseBytes += responseBody.length * 2;
@@ -385,7 +401,22 @@ export class BookSourceStageWebRuntime {
         this.captureResponseCookies(cookies, step.pendingAjax, response.url || '', response.headers);
         continue;
       }
+      if (step.pendingStringRules && step.pendingStringRules !== '[]') {
+        this.resolvePendingStringRules(request, step.pendingStringRules, stringResults);
+        continue;
+      }
       if (step.errorMessage) throw new Error(this.smallApiError(lastResponseBody) || step.errorMessage);
+      // The bridge evaluates `text(evaluated) || text(globalThis.result)`, so an empty script
+      // result silently becomes the rule's *input* content. For a content rule that is the chapter
+      // page itself: the reader then shows the page navigation instead of the article, and a failed
+      // java.ajax() looks like "the script fetched the wrong page". Surface the real reason instead
+      // of returning the input page, and always leave a warning for the other stages.
+      if (step.inputFallbackUsed) {
+        const fallbackReason = this.responseMessage(lastResponseBody) ||
+          '脚本未返回内容，已放弃把输入内容当作规则结果';
+        if (request.debugContext) request.debugContext.addLog('warn', fallbackReason);
+        if (request.stage === SourceRuntimeStage.CONTENT) throw new Error(fallbackReason);
+      }
       // A pass that requests async work is speculative: java.ajax()/cookie/crypto return a
       // placeholder and the complete script is evaluated again after the result arrives. Commit
       // script cache/runtime state only after a pass finishes, otherwise a placeholder can poison
@@ -425,6 +456,88 @@ export class BookSourceStageWebRuntime {
     } catch (_) {
       return '';
     }
+  }
+
+  /**
+   * Evaluate `java.getString()` / `java.getStringList()` rules requested by the ArkWeb bridge.
+   * The bridge collects the distinct rules of a pass and returns a placeholder; the native rule
+   * engine then produces the values and the script is replayed. Results are keyed by shape+rule so
+   * the same rule/text and rule/list pair resolve once per stage execution.
+   */
+  private resolvePendingStringRules(request: StageWebRuntimeRequest, raw: string,
+    stringResults: Record<string, string>): void {
+    let items: Object[] = [];
+    try {
+      const parsed = JSON.parse(raw || '[]') as Object;
+      if (Array.isArray(parsed)) items = parsed as Object[];
+    } catch (_) {
+      items = [];
+    }
+    if (items.length === 0) return;
+    // The bridge evaluates java.getString() against S.contextContent || S.content; mirror that
+    // exactly so host-resolved rules see the same document as JSON path lookups.
+    const content = request.contextContent && request.contextContent !== request.content ?
+      request.contextContent : request.content;
+    const analyzer = new AnalyzeRule(content || '', request.baseUrl || '',
+      this.buildStringRuleContext(request));
+    for (const item of items) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      const record = item as Record<string, Object>;
+      const rule = String(record['rule'] || '');
+      if (!rule) continue;
+      const asList = String(record['list']) === 'true';
+      const key = `${asList ? 'L' : 'S'}:${rule}`;
+      if (Object.prototype.hasOwnProperty.call(stringResults, key)) continue;
+      try {
+        stringResults[key] = asList ? JSON.stringify(analyzer.getStringList(rule)) :
+          analyzer.getString(rule);
+      } catch (_) {
+        stringResults[key] = asList ? '[]' : '';
+      }
+    }
+  }
+
+  private buildStringRuleContext(request: StageWebRuntimeRequest): RuleContext {
+    const ctx = new RuleContext();
+    const source = request.source;
+    ctx.put('source.bookSourceUrl', source.bookSourceUrl || '');
+    ctx.put('bookSourceUrl', source.bookSourceUrl || '');
+    ctx.put('source.bookSourceName', source.bookSourceName || '');
+    ctx.put('bookSourceName', source.bookSourceName || '');
+    ctx.put('source.jsLib', source.jsLib || '');
+    ctx.put('jsLib', source.jsLib || '');
+    ctx.put('source.variable', source.variable || '');
+    if (request.book) {
+      ctx.put('book.name', request.book.name || '');
+      ctx.put('book.author', request.book.author || '');
+      ctx.put('book.bookUrl', request.book.bookUrl || '');
+    }
+    if (request.chapter) {
+      ctx.put('chapter.title', request.chapter.title || '');
+      ctx.put('chapter.url', request.chapter.url || '');
+      ctx.put('chapterTitle', request.chapter.title || '');
+    }
+    return ctx;
+  }
+
+  /**
+   * Extract a server-provided failure message. Unlike smallApiError() this must not assume the
+   * `code === 0` success convention: it is only called after the script already produced nothing,
+   * so any message field is a better diagnostic than a generic placeholder.
+   */
+  private responseMessage(body: string): string {
+    const value = (body || '').trim();
+    if (!value || value.length > 4096 || !value.startsWith('{')) return '';
+    try {
+      const root = JSON.parse(value) as Record<string, Object>;
+      if (!root || typeof root !== 'object' || Array.isArray(root)) return '';
+      for (const key of ['error', 'message', 'msg', 'detail']) {
+        const message = String(root[key] || '').trim();
+        if (message && !/^(?:ok|success|成功|获取成功)$/i.test(message)) return message;
+      }
+    } catch (_) {
+    }
+    return '';
   }
 
   private async fetch(request: StageWebRuntimeRequest, requestUrl: string,
@@ -644,7 +757,8 @@ export class BookSourceStageWebRuntime {
   }
 
   private buildScript(request: StageWebRuntimeRequest, responses: Record<string, string>,
-    cookies: Record<string, string>, cacheState: Record<string, string>, fixedNow: number, randomSeed: number): string {
+    stringResults: Record<string, string>, cookies: Record<string, string>,
+    cacheState: Record<string, string>, fixedNow: number, randomSeed: number): string {
     const bookVariables = this.parseRecord(request.book ? request.book.variable : '');
     const loginInfo = this.parseLoginInfo(request.source.loginInfo || '');
     const javaState = this.parseRuntimeJavaState(request.source.loginInfo || '');
@@ -681,6 +795,7 @@ export class BookSourceStageWebRuntime {
           resourceUrl: request.chapter.resourceUrl, tag: request.chapter.tag
         } : {},
       responses: responses || {},
+      stringResults: stringResults || {},
       cookies: cookies || {},
       cache: cacheState || {},
       fixedNow: fixedNow,
@@ -698,7 +813,7 @@ export class BookSourceStageWebRuntime {
     const codeBase64 = this.encodeBase64(code);
     return `(function(){` +
       `function dec(v){try{return decodeURIComponent(escape(atob(v)));}catch(e){return atob(v);}}` +
-      `const S=JSON.parse(dec('${stateBase64}'));let pending='',pendingHeaders='{}',pendingCookie='',pendingCrypto='',url='',browserHtml='',toast='',error='',logs=[];` +
+      `const S=JSON.parse(dec('${stateBase64}'));let pending='',pendingHeaders='{}',pendingCookie='',pendingCrypto='',pendingStringRules=[],url='',browserHtml='',toast='',error='',logs=[];` +
       `const cookieOps=[];const sourceData=Object.assign({},S.sourceState||{});` +
       `const cacheData=Object.assign({},S.cache||{});` +
       `const infoMap=Object.create(null);` +
@@ -738,6 +853,13 @@ export class BookSourceStageWebRuntime {
       `let contextValue=S.contextContent||S.content;function pathValue(path){try{let value=typeof contextValue==='string'?JSON.parse(contextValue):contextValue;` +
       `const parts=String(path??'').replace(/^\\$\\.?/,'').split('.').filter(Boolean);for(const p of parts){` +
       `if(value===null||value===undefined)return '';value=value[p];}return value===null||value===undefined?'':value;}catch(e){return '';}}` +
+      `function ruleResultValue(k,list){k=String(k??'');const store=S.stringResults||{};const key=(list?'L:':'S:')+k;` +
+      `if(Object.prototype.hasOwnProperty.call(store,key)){const raw=store[key]??'';if(!list)return raw;` +
+      `try{const parsed=JSON.parse(raw);return Array.isArray(parsed)?parsed:(raw===''?[]:[raw]);}catch(e){return [];}}` +
+      `const direct=pathValue(k);if(direct!==''&&direct!==null&&direct!==undefined){` +
+      `if(list)return Array.isArray(direct)?direct:[direct];return typeof direct==='string'?direct:JSON.stringify(direct);}` +
+      `if(!pendingStringRules.some(function(r){return r.rule===k&&r.list===list;}))pendingStringRules.push({rule:k,list:list});` +
+      `return list?[]:'';}` +
       `const cookieData=Object.assign({},S.cookies||{});const cookie={getCookie:function(k){k=String(k??'');` +
       `if(Object.prototype.hasOwnProperty.call(cookieData,k))return cookieData[k]??'';if(!pendingCookie)pendingCookie=k;return '';},` +
       `getKey:function(k,n){const v=this.getCookie(k);const m=String(v).match(new RegExp('(?:^|;\\\\s*)'+n+'=([^;]*)'));return m?m[1]:'';},` +
@@ -840,7 +962,8 @@ export class BookSourceStageWebRuntime {
       `try{Object.defineProperty(v,'toString',{configurable:true,enumerable:false,value:function(){return raw;}});}catch(e){}` +
       `try{Object.defineProperty(v,Symbol.toPrimitive,{configurable:true,enumerable:false,value:function(){return raw;}});}catch(e){}` +
       `globalThis.result=v;}else{globalThis.result=v==null?'':v;}return true;},` +
-      `getString:function(k){const v=pathValue(k);return typeof v==='string'?v:JSON.stringify(v);},` +
+      `getString:function(k){return ruleResultValue(k,false);},` +
+      `getStringList:function(k){return ruleResultValue(k,true);},` +
       `timeFormat:function(v){try{return new NativeDate(Number(v)).toISOString().replace('T',' ').replace('Z','');}catch(e){return String(v??'');}},` +
       `timeFormatUTC:function(v){try{return new NativeDate(Number(v)).toISOString();}catch(e){return String(v??'');}},` +
       `startBrowser:function(u){url=String(u??'');return {body:function(){return '';}};},` +
@@ -870,8 +993,10 @@ export class BookSourceStageWebRuntime {
       `let evaluated;try{evaluated=(function(){return eval(dec('${codeBase64}'));}).call(globalThis);}` +
       `catch(e){error=String((e&&e.name?e.name+': ':'')+((e&&e.message)||e||'脚本执行失败')+(e&&e.stack?'\\n'+e.stack:''));}` +
       `function text(v){if(typeof v==='string')return v;if(v===undefined||v===null)return '';try{return JSON.stringify(v);}catch(e){return String(v);}}` +
-      `const value=text(evaluated)||text(globalThis.result);` +
-      `return encodeURIComponent(JSON.stringify({pendingAjax:pending,pendingHeaders:pendingHeaders,pendingCookie:pendingCookie,pendingCrypto:pendingCrypto,` +
+      `const evaluatedText=text(evaluated);const fallbackText=text(globalThis.result);` +
+      `const usedInputFallback=!evaluatedText&&!error&&fallbackText===String(S.content||'');` +
+      `const value=evaluatedText||fallbackText;` +
+      `return encodeURIComponent(JSON.stringify({pendingAjax:pending,pendingStringRules:JSON.stringify(pendingStringRules),inputFallbackUsed:usedInputFallback,pendingHeaders:pendingHeaders,pendingCookie:pendingCookie,pendingCrypto:pendingCrypto,` +
       `cookieOperations:JSON.stringify(cookieOps),variable:S.variable||'',loginHeader:S.sourceLoginHeader||'',` +
       `bookVariable:JSON.stringify(bookData),bookType:String(book.type??''),chapterImgUrl:String(chapter.imgUrl??''),` +
       `bookDurChapterIndex:String(book.durChapterIndex??''),bookImageStyle:String(book.imageStyle??''),` +
@@ -898,6 +1023,8 @@ export class BookSourceStageWebRuntime {
       const record = JSON.parse(decodeURIComponent(value)) as Record<string, Object>;
       const step = new StageWebRuntimeStep();
       step.pendingAjax = String(record['pendingAjax'] || '');
+      step.pendingStringRules = String(record['pendingStringRules'] || '[]');
+      step.inputFallbackUsed = String(record['inputFallbackUsed'] || '') === 'true';
       step.pendingHeaders = String(record['pendingHeaders'] || '{}');
       step.pendingCookie = String(record['pendingCookie'] || '');
       step.pendingCrypto = String(record['pendingCrypto'] || '');

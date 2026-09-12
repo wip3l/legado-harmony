@@ -15,6 +15,13 @@ export interface TtsChunk {
 
 export interface TtsReadOptions {
   onFinished?: () => void;
+  /**
+   * Fired instead of synthesis when the requested text has no audible content
+   * (punctuation or whitespace only). It runs before onFinished so the caller
+   * can drop its "chapter tail not confirmed" guard and treat the range as
+   * already read.
+   */
+  onSpeechless?: () => void;
   onError?: (message: string) => void;
   onChunkStart?: (chunk: TtsChunk, index: number) => void;
   onAudioStart?: () => void;
@@ -110,6 +117,7 @@ export class SystemTtsReader {
   private active: boolean = false;
   private paused: boolean = false;
   private onFinished?: () => void;
+  private onSpeechless?: () => void;
   private onError?: (message: string) => void;
   private onChunkStart?: (chunk: TtsChunk, index: number) => void;
   private onAudioStart?: () => void;
@@ -387,9 +395,6 @@ export class SystemTtsReader {
       console.info(`[TTS] reusing pcm output across chapter handoff: ${this.pcmPlayer.debugState()}`);
     }
     const cleanText = this.normalizeText(text);
-    if (!cleanText || !cleanText.trim()) {
-      throw new Error('朗读内容为空');
-    }
     if (this.active || this.currentRequestId || this.chunks.length > 0) {
       this.stop();
     } else {
@@ -399,6 +404,7 @@ export class SystemTtsReader {
     const generation = ++this.readGeneration;
     this.paused = false;
     this.onFinished = options?.onFinished;
+    this.onSpeechless = options?.onSpeechless;
     this.onError = options?.onError;
     this.onChunkStart = options?.onChunkStart;
     this.onAudioStart = options?.onAudioStart;
@@ -426,7 +432,23 @@ export class SystemTtsReader {
     // source offsets intact. This applies to all synthesis routes (system/custom/cloud).
     this.chunks = this.coalescePunctuationOnlyChunks(splitChunks, cleanText);
     if (this.chunks.length === 0) {
-      throw new Error('朗读内容为空');
+      // The whole requested range is decorative punctuation or whitespace (for
+      // example a final standalone ellipsis, or a tail page whose only content
+      // was stripped image markers). TTS engines cannot synthesize it and may
+      // emit no completion callback, so treat it as an already-completed read
+      // instead of reporting a synthesis failure or retrying the chapter tail.
+      // Reuse the normal completion path so request/focus state, the speak
+      // watchdog, the audio session and the cross-chapter PCM handoff are all
+      // unwound exactly as they are for a real finish.
+      //
+      // onSpeechless runs first: the caller needs it to clear its "chapter tail
+      // not confirmed" guard, which otherwise sees zero emitted chunks and
+      // retries the same speechless range until it gives up and stops.
+      if (this.onSpeechless) {
+        this.onSpeechless();
+      }
+      this.finish(true);
+      return;
     }
     this.chunkIndex = 0;
     this.active = true;

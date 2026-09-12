@@ -18,9 +18,31 @@ export class EyeTurnCalibration {
   eyeBottomDelta: number = 0;
   pitchWeight: number = 0;
   eyeWeight: number = 0;
+  // True when the calibration defines an absolute zero (the top fixation), so the
+  // runtime must NOT re-centre the score around the startup baseline.
+  absolute: boolean = false;
 
   static parse(raw: string): EyeTurnCalibration | null {
     const parts = (raw || '').split(',');
+    if (parts.length === 10 && parts[0] === 'v4') {
+      const calibration = new EyeTurnCalibration();
+      calibration.version = 4;
+      calibration.top = -1;
+      calibration.center = 0;
+      calibration.bottom = 1;
+      calibration.pitchCenter = Number(parts[1]);
+      calibration.pitchTopDelta = Number(parts[2]);
+      calibration.pitchBottomDelta = Number(parts[3]);
+      calibration.pitchScale = (calibration.pitchBottomDelta - calibration.pitchTopDelta) / 2;
+      calibration.eyeCenter = Number(parts[4]);
+      calibration.eyeTopDelta = Number(parts[5]);
+      calibration.eyeBottomDelta = Number(parts[6]);
+      calibration.eyeScale = (calibration.eyeBottomDelta - calibration.eyeTopDelta) / 2;
+      calibration.pitchWeight = Number(parts[7]);
+      calibration.eyeWeight = Number(parts[8]);
+      calibration.absolute = parts[9] === '1';
+      return calibration.isValid() ? calibration : null;
+    }
     if (parts.length === 9 && parts[0] === 'v3') {
       const calibration = new EyeTurnCalibration();
       calibration.version = 3;
@@ -67,6 +89,12 @@ export class EyeTurnCalibration {
 
   encode(): string {
     if (this.version >= 3) {
+      if (this.absolute) {
+        return `v4,${this.pitchCenter.toFixed(5)},${this.pitchTopDelta.toFixed(5)},` +
+          `${this.pitchBottomDelta.toFixed(5)},${this.eyeCenter.toFixed(5)},` +
+          `${this.eyeTopDelta.toFixed(5)},${this.eyeBottomDelta.toFixed(5)},` +
+          `${this.pitchWeight.toFixed(4)},${this.eyeWeight.toFixed(4)},1`;
+      }
       return `v3,${this.pitchCenter.toFixed(5)},${this.pitchTopDelta.toFixed(5)},` +
         `${this.pitchBottomDelta.toFixed(5)},${this.eyeCenter.toFixed(5)},` +
         `${this.eyeTopDelta.toFixed(5)},${this.eyeBottomDelta.toFixed(5)},` +
@@ -118,30 +146,32 @@ export class EyeTurnCalibration {
 
   scoreForSample(sample: EyeTurnSample): number {
     if (this.version < 2) return sample.rawScore;
-    let weightedScore = 0;
-    let weight = 0;
-    const pitchTopDelta = this.version >= 3 ? this.pitchTopDelta : -this.pitchScale;
-    const pitchBottomDelta = this.version >= 3 ? this.pitchBottomDelta : this.pitchScale;
-    if (this.pitchWeight > 0 && Math.abs(pitchTopDelta) >= 0.08 && Math.abs(pitchBottomDelta) >= 0.08) {
-      // Very small regression slopes make sub-degree detector noise look like a full-screen gaze movement and
-      // also make returning to the exact centre practically impossible. Preserve direction but enforce a useful
-      // physical pitch range for the pose-only fallback.
-      const effectivePitchTopDelta = (pitchTopDelta < 0 ? -1 : 1) * Math.max(4, Math.abs(pitchTopDelta));
-      const effectivePitchBottomDelta = (pitchBottomDelta < 0 ? -1 : 1) *
-        Math.max(4, Math.abs(pitchBottomDelta));
-      weightedScore += this.normalizeAsymmetric(sample.pitch - this.pitchCenter,
-        effectivePitchTopDelta, effectivePitchBottomDelta) * this.pitchWeight;
-      weight += this.pitchWeight;
-    }
+    // The iris channel is the primary signal: it is far steadier than the public face
+    // API's head-pose pitch, which on some devices jumps tens of degrees per frame.
+    // Pitch is only a coarse fallback for frames where the eye band was unavailable.
+    const irisScore = this.irisScoreForSample(sample);
+    if (Number.isFinite(irisScore)) return irisScore;
+    return this.clampNormalized(sample.pitch / EyeTurnController.PITCH_FALLBACK_RANGE_DEG);
+  }
+
+  private irisScoreForSample(sample: EyeTurnSample): number {
+    if (!sample.eyeAvailable) return Number.NaN;
     const eyeTopDelta = this.version >= 3 ? this.eyeTopDelta : -this.eyeScale;
     const eyeBottomDelta = this.version >= 3 ? this.eyeBottomDelta : this.eyeScale;
-    if (sample.eyeAvailable && this.eyeWeight > 0 && Math.abs(eyeTopDelta) >= 0.0015 &&
-      Math.abs(eyeBottomDelta) >= 0.0015) {
-      weightedScore += this.normalizeAsymmetric(sample.eyeRatio - this.eyeCenter,
-        eyeTopDelta, eyeBottomDelta) * this.eyeWeight;
-      weight += this.eyeWeight;
-    }
-    return weight > 0 ? weightedScore / weight : 0;
+    if (Math.abs(eyeTopDelta) < 0.0015 && Math.abs(eyeBottomDelta) < 0.0015) return Number.NaN;
+    // A calibration can fit a far too small iris span (for example +-0.02 when the real
+    // ratio moves by 0.3). Substitute a plausible physical magnitude but keep the fitted
+    // direction, so the channel neither saturates nor gets its polarity rewritten.
+    const topDelta = Math.abs(eyeTopDelta) < EyeTurnController.EYE_MIN_TRUSTED_DELTA ?
+      (eyeTopDelta < 0 ? -EyeTurnController.EYE_FALLBACK_RANGE : EyeTurnController.EYE_FALLBACK_RANGE) :
+      eyeTopDelta;
+    const bottomDelta = Math.abs(eyeBottomDelta) < EyeTurnController.EYE_MIN_TRUSTED_DELTA ?
+      (eyeBottomDelta < 0 ? -EyeTurnController.EYE_FALLBACK_RANGE : EyeTurnController.EYE_FALLBACK_RANGE) :
+      eyeBottomDelta;
+    // Direction is taken from the calibration as fitted on this device. Both earlier attempts
+    // to "correct" it (first forcing the bottom delta positive, then negative) made the
+    // gesture point the wrong way, so the fitted sign is trusted here.
+    return this.normalizeAsymmetric(sample.eyeRatio - this.eyeCenter, topDelta, bottomDelta);
   }
 
   private clampNormalized(value: number): number {
@@ -186,30 +216,39 @@ export type EyeTurnAvailabilityCallback = () => boolean;
  * maps that device/camera-specific score to top, centre and bottom zones. No camera frame leaves the device.
  */
 export class EyeTurnController {
-  private static readonly FRAME_INTERVAL_MS: number = 170;
-  private static readonly TURN_COOLDOWN_MS: number = 900;
-  private static readonly POST_TURN_SAFETY_MS: number = 2200;
-  private static readonly REARM_CENTER_DWELL_MS: number = 650;
+  private static readonly FRAME_INTERVAL_MS: number = 120;
+  private static readonly TURN_COOLDOWN_MS: number = 700;
+  // How long an ignored prompt stays before it is dropped (the reader must visit the
+  // bottom again to raise it).
+  private static readonly PROMPT_GIVEUP_MS: number = 2500;
   // Looking down has a smaller comfortable range than looking up on a handheld screen. Keep separate thresholds
   // so the next-page gesture does not require an exaggerated head tilt when the public face API has to fall back
   // to pose tracking. Dwell, centre re-arming and cooldown still guard against accidental turns while reading.
-  private static readonly PREVIOUS_ZONE_ENTRY_THRESHOLD: number = 0.34;
-  private static readonly NEXT_ZONE_ENTRY_THRESHOLD: number = 0.24;
-  private static readonly ZONE_KEEP_THRESHOLD: number = 0.18;
-  private static readonly CENTER_THRESHOLD: number = 0.14;
-  private static readonly REARM_CENTER_THRESHOLD: number = 0.34;
-  private static readonly STRONG_EDGE_THRESHOLD: number = 0.72;
+  private static readonly NEXT_ZONE_ENTRY_THRESHOLD: number = 0.35;
+  private static readonly ZONE_KEEP_THRESHOLD: number = 0.25;
   private static readonly MIN_FACE_PROBABILITY: number = 0.42;
   private static readonly CALIBRATION_MIN_FACE_PROBABILITY: number = 0.30;
-  private static readonly MIN_STABLE_EDGE_MS: number = 260;
-  private static readonly MIN_STABLE_EDGE_SAMPLES: number = 2;
   private static readonly MAX_TRANSIENT_MISSING_FRAMES: number = 2;
-  private static readonly BASELINE_SAMPLE_COUNT: number = 7;
-  private static readonly SCORE_MEDIAN_WINDOW: number = 5;
+  private static readonly BASELINE_SAMPLE_COUNT: number = 15;
+  private static readonly SCORE_MEDIAN_WINDOW: number = 3;
   private static readonly CENTER_FRAME_INTERVAL_MS: number = 280;
   private static readonly MISSING_FRAME_INTERVAL_MS: number = 360;
-  private static readonly MAX_RUNTIME_CENTER_OFFSET: number = 1.35;
-  private static readonly CENTER_DRIFT_RATE: number = 0.025;
+  // Cap the baseline correction so a baseline captured during a bad moment cannot park
+  // the signal permanently inside (or outside) the trigger zone.
+  private static readonly MAX_RUNTIME_CENTER_OFFSET: number = 0.5;
+  // Head-pose span used when the calibrated channels are unusable. The public face
+  // API pitch here swings by tens of degrees, so this must be generous: a small span
+  // saturates every reading and the score stops carrying information.
+  static readonly PITCH_FALLBACK_RANGE_DEG: number = 12;
+  // Iris-ratio span used when the calibration fitted an implausibly small eye range.
+  // The real ratio on this hardware moves by roughly 0.3 across the screen.
+  static readonly EYE_MIN_TRUSTED_DELTA: number = 0.03;
+  // Iris-ratio span for a full top-to-bottom gaze swing. Measured on-device reading
+  // gestures move the ratio by only ~0.045, so a larger span left every score below
+  // the zone thresholds and the gesture never registered.
+  static readonly EYE_FALLBACK_RANGE: number = 0.04;
+  // A larger pitch change than this between two frames is a detector glitch, not a head move.
+  private static readonly MAX_PITCH_JUMP_DEG: number = 25;
 
   private surfaceId: string = '';
   private surfaceWidth: number = 0;
@@ -227,17 +266,25 @@ export class EyeTurnController {
   private lastTrackingStatusAt: number = 0;
   private reusablePixelBuffer: ArrayBuffer | null = null;
   private calibration: EyeTurnCalibration | null = null;
-  private previousDwellMs: number = 850;
-  private nextDwellMs: number = 650;
+  private nextDwellMs: number = 1000;
+  // Stage-2 state: the bottom prompt has been raised and an upward move now turns the page.
+  private nextConfirmArmed: boolean = false;
+  // Score recorded when the bottom prompt was raised; the upward confirm is measured
+  // as a large relative drop from it, so an offset or inverted-looking calibration
+  // cannot stop the gesture.
+  private promptScore: number = 0;
+  private confirmStreak: number = 0;
+  private promptCenterSince: number = 0;
   private smoothedScore: number = Number.NaN;
   private currentZone: number = 0;
+  // True once the bottom-edge prompt has asked the reader to look up; an upward move then turns the page.
+  private lastAcceptedPitch: number = Number.NaN;
+  private lastDiagAt: number = 0;
+  private lastNoSignalProbeAt: number = 0;
   private zoneSampleCount: number = 0;
   private missingFrameCount: number = 0;
   private zoneStartedAt: number = 0;
   private cooldownUntil: number = 0;
-  private rearmAllowedAt: number = 0;
-  private armed: boolean = true;
-  private centerStartedAt: number = 0;
   private scoreWindow: number[] = [];
   private baselineScores: number[] = [];
   private baselineReady: boolean = false;
@@ -256,11 +303,18 @@ export class EyeTurnController {
     return result.authResults.length > 0 && result.authResults[0] === 0;
   }
 
-  configure(calibrationRaw: string, previousDwellMs: number, nextDwellMs: number,
+  configure(calibrationRaw: string, nextDwellMs: number,
     onStatus: EyeTurnStatusCallback, onSample: EyeTurnSampleCallback,
     onTurn: EyeTurnRequestCallback, canTurn: EyeTurnAvailabilityCallback): void {
     this.calibration = EyeTurnCalibration.parse(calibrationRaw);
-    this.previousDwellMs = Math.max(400, Math.min(Math.round(previousDwellMs), 2000));
+    const loaded = this.calibration;
+    console.info(loaded !== null ?
+      `[EyeTurn] calibration v=${loaded.version} pitchWeight=${loaded.pitchWeight} ` +
+      `eyeWeight=${loaded.eyeWeight} pitchCenter=${loaded.pitchCenter.toFixed(2)} ` +
+      `pitchTop=${loaded.pitchTopDelta.toFixed(2)} pitchBottom=${loaded.pitchBottomDelta.toFixed(2)} ` +
+      `eyeCenter=${loaded.eyeCenter.toFixed(3)} eyeTop=${loaded.eyeTopDelta.toFixed(4)} ` +
+      `eyeBottom=${loaded.eyeBottomDelta.toFixed(4)}` :
+      '[EyeTurn] calibration missing or invalid');
     this.nextDwellMs = Math.max(400, Math.min(Math.round(nextDwellMs), 2000));
     this.onStatus = onStatus;
     this.onSample = onSample;
@@ -339,6 +393,8 @@ export class EyeTurnController {
       if (serial !== this.runSerial) return;
       this.running = true;
       this.starting = false;
+      console.info(`[EyeTurn] camera started ${this.surfaceWidth}x${this.surfaceHeight} ` +
+        `(front camera session running; the system camera indicator should be visible now)`);
       this.resetDwellState();
       this.onStatus(this.calibration ? '请注视屏幕中央' : '需要校准眼动翻页');
       this.scheduleFrame(serial, 260);
@@ -417,16 +473,19 @@ export class EyeTurnController {
       const maximumRotation = this.calibrationMode ? 62 : 58;
       if (!face) {
         this.reportTrackingStatus('未检测到面部，请将手机保持在面部正前方');
+        this.probeNoSignal('no face detected in frame');
         this.consumeNoFace();
         return;
       }
       if (face.probability < minimumProbability) {
         this.reportTrackingStatus('面部识别不稳定，请保证正面光线充足');
+        this.probeNoSignal(`low probability ${face.probability.toFixed(2)}`);
         this.consumeNoFace();
         return;
       }
       if (Math.abs(face.pose.yaw) > maximumRotation || Math.abs(face.pose.roll) > maximumRotation) {
         this.reportTrackingStatus('请将手机摆正并正对屏幕');
+        this.probeNoSignal(`bad pose yaw=${face.pose.yaw.toFixed(0)} roll=${face.pose.roll.toFixed(0)}`);
         this.consumeNoFace();
         return;
       }
@@ -450,8 +509,18 @@ export class EyeTurnController {
       sample.rawScore = face.pose.pitch + (eyeRatio - 0.5) * 18;
       sample.confidence = face.probability;
       sample.capturedAt = capturedAt;
+      // The public face API occasionally reports an impossible pose jump between two
+      // frames (tens of degrees). Only guard the pitch fallback: the iris channel is
+      // unaffected and dropping its samples would starve the primary signal.
+      if (!eyeBandAvailable && Number.isFinite(this.lastAcceptedPitch) &&
+        Math.abs(sample.pitch - this.lastAcceptedPitch) > EyeTurnController.MAX_PITCH_JUMP_DEG) {
+        console.info(`[EyeTurn] dropped pitch glitch=${sample.pitch.toFixed(1)}`);
+        return;
+      }
+      this.lastAcceptedPitch = sample.pitch;
       this.missingFrameCount = 0;
-      this.reportTrackingStatus(eyeBandAvailable ? '已检测到视线，正在采样' : '已检测到面部，正在采样');
+      if (!eyeBandAvailable) this.probeNoSignal('eye band unavailable (pitch fallback only)');
+      this.reportTrackingStatus(eyeBandAvailable ? '已检测到视线，准备采样' : '已检测到面部，准备采样');
       this.onSample(sample);
       const normalizedScore = this.calibration ? this.calibration.scoreForSample(sample) : sample.rawScore;
       console.info(`[EyeTurn] accepted pitch=${sample.pitch.toFixed(2)}, eye=${sample.eyeAvailable ?
@@ -610,7 +679,6 @@ export class EyeTurnController {
     this.currentZone = 0;
     this.zoneSampleCount = 0;
     this.zoneStartedAt = 0;
-    this.centerStartedAt = 0;
     this.smoothedScore = Number.NaN;
   }
 
@@ -621,6 +689,19 @@ export class EyeTurnController {
     this.lastTrackingStatus = status;
     this.lastTrackingStatusAt = now;
     this.onStatus(status);
+  }
+
+  /** Rate-limited probe for frames that produced no usable sample. */
+  private probeNoSignal(reason: string): void {
+    const now = Date.now();
+    if (now - this.lastNoSignalProbeAt < 1000) return;
+    this.lastNoSignalProbeAt = now;
+    this.probe(`no signal: ${reason}`);
+  }
+
+  /** Diagnostics use warn level and a unique marker: plain info on this app is dropped by log rate limiting. */
+  private probe(message: string): void {
+    console.warn('[EyeTurnProbe] ' + message);
   }
 
   private reportRuntimeStatus(status: string): void {
@@ -641,6 +722,13 @@ export class EyeTurnController {
     this.scoreWindow.push(rawScore);
     if (this.scoreWindow.length > EyeTurnController.SCORE_MEDIAN_WINDOW) this.scoreWindow.shift();
     const filteredScore = this.medianScore(this.scoreWindow);
+    if (!this.baselineReady && this.calibration.absolute) {
+      // An absolute calibration already defines where zero is (the top fixation), so the
+      // startup baseline must not drag the reading position back to the centre.
+      this.baselineReady = true;
+      this.runtimeCenterOffset = 0;
+      this.smoothedScore = 0;
+    }
     if (!this.baselineReady) {
       this.baselineScores.push(filteredScore);
       this.nextFrameDelayMs = EyeTurnController.FRAME_INTERVAL_MS;
@@ -655,109 +743,115 @@ export class EyeTurnController {
       return;
     }
     const centeredScore = filteredScore - this.runtimeCenterOffset;
+    // Faster smoothing than before: the reader should not have to hold a gesture for
+    // several frames before the runtime notices it.
     this.smoothedScore = Number.isFinite(this.smoothedScore) ?
-      this.smoothedScore * 0.45 + centeredScore * 0.55 : centeredScore;
-    const zone = this.zoneForScore(this.smoothedScore, this.calibration, this.currentZone);
+      this.smoothedScore * 0.3 + centeredScore * 0.7 : centeredScore;
     const now = Date.now();
-    const strongEdgeSample = Math.abs(this.smoothedScore) >= EyeTurnController.STRONG_EDGE_THRESHOLD;
-    this.nextFrameDelayMs = zone === 0 ? EyeTurnController.CENTER_FRAME_INTERVAL_MS :
-      EyeTurnController.FRAME_INTERVAL_MS;
-    if (!this.armed || now < this.cooldownUntil) {
-      // After a page turn the eyes naturally travel from the old bottom edge to the new top edge. Do not treat
-      // that traversal as an intentional reverse turn, and do not count its brief centre crossing as re-arming.
-      if (now < this.rearmAllowedAt) {
-        this.centerStartedAt = 0;
-        this.reportRuntimeStatus('翻页保护中');
-        return;
-      }
-      // Re-arming needs a wider neutral band than initial zone entry. It must tolerate ordinary face-pose noise,
-      // especially when calibration is using the head-pitch fallback rather than a true eye channel.
-      if (Math.abs(this.smoothedScore) <= EyeTurnController.REARM_CENTER_THRESHOLD) {
-        if (this.centerStartedAt <= 0) this.centerStartedAt = now;
-        const centerStableFor = now - this.centerStartedAt;
-        if (now >= this.cooldownUntil && centerStableFor >= EyeTurnController.REARM_CENTER_DWELL_MS) {
-          this.armed = true;
-          this.currentZone = 0;
-          this.zoneSampleCount = 0;
-          this.zoneStartedAt = 0;
-          this.reportRuntimeStatus('眼动已就绪');
-        }
-      } else {
-        this.centerStartedAt = 0;
-        this.reportRuntimeStatus('请回看屏幕中央');
-      }
+    const inBottom = this.smoothedScore >= (this.currentZone === 1 ?
+      EyeTurnController.ZONE_KEEP_THRESHOLD : EyeTurnController.NEXT_ZONE_ENTRY_THRESHOLD);
+    this.nextFrameDelayMs = inBottom ? EyeTurnController.FRAME_INTERVAL_MS :
+      EyeTurnController.CENTER_FRAME_INTERVAL_MS;
+    if (now - this.lastDiagAt >= 400) {
+      this.lastDiagAt = now;
+      this.probe(`score=${this.smoothedScore.toFixed(2)} bottom=${inBottom} ` +
+        `prompt=${this.nextConfirmArmed} promptScore=${this.promptScore.toFixed(2)} ` +
+        `hold=${this.zoneStartedAt > 0 ? now - this.zoneStartedAt : 0}`);
+    }
+    if (now < this.cooldownUntil) {
+      // Short guard after a page turn: the eyes naturally travel away from the old page
+      // position and that travel must not immediately trigger the next turn.
+      this.resetZoneTracking();
+      this.reportRuntimeStatus('翻页保护中');
       return;
     }
-    if (zone === 0) {
-      if (Math.abs(centeredScore) <= EyeTurnController.REARM_CENTER_THRESHOLD) {
-        this.runtimeCenterOffset += centeredScore * EyeTurnController.CENTER_DRIFT_RATE;
-        this.runtimeCenterOffset = Math.max(-EyeTurnController.MAX_RUNTIME_CENTER_OFFSET,
-          Math.min(EyeTurnController.MAX_RUNTIME_CENTER_OFFSET, this.runtimeCenterOffset));
+    if (this.nextConfirmArmed) {
+      // Stage 2 — look up to confirm. Calibrated to the measured on-device gesture: a
+      // look-up from the armed bottom level lowers the score by ~40% here, so requiring a
+      // half or a zero crossing never fired. Two consecutive samples keep a noisy frame out.
+      const droppedEnough = this.promptScore > 0.2 &&
+        this.smoothedScore <= this.promptScore * 0.65;
+      if (droppedEnough || this.smoothedScore <= EyeTurnController.ZONE_KEEP_THRESHOLD) {
+        this.confirmStreak++;
+        if (this.confirmStreak >= 2) {
+          this.turnNextPage(now);
+          return;
+        }
+        this.reportRuntimeStatus('向上看，翻下一页');
+        return;
       }
-      this.currentZone = 0;
-      this.zoneSampleCount = 0;
-      this.zoneStartedAt = 0;
+      this.confirmStreak = 0;
+      // Ignored while resting between the two zones: drop the prompt after a while so it
+      // does not linger, and re-raise it only by returning to the bottom.
+      if (this.smoothedScore < EyeTurnController.NEXT_ZONE_ENTRY_THRESHOLD) {
+        if (this.promptCenterSince <= 0) this.promptCenterSince = now;
+        if (now - this.promptCenterSince >= EyeTurnController.PROMPT_GIVEUP_MS) {
+          this.nextConfirmArmed = false;
+          this.promptCenterSince = 0;
+          this.resetZoneTracking();
+          this.reportRuntimeStatus('眼动已就绪');
+          return;
+        }
+      } else {
+        this.promptCenterSince = 0;
+      }
+      this.reportRuntimeStatus('向上看，翻下一页');
+      return;
+    }
+    // Stage 1 — hold the bottom zone to raise the prompt.
+    if (!inBottom) {
+      this.resetZoneTracking();
       this.reportRuntimeStatus('眼动已就绪');
       return;
     }
-    if (zone !== this.currentZone) {
-      this.currentZone = zone;
-      this.zoneSampleCount = 1;
+    if (this.currentZone !== 1) {
+      this.currentZone = 1;
       this.zoneStartedAt = now;
-      this.reportRuntimeStatus(zone < 0 ? '正在注视顶部' : '正在注视底部');
-      // Keep the edge hint visible for at least one subsequent sample. This gives the reader time to cancel an
-      // unintended turn by looking away and prevents a single extreme frame from flipping a page.
+      this.reportRuntimeStatus('正在注视底部');
       return;
     }
-    else {
-      this.zoneSampleCount++;
+    if (now - this.zoneStartedAt >= this.nextDwellMs) {
+      this.nextConfirmArmed = true;
+      this.promptScore = this.smoothedScore;
+      this.confirmStreak = 0;
+      this.promptCenterSince = 0;
+      this.probe(`prompt armed at score=${this.smoothedScore.toFixed(2)}`);
+      this.reportRuntimeStatus('向上看，翻下一页');
+      return;
     }
-    const dwell = zone < 0 ? this.previousDwellMs : this.nextDwellMs;
-    const stableForMs = this.zoneStartedAt > 0 ? now - this.zoneStartedAt : 0;
-    const dwellReached = stableForMs >= dwell;
-    const sampleStabilityReached = this.zoneSampleCount >= EyeTurnController.MIN_STABLE_EDGE_SAMPLES &&
-      stableForMs >= EyeTurnController.MIN_STABLE_EDGE_MS;
-    const strongEdgeReached = strongEdgeSample && this.zoneSampleCount >= 2 && stableForMs >= 360;
-    if (!dwellReached && !sampleStabilityReached && !strongEdgeReached) return;
-    this.zoneStartedAt = now;
-    const turnAvailable = this.canTurn();
-    console.info(`[EyeTurn] candidate direction=${zone}, samples=${this.zoneSampleCount}, ` +
-      `stable=${stableForMs}, available=${turnAvailable}`);
-    if (!turnAvailable) return;
-    this.armed = false;
-    this.centerStartedAt = 0;
-    this.cooldownUntil = now + EyeTurnController.TURN_COOLDOWN_MS;
-    this.rearmAllowedAt = now + EyeTurnController.POST_TURN_SAFETY_MS;
-    this.reportRuntimeStatus(zone < 0 ? '已翻上一页，请回看中央' :
-      '已翻下一页，请回看中央');
-    this.onTurn(zone);
+    this.reportRuntimeStatus('正在注视底部');
   }
 
-  private zoneForScore(score: number, calibration: EyeTurnCalibration, previousZone: number): number {
-    const topDelta = calibration.top - calibration.center;
-    const bottomDelta = calibration.bottom - calibration.center;
-    const topProgress = (score - calibration.center) / topDelta;
-    const bottomProgress = (score - calibration.center) / bottomDelta;
-    const topThreshold = previousZone === -1 ?
-      EyeTurnController.ZONE_KEEP_THRESHOLD : EyeTurnController.PREVIOUS_ZONE_ENTRY_THRESHOLD;
-    const bottomThreshold = previousZone === 1 ?
-      EyeTurnController.ZONE_KEEP_THRESHOLD : EyeTurnController.NEXT_ZONE_ENTRY_THRESHOLD;
-    if (topProgress >= topThreshold && topProgress > bottomProgress) return -1;
-    if (bottomProgress >= bottomThreshold && bottomProgress > topProgress) return 1;
-    if (Math.max(topProgress, bottomProgress) <= EyeTurnController.CENTER_THRESHOLD) return 0;
-    return 0;
+  private resetZoneTracking(): void {
+    this.currentZone = 0;
+    this.zoneSampleCount = 0;
+    this.zoneStartedAt = 0;
+  }
+
+  private turnNextPage(now: number): void {
+    const turnAvailable = this.canTurn();
+    this.probe(`turn request available=${turnAvailable} score=${this.smoothedScore.toFixed(2)}`);
+    if (!turnAvailable) return; // the reader will keep trying while the gaze stays low
+    this.nextConfirmArmed = false;
+    this.confirmStreak = 0;
+    this.promptCenterSince = 0;
+    this.resetZoneTracking();
+    this.cooldownUntil = now + EyeTurnController.TURN_COOLDOWN_MS;
+    this.reportRuntimeStatus('已翻下一页，请回看中央');
+    this.onTurn(1);
   }
 
   private resetDwellState(): void {
     this.smoothedScore = Number.NaN;
     this.currentZone = 0;
+    this.nextConfirmArmed = false;
+    this.confirmStreak = 0;
+    this.promptCenterSince = 0;
+    this.promptScore = 0;
     this.zoneSampleCount = 0;
     this.missingFrameCount = 0;
     this.zoneStartedAt = 0;
     this.cooldownUntil = 0;
-    this.rearmAllowedAt = 0;
-    this.armed = true;
-    this.centerStartedAt = 0;
     this.scoreWindow = [];
     this.baselineScores = [];
     this.baselineReady = false;

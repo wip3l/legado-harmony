@@ -10,6 +10,9 @@ import { CloudSyncChangeTracker } from '../account/CloudSyncChangeTracker';
 export class AppThemeSettings {
   themeId: string = '';
   themeBookCoverEnabled: boolean = false;
+  // Remembers the last choice made in the "apply theme" prompt. Defaults to off so
+  // switching themes preserves the reader's current layout unless the user opts in.
+  themeApplyLayoutEnabled: boolean = false;
   lightAccentColor: string = AppThemeSettingsStore.DEFAULT_LIGHT_ACCENT_COLOR;
   darkAccentColor: string = AppThemeSettingsStore.DEFAULT_DARK_ACCENT_COLOR;
   lightButtonColor: string = AppThemeSettingsStore.DEFAULT_LIGHT_BUTTON_COLOR;
@@ -44,6 +47,7 @@ export class AppThemeSettings {
 export class AppThemeSettingsStore {
   static readonly KEY_THEME_ID: string = ThemeRuntime.KEY_THEME_ID;
   static readonly KEY_THEME_BOOK_COVER_ENABLED: string = 'appThemeBookCoverEnabled';
+  static readonly KEY_THEME_APPLY_LAYOUT_ENABLED: string = 'appThemeApplyLayoutEnabled';
   static readonly KEY_LIGHT_ACCENT_COLOR: string = 'appLightAccentColor';
   static readonly KEY_DARK_ACCENT_COLOR: string = 'appDarkAccentColor';
   static readonly KEY_LIGHT_BUTTON_COLOR: string = 'appLightButtonColor';
@@ -94,6 +98,8 @@ export class AppThemeSettingsStore {
     settings.themeBookCoverEnabled = await AppThemeSettingsStore.getBoolean(
       store, AppThemeSettingsStore.KEY_THEME_BOOK_COVER_ENABLED,
       AppStorage.get<boolean>(AppThemeSettingsStore.KEY_THEME_BOOK_COVER_ENABLED) || false);
+    settings.themeApplyLayoutEnabled = await AppThemeSettingsStore.getBoolean(
+      store, AppThemeSettingsStore.KEY_THEME_APPLY_LAYOUT_ENABLED, false);
     const customBaseFallback = BuiltinThemeRegistry.normalizeBuiltinId(settings.themeId);
     settings.customBaseThemeId = BuiltinThemeRegistry.normalizeBuiltinId(await AppThemeSettingsStore.getString(
       store, AppThemeSettingsStore.KEY_CUSTOM_BASE_THEME_ID,
@@ -179,6 +185,7 @@ export class AppThemeSettingsStore {
     const store = await preferences.getPreferences(context, AppThemeSettingsStore.STORE_NAME);
     await store.put(AppThemeSettingsStore.KEY_THEME_ID, normalized.themeId);
     await store.put(AppThemeSettingsStore.KEY_THEME_BOOK_COVER_ENABLED, normalized.themeBookCoverEnabled);
+    await store.put(AppThemeSettingsStore.KEY_THEME_APPLY_LAYOUT_ENABLED, normalized.themeApplyLayoutEnabled);
     await store.put(AppThemeSettingsStore.KEY_LIGHT_ACCENT_COLOR, normalized.lightAccentColor);
     await store.put(AppThemeSettingsStore.KEY_DARK_ACCENT_COLOR, normalized.darkAccentColor);
     await store.put(AppThemeSettingsStore.KEY_LIGHT_BUTTON_COLOR, normalized.lightButtonColor);
@@ -543,6 +550,7 @@ export class AppThemeSettingsStore {
       AppThemeSettingsStore.DEFAULT_THEME_ID;
     settings.themeId = AppThemeSettingsStore.normalizeThemeId(source.themeId || currentThemeId);
     settings.themeBookCoverEnabled = source.themeBookCoverEnabled === true;
+    settings.themeApplyLayoutEnabled = source.themeApplyLayoutEnabled === true;
     settings.customBaseThemeId = BuiltinThemeRegistry.normalizeBuiltinId(source.customBaseThemeId);
     settings.customLightSources = AppThemeSettingsStore.normalizeSources(
       source.customLightSources, settings.customBaseThemeId);

@@ -364,9 +364,12 @@ struct TtsSettingsPage {
       .width('calc(100% - 24vp)')
       .constraintSize({ maxWidth: 560 })
       .padding({ top: 6, bottom: 6 })
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
+      // API 6 changed how backdropBlur composites for custom overlays, so the
+      // translucent glass tint let page content bleed through the voice list.
+      // Use the opaque card surface instead, matching the other settings
+      // dropdown menus, so every option stays readable.
+      .backgroundColor(this.cardColor())
       .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
       .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
       .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
       .position({ x: 12, y: this.statusBarHeight + 108 })

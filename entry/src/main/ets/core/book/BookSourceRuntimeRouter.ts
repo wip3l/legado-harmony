@@ -45,8 +45,17 @@ export class SourceRuntimeDecision {
 export class BookSourceRuntimeRouter {
   static readonly BRIDGE_VERSION: number = 1;
 
+  // A `/` starts a regex literal only after one of these tokens; anywhere else it is division.
+  // `}` is intentionally excluded: it is ambiguous with a division after a block/object literal,
+  // and the same context set is already used by the login runtime scanner.
+  private static readonly REGEX_CONTEXT_CHARS: string = '([{:;,=!?&|+-*%^~<>';
+  private static readonly REGEX_CONTEXT_KEYWORDS: string[] = [
+    'return', 'case', 'throw', 'typeof', 'delete', 'void', 'new', 'in', 'of',
+    'instanceof', 'do', 'else', 'yield', 'await'
+  ];
+
   private static readonly FULL_JAVA_METHODS: string[] = [
-    'ajax', 'ajaxAll', 'post', 'put', 'get', 'getString', 'toast', 'longToast',
+    'ajax', 'ajaxAll', 'post', 'put', 'get', 'getString', 'getStringList', 'toast', 'longToast',
     'startBrowser', 'startBrowserAwait',
     'startBrowserDp', 'showBrowser', 'showReadingBrowser', 'open', 'openUrl',
     'base64Encode', 'base64EncodeToString', 'base64Decode', 'base64DecodeToString',
@@ -172,6 +181,50 @@ export class BookSourceRuntimeRouter {
     if (value && !values.includes(value)) values.push(value);
   }
 
+  /**
+   * The scanner below is not a parser, so a regex literal such as `/chapterToken\s*=\s*['"]([^'"]+)['"]/`
+   * would otherwise be read as an opening single quote and swallow the rest of the script (including
+   * `try {`), which misroutes complex rules to the lightweight engine. These helpers let the scanner
+   * recognise and blank regex literals just like other literals.
+   */
+  private static canStartRegex(output: string): boolean {
+    const ch = this.lastSignificantChar(output);
+    if (!ch) return true;
+    if (this.REGEX_CONTEXT_CHARS.indexOf(ch) >= 0) return true;
+    const word = this.trailingWord(output);
+    return word.length > 0 && this.REGEX_CONTEXT_KEYWORDS.includes(word);
+  }
+
+  private static lastSignificantChar(output: string): string {
+    for (let index = output.length - 1; index >= 0; index--) {
+      const ch = output.charAt(index);
+      if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') return ch;
+    }
+    return '';
+  }
+
+  private static trailingWord(output: string): string {
+    let index = output.length - 1;
+    while (index >= 0 && /\s/.test(output.charAt(index))) index--;
+    const end = index;
+    while (index >= 0 && /[A-Za-z0-9_$]/.test(output.charAt(index))) index--;
+    return output.substring(index + 1, end + 1);
+  }
+
+  /** Index of the closing `/` when [start] opens a single-line regex literal, otherwise -1. */
+  private static regexLiteralEnd(value: string, start: number): number {
+    let inClass = false;
+    for (let index = start + 1; index < value.length; index++) {
+      const ch = value.charAt(index);
+      if (ch === '\n' || ch === '\r') return -1;
+      if (ch === '\\') { index++; continue; }
+      if (ch === '[') { inClass = true; continue; }
+      if (ch === ']') { inClass = false; continue; }
+      if (ch === '/' && !inClass) return index;
+    }
+    return -1;
+  }
+
   /** Removes comments and literal bodies while preserving expressions embedded in template strings. */
   private static executableCode(script: string): string {
     script = this.stripEmbeddedHtml(script || '');
@@ -231,6 +284,29 @@ export class BookSourceRuntimeRouter {
         blockComment = true;
         output += '  ';
         index++;
+      } else if (current === '/' && this.canStartRegex(output)) {
+        const end = this.regexLiteralEnd(script, index);
+        if (end > index) {
+          for (let cursor = index; cursor <= end; cursor++) {
+            const inner = script.charAt(cursor);
+            if (templateExpressionDepth > 0) {
+              if (inner === '{') templateExpressionDepth++;
+              if (inner === '}') {
+                templateExpressionDepth--;
+                if (templateExpressionDepth === 0) quote = '`';
+              }
+            }
+            output += ' ';
+          }
+          let cursor = end + 1;
+          while (cursor < script.length && /[A-Za-z]/.test(script.charAt(cursor))) {
+            output += ' ';
+            cursor++;
+          }
+          index = cursor - 1;
+        } else {
+          output += current;
+        }
       } else if (current === '\'' || current === '"' || current === '`') {
         quote = current;
         output += ' ';
