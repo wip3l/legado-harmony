@@ -645,7 +645,34 @@ title@text##^《|》$
 $.status##^1$##连载
 ```
 
-正则以 JavaScript `RegExp` 的全局模式执行。第三段省略时替换为空字符串；替换文本支持 `$1` 等捕获组引用。字面量 `##` 可写成 `\##`。以 `:` 开头的直接正则链还兼容 Java/Kotlin 常见的前置内联标志 `(?i)`、`(?m)`、`(?s)`、组合标志和 `(?-i)` 一类关闭标志，并转换为 JavaScript 正则选项。
+正则以 JavaScript `RegExp` 的全局模式执行，但规则可以先按 Android 阅读的 Java/Kotlin 方言书写，编译前会由 `JavaRegexCompat` 转换。第三段省略时替换为空字符串；替换文本支持 `$1` 等捕获组引用，其中 Java 的 `$0`（整个匹配）会映射为 JavaScript 的 `$&`，反斜杠按 Java 语义作为转义符。字面量 `##` 可写成 `\##`。
+
+转换覆盖的方言差异：
+
+| Android 写法 | 转换结果 |
+| --- | --- |
+| `(?i)`、`(?m)`、`(?s)`、`(?is)` 等内联标志（含出现在规则中间的情况） | 提升为 `RegExp` 的 flags |
+| `a*+`、`a++`、`a?+`、`a{2,3}+` 占有量词 | 降级为贪婪量词 |
+| `(?>…)` 原子组 | 降级为普通分组 `(?:…)` |
+| `\Q…\E` | 转义为字面量 |
+| `\h`、`\H`、`\v`、`\V`、`\R`、`\z`、`\Z` | 展开为等价的字符类或断言 |
+| `\p{…}` | 保留并自动附加 `u` 标志 |
+
+仍无法完全等价的写法会按最接近的语义处理，并在替换净化配置页给出“已按 Android 正则转换”提示：内联标志的位置语义、占有量词与原子组的回溯行为、字符类交集 `[a&&b]`、Java 专有属性名（`InCJKUnifiedIdeographs` 等），以及 `(?x)`/`(?u)`/`(?d)`/`(?U)` 这类 JavaScript 没有的开关。稳定书源更适合用 CSS/JSONPath 提取后再用 `##` 净化。
+
+阅读器里的“替换净化”规则（阅读设置 → 替换净化配置）使用同一套转换：导入 Android 阅读导出的规则文件后即可生效，无需把 `(?m)`、`(?is)` 之类改成 JavaScript 写法。
+
+导入支持三种字段命名，按别名匹配，不要求字段顺序：
+
+| 来源 | 示例字段 | 映射 |
+| --- | --- | --- |
+| 本应用导出 | `pattern` `replacement` `isRegex` `applyToTitle` | 原样 |
+| 阅读/Legado 导出 | `pattern` `isEnabled` `isEnabledForTitle` `isEnabledForContent` `timeoutMillisecond` `scope` | 同名或按语义映射 |
+| 阅读/YueDu 的 `Share/Rule.txt` | `regex` `replacement` `enable` `replaceSummary` `serialNumber` | `regex`→匹配规则，`replaceSummary`→规则名，`serialNumber`→应用顺序 |
+
+文件可以是顶层数组，也可以包在 `rules`/`replaceRules`/`list`/`data` 等字段里，允许带 UTF-8 BOM。导入时缺少匹配规则的条目会被跳过并计入提示；`scope`/`excludeScope` 里的正则会自动包成 `/…/` 形式（含逗号、分号或换行时保持原样，这类值无法安全转换）。
+
+只有识别为非本应用来源（阅读/Legado、阅读/YueDu）时才先弹确认框：标题标明来源，正文说明将做哪些转换、有多少条目会被跳过或因不支持正文范围条件而被忽略，确认后才写入规则列表；本应用自己导出的文件直接导入，不打断用户。
 
 规则可直接以 `##正则##替换` 开头，此时处理输入是完整当前元素。尾部再加 `###` 时只处理首个命中的子串，并返回替换后的该子串，而不是返回周围的原文本。
 

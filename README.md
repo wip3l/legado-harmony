@@ -219,11 +219,15 @@ release 构建依赖本机有效的签名证书、Profile 和 keystore。请使�
 node scripts/neutral-source-engine-check.mjs
 node scripts/thread-blocking-check.mjs
 node scripts/theme-framework-check.mjs
+node --experimental-strip-types scripts/java-regex-compat-check.mjs
+node --experimental-strip-types scripts/replace-rule-import-check.mjs
 ```
 
 - `neutral-source-engine-check`：检查是否引入固定内容接口、默认凭据或站点专用后端。
 - `thread-blocking-check`：检查协作式调度、分页和运行时隔离约束。
 - `theme-framework-check`：检查主题注册、令牌和资源安全约束。
+- `java-regex-compat-check`：检查 Android/Java 正则方言到 JavaScript 的转换，避免书源正则与替换净化规则因 `(?i)`、占有量词一类语法整条失效。
+- `replace-rule-import-check`：检查替换净化规则导入的字段别名映射，确保阅读/Legado/YueDu 导出的规则文件能直接导入。
 
 这些脚本用于代码回归，不能替代授权审查、安全审计或法律意见。
 

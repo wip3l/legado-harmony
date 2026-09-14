@@ -13,6 +13,8 @@ import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
 import { HttpClient } from '../core/http/HttpClient';
+import { JavaRegexCompat } from '../core/rule/JavaRegexCompat';
+import { ReplaceRuleImport } from '../core/rule/ReplaceRuleImport';
 
 const REPLACE_RULE_IMPORT_FILE_LIMIT_BYTES: number = 5 * 1024 * 1024;
 const REPLACE_RULE_IMPORT_TIMEOUT_MS: number = 20000;
@@ -170,18 +172,33 @@ struct ReaderReplaceRulesPage {
   }
 
   async importRulesFromJson(raw: string): Promise<void> {
-    const values = this.decodeImportedRules(raw);
-    if (values.length === 0) {
-      throw new Error('未找到有效的替换净化规则');
+    const result = ReplaceRuleImport.parse(raw);
+    if (ReplaceRuleImport.needsConfirm(result)) {
+      this.isImporting = false;
+      const confirmed = await promptAction.showDialog({
+        title: ReplaceRuleImport.confirmTitle(result),
+        message: ReplaceRuleImport.confirmMessage(result),
+        buttons: [
+          { text: '取消', color: this.secondaryTextColor() },
+          { text: '转换导入', color: this.accentColor() }
+        ]
+      });
+      if (confirmed.index !== 1) {
+        promptAction.showToast({ message: '已取消导入' });
+        return;
+      }
+      this.isImporting = true;
     }
     const next = this.rules.map((rule: ReaderReplaceRule) => ReaderReplaceRuleStore.cloneRule(rule));
     const usedIds = new Set<number>(next.map((rule: ReaderReplaceRule) => rule.id));
     let nextId = Date.now();
     let importedCount = 0;
-    for (const value of values) {
-      const imported = ReaderReplaceRuleStore.cloneRule(value);
+    for (const entry of result.rules) {
+      const imported = ReaderReplaceRuleStore.fromImportEntry(entry);
       if (!imported.pattern.trim()) continue;
-      const existingIndex = next.findIndex((rule: ReaderReplaceRule) => rule.id === imported.id);
+      // 只有 id 与匹配规则都相同的条目才算更新同一条规则，避免不同来源的文件用小 id 互相覆盖。
+      const existingIndex = next.findIndex((rule: ReaderReplaceRule) =>
+        rule.id === imported.id && rule.pattern === imported.pattern);
       if (existingIndex >= 0) {
         next[existingIndex] = imported;
       } else {
@@ -197,26 +214,11 @@ struct ReaderReplaceRulesPage {
     await ReaderReplaceRuleStore.save(getContext(this), next);
     this.rules = await ReaderReplaceRuleStore.load(getContext(this), true);
     this.selectedRuleIds = [];
-    promptAction.showToast({ message: `已导入 ${importedCount} 条替换规则` });
-  }
-
-  decodeImportedRules(raw: string): ReaderReplaceRule[] {
-    if (!raw || raw.trim().length === 0) throw new Error('文件内容为空');
-    let parsed: Object;
-    try {
-      parsed = JSON.parse(raw.replace(/^\uFEFF/, '')) as Object;
-    } catch (_) {
-      throw new Error('内容不是有效的 JSON');
-    }
-    if (Array.isArray(parsed)) return parsed as ReaderReplaceRule[];
-    if (parsed && typeof parsed === 'object') {
-      const record = parsed as Record<string, Object>;
-      for (const key of ['rules', 'replaceRules', 'readerReplaceRules']) {
-        const values = record[key];
-        if (Array.isArray(values)) return values as ReaderReplaceRule[];
-      }
-    }
-    throw new Error('JSON 中未找到规则数组');
+    const source = result.formatLabel === '本应用' ? '' : `（来源：${result.formatLabel}）`;
+    const skipped = result.skipped > 0 ? `，跳过 ${result.skipped} 条无匹配规则` : '';
+    const contentScope = result.ignoredContentScope > 0 ?
+      `，${result.ignoredContentScope} 条正文范围条件已忽略` : '';
+    promptAction.showToast({ message: `已导入 ${importedCount} 条替换规则${source}${skipped}${contentScope}` });
   }
 
   async readRuleTextFile(uri: string): Promise<string> {
@@ -470,7 +472,7 @@ struct ReaderReplaceRulesPage {
           .textAlign(TextAlign.Center)
           .margin({ bottom: 16 })
 
-        TextInput({ placeholder: '请输入规则 JSON URL', text: this.importUrl })
+        TextInput({ placeholder: '规则 URL（兼容阅读/YueDu 导出）', text: this.importUrl })
           .width('100%')
           .height(48)
           .borderRadius(8)
@@ -697,6 +699,14 @@ struct ReaderReplaceRulesPage {
             .fontSize(12)
             .fontColor(this.ruleEffectColor(rule))
         }
+
+        if (this.ruleCompatibilityNotes(rule).length > 0) {
+          Text(`已按 Android 正则转换：${this.ruleCompatibilityNotes(rule).join('；')}`)
+            .fontSize(11)
+            .fontColor(this.subTextColor())
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
@@ -814,6 +824,10 @@ struct ReaderReplaceRulesPage {
 
   ruleEffectLabel(rule: ReaderReplaceRule): string {
     return this.ruleEffectCheck(rule).label;
+  }
+
+  ruleCompatibilityNotes(rule: ReaderReplaceRule): string[] {
+    return rule.isRegex ? JavaRegexCompat.notes(rule.pattern) : [];
   }
 
   ruleEffectColor(rule: ReaderReplaceRule): string {
@@ -1613,9 +1627,10 @@ struct ReaderReplaceRulesPage {
     }
     if (this.draftIsRegex) {
       try {
-        new RegExp(pattern, 'g');
-      } catch (_) {
-        promptAction.showToast({ message: '正则表达式无效' });
+        JavaRegexCompat.compile(pattern, 'g');
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        promptAction.showToast({ message: `正则表达式无效：${reason}` });
         return;
       }
     }

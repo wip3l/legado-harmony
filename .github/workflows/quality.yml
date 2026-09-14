@@ -28,3 +28,6 @@ jobs:
       - run: node scripts/theme-framework-check.mjs
       - run: node scripts/neutral-source-engine-check.mjs
       - run: node scripts/log-policy-check.mjs
+      # 这两个检查会导入 entry 下的 TypeScript 模块，需要 Node 的类型擦除能力。
+      - run: node --experimental-strip-types scripts/java-regex-compat-check.mjs
+      - run: node --experimental-strip-types scripts/replace-rule-import-check.mjs

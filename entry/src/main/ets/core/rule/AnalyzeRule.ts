@@ -3,6 +3,7 @@ import { RuleContext } from './RuleContext';
 import { VerificationSupport } from '../http/VerificationSupport';
 import { EncodedJsonMap, EncodedSourceUrl } from '../book/EncodedSourceUrl';
 import { JsonPathEvaluator } from './JsonPathEvaluator';
+import { JavaRegexCompat } from './JavaRegexCompat';
 import { ScriptEngine, ScriptEngineContext } from './ScriptEngine';
 import { BookUrlResolver } from '../book/BookUrlResolver';
 import { QuickJsObservationContext } from '../script/QuickJsRuntimeStatus';
@@ -204,24 +205,8 @@ export class AnalyzeRule {
   }
 
   private compileLegadoRegex(pattern: string, global: boolean): RegExp {
-    let source = pattern || '';
-    let flags = global ? 'g' : '';
-    // Kotlin/Java Regex accepts leading inline flags such as (?s), (?i) and
-    // (?m); JavaScript requires the same options in the RegExp flags string.
-    // Multiple leading groups (for example (?i)(?s)) and disabling groups are
-    // both legal in Legado sources, so consume all of them before compiling.
-    let inlineFlags = source.match(/^\(\?([ims]*)(?:-([ims]+))?\)/);
-    while (inlineFlags) {
-      const enabled = inlineFlags[1] || '';
-      const disabled = inlineFlags[2] || '';
-      for (const flag of ['i', 'm', 's']) {
-        if (enabled.includes(flag) && !flags.includes(flag)) flags += flag;
-        if (disabled.includes(flag)) flags = flags.replace(flag, '');
-      }
-      source = source.substring(inlineFlags[0].length);
-      inlineFlags = source.match(/^\(\?([ims]*)(?:-([ims]+))?\)/);
-    }
-    return new RegExp(source, flags);
+    // Legado 书源里的直接正则按 Java/Kotlin 方言书写，交给兼容层转换后再编译。
+    return JavaRegexCompat.compile(pattern, global ? 'g' : '');
   }
 
   private isJsonPathLikeRule(rule: string): boolean {
@@ -2070,7 +2055,7 @@ export class AnalyzeRule {
   private evalRegexRule(rule: string): string[] {
     if (!rule || rule.length > 300 || !/[()\\[\].*+?]/.test(rule)) return [];
     try {
-      const re = new RegExp(rule, 'g');
+      const re = JavaRegexCompat.compile(rule, 'g');
       const values: string[] = [];
       let m: RegExpExecArray | null;
       while ((m = re.exec(this.content)) !== null) {
@@ -2733,17 +2718,18 @@ export class AnalyzeRule {
 
     try {
       if (parts.length >= 3) {
-        const regex = new RegExp(parts[1], parts.length > 3 ? '' : 'g');
+        const regex = JavaRegexCompat.compile(parts[1], parts.length > 3 ? '' : 'g');
+        const replacement = JavaRegexCompat.convertReplacement(parts[2]);
         if (parts.length > 3) {
           // A fourth segment is produced by the trailing `###` marker. Legado applies the
           // replacement only to the first matched substring and returns that substring, rather
           // than returning the surrounding source content.
           const match = regex.exec(value);
-          return match ? match[0].replace(regex, parts[2]) : '';
+          return match ? match[0].replace(regex, replacement) : '';
         }
-        return value.replace(regex, parts[2]);
+        return value.replace(regex, replacement);
       }
-      return value.replace(new RegExp(parts[1], 'g'), '');
+      return value.replace(JavaRegexCompat.compile(parts[1], 'g'), '');
     } catch (_) {
       return value;
     }

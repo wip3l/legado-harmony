@@ -2,6 +2,8 @@ import { Context } from '@kit.AbilityKit';
 import preferences from '@ohos.data.preferences';
 import { Book } from '../model/data/Book';
 import { CloudSyncChangeTracker } from '../account/CloudSyncChangeTracker';
+import { JavaRegexCompat } from '../core/rule/JavaRegexCompat';
+import { ImportedReplaceRule } from '../core/rule/ReplaceRuleImport';
 
 export class ReaderReplaceRule {
   id: number = 0;
@@ -26,6 +28,7 @@ export class ReaderReplaceRuleCheck {
   titleMatched: boolean = false;
   contentMatched: boolean = false;
   changed: boolean = false;
+  compatibilityNotes: string[] = [];
 }
 
 export class ReaderReplaceRuleStore {
@@ -93,17 +96,20 @@ export class ReaderReplaceRuleStore {
     }
     try {
       if (rule.isRegex) {
-        const titleRegex = new RegExp(rule.pattern, 'g');
-        const contentRegex = new RegExp(rule.pattern, 'g');
+        // 规则多数来自 Android 阅读，按 Java 正则方言编译后再校验。
+        const replacement = JavaRegexCompat.convertReplacement(rule.replacement);
+        const titleRegex = JavaRegexCompat.compile(rule.pattern, 'g');
+        const contentRegex = JavaRegexCompat.compile(rule.pattern, 'g');
         result.titleMatched = rule.applyToTitle && !!title && titleRegex.test(title);
         result.contentMatched = rule.applyToContent && !!content && contentRegex.test(content);
         if (result.titleMatched) {
-          result.changed = title.replace(new RegExp(rule.pattern, 'g'), rule.replacement) !== title;
+          result.changed = title.replace(JavaRegexCompat.compile(rule.pattern, 'g'), replacement) !== title;
         }
         if (result.contentMatched) {
           result.changed = result.changed ||
-            content.replace(new RegExp(rule.pattern, 'g'), rule.replacement) !== content;
+            content.replace(JavaRegexCompat.compile(rule.pattern, 'g'), replacement) !== content;
         }
+        result.compatibilityNotes = JavaRegexCompat.notes(rule.pattern);
       } else {
         result.titleMatched = rule.applyToTitle && !!title && title.includes(rule.pattern);
         result.contentMatched = rule.applyToContent && !!content && content.includes(rule.pattern);
@@ -115,8 +121,10 @@ export class ReaderReplaceRuleStore {
         }
       }
     } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const hint = JavaRegexCompat.unsupportedHint(rule.pattern);
       result.state = 'invalid';
-      result.label = `规则无效：${error instanceof Error ? error.message : String(error)}`;
+      result.label = hint ? `规则无效：${reason}（${hint}）` : `规则无效：${reason}`;
       result.valid = false;
       return result;
     }
@@ -146,7 +154,8 @@ export class ReaderReplaceRuleStore {
       const startedAt = Date.now();
       try {
         if (rule.isRegex) {
-          result = result.replace(new RegExp(rule.pattern, 'g'), rule.replacement);
+          result = result.replace(JavaRegexCompat.compile(rule.pattern, 'g'),
+            JavaRegexCompat.convertReplacement(rule.replacement));
         } else {
           result = result.split(rule.pattern).join(rule.replacement);
         }
@@ -244,6 +253,24 @@ export class ReaderReplaceRuleStore {
 
   static cloneRule(source: ReaderReplaceRule): ReaderReplaceRule {
     return ReaderReplaceRuleStore.normalize(source);
+  }
+
+  /** 把导入适配器的条目（已按别名统一字段）转成本应用的规则对象。 */
+  static fromImportEntry(entry: ImportedReplaceRule): ReaderReplaceRule {
+    const rule = new ReaderReplaceRule();
+    rule.id = Number.isFinite(entry.id) && entry.id > 0 ? Math.round(entry.id) : 0;
+    rule.name = entry.name;
+    rule.group = entry.group;
+    rule.pattern = entry.pattern;
+    rule.replacement = entry.replacement;
+    rule.isRegex = entry.isRegex;
+    rule.enabled = entry.enabled;
+    rule.applyToTitle = entry.applyToTitle;
+    rule.applyToContent = entry.applyToContent;
+    rule.scope = entry.scope;
+    rule.excludeScope = entry.excludeScope;
+    rule.timeoutMs = entry.timeoutMs;
+    return ReaderReplaceRuleStore.normalize(rule);
   }
 
   private static cloneRules(rules: ReaderReplaceRule[]): ReaderReplaceRule[] {

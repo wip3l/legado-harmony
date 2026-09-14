@@ -10,6 +10,7 @@ import { BookSourceDataUrlSupport } from './BookSourceDataUrlSupport';
 import { BookUrlResolver } from './BookUrlResolver';
 import { BookFieldSanitizer } from '../../utils/BookFieldSanitizer';
 import { AjaxRuleCompat } from '../rule/AjaxRuleCompat';
+import { JavaRegexCompat } from '../rule/JavaRegexCompat';
 import { ReaderImageMarker } from './ReaderImageMarker';
 import { JsRuntime } from '../rule/JsRuntime';
 import { ScriptEngine, ScriptEngineContext } from '../rule/ScriptEngine';
@@ -1415,7 +1416,9 @@ export class WebBookService {
       replacement = this.expandRuleTemplate(replacement.replace(/\\##/g, '##'), ctx);
       if (pattern) {
         try {
-          value = value.replace(new RegExp(pattern, 'g'), replacement);
+          // 书源的正文替换净化沿用 Android 的 Java 正则方言。
+          value = value.replace(JavaRegexCompat.compile(pattern, 'g'),
+            JavaRegexCompat.convertReplacement(replacement));
         } catch (_) {
         }
       }
