@@ -48,6 +48,7 @@ import { ReaderThemeBackground } from '../components/ReaderThemeBackground';
 import { ReaderPageCurlPainter } from '../components/ReaderPageCurlPainter';
 import { ReaderEmulationFlipPainter, ReaderEmulationFlipRegion } from '../components/ReaderEmulationFlipPainter';
 import { ReaderTtsPlayerPanel } from '../components/ReaderTtsPlayerPanel';
+import { TtsCatalogSheet, CatalogTitleDataSource } from '../components/TtsCatalogSheet';
 import { BookSourceStageRuntimeHost } from '../components/BookSourceStageRuntimeHost';
 import { WebBookFetchRuntimeHost } from '../components/WebBookFetchRuntimeHost';
 import { BookSourceStageWebRuntime, StageWebRuntimeRequest } from '../core/book/BookSourceStageWebRuntime';
@@ -96,7 +97,7 @@ import { ReaderOpenTrace } from '../utils/ReaderOpenTrace';
 import { EyeTurnCalibration, EyeTurnController, EyeTurnSample } from '../core/reader/EyeTurnController';
 import { ArEyeSignal, ArEyeTurnHost } from '../core/reader/ArEyeTypes';
 import { FullTextCacheCancelCoordinator, FullTextCacheCancelSignal } from '../utils/FullTextCacheCancelCoordinator';
-import { ReaderComicPageDataSource, ReaderFloatingCatalogDataSource } from '../core/reader/ReaderDataSources';
+import { ReaderComicPageDataSource } from '../core/reader/ReaderDataSources';
 import { ReaderCustomFontItem, ReaderCustomFontData, ReaderTxtCharsetOption } from '../core/reader/ReaderSettingsModels';
 import { PageTurnPreview, ReaderParagraphMetrics, ReaderInlineActionBoundsTask, ReaderMergedActionBoundsTask, ReaderTextParagraph, ReadTextSlice, ReaderPaginationResult, ReaderViewportSize, ReaderTextParagraphGroup, ReaderParagraphMeasureFallback, ReaderV2HighlightRect, ReaderContinuousSelectionChunk } from '../core/reader/ReaderPageModels';
 import { ReaderEyeCalibrationPoint } from '../core/reader/ReaderEyeModels';
@@ -315,7 +316,7 @@ struct ReadBookPage {
   private tocPositionRequestSerial: number = 0;
   private bookmarkScroller: ListScroller = new ListScroller();
   private globalTtsCatalogScroller: ListScroller = new ListScroller();
-  private globalTtsCatalogSource: ReaderFloatingCatalogDataSource = new ReaderFloatingCatalogDataSource();
+  private globalTtsCatalogSource: CatalogTitleDataSource = new CatalogTitleDataSource();
   private readerComicScroller: ListScroller = new ListScroller();
   private readerComicPageDataSource: ReaderComicPageDataSource = new ReaderComicPageDataSource();
   private readerComicImageRatioCache: Map<string, number> = new Map();
@@ -541,8 +542,12 @@ struct ReadBookPage {
   private readerSourceActionHitSlopX: number = 20;
   private readerSourceActionHitSlopY: number = 16;
   private readerTapSlop: number = 12;
+  // 翻页提交距离下限；实际阈值按页面尺寸比例计算，避免手指只动一点点就把整页翻过去。
   private readerPageTurnCommitDistance: number = 18;
   private readerPageTurnDirectionRatio: number = 0.8;
+  private readerPageTurnCommitRatio: number = 0.2;
+  private readerPageTurnFlickRatio: number = 0.06;
+  private readerPageTurnFlickVelocity: number = 800;
   private readerBookmarkPullStartDistance: number = 48;
   private readerBookmarkPullDirectionRatio: number = 1.5;
   private readerPanActive: boolean = false;
@@ -2791,7 +2796,10 @@ struct ReadBookPage {
         this.sharedTtsPlayerPanel(false)
       }
 
-      if (this.globalTtsActive && this.showGlobalTtsQuickPlayer && this.showGlobalTtsCatalog) {
+      // The catalog overlay serves both panel owners: the reader's own quick player
+      // and the floating panel published while another page is in front.
+      if (this.showGlobalTtsCatalog &&
+        (this.showTtsQuickPlayer || (this.globalTtsActive && this.showGlobalTtsQuickPlayer))) {
         this.globalTtsCatalogOverlay()
       }
 
@@ -4935,6 +4943,7 @@ struct ReadBookPage {
   }
 
   closeTtsQuickPlayer(): void {
+    this.showGlobalTtsCatalog = false;
     animateTo({ duration: 190, curve: Curve.EaseIn }, () => {
       this.showTtsQuickPlayer = false;
     });
@@ -4960,6 +4969,10 @@ struct ReadBookPage {
       return;
     }
     this.globalTtsCatalogSource.replace(this.globalTtsCatalogReverseOrder ? titles.slice().reverse() : titles);
+    // Re-snapshot at open time so the cache chip reflects chapters cached while this
+    // session has been running, instead of the state at session publish time.
+    ReaderTtsFloatingSession.updateCatalogCachedFlags(
+      this.ttsFloatingSessionOwnerId, this.readerChapterCachedFlags());
     animateTo({ duration: 280, curve: Curve.Friction }, () => {
       this.showGlobalTtsCatalog = true;
     });
@@ -4984,13 +4997,31 @@ struct ReadBookPage {
   }
 
   globalTtsCatalogCanonicalIndex(displayIndex: number): number {
-    const count = ReaderTtsFloatingSession.catalogTitles().length;
+    const count = ReaderTtsFloatingSession.catalogCount();
     return this.globalTtsCatalogReverseOrder ? count - 1 - displayIndex : displayIndex;
   }
 
   globalTtsCatalogDisplayIndex(canonicalIndex: number): number {
-    const count = ReaderTtsFloatingSession.catalogTitles().length;
+    const count = ReaderTtsFloatingSession.catalogCount();
     return this.globalTtsCatalogReverseOrder ? count - 1 - canonicalIndex : canonicalIndex;
+  }
+
+  /**
+   * The chip is read from the published session catalog so that the catalog opened
+   * from the shelf renders identically to the one opened inside the reader.
+   */
+  isGlobalTtsCatalogChapterCached(displayIndex: number): boolean {
+    return ReaderTtsFloatingSession.catalogCachedFlag(this.globalTtsCatalogCanonicalIndex(displayIndex));
+  }
+
+  /** Canonical-order cache flags published with the floating TTS session catalog. */
+  readerChapterCachedFlags(): boolean[] {
+    const flags: boolean[] = [];
+    for (let index = 0; index < this.chapters.length; index++) {
+      flags.push(this.book !== null && this.book.origin !== 'local' &&
+        this.chapters[index].cacheDate > 0);
+    }
+    return flags;
   }
 
   toggleGlobalTtsCatalogOrder(): void {
@@ -5210,102 +5241,32 @@ struct ReadBookPage {
 
   @Builder
   globalTtsCatalogOverlay() {
-    Stack({ alignContent: Alignment.Bottom }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#78000000')
-        .onClick(() => this.closeGlobalTtsCatalog())
-      Column({ space: 10 }) {
-        Row() {
-          Text('听书目录')
-            .fontSize(19)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.getTextColor())
-          Blank()
-          Stack({ alignContent: Alignment.Center }) {
-            Column({ space: 0 }) {
-              SymbolGlyph($r('sys.symbol.chevron_up'))
-                .fontSize(11)
-                .fontColor([this.globalTtsCatalogReverseOrder ? this.accentColor() : this.getTextColor()])
-              SymbolGlyph($r('sys.symbol.chevron_down'))
-                .fontSize(11)
-                .fontColor([this.globalTtsCatalogReverseOrder ? this.accentColor() : this.getTextColor()])
-            }
-            .alignItems(HorizontalAlign.Center)
-          }
-            .width(34)
-            .height(34)
-            .borderRadius(17)
-            .backgroundColor(this.globalTtsCatalogReverseOrder ?
-              (this.isReaderThemeDark() ? '#24384A' : '#E8F1FF') :
-              (this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000'))
-            .accessibilityText(this.globalTtsCatalogReverseOrder ? '切换为正序目录' : '切换为倒序目录')
-            .onClick(() => this.toggleGlobalTtsCatalogOrder())
-          Text(`${ReaderTtsFloatingSession.catalogIndex() + 1} / ` +
-            `${ReaderTtsFloatingSession.catalogTitles().length}`)
-            .fontSize(12)
-            .fontColor(this.getSubTextColor())
-          SymbolGlyph($r('sys.symbol.xmark'))
-            .fontSize(17)
-            .fontColor([this.getTextColor()])
-            .width(40)
-            .height(40)
-            .margin({ left: 6 })
-            .onClick(() => this.closeGlobalTtsCatalog())
-        }
-        .width('100%')
-        List({ scroller: this.globalTtsCatalogScroller, space: 4 }) {
-          LazyForEach(this.globalTtsCatalogSource, (title: string, index: number) => {
-            ListItem() {
-              Row({ space: 10 }) {
-                Text(`${this.globalTtsCatalogCanonicalIndex(index) + 1}`)
-                  .fontSize(11)
-                  .fontColor(this.globalTtsCatalogCanonicalIndex(index) === ReaderTtsFloatingSession.catalogIndex() ? '#FFFFFF' :
-                    this.getSubTextColor())
-                  .textAlign(TextAlign.Center)
-                  .width(34)
-                  .height(26)
-                  .borderRadius(13)
-                  .backgroundColor(this.globalTtsCatalogCanonicalIndex(index) === ReaderTtsFloatingSession.catalogIndex() ?
-                    this.accentColor() : ThemeRuntime.inputColor(this.isReaderThemeDark()))
-                Text(title || `第${this.globalTtsCatalogCanonicalIndex(index) + 1}章`)
-                  .fontSize(15)
-                  .fontWeight(this.globalTtsCatalogCanonicalIndex(index) === ReaderTtsFloatingSession.catalogIndex() ?
-                    FontWeight.Bold : FontWeight.Regular)
-                  .fontColor(this.globalTtsCatalogCanonicalIndex(index) === ReaderTtsFloatingSession.catalogIndex() ?
-                    this.accentColor() : this.getTextColor())
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .layoutWeight(1)
-              }
-              .width('100%')
-              .constraintSize({ minHeight: 50 })
-              .padding({ left: 8, right: 8, top: 7, bottom: 7 })
-              .borderRadius(10)
-              .backgroundColor(this.globalTtsCatalogCanonicalIndex(index) === ReaderTtsFloatingSession.catalogIndex() ?
-                ThemeRuntime.accentSurfaceColor(this.isReaderThemeDark()) : Color.Transparent)
-              .onClick(() => this.selectGlobalTtsCatalog(index))
-            }
-          }, (title: string, index: number) => `${index}_${title}`)
-        }
-        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-        .layoutWeight(1)
-        .width('100%')
-        .scrollBar(BarState.Auto)
-      }
-      .width('100%')
-      .height('72%')
-      .padding({ left: 16, right: 16, top: 12, bottom: this.navBarHeight + 12 })
-      .borderRadius({ topLeft: 22, topRight: 22 })
-      .backgroundColor(this.readerGlassPanelColor())
-      .transition(TransitionEffect.translate({ y: 520 })
-        .combine(TransitionEffect.opacity(0))
-        .animation({ duration: 280, curve: Curve.Friction }))
-    }
-    .width('100%')
-    .height('100%')
-    .zIndex(90)
+    TtsCatalogSheet({
+      darkMode: this.isReaderThemeDark(),
+      accentColor: this.accentColor(),
+      primaryTextColor: this.getTextColor(),
+      subTextColor: this.getSubTextColor(),
+      controlIconColor: this.readerControlIconColor(),
+      panelColor: this.readerGlassPanelColor(),
+      bookName: this.book?.name || '',
+      bookInitial: this.getTocBookInitial(),
+      cover: this.getTocCover(),
+      bookSubtitle: this.book?.author || '',
+      count: ReaderTtsFloatingSession.catalogCount(),
+      currentDisplayIndex: this.globalTtsCatalogDisplayIndex(ReaderTtsFloatingSession.catalogIndex()),
+      reverseOrder: this.globalTtsCatalogReverseOrder,
+      progressText: `${ReaderTtsFloatingSession.catalogIndex() + 1} / ` +
+        `${ReaderTtsFloatingSession.catalogCount()}`,
+      bottomInset: this.navBarHeight,
+      viewportHeight: this.pageViewHeight,
+      zIndexValue: 90,
+      scroller: this.globalTtsCatalogScroller,
+      source: this.globalTtsCatalogSource,
+      isCached: (displayIndex: number): boolean => this.isGlobalTtsCatalogChapterCached(displayIndex),
+      onToggleOrder: () => this.toggleGlobalTtsCatalogOrder(),
+      onSelect: (displayIndex: number) => this.selectGlobalTtsCatalog(displayIndex),
+      onClose: () => this.closeGlobalTtsCatalog()
+    })
   }
 
   ttsCurrentSentence(): string {
@@ -9802,6 +9763,10 @@ struct ReadBookPage {
     book.durChapterPos = pageIndex;
     book.durChapterTitle = oldBook.durChapterTitle;
     book.durChapterTime = Date.now();
+    // Mark the book as opened as well as read. hasStartedReading() also accepts
+    // durChapterIndex/durChapterPos > 0, but a source switch can legitimately land on
+    // chapter 0 / page 0, which used to leave the book looking never-read on the shelf.
+    book.putVariable('readStarted', '1');
     book.putVariable('lastReadTime', `${Date.now()}`);
     return book;
   }
@@ -9823,6 +9788,8 @@ struct ReadBookPage {
     target.durChapterTitle = oldBook.durChapterTitle;
     target.durChapterTime = Date.now();
     target.syncTime = oldBook.syncTime;
+    // See buildBookFromSearchResult(): a chapter-0/page-0 switch must still count as opened.
+    target.putVariable('readStarted', '1');
     target.putVariable('lastReadTime', `${Date.now()}`);
   }
 
@@ -10689,12 +10656,12 @@ struct ReadBookPage {
     }
     const offsetX = event.offsetX;
     const offsetY = event.offsetY;
-    if (this.isReaderPageTurnCommitGesture(offsetX, offsetY)) {
+    const axisVelocity = this.isVerticalPageTurnAnimation() ? event.velocityY : event.velocityX;
+    const releasedVelocity = Number.isFinite(axisVelocity) ? Math.abs(axisVelocity) : 0;
+    if (this.isReaderPageTurnCommitGesture(offsetX, offsetY, releasedVelocity)) {
       this.readerTouchMoved = true;
       this.suppressReaderTapClick = true;
-      const axisVelocity = this.isVerticalPageTurnAnimation() ? event.velocityY : event.velocityX;
-      this.commitReaderMove(offsetX, offsetY,
-        Number.isFinite(axisVelocity) ? Math.abs(axisVelocity) : 0);
+      this.commitReaderMove(offsetX, offsetY, releasedVelocity);
       return;
     }
     if (this.readerTouchMoved || this.isReaderTouchMoved(offsetX, offsetY)) {
@@ -11074,15 +11041,26 @@ struct ReadBookPage {
     return this.isVerticalPageTurnAnimation() ? offsetY : offsetX;
   }
 
-  isReaderPageTurnCommitGesture(offsetX: number, offsetY: number): boolean {
-    const commitDistance = this.readerPageTurnCommitDistance;
+  // 拖动达到页面尺寸的一定比例才提交；快速甩动允许用更短的距离提交，但仍需明确位移。
+  isPageTurnCommitOffset(axisOffset: number, axisVelocity: number): boolean {
+    const dimension = this.isVerticalPageTurnAnimation() ? this.getPageTurnHeight() : this.getPageTurnWidth();
+    const commitDistance = Math.max(this.readerPageTurnCommitDistance, dimension * this.readerPageTurnCommitRatio);
+    const total = Math.abs(axisOffset);
+    if (total >= commitDistance) {
+      return true;
+    }
+    const flickDistance = Math.max(this.readerPageTurnCommitDistance, dimension * this.readerPageTurnFlickRatio);
+    return Math.abs(axisVelocity) >= this.readerPageTurnFlickVelocity && total >= flickDistance;
+  }
+
+  isReaderPageTurnCommitGesture(offsetX: number, offsetY: number, axisVelocity: number = 0): boolean {
     const directionRatio = this.readerPageTurnDirectionRatio;
     if (this.isVerticalPageTurnAnimation()) {
-      return Math.abs(offsetY) >= commitDistance &&
-        Math.abs(offsetY) > Math.abs(offsetX) * directionRatio;
+      return Math.abs(offsetY) > Math.abs(offsetX) * directionRatio &&
+        this.isPageTurnCommitOffset(offsetY, axisVelocity);
     }
-    return Math.abs(offsetX) >= commitDistance &&
-      Math.abs(offsetX) > Math.abs(offsetY) * directionRatio;
+    return Math.abs(offsetX) > Math.abs(offsetY) * directionRatio &&
+      this.isPageTurnCommitOffset(offsetX, axisVelocity);
   }
 
   commitReaderMove(offsetX: number, offsetY: number, releaseVelocity: number = 0): void {
@@ -11108,10 +11086,9 @@ struct ReadBookPage {
       this.chapters.length === 0) {
       return;
     }
-    const commitDistance = this.readerPageTurnCommitDistance;
-    if (offsetY <= -commitDistance) {
+    if (offsetY < 0 && this.isPageTurnCommitOffset(offsetY, releaseVelocity)) {
       this.runPageTurnAnimation(1, 'gesture', false, releaseVelocity);
-    } else if (offsetY >= commitDistance) {
+    } else if (offsetY > 0 && this.isPageTurnCommitOffset(offsetY, releaseVelocity)) {
       this.runPageTurnAnimation(-1, 'gesture', false, releaseVelocity);
     } else {
       this.resetSlidePageEffect();
@@ -11124,10 +11101,9 @@ struct ReadBookPage {
       this.chapters.length === 0) {
       return;
     }
-    const commitDistance = this.readerPageTurnCommitDistance;
-    if (offsetX <= -commitDistance) {
+    if (offsetX < 0 && this.isPageTurnCommitOffset(offsetX, releaseVelocity)) {
       this.runPageTurnAnimation(1, 'gesture', false, releaseVelocity);
-    } else if (offsetX >= commitDistance) {
+    } else if (offsetX > 0 && this.isPageTurnCommitOffset(offsetX, releaseVelocity)) {
       this.runPageTurnAnimation(-1, 'gesture', false, releaseVelocity);
     } else {
       this.resetSlidePageEffect();
@@ -13638,6 +13614,16 @@ struct ReadBookPage {
       (chapterIndex: number, pageIndex: number, sourceOffset: number): Promise<void> =>
         this.playPositionFromFloatingSession(chapterIndex, pageIndex, sourceOffset)
     );
+    ReaderTtsFloatingSession.configureCatalog(
+      this.ttsFloatingSessionOwnerId,
+      this.chapters.map((chapter: BookChapter) => chapter.title),
+      this.currentChapterIndex,
+      (index: number) => {
+        this.playPositionFromFloatingSession(index, 0).catch(
+          (error: Error) => console.warn('朗读目录跳转失败:', error));
+      },
+      this.readerChapterCachedFlags()
+    );
     this.publishTtsFloatingVoices();
     this.updateTtsFloatingSession();
   }
@@ -13662,6 +13648,9 @@ struct ReadBookPage {
       this.getChapterTitle(),
       this.isTtsPaused
     );
+    // Keeps the floating catalog highlight on the chapter being read. Availability
+    // published here is recomputed identically by updateDetails below.
+    ReaderTtsFloatingSession.updateCatalogIndex(this.ttsFloatingSessionOwnerId, this.currentChapterIndex);
     ReaderTtsFloatingSession.updateDetails(
       this.ttsFloatingSessionOwnerId,
       this.ttsPanelFollowingText() || this.ttsQuickSentencePreview(),
@@ -18873,7 +18862,11 @@ struct ReadBookPage {
       return;
     }
     const request = new StageWebRuntimeRequest();
-    request.applyStageBudget(SourceRuntimeStage.CONTENT);
+    // Reader action scripts communicate through side effects (java.showBrowser setting the
+    // requestedUrl) and legitimately return nothing. The CONTENT stage treats an empty script
+    // result as a failed content extraction and throws, so run actions in their own stage that
+    // keeps the same request budget without that rule.
+    request.applyStageBudget(SourceRuntimeStage.READER_ACTION);
     request.source = source;
     request.book = this.book;
     request.chapter = this.chapters.length > 0 ? this.chapters[this.clampChapterIndex(this.currentChapterIndex)] : null;
@@ -18898,7 +18891,14 @@ struct ReadBookPage {
     } catch (error) {
       this.readerSourceActionOpenedAt = 0;
       const message = error instanceof Error ? error.message : String(error || '');
-      promptAction.showToast({ message: `评论加载失败${message ? `：${message}` : ''}` });
+      // Content cached by an older app version can carry markers whose embedded script was
+      // truncated by the old extraction regex. The runtime then fails at parse time; point the
+      // reader at the chapter refresh instead of a bare script error.
+      const staleScript = /SyntaxError|Unexpected|invalid|未终止|脚本执行失败/i.test(message);
+      promptAction.showToast({
+        message: `评论加载失败${message ? `：${message}` : ''}` +
+          (staleScript ? '\n本章正文可能是旧版缓存，请在目录中刷新本章后重试' : '')
+      });
     }
   }
 
@@ -23382,6 +23382,15 @@ struct ReadBookPage {
   }
 
   // 对应官方示例 initPanPositionX：按手指落点决定卷曲从上角/下角/中部开始。
+  // 折页背面的纸张底色：取主题背景色；背景图主题的背景色常为全透明，此时退回白纸避免透出下层。
+  readerFlapPaperColor(): string {
+    const color = this.getBackgroundColor();
+    if (!color) {
+      return '#FFFFFF';
+    }
+    return color.length >= 9 && color.toUpperCase().endsWith('00') ? '#FFFFFF' : color;
+  }
+
   captureReaderCurlStartRegion(event: GestureEvent): void {
     this.readerCurlStartRegion = ReaderEmulationFlipRegion.MIDDLE;
     if (!this.is3DPageTurnAnimation() || !event || !event.fingerList || event.fingerList.length === 0) {
@@ -23389,10 +23398,13 @@ struct ReadBookPage {
     }
     const localY = event.fingerList[0].localY;
     const height = this.getPageTurnHeight();
+    // 中部起手走竖直折线，上/下部起手走折角。
     if (localY < height / 3) {
       this.readerCurlStartRegion = ReaderEmulationFlipRegion.TOP;
     } else if (localY > height * 2 / 3) {
       this.readerCurlStartRegion = ReaderEmulationFlipRegion.BOTTOM;
+    } else {
+      this.readerCurlStartRegion = ReaderEmulationFlipRegion.MIDDLE;
     }
   }
 
@@ -23426,7 +23438,8 @@ struct ReadBookPage {
         this.readerPageCurlBack, this.getPageTurnWidth(), this.getReaderPageCurlCanvasHeight(),
         this.getPageTurnProgress(), this.pageSlideDirection, this.readerCurlStartRegion,
         this.isLandscapeDoublePageActive(), this.getReaderPageColumnWidth(),
-        this.getReaderDoublePageRightOrigin(), 1 / this.getUIContext().vp2px(1));
+        this.getReaderDoublePageRightOrigin(), 1 / this.getUIContext().vp2px(1),
+        this.readerFlapPaperColor());
       return;
     }
     if (!this.readerPageCurlBack) {

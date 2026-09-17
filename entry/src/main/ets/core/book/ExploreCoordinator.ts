@@ -688,8 +688,18 @@ export class ExploreCoordinator {
       // parameter is the persistent source-variable key. The visible title is retained
       // separately in `actions` so native UI can show the same hierarchy as the source.
       selector.parameter = title;
-      selector.mode = selector.parameter ? 'show' : '';
-      selector.actions = [parameter ? parameter[1] : ''];
+      if (parameter) {
+        selector.mode = 'show';
+        selector.actions = [parameter[1]];
+      } else if (action.trim()) {
+        // Legado select controls commonly ship a self-contained action script that reads the
+        // chosen value from infoMap[<control name>] (often via source.setVariable + refresh).
+        // Keep the script verbatim; executeExploreSelector pre-fills infoMap before running it.
+        selector.mode = 'script';
+        selector.actions = [action];
+      } else {
+        continue;
+      }
       const defaultValue = String(item.default || '').trim();
       const defaultIndex = selector.values.indexOf(defaultValue);
       selector.currentLabel = defaultIndex >= 0 ? selector.labels[defaultIndex] : defaultValue;
@@ -758,14 +768,26 @@ export class ExploreCoordinator {
         `${JSON.stringify(variableKey)});}'';`;
     } else if (selector.mode === 'loginAction' && selector.actions[index]) {
       const action = selector.actions[index];
-      request.code = `${source.loginUrl || ''}\n;if(typeof globalThis[${JSON.stringify(action)}]==='function')` +
+      // 登录动作库同样必须剥掉 loginUrl 的 <js> 包装，否则函数无法进入作用域。
+      const loginLib = (source.loginUrl || '').trim()
+        .replace(/^<js>\s*/i, '').replace(/\s*<\/js>$/i, '')
+        .replace(/^@?js:\s*/i, '');
+      request.code = `${loginLib}\n;if(typeof globalThis[${JSON.stringify(action)}]==='function')` +
         `{globalThis[${JSON.stringify(action)}]();}'';`;
+    } else if (selector.mode === 'script' && variableKey) {
+      // Generic Legado select action: the script reads the chosen value from
+      // infoMap[<control name>] and typically persists it via source.setVariable().
+      request.code = `infoMap.put(${JSON.stringify(selector.parameter || '')},` +
+        ` ${JSON.stringify(selector.values[index])});\n${variableKey}\n;'';`;
     } else {
       return false;
     }
     try {
-      await runtime.execute(request);
+      const result = await runtime.execute(request);
       selector.currentLabel = selection;
+      if (!this.noticeMessage && result.toastMessage && result.toastMessage.trim()) {
+        this.noticeMessage = result.toastMessage.trim();
+      }
       console.info('[ExploreCoordinator] native explore filter switched:', source.bookSourceName,
         selector.parameter, selection);
       return true;

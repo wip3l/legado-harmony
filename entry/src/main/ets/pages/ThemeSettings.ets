@@ -31,6 +31,10 @@ import deviceInfo from '@ohos.deviceInfo';
 import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 
+const STORE_COVER_MIN_HEIGHT = 170;
+const STORE_COVER_MAX_HEIGHT = 340;
+const STORE_PAGE_FIXED_HEIGHT = 286;
+
 /** User choice from the "apply theme" prompt. */
 class ThemeApplyChoice {
   applyLayout: boolean = false;
@@ -104,6 +108,9 @@ struct ThemeSettingsPage {
   private pendingApplyChoice: ((choice: ThemeApplyChoice | null) => void) | null = null;
   @State themeCatalog: ThemeCatalogItem[] = [];
   @State themeCatalogLoaded: boolean = false;
+  @State showThemeStore: boolean = false;
+  @State storePageIndex: number = 0;
+  @State storeSwiperHeight: number = 0;
   private customSchemeRefreshSerial: number = 0;
   private themeListScroller: ListScroller = new ListScroller();
 
@@ -123,6 +130,14 @@ struct ThemeSettingsPage {
 
   onCustomThemeSchemesRevisionChanged(): void {
     this.refreshCustomSchemes();
+  }
+
+  onBackPress(): boolean {
+    if (this.showThemeStore) {
+      this.closeThemeStore();
+      return true;
+    }
+    return false;
   }
 
   build() {
@@ -170,13 +185,18 @@ struct ThemeSettingsPage {
           }
         }, (scheme: CustomThemeScheme) => `${scheme.id}_${scheme.revision}`)
         ListItem() {
-          this.sectionTitle('更多主题')
+          this.sectionTitle('已购主题')
         }
-        ForEach(this.additionalBuiltinThemes(), (theme: ThemePack) => {
+        if (this.purchasedThemes().length === 0) {
+          ListItem() {
+            this.purchasedThemesEmptyHint()
+          }
+        }
+        ForEach(this.purchasedThemes(), (theme: ThemePack) => {
           ListItem() {
             this.themeCard(theme)
           }
-        }, (theme: ThemePack) => theme.id)
+        }, (theme: ThemePack) => `${theme.id}_${this.accountEntitlementsRevision}`)
         ListItem() {
           Row() {
           }
@@ -200,6 +220,10 @@ struct ThemeSettingsPage {
       // Pinned over the edge-to-edge list so scrolled content remains visible
       // beneath the status/title area instead of being clipped by it.
       this.titleBar()
+
+      if (this.showThemeStore) {
+        this.themeStoreOverlay()
+      }
 
       if (this.showCustomThemeActionMenu) {
         this.customThemeActionMenu()
@@ -596,6 +620,7 @@ struct ThemeSettingsPage {
         .fontWeight(FontWeight.Bold)
         .fontColor(this.primaryTextColor())
         .layoutWeight(1)
+      this.themeStoreEntryButton()
     }
     .width('100%')
     // The status-bar inset belongs to the pinned title itself, avoiding an
@@ -615,6 +640,366 @@ struct ThemeSettingsPage {
       .fontColor(this.subTextColor())
       .width('100%')
       .padding({ left: 2, top: 6, bottom: 0 })
+  }
+
+  @Builder
+  themeStoreEntryButton() {
+    Row({ space: 5 }) {
+      SymbolGlyph($r('sys.symbol.bag'))
+        .fontSize(14)
+        .fontColor([this.accentColor()])
+      Text('主题商店')
+        .fontSize(12)
+        .fontColor(this.accentColor())
+    }
+    .height(30)
+    .padding({ left: 10, right: 10 })
+    .borderRadius(15)
+    .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
+    .alignItems(VerticalAlign.Center)
+    .accessibilityText('打开主题商店')
+    .onClick(() => this.openThemeStore())
+  }
+
+  @Builder
+  purchasedThemesEmptyHint() {
+    Row({ space: 3 }) {
+      Text('暂无已购主题，去主题商店逛逛')
+        .fontSize(13)
+        .fontColor(this.subTextColor())
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(12)
+        .fontColor([this.subTextColor()])
+    }
+    .width('100%')
+    .padding({ left: 2, top: 8, bottom: 4 })
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => this.openThemeStore())
+  }
+
+  /** Full-screen store: one themed showcase page per swipe. */
+  @Builder
+  themeStoreOverlay() {
+    Column() {
+      this.themeStoreHeader()
+      Text('左右滑动浏览全部主题')
+        .fontSize(12)
+        .fontColor(this.subTextColor())
+        .width('100%')
+        .padding({ left: 20, top: 10, bottom: 2 })
+      this.themeStoreSwiper()
+      this.storePageDots()
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ bottom: Math.max(12, this.navBarHeight) })
+    .backgroundColor(this.pageColor())
+    .transition(TransitionEffect.translate({ y: 64 })
+      .combine(TransitionEffect.opacity(0))
+      .animation({ duration: 260, curve: Curve.Friction }))
+  }
+
+  @Builder
+  themeStoreHeader() {
+    Row() {
+      ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
+        buttonSize: 40, containerWidth: 40, containerHeight: 40,
+        startInset: 0, materialScale: 0.83, compactLayout: true,
+        accessibilityLabel: '返回主题设置', onBack: () => this.closeThemeStore() })
+      Text('主题商店')
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
+        .margin({ left: 2 })
+      if (this.accountLoggedIn) {
+        Text(`${this.accountPoints} 点`)
+          .fontSize(12)
+          .fontColor(this.accentColor())
+          .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+          .borderRadius(14)
+          .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
+      }
+    }
+    .width('100%')
+    .height(56 + this.statusBarHeight)
+    .padding({ top: this.statusBarHeight, left: 12, right: 14 })
+    .backgroundColor(this.titleBarSurfaceColor())
+    .backdropBlur(ThemeRuntime.topBarBlur())
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  themeStoreSwiper() {
+    Swiper() {
+      ForEach(this.storeThemes(), (theme: ThemePack) => {
+        // A vertical scroll is the safety net for viewports too short for the
+        // fixed detail rows; the cover height normally keeps the page fitting.
+        Scroll() {
+          this.storeThemePage(theme)
+        }
+        .width('100%')
+        .height('100%')
+        .scrollBar(BarState.Off)
+        .edgeEffect(EdgeEffect.Spring)
+      }, (theme: ThemePack) => `store_${theme.id}_${this.accountEntitlementsRevision}`)
+    }
+    .indicator(false)
+    .loop(false)
+    .duration(300)
+    .onChange((index: number) => {
+      this.storePageIndex = index;
+    })
+    .onAreaChange((_oldValue: Area, newValue: Area) => {
+      const height = Number(newValue.height);
+      if (Number.isFinite(height) && height > 0) {
+        this.storeSwiperHeight = height;
+      }
+    })
+    .width('100%')
+    .layoutWeight(1)
+    .padding({ left: 18, right: 18, top: 8, bottom: 6 })
+  }
+
+  @Builder
+  storePageDots() {
+    Row({ space: 6 }) {
+      ForEach(this.storeThemes(), (theme: ThemePack, index: number) => {
+        Row()
+          .width(index === this.storePageIndex ? 16 : 6)
+          .height(6)
+          .borderRadius(3)
+          .backgroundColor(index === this.storePageIndex ? this.accentColor() :
+            (this.appDarkMode ? '#4DFFFFFF' : '#26000000'))
+      }, (theme: ThemePack) => `store_dot_${theme.id}`)
+    }
+    .justifyContent(FlexAlign.Center)
+    .width('100%')
+    .height(18)
+  }
+
+  /** One full detail page per theme: cover art, reader sample, pricing and actions. */
+  @Builder
+  storeThemePage(theme: ThemePack) {
+    Column({ space: 10 }) {
+      Stack() {
+        ThemeStartupCover({
+          themeId: theme.startup.styleId,
+          darkMode: this.appDarkMode,
+          animated: false
+        })
+      }
+      .width('100%')
+      .height(this.storeCoverHeight())
+      .borderRadius(theme.radius.large)
+      .clip(true)
+
+      Row({ space: 8 }) {
+        Text(theme.name)
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
+          .fontFamily(theme.typography.appFontFamily)
+          .fontColor(this.activeVariant(theme).colors.primaryTextColor)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+        this.storeThemeStatusPill(theme)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Row({ space: 10 }) {
+        Text(theme.description)
+          .fontSize(11)
+          .fontColor(this.activeVariant(theme).colors.subTextColor)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+        Text(this.storeThemeCaption(theme))
+          .fontSize(11)
+          .fontColor(this.activeVariant(theme).colors.accentColor)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      this.storeReaderPreview(theme)
+      this.storeNavInfoRow(theme)
+      this.storeThemeActions(theme)
+    }
+    .width('100%')
+    .padding(12)
+    .alignItems(HorizontalAlign.Start)
+    .borderRadius(theme.radius.card)
+    .backgroundColor(this.activeVariant(theme).colors.cardColor)
+    .border({
+      width: this.isSelected(theme) ? 2 : 1,
+      color: this.isSelected(theme) ? this.activeVariant(theme).colors.accentColor :
+        this.activeVariant(theme).colors.dividerColor
+    })
+  }
+
+  /** Reader body sample: the theme's paper, text colour and emphasis bubble. */
+  @Builder
+  storeReaderPreview(theme: ThemePack) {
+    Stack({ alignContent: Alignment.TopStart }) {
+      ReaderThemeBackground({
+        surfaceColor: this.activeVariant(theme).reader.backgroundColor,
+        backgroundAssetId: this.activeVariant(theme).reader.backgroundAssetId,
+        compact: true
+      })
+      Column({ space: 7 }) {
+        Text('正文预览 · 护眼底色与字色')
+          .fontSize(10)
+          .fontColor(this.activeVariant(theme).reader.subTextColor)
+        Text() {
+          ContainerSpan() {
+            ImageSpan(ThemeAssetRegistry.regexBubbleCap(this.activeVariant(theme).regexEmphasis.bubbleStyle))
+              .width(14)
+              .height(14)
+              .objectFit(ImageFit.Contain)
+              .verticalAlign(ImageSpanAlignment.CENTER)
+            Span('重点标注')
+              .fontSize(12)
+              .fontColor(this.themeRegexPreview(theme).textColor)
+              .textShadow(this.themeRegexPreviewShadow(theme))
+            ImageSpan(ThemeAssetRegistry.regexBubbleCap(this.activeVariant(theme).regexEmphasis.bubbleStyle))
+              .width(14)
+              .height(14)
+              .objectFit(ImageFit.Contain)
+              .verticalAlign(ImageSpanAlignment.CENTER)
+              .rotate({ angle: 180 })
+          }
+          .textBackgroundStyle(this.themeRegexPreviewBackground(theme))
+        }
+        Text('一行正文示例，用于预览阅读页的排版与配色。')
+          .fontSize(12)
+          .fontFamily(theme.typography.appFontFamily)
+          .fontColor(this.activeVariant(theme).reader.textColor)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .width('100%')
+      .padding(12)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height(96)
+    .borderRadius(theme.radius.medium)
+    .clip(true)
+  }
+
+  @Builder
+  storeNavInfoRow(theme: ThemePack) {
+    Row({ space: 8 }) {
+      ForEach(['bookshelf', 'explore', 'search', 'mine'], (tabId: string) => {
+        Image(ThemeAssetRegistry.navigationIcon(theme.navigation.iconPackId, tabId))
+          .width(16)
+          .height(16)
+          .fillColor(this.activeVariant(theme).colors.accentColor)
+          .draggable(false)
+      }, (tabId: string) => `store_${theme.id}_${tabId}`)
+      Blank()
+      Text(`字号 ${theme.readerLayout.fontSize} · 行距 ${theme.readerLayout.lineHeight} · ` +
+        `边距 ${theme.readerLayout.marginLeft}/${theme.readerLayout.marginRight}`)
+        .fontSize(10)
+        .fontColor(this.activeVariant(theme).colors.subTextColor)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  storeThemeActions(theme: ThemePack) {
+    if (this.isSelected(theme)) {
+      Row() {
+        Text(this.isTrialTheme(theme.id) ? '试用中 · 5分钟后自动恢复' : '正在使用该主题')
+          .fontSize(12)
+          .fontColor(this.activeVariant(theme).colors.accentColor)
+      }
+      .width('100%')
+      .height(40)
+      .justifyContent(FlexAlign.Center)
+      .borderRadius(theme.radius.button)
+      .backgroundColor(this.activeVariant(theme).colors.inputColor)
+    } else if (AccountSessionStore.hasValidEntitlement(theme.id)) {
+      Button('应用主题', { type: ButtonType.Normal })
+        .width('100%')
+        .height(40)
+        .fontSize(13)
+        .fontColor('#FFFFFF')
+        .backgroundColor(this.activeVariant(theme).colors.buttonColor)
+        .onClick(() => {
+          this.selectTheme(theme.id);
+        })
+    } else {
+      Row({ space: 8 }) {
+        this.storeTrialButton(theme)
+        this.storeAcquireButton(theme)
+      }
+      .width('100%')
+    }
+  }
+
+  @Builder
+  storeTrialButton(theme: ThemePack) {
+    Button(this.isTrialTheme(theme.id) ? '结束试用' : '试用5分钟', { type: ButtonType.Normal })
+      .height(40)
+      .fontSize(13)
+      .fontColor(this.activeVariant(theme).colors.accentColor)
+      .backgroundColor(this.activeVariant(theme).colors.inputColor)
+      .layoutWeight(1)
+      .onClick(() => {
+        if (this.isTrialTheme(theme.id)) {
+          this.stopThemeTrial();
+        } else {
+          this.startThemeTrial(theme);
+        }
+      })
+  }
+
+  @Builder
+  storeAcquireButton(theme: ThemePack) {
+    Button(this.themeCatalogLoaded && !this.themeOffer(theme.id) ? '暂未上架' :
+      `获取 · ${this.storeThemePricePoints(theme.id)}点`, { type: ButtonType.Normal })
+      .height(40)
+      .fontSize(13)
+      .fontColor('#FFFFFF')
+      .backgroundColor(this.activeVariant(theme).colors.buttonColor)
+      .layoutWeight(1)
+      .enabled(!this.themeCatalogLoaded || !!this.themeOffer(theme.id))
+      .onClick(() => {
+        this.acquireTheme(theme.id);
+      })
+  }
+
+  @Builder
+  storeThemeStatusPill(theme: ThemePack) {
+    if (this.applyingThemeId === theme.id && !this.isSelected(theme) && !this.isTrialTheme(theme.id)) {
+      Text('应用中')
+        .fontSize(10)
+        .fontColor(this.activeVariant(theme).colors.accentColor)
+    } else if (this.isTrialTheme(theme.id) || this.isSelected(theme)) {
+      Text(this.isTrialTheme(theme.id) ? '试用中' : '使用中')
+        .fontSize(10)
+        .fontColor('#FFFFFF')
+        .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+        .borderRadius(10)
+        .backgroundColor(this.activeVariant(theme).colors.accentColor)
+    } else if (BuiltinThemeRegistry.isFree(theme.id) || AccountSessionStore.hasValidEntitlement(theme.id)) {
+      Text(BuiltinThemeRegistry.isFree(theme.id) ? '免费' : '已购')
+        .fontSize(10)
+        .fontColor(this.activeVariant(theme).colors.accentColor)
+        .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+        .borderRadius(10)
+        .backgroundColor(this.activeVariant(theme).colors.inputColor)
+    } else {
+      Text(`${this.storeThemePricePoints(theme.id)}点`)
+        .fontSize(10)
+        .fontColor(this.activeVariant(theme).colors.subTextColor)
+        .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+        .borderRadius(10)
+        .backgroundColor(this.activeVariant(theme).colors.inputColor)
+    }
   }
 
   @Builder
@@ -1506,14 +1891,68 @@ struct ThemeSettingsPage {
     await this.selectTheme(themeId);
   }
 
-  additionalBuiltinThemes(): ThemePack[] {
+  /** Only themes with a live (unexpired) purchase entitlement belong here. */
+  purchasedThemes(): ThemePack[] {
     const themes: ThemePack[] = [];
     for (const theme of BuiltinThemeRegistry.all()) {
-      if (theme.id !== ThemeIds.PLAIN_DEFAULT) {
+      if (AccountSessionStore.hasValidEntitlement(theme.id)) {
         themes.push(theme);
       }
     }
     return themes;
+  }
+
+  openThemeStore(): void {
+    this.focusedThemeId = '';
+    this.showThemeStore = true;
+  }
+
+  closeThemeStore(): void {
+    this.showThemeStore = false;
+    this.focusedThemeId = '';
+  }
+
+  /**
+   * The store only merchandises paid themes; the free default theme lives on
+   * the main list and is never shown here. One theme per swipe page.
+   */
+  storeThemes(): ThemePack[] {
+    const themes: ThemePack[] = [];
+    for (const theme of BuiltinThemeRegistry.all()) {
+      if (!BuiltinThemeRegistry.isFree(theme.id)) {
+        themes.push(theme);
+      }
+    }
+    return themes;
+  }
+
+  /** Cover takes whatever the swipe page has left after its fixed detail rows. */
+  storeCoverHeight(): number {
+    const swiper = this.storeSwiperHeight > 0 ? this.storeSwiperHeight : 630;
+    return Math.max(STORE_COVER_MIN_HEIGHT,
+      Math.min(STORE_COVER_MAX_HEIGHT, swiper - STORE_PAGE_FIXED_HEIGHT));
+  }
+
+  storeThemePricePoints(themeId: string): number {
+    return this.themeOffer(themeId)?.pricePoints || AccountCommerceConfig.THEME_PRICE_POINTS;
+  }
+
+  storeThemeValidDays(themeId: string): number {
+    return this.themeOffer(themeId)?.validDays || AccountCommerceConfig.THEME_VALID_DAYS;
+  }
+
+  storeThemeCaption(theme: ThemePack): string {
+    if (BuiltinThemeRegistry.isFree(theme.id)) {
+      return '免费使用';
+    }
+    const entitlement = AccountSessionStore.entitlement(theme.id);
+    if (entitlement && entitlement.expiresAt > Date.now()) {
+      return `有效至 ${this.formatDate(entitlement.expiresAt)}`;
+    }
+    if (this.themeCatalogLoaded && !this.themeOffer(theme.id)) {
+      return '暂未上架';
+    }
+    return `${this.storeThemePricePoints(theme.id)}点 · 有效期${this.storeThemeValidDays(theme.id)}天`;
   }
 
   themeHasBookCover(theme: ThemePack): boolean {

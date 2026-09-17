@@ -9,24 +9,35 @@ export class TtsAvAudioPlayer {
   private player: media.AVPlayer | null = null;
   private sourceFile: fs.File | null = null;
   private playGeneration: number = 0;
+  // Generation that currently owns `player`. A newer play() takes ownership, so an older
+  // session finishing later must not release the player the new session is using.
+  private playerOwnerGeneration: number = 0;
   private paused: boolean = false;
   private interruptPaused: boolean = false;
   private resumeWaiters: Array<() => void> = [];
 
+  /**
+   * Play one synthesized chunk.
+   *
+   * The player is a resident instance reused by the next chunk. Creating and releasing an
+   * AVPlayer per chunk (which is what this used to do) costs far more than the audio itself:
+   * the release/prepare/start sequence between two chunks is long enough to be heard as a
+   * hard silence between sentences, which is the custom-voice counterpart of the
+   * "half a sentence read as a whole sentence" complaint.
+   */
   async play(filePath: string, speed: number = 1,
     onPlaybackStart?: (durationMs: number) => void): Promise<void> {
     const generation = ++this.playGeneration;
     this.interruptPaused = false;
-    await this.releaseCurrent();
     const sourceLength = this.getFileLength(filePath);
-    const player = await media.createAVPlayer();
-    this.player = player;
+    const player = await this.acquirePlayer(generation);
     const sourceFile = fs.openSync(filePath, fs.OpenMode.READ_ONLY);
     this.sourceFile = sourceFile;
     const normalizedSpeed = Math.max(0.125, Math.min(4, speed || 1));
-    const initialized = this.waitForInitialized(player, generation);
+    let keepResident = true;
     const audioSessionOwner = `${this.audioSessionOwnerPrefix}_${generation}`;
     try {
+      const initialized = this.waitForInitialized(player, generation);
       // Supplying the complete descriptor is important for downloaded TTS audio.
       // A bare fd can be classified as an unknown-length/live stream by AVPlayer,
       // which rejects playback-rate changes and aborts continuous reading.
@@ -45,6 +56,10 @@ export class TtsAvAudioPlayer {
         return;
       }
       const ended = new Promise<void>((resolve, reject) => {
+        // The initialized waiter has already settled, so its listeners can go now. Clearing
+        // everything first also keeps a resident player from accumulating one set of listeners
+        // per chunk.
+        this.detachListeners(player);
         player.on('stateChange', (state: string) => {
           if (generation !== this.playGeneration) {
             resolve();
@@ -96,19 +111,40 @@ export class TtsAvAudioPlayer {
         }
       }
       await ended;
+    } catch (error) {
+      // A failed chunk must not leave a half-broken player behind for the next one.
+      keepResident = false;
+      throw error as Error;
     } finally {
-      if (this.player === player) {
-        this.player = null;
-      }
-      if (this.sourceFile === sourceFile) {
-        this.sourceFile = null;
-      }
-      await this.releasePlayer(player);
-      this.closeFile(sourceFile);
+      this.detachListeners(player);
       TtsAudioSession.release(audioSessionOwner);
       if (this.activeAudioSessionOwner === audioSessionOwner) {
         this.activeAudioSessionOwner = '';
       }
+      if (this.player === player && this.playerOwnerGeneration === generation) {
+        if (!keepResident || generation !== this.playGeneration) {
+          this.player = null;
+          this.playerOwnerGeneration = 0;
+          await this.releasePlayer(player);
+        } else {
+          // Park the player in idle so the next chunk only has to set fdSrc and prepare.
+          // Resetting here (rather than when the next chunk starts) keeps the cost inside the
+          // tail silence instead of in front of the next sentence. It also runs before the file
+          // descriptor is closed so the player still owns a valid source while it tears down.
+          try {
+            await player.reset();
+          } catch (error) {
+            console.warn('[TTS] reset av player failed, releasing:', error);
+            this.player = null;
+            this.playerOwnerGeneration = 0;
+            await this.releasePlayer(player);
+          }
+        }
+      }
+      if (this.sourceFile === sourceFile) {
+        this.sourceFile = null;
+      }
+      this.closeFile(sourceFile);
     }
   }
 
@@ -122,6 +158,7 @@ export class TtsAvAudioPlayer {
     const player = this.player;
     const sourceFile = this.sourceFile;
     this.player = null;
+    this.playerOwnerGeneration = 0;
     this.sourceFile = null;
     if (player) {
       this.releasePlayer(player).finally(() => {
@@ -271,12 +308,62 @@ export class TtsAvAudioPlayer {
     }
   }
 
+  /**
+   * Return the resident player for a new play session, resetting it when it is still around
+   * and creating a fresh one only when reuse is impossible.
+   */
+  private async acquirePlayer(generation: number): Promise<media.AVPlayer> {
+    const existing = this.player;
+    if (existing) {
+      try {
+        this.detachListeners(existing);
+        const state = existing.state;
+        if (state !== 'idle') {
+          await existing.reset();
+        }
+        if (generation !== this.playGeneration) {
+          throw new Error('朗读已停止');
+        }
+        this.playerOwnerGeneration = generation;
+        return existing;
+      } catch (error) {
+        console.warn('[TTS] reuse av player failed, recreating:', error);
+        await this.releaseCurrent();
+      }
+    }
+    const player = await media.createAVPlayer();
+    this.player = player;
+    this.playerOwnerGeneration = generation;
+    console.info(`[TTS] av player created: generation=${generation},state=${player.state}`);
+    return player;
+  }
+
+  private detachListeners(player: media.AVPlayer | null): void {
+    if (!player) {
+      return;
+    }
+    try {
+      player.off('stateChange');
+    } catch (_) {
+    }
+    try {
+      player.off('error');
+    } catch (_) {
+    }
+    try {
+      player.off('audioInterrupt');
+    } catch (_) {
+    }
+  }
+
   private async releaseCurrent(): Promise<void> {
     const player = this.player;
     const sourceFile = this.sourceFile;
     this.player = null;
+    this.playerOwnerGeneration = 0;
     this.sourceFile = null;
     if (player) {
+      this.detachListeners(player);
       await this.releasePlayer(player);
     }
     this.closeFile(sourceFile);

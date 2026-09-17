@@ -7,6 +7,7 @@ export class SourceRuntimeStage {
   static readonly BOOK_INFO: string = 'bookInfo';
   static readonly TOC: string = 'toc';
   static readonly CONTENT: string = 'content';
+  static readonly READER_ACTION: string = 'readerAction';
 }
 
 export class SourceRuntimeCapabilityReport {
@@ -55,7 +56,8 @@ export class BookSourceRuntimeRouter {
   ];
 
   private static readonly FULL_JAVA_METHODS: string[] = [
-    'ajax', 'ajaxAll', 'post', 'put', 'get', 'getString', 'getStringList', 'toast', 'longToast',
+    'ajax', 'ajaxAll', 'post', 'put', 'get', 'getString', 'getStringList', 'getElement',
+    'setContent', 'toast', 'longToast',
     'startBrowser', 'startBrowserAwait',
     'startBrowserDp', 'showBrowser', 'showReadingBrowser', 'open', 'openUrl',
     'base64Encode', 'base64EncodeToString', 'base64Decode', 'base64DecodeToString',

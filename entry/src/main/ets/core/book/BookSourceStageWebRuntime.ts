@@ -48,7 +48,8 @@ export class StageWebRuntimeRequest {
       this.maxTotalResponseBytes = 8 * 1024 * 1024;
       this.maxInputBytes = 16 * 1024 * 1024;
       this.maxRequestCount = 8;
-    } else if (this.stage === SourceRuntimeStage.CONTENT) {
+    } else if (this.stage === SourceRuntimeStage.CONTENT ||
+      this.stage === SourceRuntimeStage.READER_ACTION) {
       this.maxResponseBytes = 6 * 1024 * 1024;
       this.maxTotalResponseBytes = 10 * 1024 * 1024;
       this.maxInputBytes = 20 * 1024 * 1024;
@@ -74,6 +75,8 @@ export class StageWebRuntimeResult {
   requestedHtml: string = '';
   toastMessage: string = '';
   errorMessage: string = '';
+  // 'true' when the script called java.refreshExplore() / source.refreshExplore().
+  refreshExploreRequested: string = '';
 }
 
 class StageWebRuntimeStep extends StageWebRuntimeResult {
@@ -307,7 +310,7 @@ export class BookSourceStageWebRuntime {
     for (let stepIndex = 0; stepIndex < 20; stepIndex++) {
       this.ensureNotCancelled(request);
       const script = this.buildScript(request, responses, stringResults, cookies, cacheState,
-        fixedNow, randomSeed);
+        fixedNow, randomSeed, journal.responseHeaders);
       const raw = await this.runJavaScript(script);
       this.ensureNotCancelled(request);
       const step = this.parseStep(raw);
@@ -398,6 +401,7 @@ export class BookSourceStageWebRuntime {
           throw new Error('书源脚本累计响应过大');
         }
         journal.recordResponse(step.pendingAjax, responseBody);
+        journal.recordResponseHeaders(step.pendingAjax, response.headers);
         this.captureResponseCookies(cookies, step.pendingAjax, response.url || '', response.headers);
         continue;
       }
@@ -758,7 +762,8 @@ export class BookSourceStageWebRuntime {
 
   private buildScript(request: StageWebRuntimeRequest, responses: Record<string, string>,
     stringResults: Record<string, string>, cookies: Record<string, string>,
-    cacheState: Record<string, string>, fixedNow: number, randomSeed: number): string {
+    cacheState: Record<string, string>, fixedNow: number, randomSeed: number,
+    responseHeaders: Record<string, string> = {}): string {
     const bookVariables = this.parseRecord(request.book ? request.book.variable : '');
     const loginInfo = this.parseLoginInfo(request.source.loginInfo || '');
     const javaState = this.parseRuntimeJavaState(request.source.loginInfo || '');
@@ -795,6 +800,7 @@ export class BookSourceStageWebRuntime {
           resourceUrl: request.chapter.resourceUrl, tag: request.chapter.tag
         } : {},
       responses: responses || {},
+      responseHeaders: responseHeaders || {},
       stringResults: stringResults || {},
       cookies: cookies || {},
       cache: cacheState || {},
@@ -813,7 +819,7 @@ export class BookSourceStageWebRuntime {
     const codeBase64 = this.encodeBase64(code);
     return `(function(){` +
       `function dec(v){try{return decodeURIComponent(escape(atob(v)));}catch(e){return atob(v);}}` +
-      `const S=JSON.parse(dec('${stateBase64}'));let pending='',pendingHeaders='{}',pendingCookie='',pendingCrypto='',pendingStringRules=[],url='',browserHtml='',toast='',error='',logs=[];` +
+      `const S=JSON.parse(dec('${stateBase64}'));let pending='',pendingHeaders='{}',pendingCookie='',pendingCrypto='',pendingStringRules=[],url='',browserHtml='',toast='',error='',logs=[],refreshExploreRequested=false;` +
       `const cookieOps=[];const sourceData=Object.assign({},S.sourceState||{});` +
       `const cacheData=Object.assign({},S.cache||{});` +
       `const infoMap=Object.create(null);` +
@@ -860,6 +866,24 @@ export class BookSourceStageWebRuntime {
       `if(list)return Array.isArray(direct)?direct:[direct];return typeof direct==='string'?direct:JSON.stringify(direct);}` +
       `if(!pendingStringRules.some(function(r){return r.rule===k&&r.list===list;}))pendingStringRules.push({rule:k,list:list});` +
       `return list?[]:'';}` +
+      `function decodeEntities(v){return String(v??'').replace(/&(nbsp|lt|gt|quot|apos|amp|#39|#x27);/gi,function(_,n){` +
+      `n=String(n).toLowerCase();if(n==='nbsp')return ' ';if(n==='lt')return '<';if(n==='gt')return '>';` +
+      `if(n==='quot')return String.fromCharCode(34);if(n==='amp')return '&';return String.fromCharCode(39);});}` +
+      `function elementText(html){return decodeEntities(String(html??'').replace(/<(script|style)[\\s\\S]*?<\\/(script|style)>/gi,' ')` +
+      `.replace(/<[^>]*>/g,' ')).replace(/\\s+/g,' ').trim();}` +
+      `function elementOwnText(html){var inner=String(html??'').replace(/^<[^>]*>/,'').replace(/<[^>]*>$/,'');` +
+      `return decodeEntities(inner.replace(/<[a-zA-Z][^>]*>[\\s\\S]*?<\\/[a-zA-Z][^>]*>/g,' ').replace(/<[^>]*>/g,' '))` +
+      `.replace(/\\s+/g,' ').trim();}` +
+      `function elementAttrs(html){var start=String(html??'').match(/^<([a-zA-Z][a-zA-Z0-9_-]*)((?:\\s[^<>]*?)?)\\/?>/);` +
+      `var attrs={};if(start&&start[2]){var re=/([A-Za-z_:][-A-Za-z0-9_:.]*)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>` + "`" + `]+))/g;var m;` +
+      `while((m=re.exec(start[2]))!==null){attrs[m[1].toLowerCase()]=m[2]!=null?m[2]:(m[3]!=null?m[3]:(m[4]!=null?m[4]:''));}}return attrs;}` +
+      `function elementFromHtml(html){var attrs=elementAttrs(html);` +
+      `return {attr:function(n){var v=attrs[String(n??'').toLowerCase()];return v===undefined?'':v;},` +
+      `hasAttr:function(n){return attrs[String(n??'').toLowerCase()]!==undefined;},` +
+      `text:function(){return elementText(html);},ownText:function(){return elementOwnText(html);},` +
+      `html:function(){return html;},toString:function(){return elementText(html);}};}` +
+      `function getElementList(k){var list=ruleResultValue(String(k??'')+'@html',true);` +
+      `return list.map(function(item){return elementFromHtml(item);});}` +
       `const cookieData=Object.assign({},S.cookies||{});const cookie={getCookie:function(k){k=String(k??'');` +
       `if(Object.prototype.hasOwnProperty.call(cookieData,k))return cookieData[k]??'';if(!pendingCookie)pendingCookie=k;return '';},` +
       `getKey:function(k,n){const v=this.getCookie(k);const m=String(v).match(new RegExp('(?:^|;\\\\s*)'+n+'=([^;]*)'));return m?m[1]:'';},` +
@@ -880,7 +904,7 @@ export class BookSourceStageWebRuntime {
       `removeLoginHeader:function(){S.sourceLoginHeader='';return '';},` +
       `getHeaderMap:function(){try{return JSON.parse(S.sourceHeader||'{}');}catch(e){return {};}} ,` +
       `getVariable:function(){return S.variable||'';},setVariable:function(v){S.variable=String(v??'');return S.variable;},` +
-      `refreshExplore:function(){return true;},` +
+      `refreshExplore:function(){refreshExploreRequested=true;return true;},` +
       `get:function(k){return sourceData[String(k??'')]??'';},put:function(k,v){sourceData[String(k??'')]=v;return v;},` +
       `putLoginInfo:function(v){if(typeof v==='string'){try{v=JSON.parse(v);}catch(e){return v;}}` +
       `if(v&&typeof v==='object')Object.assign(loginMap,v);return v;},` +
@@ -913,7 +937,13 @@ export class BookSourceStageWebRuntime {
       `function responseObject(v){v=String(v??'');let body='';` +
       `if(Object.prototype.hasOwnProperty.call(S.responses,v))body=S.responses[v]??'';else if(!pending)pending=v;` +
       `return {body:function(){return body;},code:function(){return body?200:599;},` +
-      `isSuccessful:function(){return !!body;},headers:function(){return {};},cookies:function(){const u=specUrl(v);` +
+      `isSuccessful:function(){return !!body;},headers:function(){var map={};` +
+      `try{map=JSON.parse((S.responseHeaders||{})[v]||'{}');}catch(e){map={};}` +
+      `var upper={};for(var hk in map){upper[String(hk).toUpperCase()]=String(map[hk]);}` +
+      `return {get:function(n){var name=String(n??'');if(map[name]!==undefined&&map[name]!==null)return String(map[name]);` +
+      `var u=upper[name.toUpperCase()];return u===undefined?null:u;},` +
+      `names:function(){return Object.keys(map);}};},` +
+      `cookies:function(){const u=specUrl(v);` +
       `const c=responseCookieList(cookieData[u]);return {toString:function(){return c;},size:function(){return c?c.split(',').length:0;}};},` +
       `toString:function(){return body;}};}` +
       `function requestSpec(method,u,b,h){const options={method:String(method||'GET').toUpperCase()};` +
@@ -964,17 +994,26 @@ export class BookSourceStageWebRuntime {
       `globalThis.result=v;}else{globalThis.result=v==null?'':v;}return true;},` +
       `getString:function(k){return ruleResultValue(k,false);},` +
       `getStringList:function(k){return ruleResultValue(k,true);},` +
+      `getElement:function(k){return getElementList(k);},` +
+      `setContent:function(v){this.__setContextContent(typeof v==='string'?v:JSON.stringify(v??''));return true;},` +
       `timeFormat:function(v){try{return new NativeDate(Number(v)).toISOString().replace('T',' ').replace('Z','');}catch(e){return String(v??'');}},` +
       `timeFormatUTC:function(v){try{return new NativeDate(Number(v)).toISOString();}catch(e){return String(v??'');}},` +
       `startBrowser:function(u){url=String(u??'');return {body:function(){return '';}};},` +
       `startBrowserAwait:function(u){url=String(u??'');return {body:function(){return '';}};},` +
       `startBrowserDp:function(u){url=String(u??'');return {body:function(){return '';}};},` +
-      `showBrowser:function(u,h,p){url=String(u??'');browserHtml=browserDocument(h,p);return {body:function(){return browserHtml;}};},` +
       `showReadingBrowser:function(u){url=String(u??'');return {body:function(){return '';}};},` +
+      // Sources call showBrowser in two shapes: showBrowser(url, html, preloadJs) wants a built
+      // document, while paragraph-comment bubbles call showBrowser(url, null, null, config) where
+      // the trailing object only describes the host sheet. With no html there is nothing to build:
+      // keep requestedHtml empty so the reader opens the URL itself instead of a blank document
+      // that would inject the config JSON as if it were script.
+      `showBrowser:function(u,h,p){url=String(u??'');` +
+      `browserHtml=(typeof h==='string'&&h)?browserDocument(h,p):'';` +
+      `return {body:function(){return browserHtml;}};},` +
       `open:function(u){url=String(u??'');return url;},webView:function(){throw new Error('java.webView仅登录动作可用');},` +
       `getWebViewUA:function(){return 'Mozilla/5.0 (Linux; HarmonyOS) AppleWebKit/537.36 Mobile Safari/537.36';},` +
       `getAppVariant:function(){return 'harmony';},` +
-      `refreshExplore:function(){return true;},refreshBookToc:function(){return true;},` +
+      `refreshExplore:function(){refreshExploreRequested=true;return true;},refreshBookToc:function(){return true;},` +
       `refreshContent:function(){return true;},upConfig:function(){return true;},searchBook:function(){return true;}};` +
       `function TimeoutCancellationException(){}const Packages={io:{legato:{kazusa:{utils:{` +
       `TimeoutCancellationException:TimeoutCancellationException}}}}};` +
@@ -1001,6 +1040,7 @@ export class BookSourceStageWebRuntime {
       `bookVariable:JSON.stringify(bookData),bookType:String(book.type??''),chapterImgUrl:String(chapter.imgUrl??''),` +
       `bookDurChapterIndex:String(book.durChapterIndex??''),bookImageStyle:String(book.imageStyle??''),` +
       `cacheState:JSON.stringify(cacheData),javaState:JSON.stringify(javaData),sourceState:JSON.stringify(sourceData),logs:JSON.stringify(logs),` +
+      `refreshExploreRequested:refreshExploreRequested?'true':'false',` +
       `value:value,requestedUrl:url,requestedHtml:browserHtml,toastMessage:toast,errorMessage:error}));})()`;
   }
 
@@ -1045,6 +1085,7 @@ export class BookSourceStageWebRuntime {
       step.requestedHtml = String(record['requestedHtml'] || '');
       step.toastMessage = String(record['toastMessage'] || '');
       step.errorMessage = String(record['errorMessage'] || '');
+      step.refreshExploreRequested = String(record['refreshExploreRequested'] || '');
       return step;
     } catch (error) {
       // Never print the returned value: it can contain credentials or copyrighted content.

@@ -1978,6 +1978,20 @@ struct BookSourcePage {
         .constraintSize({ maxHeight: 430 })
         .scrollBar(BarState.Auto)
 
+        if (this.sourceLoginSupportsConfirmAction(this.actionSourceDetail)) {
+          Button(this.isExecutingLoginAction ? '登录中...' : '确认登录', { type: ButtonType.Normal })
+            .width('100%')
+            .height(42)
+            .margin({ top: 8 })
+            .fontSize(14)
+            .fontColor('#FFFFFF')
+            .backgroundColor(this.accentColor())
+            .enabled(!this.isExecutingLoginAction)
+            .onClick(() => {
+              this.confirmSourceLoginInputs();
+            })
+        }
+
         Button('关闭')
           .width('100%')
           .height(42)
@@ -4297,6 +4311,31 @@ struct BookSourcePage {
     this.sourceLoginItems = items;
   }
 
+  /**
+   * A loginUi with only input fields has no action button; Android Legado runs the loginUrl
+   * script's `login()` function when the user confirms the dialog. Mirror that: show a confirm
+   * button only when the source's loginUrl JavaScript actually defines `login`.
+   */
+  sourceLoginSupportsConfirmAction(source: BookSource | null): boolean {
+    if (!source) return false;
+    const hasInput = this.sourceLoginItems.some((item: BookSourceLoginItem): boolean =>
+      this.isSourceLoginInput(item) || this.isSourceLoginChoice(item));
+    if (!hasInput) return false;
+    const js = `${source.loginUrl || ''}`;
+    return /\bfunction\s+login\s*\(/.test(js) || /\blogin\s*=\s*function\b/.test(js);
+  }
+
+  async confirmSourceLoginInputs(): Promise<void> {
+    const source = this.actionSourceDetail;
+    if (!source || this.isExecutingLoginAction) return;
+    this.syncSourceLoginInfo(source);
+    const item = new BookSourceLoginItem();
+    item.name = '登录';
+    item.type = 'button';
+    item.action = `if(typeof login==='function'){login();}'';`;
+    await this.executeSourceLoginAction(item);
+  }
+
   syncSourceLoginInfo(source: BookSource): void {
     const values = BookSourceLoginWebRuntime.parseRecord(source.loginInfo);
     for (const item of this.sourceLoginItems) {
@@ -4975,7 +5014,10 @@ struct BookSourcePage {
     awaitToken: string = '', html: string = '', injectJs: string = ''): void {
     if (/^https?:\/\//i.test(url || '')) VerificationSupport.requestVerification(url, title, source);
     let payloadToken = '';
-    if (html) {
+    // java.showBrowser(url, null, preloadJs) may carry no HTML at all. The preload script is the
+    // only channel through which token-based web login pages can hand credentials back (they are
+    // not cookie sessions), so it must survive even without a payload document.
+    if (html || injectJs) {
       payloadToken = `${Date.now()}_${Math.floor(Math.random() * 1000000000)}`;
       AppStorage.setOrCreate('bookSourceBrowserPayloadToken', payloadToken);
       AppStorage.setOrCreate('bookSourceBrowserPayloadHtml', html);
@@ -4990,7 +5032,8 @@ struct BookSourcePage {
         title: title,
         requireLoginCookie: requireLoginCookie ? 'true' : 'false',
         bookSourceBrowserAwaitToken: awaitToken,
-        bookSourceBrowserPayloadToken: payloadToken
+        bookSourceBrowserPayloadToken: payloadToken,
+        bookSourceVariable: source.variable || ''
       }
     });
   }

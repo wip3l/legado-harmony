@@ -1,6 +1,7 @@
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { ReaderTtsFloatingSession } from '../utils/ReaderTtsFloatingSession';
+import deviceInfo from '@ohos.deviceInfo';
 
 @Component
 export struct ReaderTtsPlayerPanel {
@@ -73,26 +74,7 @@ export struct ReaderTtsPlayerPanel {
           this.speedOptions()
         }
 
-        if (this.globalTtsMode === 'audio') {
-          this.audioActions()
-        } else if (ReaderTtsFloatingSession.ttsVoiceTitles().length > 0) {
-          this.ttsVoiceSelect()
-        }
-
-        if (this.globalTtsMode !== 'audio') {
-          this.catalogAction()
-        }
-
-        Button(this.globalTtsMode === 'audio' ? '停止听书' : '停止朗读')
-          .width('100%')
-          .height(42)
-          .borderRadius(12)
-          .fontColor('#FFFFFF')
-          .backgroundColor('#D94841')
-          .onClick(() => {
-            this.close();
-            ReaderTtsFloatingSession.stop();
-          })
+        this.bottomActions()
       }
       .width('100%')
       .height('100%')
@@ -388,45 +370,72 @@ export struct ReaderTtsPlayerPanel {
 
   @Builder
   ttsVoiceSelect() {
-    Row({ space: 8 }) {
-      SymbolGlyph($r('sys.symbol.speaker_wave_3'))
-        .fontSize(17)
-        .fontColor([this.accentColor])
-        .width(24)
-      Select(this.ttsVoiceOptions())
-        .id(`shared_tts_voice_${this.globalTtsVoiceRevision}_${ReaderTtsFloatingSession.ttsVoiceIndex()}`)
-        .selected(ReaderTtsFloatingSession.ttsVoiceIndex())
-        .value(this.globalTtsVoiceCode)
-        .font({ size: 13 })
-        .fontColor(this.primaryTextColor)
-        .layoutWeight(1)
-        .height(40)
-        .padding({ left: 0, right: 0 })
-        .backgroundColor(Color.Transparent)
-        .borderRadius(16)
-        .border({ width: 0 })
-        .optionBgColor(Color.Transparent)
-        .divider(null)
-        .optionFontColor(this.primaryTextColor)
-        .selectedOptionFontColor(this.accentColor)
-        .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.darkMode))
-        // This menu floats over the page image, so it needs a genuinely frosted
-        // surface: the opaque card color used by the settings dropdowns hides
-        // the API 26 menu material completely, and the translucent tint alone
-        // reads as see-through. Keep the translucent dropdown tint used by every
-        // other menu (so menuSystemMaterial can frost the page behind it) and add
-        // an explicit component blur so the frost also works on devices where the
-        // immersive menu material is unavailable.
-        .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.darkMode, ''))
-        .menuBackgroundBlurStyle(ThemeRuntime.glassEnabled() ? BlurStyle.COMPONENT_THICK : BlurStyle.NONE)
-        .menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial())
-        .onSelect((index: number) => ReaderTtsFloatingSession.selectTtsVoice(index))
+    if (deviceInfo.sdkApiVersion >= 26) {
+      // The API 26 Select paints its own component surface, so the speaker mark has to
+      // sit inside that surface instead of beside it, matching the shelf sort chip.
+      Stack({ alignContent: Alignment.Start }) {
+        this.ttsVoiceSelectControl(34, this.darkMode ? '#20FFFFFF' : '#0D000000')
+        SymbolGlyph($r('sys.symbol.speaker_wave_3'))
+          .fontSize(17)
+          .fontColor([this.accentColor])
+          .width(22)
+          .margin({ left: 11 })
+          .hitTestBehavior(HitTestMode.None)
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .height(44)
+    } else {
+      Row({ space: 8 }) {
+        SymbolGlyph($r('sys.symbol.speaker_wave_3'))
+          .fontSize(17)
+          .fontColor([this.accentColor])
+          .width(24)
+        this.ttsVoiceSelectControl(0, Color.Transparent)
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .height(44)
+      .padding({ left: 12, right: 10 })
+      .borderRadius(12)
+      .backgroundColor(this.darkMode ? '#20FFFFFF' : '#0D000000')
     }
-    .width('100%')
-    .height(44)
-    .padding({ left: 12, right: 10 })
-    .borderRadius(12)
-    .backgroundColor(this.darkMode ? '#20FFFFFF' : '#0D000000')
+  }
+
+  @Builder
+  ttsVoiceSelectControl(leadingInset: number, surfaceColor: ResourceColor) {
+    Select(this.ttsVoiceOptions())
+      .id(`shared_tts_voice_${this.globalTtsVoiceRevision}_${ReaderTtsFloatingSession.ttsVoiceIndex()}`)
+      .selected(ReaderTtsFloatingSession.ttsVoiceIndex())
+      .value(this.globalTtsVoiceCode)
+      .font({ size: 13 })
+      .fontColor(this.primaryTextColor)
+      // The API 26 branch fills its Stack by width; inside the legacy Row the
+      // layoutWeight owns the main axis and this width is ignored, so both
+      // branches can share one definition.
+      .width('100%')
+      .layoutWeight(1)
+      .height(44)
+      .padding({ left: leadingInset, right: 0 })
+      .backgroundColor(surfaceColor)
+      .borderRadius(12)
+      .border({ width: 0 })
+      .optionBgColor(Color.Transparent)
+      .divider(null)
+      .optionFontColor(this.primaryTextColor)
+      .selectedOptionFontColor(this.accentColor)
+      .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.darkMode))
+      // This menu floats over the page image, so it needs a genuinely frosted
+      // surface: the opaque card color used by the settings dropdowns hides
+      // the API 26 menu material completely, and the translucent tint alone
+      // reads as see-through. Keep the translucent dropdown tint used by every
+      // other menu (so menuSystemMaterial can frost the page behind it) and add
+      // an explicit component blur so the frost also works on devices where the
+      // immersive menu material is unavailable.
+      .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.darkMode, ''))
+      .menuBackgroundBlurStyle(ThemeRuntime.glassEnabled() ? BlurStyle.COMPONENT_THICK : BlurStyle.NONE)
+      .menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial())
+      .onSelect((index: number) => ReaderTtsFloatingSession.selectTtsVoice(index))
   }
 
   ttsVoiceOptions(): SelectOption[] {
@@ -458,33 +467,78 @@ export struct ReaderTtsPlayerPanel {
     .width('100%')
   }
 
+  /**
+   * Voice, catalog and stop share one row so the reading text keeps the panel
+   * height. Both reader modes use this row; their footers only differ in where
+   * the voice list comes from.
+   */
   @Builder
-  audioActions() {
-    Row({ space: 10 }) {
-      Button(`音色 · ${this.globalTtsVoiceCode || '4'}`)
-        .layoutWeight(1)
-        .height(40)
-        .backgroundColor(ThemeRuntime.inputColor(this.darkMode))
-        .fontColor(this.primaryTextColor)
-        .onClick(() => this.onOpenVoice())
-      Button('目录跳转')
-        .layoutWeight(1)
-        .height(40)
-        .backgroundColor(ThemeRuntime.inputColor(this.darkMode))
-        .fontColor(this.primaryTextColor)
-        .onClick(() => this.onOpenCatalog())
+  bottomActions() {
+    Row({ space: 8 }) {
+      if (this.globalTtsMode === 'audio') {
+        this.voiceButton()
+      } else if (ReaderTtsFloatingSession.ttsVoiceTitles().length > 0) {
+        this.ttsVoiceSelect()
+      }
+      this.bottomAction($r('sys.symbol.list_bullet'), '目录', '目录跳转', false,
+        () => this.onOpenCatalog())
+      this.bottomAction($r('sys.symbol.stop_circle_fill'), '停止',
+        this.globalTtsMode === 'audio' ? '停止听书' : '停止朗读', true, () => {
+          this.close();
+          ReaderTtsFloatingSession.stop();
+        })
     }
     .width('100%')
+    .height(44)
+    .alignItems(VerticalAlign.Center)
   }
 
   @Builder
-  catalogAction() {
-    Button('目录跳转')
-      .width('100%')
-      .height(40)
-      .backgroundColor(ThemeRuntime.inputColor(this.darkMode))
-      .fontColor(this.primaryTextColor)
-      .onClick(() => this.onOpenCatalog())
+  bottomAction(icon: Resource, label: string, accessibility: string, danger: boolean,
+    action: () => void) {
+    Row({ space: 4 }) {
+      SymbolGlyph(icon)
+        .fontSize(16)
+        .fontColor([danger ? '#FFFFFF' : this.primaryTextColor])
+      Text(label)
+        .fontSize(12)
+        .fontColor(danger ? '#FFFFFF' : this.primaryTextColor)
+        .maxLines(1)
+    }
+    .height(44)
+    .padding({ left: 10, right: 10 })
+    .borderRadius(12)
+    .backgroundColor(danger ? '#D94841' : (this.darkMode ? '#20FFFFFF' : '#0D000000'))
+    .alignItems(VerticalAlign.Center)
+    .accessibilityText(accessibility)
+    .onClick(action)
+  }
+
+  /** Voice entry for the audio mode, whose voice list comes from the book source. */
+  @Builder
+  voiceButton() {
+    Row({ space: 6 }) {
+      SymbolGlyph($r('sys.symbol.speaker_wave_3'))
+        .fontSize(16)
+        .fontColor([this.accentColor])
+      Text(`音色 · ${this.globalTtsVoiceCode || '4'}`)
+        .fontSize(13)
+        .fontColor(this.primaryTextColor)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+      SymbolGlyph($r('sys.symbol.chevron_down'))
+        .fontSize(13)
+        .fontColor([this.subTextColor])
+    }
+    .layoutWeight(1)
+    .height(44)
+    .padding({ left: 12, right: 10 })
+    .borderRadius(12)
+    .backgroundColor(this.darkMode ? '#20FFFFFF' : '#0D000000')
+    .alignItems(VerticalAlign.Center)
+    .accessibilityText('选择音色')
+    .onClick(() => this.onOpenVoice())
   }
 
   close(): void {

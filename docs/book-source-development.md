@@ -1,14 +1,14 @@
 # Legado Harmony 书源开发指南
 
-> 适用版本：`3.9.906`（2026-09-12）。本文以当前工作区代码为准；规则能力、字段消费方式和限制可能随版本继续调整。
+> 适用版本：`3.9.907`（2026-09-17）。本文以当前工作区代码为准；规则能力、字段消费方式和限制可能随版本继续调整。
 
 本文面向为开源轻页编写、迁移和调试书源的开发者，描述项目当前代码中**已经实现并实际调用**的规则能力。
 
 | 项目 | 信息 |
 | --- | --- |
 | 适用项目 | `legado-harmony` |
-| 适用版本 | `3.9.906`（以 `AppScope/app.json5` 为准） |
-| 最后核对 | 2026-09-12 |
+| 适用版本 | `3.9.907`（以 `AppScope/app.json5` 为准） |
+| 最后核对 | 2026-09-17 |
 | 文档性质 | 当前实现参考，不是 Android「阅读」全部规则的等价清单 |
 
 > [!IMPORTANT]
@@ -231,7 +231,7 @@
 | `searchUrl` | 搜索地址 | 字符串 | 搜索请求模板。 |
 | `exploreUrl` | 发现地址 | 字符串 | 发现分类及请求模板。 |
 | `jsLib` | JS库 | 字符串 | 搜索、发现、详情、目录、正文和登录动作共用。简单代码走轻量引擎，复杂语义可按阶段路由到 ArkWeb，但只开放受控主机能力。 |
-| `header` | 请求头 | 字符串 | 书源全局 HTTP 请求头。支持 JSON/宽松对象或每行一个 `名称: 值`。 |
+| `header` | 请求头 | 字符串 | 书源全局 HTTP 请求头。支持 JSON/宽松对象或每行一个 `名称: 值`；以 `@js:`/`js:` 开头时按脚本动态计算请求头对象，详见[动态 `@js:` 请求头](#动态-js-请求头)。 |
 | `variableComment` | 暂无编辑项 | 字符串 | 书源变量的说明文本。 |
 | `variable` | 书源变量 | 字符串 | 作为 `source.variable` 注入上下文并独立持久化，登录按钮可通过 `source.setVariable()` 修改。 |
 | `enabledCookieJar` | 启用 Cookie | 布尔，默认 `true` | 导入并保存 Cookie 偏好；登录 Cookie 仍按实际请求域名隔离和附加。 |
@@ -293,6 +293,8 @@
 
 避免对 `{{key}}` 再手工 URL 编码，否则可能双重编码。目标站要求 GBK/GB2312 时，使用 `searchKeyRaw` 配合 `charset`。
 
+搜索地址也可以是 `@js:`/`<js>` 脚本，返回最终请求地址；此时返回值中的 `{{key}}`、`{{page-1}}` 等模板仍会按上面同一组变量再做一次替换，不会把字面花括号原样发给站点。
+
 #### 发现变量与分类格式
 
 发现页支持 `{{page}}` 和 `{{pageIndex}}`。最稳定的配置是一行一个分类：
@@ -326,7 +328,7 @@
 ]
 ```
 
-动态发现脚本返回的 `select` 控件也可映射为原生筛选。控件只需具有非空标题，候选值来自 `chars`；使用 `show(值, '变量名')` 写入书源变量后，应用会重新执行该源的发现规则。复杂脚本仍需逐源验证，不应只依赖标题推断。
+动态发现脚本返回的 `select` 控件也可映射为原生筛选。控件只需具有非空标题，候选值来自 `chars`。支持两种动作写法：动作形如 `show(值, '变量名')` 时，选择后写入书源变量并重新执行该源的发现规则；动作是自带脚本时，应用会先把所选值写入 `infoMap[控件名]`，再原样执行该脚本（通常配合 `source.setVariable()` 持久化），脚本中的 toast 会作为提示显示。复杂脚本仍需逐源验证，不应只依赖标题推断。
 
 发现页会一次查询已启用书源的轻量元数据，以便排序、搜索和恢复选择；下拉菜单使用 `LazyForEach`，只为可见项创建 ArkUI 组件。这里的“按需加载”是界面虚拟化，不是把书源数据库拆成网络分页。
 
@@ -347,12 +349,16 @@
 | `charset` | URL 查询和表单编码字符集，如 `utf-8`、`gbk`、`gb2312`、`gb18030`、`escape`。 |
 | `headers` | 本次请求头；同名项覆盖书源全局请求头。 |
 | `retry` | 响应不可用时的额外重试次数。 |
-| `type` | 会被解析并保存到请求配置，当前 HTTP 执行链没有额外分支行为。 |
+| `type` | 声明负载类型。章节地址为 `data:` 且尾部选项声明了 `type` 时，正文阶段会把解码后的字节以十六进制文本提供给规则脚本，对齐 Android 阅读的字节串约定（脚本内通常用 `java.hexDecodeToString` 还原）。 |
 | `webView` | 为 `true` 时，HTTP(S) GET/POST 请求交给隐藏 ArkWeb，沿用书源 URL、Cookie 与 UA（GET 也传入可用的额外 Header），等待页面脚本渲染稳定后返回 DOM。 |
 | `webJs` | 与 `webView: true` 配合，在已加载页面上下文执行；有效返回值作为响应正文，否则使用页面 DOM。 |
 | `session` | 可选的通用会话规则；仅操作当前请求目标的 Cookie，并可在未声明 Referer 时按规则补充。详见下文。 |
 
 选项对象支持单引号、无引号键和尾逗号等宽松写法，但推荐使用标准 JSON，减少转义差异。
+
+##### 动态 `@js:` 请求头
+
+书源 `header` 以 `@js:`/`js:` 开头时视为动态请求头规则：脚本在受控分阶段运行时中执行（按 URL 阶段预算限制），返回 JSON 对象或 JSON 编码的对象字符串，例如 `"@js:'{\"Referer\": baseUrl + \'/\', \"Cookie\": source.getVariable()}'"`。脚本可以读取书源变量、登录状态并调用 `jsLib` 函数；结果按“书源地址 + 书源变量”缓存约 5 分钟，变量变化后自动重算。动态结果与登录密钥一样只在书源自己的主机（`bookSourceUrl`、`loginUrl` 及同主机地址）上发送，不会附加到第三方图片或内容主机；URL 选项中的显式 `headers` 仍覆盖同名项。运行时不可用时回退为静态字面量解析。
 
 `webView` 请求在同一个隐藏 ArkWeb 中串行执行，默认约 20 秒超时（实现会把单次超时限制在 3～60 秒），最多排队 32 个任务。页面需达到 `document.readyState === 'complete'` 且 DOM 连续稳定后才返回。隐藏 ArkWeb 必须已随当前应用页面挂载；若提示“抓取环境未挂载”，重新进入搜索、发现或相关页面后重试。
 
@@ -777,11 +783,15 @@ ArkWeb 提供真实 ECMAScript 语义，但**不等于完整 Android、Rhino、N
 
 `java.getString`/`java.getStringList` 支持完整规则语法（CSS/`class.`/`id.`/`tag.` 选择器、`@text`/`@html`/`@@`、`##` 替换链），由原生规则引擎按“收集规则 → 求值 → 重放脚本”的同一套主机动作机制执行，结果按规则缓存；`$.` 开头的 JSON 路径仍直接取值，不需要重放。若阶段脚本最终没有返回任何内容，应用不会再静默地把它替换成规则输入内容（例如把正文规则变成章节页本身），而是记录警告，并在正文阶段把服务端返回的错误信息（如“仅支持网页端访问”“Token验证失败”）作为正文错误上报。
 
+阶段脚本还提供 `java.getElement(规则)` 与 `java.setContent(值)`：`getElement` 按完整规则语法收集元素（内部按 `@html` 取外层 HTML），返回轻量元素对象，支持 `attr(name)`、`hasAttr(name)`、`text()`、`ownText()`、`html()` 和 `toString()`，可用于元素级脚本处理；`setContent` 会替换当前上下文内容，后续 `$.` 路径与规则按新内容求值。`java.ajax` 返回的 `responseObject.headers()` 现在返回真实响应头（`get(name)` 大小写不敏感、`names()` 列出全部名称），不再是恒空对象；登录与调试动作中的 `java.refreshExplore()` 会真正刷新该源发现页，`java.showBrowser(url)` 只传 URL 不传 HTML 时，应用直接打开该地址而不是渲染空白文档。
+
 能力路由会分析 `java`、`source`、`cache` 和 `cookie` 方法，并在登录动作失败时提示缺少的桥接方法。复杂源仍应逐阶段实机验证；书源中的私有函数、接口和凭据始终属于该书源配置，不会成为应用内置 API。
 
 ### 编码 `data:` 地址与显式请求
 
 应用支持标准 `data:` 文本以及 `data:;base64,<负载>,{...}` 形式。Base64 负载和尾部选项会分别解析，避免把请求选项误当成正文；编码章节地址中的 `/` 或形似 `name=value` 的 Base64 片段不会再被旧式虚拟章节参数解析截断。
+
+尾部选项对象显式声明 `type` 时，正文阶段按 Android 阅读的字节串约定，把解码后的内容以十六进制文本交给规则脚本，脚本内通常用 `java.hexDecodeToString(result)` 还原；未声明 `type`、但正文规则自身调用 `java.hexDecodeToString(result)` 等字节串函数的旧写法，也会得到同样的十六进制输入。
 
 编码请求只有在选项明确使用通用 `type: "request"`，并明确提供 HTTP(S) `url`/`requestUrl` 时才会执行。方法、请求体和请求头也必须来自书源配置。应用不会：
 
@@ -1121,9 +1131,11 @@ https://img.example/page.jpg,{"headers":{"Referer":"https://example.com/"}}
 - `createSymmetricCrypto` 的 AES/DES/3DES 常见变换；
 - `startBrowser`、`startBrowserAwait`、`showBrowser`、`openUrl`；
 - 登录动作中的 `java.webView`（加载指定 URL 并执行脚本后回传结果）；
-- `searchBook`、`refreshExplore`、`reLoginView` 等 UI 动作。
+- `searchBook`、`refreshExplore`（触发该源发现页刷新）、`reLoginView` 等 UI 动作。
 
 `startBrowserAwait` 会暂停当前脚本，打开网页，用户点击完成后将页面返回值交回同一动作继续执行。浏览器关闭、取消、网络失败或脚本超时会结束执行并恢复按钮状态，不应永久停在“执行中”。用于“书源更新”的按钮可以打开源提供的更新页面；页面是否真正更新配置取决于该脚本是否返回并保存了新数据，不能仅凭打开网页判定更新成功。
+
+当 `loginUrl` 本身是 `<js>…</js>` 或 `@js:` 包裹的脚本时，登录动作执行前会先剥掉这层包装，脚本内定义的函数才能进入作用域；书源登录脚本定义了 `login()` 且面板存在输入项时，登录面板会出现“确认登录”按钮，点击即显式调用 `login()`。`showBrowser` 打开的同源会话页面会注入 `window.source` 桥接（`getVariable`/`putVariable`/`reLoginView`），预载脚本在每次页面加载完成后重新注入；用户点击“完成”时，变量改动会写回书源并热更新后续执行使用的运行时。
 
 请求规则中的 `<js>startBrowserAwait(...)`、`getVerificationCode(...)` 等提示也可触发验证逻辑，但不是完整 Android WebView/Activity API。需要账号口令签名、动态参数或复杂验证码的网站，必须实机确认。应用不按站点名称提供私有接口适配，全部请求参数和解析逻辑应来自书源本身。
 
@@ -1244,12 +1256,15 @@ https://img.example/page.jpg,{"headers":{"Referer":"https://example.com/"}}
 | 正文返回整页文字 | `content` 选择器太宽；先缩到正文容器，再用 `replaceRegex`。若脚本最终没有返回内容，应用会改为上报正文错误而不是返回输入页。 |
 | 正文是空字符串 | 请求失败、被验证拦截、提取规则为空，或提取结果被净化正则全部删除。若错误提示是服务端原文（如“仅支持网页端访问”“Token验证失败”），说明阶段脚本的 `java.ajax` 已被调用但接口拒绝了本次请求，应检查该接口要求的 UA、`Referer`、`X-Requested-With` 等请求头是否由书源写全。 |
 | `java.getString`/`getStringList` 一直返回空 | 确认规则语法正确（选择器 + `@text`/`@html`，`@@` 取全部）；`$.` 开头的 JSON 路径会直接取值。规则由原生引擎在阶段重放中求值，规则过多或依赖 DOM 渲染的站点仍需检查。 |
+| `@js:` 动态请求头没有生效 | 确认脚本返回 JSON 对象或 JSON 字符串；动态头只发送到书源自己的主机，第三方图片/内容域不会收到；URL 选项的 `headers` 覆盖同名项，运行时不可用时回退静态解析。 |
+| 正文脚本拿到的是 JSON 明文且解码失败 | 章节地址为 `data:` 且尾部选项声明了 `type` 时，脚本输入是十六进制字节串，需要先 `java.hexDecodeToString(result)`；未声明 `type` 时依靠规则内调用 `java.hexDecodeToString(result)` 等字节串函数识别。 |
 | `text.下一页@href` 没有继续翻页 | 检查链接的“下一页”是否为 `<a>` 自身直接文本；若文字包在子元素中，改用稳定 CSS 或 `:contains()`。还要确认下一页不是 JavaScript 点击事件。 |
 | 有下一页规则但正文仍不完整 | `nextContentUrl` 只能跟随真实分页链接；若服务端 HTML 已截断而完整正文位于页面脚本状态/渲染 DOM，改用显式 `webView: true` / `webJs` 返回完整内容。 |
 | 正文显示 `JSON.parse(undefined)` | 检查脚本变量是否由 `data:` 负载、`java.ajax` 或上一条规则提供；不要假定不存在的字段会自动变成 `{}`。 |
 | 朗读一直念星号、井号或与号 | 当前版本会过滤只由常见装饰符组成的整行，也会静音正文中的长重复装饰符号（URL 中的 `://` 会保留）；若符号与推广文字混在同一行，仍可使用 `replaceRegex` 精确清理该站文本。 |
 | 开启段评后正文显示内部代码 | 确认返回的是 `<comment ident count>` 或 `<img ident>` 支持格式，并在正文清理前进入统一交互后处理；TTS 必须使用剥离动作标记后的文本。 |
 | 段评气泡存在但无法点击 | `ident` 必须是完整或可补全 URL，并包含正确书籍/章节 ID；同时检查段评开关、登录 Cookie 和后端返回。 |
+| 章尾互动卡片显示成“段评 0” | 章尾卡片的 `data:image` 选项应携带以 `xyCommentTail` 开头的 `marker` 选项；应用据此显示“章评”且不加计数气泡。 |
 | 登录按钮脚本超时 | 检查动作是否等待未完成的网页、反复请求同一 URL、调用未映射的主机方法，或超过网络/脚本限制；错误提示中的“缺少兼容能力”优先处理。 |
 | 登录面板开关没有状态 | 新源使用 `type: "toggle"`/`"select"`、`chars` 和默认值；旧按钮式开关需确保动作把状态写入 `source`、`java` 或 `loginInfo`。 |
 | 有声书有目录但不能播放 | 确认 `chapterUrl` 已返回可播放地址；若使用页面抓取，确认其请求选项显式包含 `webView: true` 且 `sourceRegex` 能匹配页面媒体请求；同时检查登录、Token、音色代码和响应是否为 401/JSON 错误。 |
@@ -1440,6 +1455,7 @@ https://img.example/page.jpg,{"headers":{"Referer":"https://example.com/"}}
 - JS 兼容层：`entry/src/main/ets/core/rule/JsRuntime.ts`
 - QuickJS 迁移运行时：`entry/src/main/ets/core/script/QuickJsScriptRuntime.ts`、`QuickJsAsyncRouter.ts`、`QuickJsMigrationStore.ts`、`QuickJsRuntimeStatus.ts`、`QuickJsShadowExecutor.ets`
 - 分阶段运行路由：`entry/src/main/ets/core/book/BookSourceRuntimeRouter.ts`
+- 动态 `@js:` 请求头：`entry/src/main/ets/core/book/BookSourceHeaderRuntime.ts`
 - 搜索/发现/详情/目录/正文 ArkWeb：`entry/src/main/ets/core/book/BookSourceStageWebRuntime.ts`
 - 显式 `webView` 请求：`entry/src/main/ets/core/book/WebBookFetchRuntime.ts`
 - 阶段规则识别：`entry/src/main/ets/core/book/BookSourceStageRuleSupport.ts`

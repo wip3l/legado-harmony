@@ -101,9 +101,24 @@ export class SystemTtsReader {
   private static readonly CUSTOM_TTS_HIDDEN_GAP_LENGTH: number = 8;
   private static readonly CLOUD_TTS_WIFI_PREFETCH_WINDOW: number = 2;
   private static readonly CLOUD_TTS_MOBILE_PREFETCH_WINDOW: number = 1;
-  private static readonly CLOUD_TTS_FOCUS_CHUNK_LENGTH: number = 10;
+  // Fallback highlight granularity only. Cloud highlight normally follows the server
+  // prosody timings (see buildCloudPlaybackCues); this window is used when a response
+  // carries no usable timing list. 10 characters produced visibly sub-sentence steps.
+  private static readonly CLOUD_TTS_FOCUS_CHUNK_LENGTH: number = 32;
   private static readonly CLOUD_TTS_STANDARD_FIRST_CHUNK_LENGTH: number = 100;
   private static readonly CLOUD_TTS_PREMIUM_FIRST_CHUNK_LENGTH: number = 50;
+  // The first chunk may look past its preferred length for a strong sentence end.
+  // Without this the search window collapsed to the preferred length and every start
+  // of playback fell back to a comma, which the synthesizer reads as a sentence end.
+  private static readonly CLOUD_TTS_FIRST_CHUNK_MAX_EXTEND: number = 60;
+  private static readonly CLOUD_TTS_PREMIUM_FIRST_CHUNK_MAX_EXTEND: number = 50;
+  // How far a page boundary may move to land on a sentence boundary instead of
+  // cutting mid-sentence (about half a Chinese sentence).
+  private static readonly SYSTEM_PAGE_BREAK_SNAP_RADIUS: number = 20;
+  private static readonly SYSTEM_PAGE_BREAK_MIN_PART: number = 10;
+  private static readonly SPEECH_UNIT_CHARS: string = '％%‰°℃秒分时天年月日倍人个只件条米克吨元万亿';
+  private static readonly SPEECH_LEADING_CHARS: string = '「『（(【[《〈<“”‘’"\'';
+  private static readonly SPEECH_TRAILING_CHARS: string = '」』）)】]》〉>。！？；;!?…，,、：:';
   private static readonly SYSTEM_TTS_START_BUFFER_SEGMENTS: number = 2;
   private static readonly SYSTEM_TTS_MAX_BUFFERED_SEGMENTS: number = 3;
   private static readonly DIRECT_PLAY_COMPLETION_GRACE_MS: number = 5000;
@@ -113,6 +128,10 @@ export class SystemTtsReader {
   private httpReader: HttpTtsReader = new HttpTtsReader();
   private cloudReader: CloudTtsClient = new CloudTtsClient();
   private chunks: TtsChunk[] = [];
+  // Normalized source text the current chunks were derived from. Used to tell a real
+  // chunk boundary (keep the trailing comma so the engine hears "sentence continues")
+  // from the very end of the requested range.
+  private sourceText: string = '';
   private chunkIndex: number = 0;
   private active: boolean = false;
   private paused: boolean = false;
@@ -431,6 +450,7 @@ export class SystemTtsReader {
     // Coalesce those chunks with the preceding readable chunk while keeping the original
     // source offsets intact. This applies to all synthesis routes (system/custom/cloud).
     this.chunks = this.coalescePunctuationOnlyChunks(splitChunks, cleanText);
+    this.sourceText = cleanText;
     if (this.chunks.length === 0) {
       // The whole requested range is decorative punctuation or whitespace (for
       // example a final standalone ellipsis, or a tail page whose only content
@@ -646,6 +666,7 @@ export class SystemTtsReader {
     this.active = false;
     this.paused = false;
     this.chunks = [];
+    this.sourceText = '';
     this.chunkIndex = 0;
     this.onChunkStart = undefined;
     this.onAudioStart = undefined;
@@ -751,7 +772,7 @@ export class SystemTtsReader {
     }
     const index = this.chunkIndex;
     const chunk = this.chunks[this.chunkIndex++];
-    const speakText = this.normalizeChunkForSpeech(chunk.text);
+    const speakText = this.normalizeChunkForSpeech(chunk.text, chunk.end < this.sourceText.length);
     if (!speakText) {
       this.speakNext(generation);
       return;
@@ -824,6 +845,7 @@ export class SystemTtsReader {
     this.active = false;
     this.paused = false;
     this.chunks = [];
+    this.sourceText = '';
     this.chunkIndex = 0;
     this.onChunkStart = undefined;
     this.currentRequestId = '';
@@ -981,11 +1003,121 @@ export class SystemTtsReader {
     return SystemTtsReader.CLOUD_TTS_MOBILE_PREFETCH_WINDOW;
   }
 
+  /**
+   * Build playback cues (reader highlight steps) for one cloud audio response.
+   *
+   * The synthesizer already returns a prosody timeline (`timings`) that was produced by the
+   * server's own splitter (28 characters preferred, 42 maximum, 10 minimum) and then aligned
+   * to quiet points in the PCM. Use it directly: it yields roughly one highlight per sentence
+   * and its timestamps cannot drift from the audio. The previous implementation ignored it and
+   * re-split the text into 10-character windows, which is why a highlight covered only a
+   * fraction of a sentence.
+   */
   private buildCloudPlaybackCues(generation: number, job: CloudTtsAudioJob,
     audio: CloudTtsAudio): PcmPlaybackCue[] {
-    const focusChunks = this.splitCloudFocusChunks(job.chunk);
     const durationMs = audio.sampleRate > 0 ?
       audio.pcm.byteLength * 1000 / (audio.sampleRate * 2) : 0;
+    const cues = this.buildProsodyCloudCues(generation, job, audio);
+    if (cues.length > 0) {
+      console.info(`[TTS] cloud timeline queued: mode=${audio.timingMode},` +
+        `timings=${audio.timings.length},focus=${cues.length},bytes=${audio.pcm.byteLength}`);
+      return cues;
+    }
+    return this.buildLegacyCloudFocusCues(generation, job, durationMs, audio);
+  }
+
+  private buildProsodyCloudCues(generation: number, job: CloudTtsAudioJob,
+    audio: CloudTtsAudio): PcmPlaybackCue[] {
+    const timings = audio.timings;
+    if (!timings || timings.length < 2) {
+      // A single range means silence alignment collapsed (very short audio, or no quiet
+      // boundary found). Fall back to the punctuation-aware window splitter.
+      return [];
+    }
+    const cues: PcmPlaybackCue[] = [];
+    const durationMs = audio.sampleRate > 0 ?
+      audio.pcm.byteLength * 1000 / (audio.sampleRate * 2) : 0;
+    let lastFrame = -1;
+    for (let index = 0; index < timings.length; index++) {
+      const timing = timings[index];
+      const speechStart = Math.max(0, Math.min(job.text.length, Math.round(timing.startOffset)));
+      const speechEnd = Math.max(speechStart, Math.min(job.text.length, Math.round(timing.endOffset)));
+      if (speechEnd <= speechStart) {
+        continue;
+      }
+      const focusChunk = this.cloudFocusChunkForSpeechRange(job, speechStart, speechEnd);
+      if (!focusChunk) {
+        continue;
+      }
+      const startTime = cues.length === 0 ? 0 :
+        Math.max(0, Math.min(durationMs, timing.startTime));
+      const frameOffset = Math.max(0, Math.round(startTime * audio.sampleRate / 1000));
+      if (frameOffset <= lastFrame) {
+        continue;
+      }
+      const capturedChunk = focusChunk;
+      cues.push({
+        frameOffset,
+        callback: () => {
+          if (this.readGeneration !== generation || !this.active) {
+            return;
+          }
+          if (this.onChunkStart) {
+            this.onChunkStart(capturedChunk, job.index);
+          }
+          this.notifyAudioStarted();
+        }
+      });
+      lastFrame = frameOffset;
+    }
+    return cues;
+  }
+
+  /**
+   * Map a range of the synthesized (speech) text back onto the reader's source range, so the
+   * highlight covers exactly the characters the timeline segment was spoken from.
+   */
+  private cloudFocusChunkForSpeechRange(job: CloudTtsAudioJob, speechStart: number,
+    speechEnd: number): TtsChunk | null {
+    const speechLength = job.chunk.text.length;
+    const map = job.sourceToSpeechOffsets;
+    let sourceStart = 0;
+    let sourceEnd = speechLength;
+    if (map.length === speechLength + 1) {
+      sourceStart = 0;
+      while (sourceStart + 1 <= speechLength && map[sourceStart + 1] <= speechStart) {
+        sourceStart++;
+      }
+      sourceEnd = sourceStart;
+      while (sourceEnd + 1 <= speechLength && map[sourceEnd + 1] <= speechEnd) {
+        sourceEnd++;
+      }
+    } else {
+      // Offset map unavailable (normalization changed length without a map). Approximate
+      // proportionally; the highlight is still confined to this chunk.
+      const safeSpeechLength = Math.max(1, job.text.length);
+      sourceStart = Math.floor(speechStart * speechLength / safeSpeechLength);
+      sourceEnd = Math.ceil(speechEnd * speechLength / safeSpeechLength);
+    }
+    sourceStart = Math.max(0, Math.min(speechLength, sourceStart));
+    sourceEnd = Math.max(sourceStart, Math.min(speechLength, sourceEnd));
+    if (sourceEnd <= sourceStart) {
+      return null;
+    }
+    const text = job.chunk.text.substring(sourceStart, sourceEnd);
+    if (!text.trim()) {
+      return null;
+    }
+    return {
+      text,
+      start: job.chunk.start + sourceStart,
+      end: job.chunk.start + sourceEnd
+    };
+  }
+
+  private buildLegacyCloudFocusCues(generation: number, job: CloudTtsAudioJob,
+    durationMs: number, audio: CloudTtsAudio): PcmPlaybackCue[] {
+    const focusChunks = this.splitCloudFocusChunks(job.chunk);
     const cues: PcmPlaybackCue[] = [];
     let lastFrame = -1;
     for (let focusIndex = 0; focusIndex < focusChunks.length; focusIndex++) {
@@ -1831,8 +1963,18 @@ export class SystemTtsReader {
     }).join('\n');
   }
 
-  private normalizeChunkForSpeech(text: string): string {
-    return this.normalizeMathNotationForSpeech(this.replaceUnsafeSpeechCharacters(text || ''))
+  /**
+   * Normalize a chunk for synthesis.
+   *
+   * `protectTailPause` keeps a trailing comma/ideographic comma. Splitters return break
+   * offsets that already include the punctuation, and that punctuation is the only signal
+   * telling the engine the sentence continues. Removing it made the engine treat a
+   * mid-sentence break as the end of the input and close the sentence with falling pitch,
+   * which is audible as "half a sentence read as a whole sentence". Only the final chunk of
+   * the requested range has nothing following it, so only that one still drops the comma.
+   */
+  private normalizeChunkForSpeech(text: string, protectTailPause: boolean = true): string {
+    const normalized = this.normalizeMathNotationForSpeech(this.replaceUnsafeSpeechCharacters(text || ''))
       .replace(/\r\n/g, '\n')
       .replace(/\s*\n+\s*/g, '。')
       .replace(/[ \t]{2,}/g, ' ')
@@ -1841,8 +1983,11 @@ export class SystemTtsReader {
       .replace(/([！!?！？])\1+/g, '$1')
       .replace(/(?:\.{3,}|…{2,})/g, '…')
       .replace(/^[，。！？；;：:,.!?…]+/, '')
-      .replace(/[，,]+$/, '')
       .trim();
+    if (protectTailPause) {
+      return normalized;
+    }
+    return normalized.replace(/[，,]+$/, '');
   }
 
   /**
@@ -1893,8 +2038,15 @@ export class SystemTtsReader {
     // these blocks as readable content (including CJK, kana, Cyrillic and emoji).
     if ((code >= 0x2000 && code <= 0x206f) ||
       (code >= 0x2e00 && code <= 0x2e7f) ||
-      (code >= 0x3000 && code <= 0x303f) ||
-      (code >= 0xff00 && code <= 0xff65)) return true;
+      (code >= 0x3000 && code <= 0x303f)) return true;
+    // The halfwidth/fullwidth forms block is NOT uniformly punctuation: U+FF10-FF19 are full
+    // width digits and U+FF21-FF5A are full width letters. Treating the whole block as
+    // punctuation classified a chunk such as "ＡＢＣ１２３" as punctuation-only, which silently
+    // merged or dropped real content. Whitelist only the punctuation sub-ranges.
+    if ((code >= 0xff01 && code <= 0xff0f) ||
+      (code >= 0xff1a && code <= 0xff20) ||
+      (code >= 0xff3b && code <= 0xff40) ||
+      (code >= 0xff5b && code <= 0xff65)) return true;
     return false;
   }
 
@@ -1903,14 +2055,15 @@ export class SystemTtsReader {
    * calculated from prefixes so every replacement (math, whitespace, punctuation and trimming)
    * follows the exact same rules as the text sent to the service.
    */
-  private normalizeChunkForSpeechWithMap(text: string): NormalizedSpeechText {
+  private normalizeChunkForSpeechWithMap(text: string,
+    protectTailPause: boolean = true): NormalizedSpeechText {
     const source = text || '';
     const offsets: number[] = [];
     for (let index = 0; index <= source.length; index++) {
-      offsets.push(this.normalizeChunkForSpeech(source.substring(0, index)).length);
+      offsets.push(this.normalizeChunkForSpeech(source.substring(0, index), protectTailPause).length);
     }
     return {
-      text: this.normalizeChunkForSpeech(source),
+      text: this.normalizeChunkForSpeech(source, protectTailPause),
       sourceToSpeechOffsets: offsets
     };
   }
@@ -2494,7 +2647,7 @@ export class SystemTtsReader {
         end = this.findFirstCloudBreak(text, preferredEnd, limit, false);
       }
       if (end <= start) {
-        end = limit;
+        end = this.safeHardCutIndex(text, limit);
       }
       end = this.extendCloudBreak(text, end, limit);
       this.appendAbsoluteTextChunk(chunks, text, start, end);
@@ -2508,17 +2661,23 @@ export class SystemTtsReader {
     if (pageBreakOffsets.length === 0) {
       return chunks;
     }
+    const minPart = SystemTtsReader.SYSTEM_PAGE_BREAK_MIN_PART;
     const result: TtsChunk[] = [];
     for (const chunk of chunks) {
       let partStart = chunk.start;
-      for (const breakOffset of pageBreakOffsets) {
-        if (breakOffset <= partStart) {
+      for (const rawBreakOffset of pageBreakOffsets) {
+        if (rawBreakOffset <= partStart) {
           continue;
         }
-        if (breakOffset >= chunk.end) {
+        if (rawBreakOffset >= chunk.end) {
           break;
         }
-        if (breakOffset - partStart < 6 || chunk.end - breakOffset < 6) {
+        // A page boundary comes from layout, not from language, so it routinely lands in the
+        // middle of a sentence and used to add an audible pause on every page turn. Snap it
+        // to the nearest sentence boundary; a boundary with no punctuation nearby keeps the
+        // original offset, so behaviour is unchanged when snapping is not possible.
+        const breakOffset = this.snapPageBreakOffset(text, rawBreakOffset, partStart, chunk.end);
+        if (breakOffset - partStart < minPart || chunk.end - breakOffset < minPart) {
           continue;
         }
         this.appendAbsoluteTextChunk(result, text, partStart, breakOffset);
@@ -2620,26 +2779,45 @@ export class SystemTtsReader {
     let start = 0;
     while (start < text.length) {
       const firstChunk = chunks.length === 0;
-      const firstChunkLength = this.optionCloudVoiceTier === 'PREMIUM' ?
+      const premium = this.optionCloudVoiceTier === 'PREMIUM';
+      const firstChunkLength = premium ?
         SystemTtsReader.CLOUD_TTS_PREMIUM_FIRST_CHUNK_LENGTH :
         SystemTtsReader.CLOUD_TTS_STANDARD_FIRST_CHUNK_LENGTH;
+      const firstChunkExtend = premium ?
+        SystemTtsReader.CLOUD_TTS_PREMIUM_FIRST_CHUNK_MAX_EXTEND :
+        SystemTtsReader.CLOUD_TTS_FIRST_CHUNK_MAX_EXTEND;
       const preferredLength = firstChunk ? firstChunkLength : 200;
       const minimumStrongLength = firstChunk ? Math.ceil(firstChunkLength * 0.8) : 80;
       const minimumWeakLength = firstChunk ? Math.ceil(firstChunkLength * 0.8) : 140;
-      const maximumLength = firstChunk ? firstChunkLength : 450;
+      // The first chunk used to cap `maximumLength` at `preferredLength`, which made the
+      // "look forward for a strong break" step unreachable (its guard required
+      // `preferredEnd < limit`). The first chunk therefore always fell through to a comma and
+      // the cloud voice closed a half sentence with falling pitch. Allow the window to extend
+      // past the preferred length before downgrading to weak punctuation.
+      const maximumLength = firstChunk ? firstChunkLength + firstChunkExtend : 450;
       const limit = Math.min(text.length, start + maximumLength);
       const preferredEnd = Math.min(limit, start + preferredLength);
+      let breakPath = 'strong-last';
       let end = this.findLastCloudBreak(text, start + minimumStrongLength, preferredEnd, true);
-      if (end <= start && preferredEnd < limit) {
+      if (end <= start) {
+        breakPath = 'strong-first';
         end = this.findFirstCloudBreak(text, preferredEnd, limit, true);
       }
       if (end <= start) {
+        breakPath = 'weak';
         end = this.findLastCloudBreak(text, start + minimumWeakLength, limit, false);
       }
       if (end <= start) {
-        end = limit;
+        breakPath = 'hard';
+        end = this.safeHardCutIndex(text, limit);
       }
       end = this.extendCloudBreak(text, end, limit);
+      if (breakPath === 'weak' || breakPath === 'hard') {
+        // Only the two degraded paths are worth surfacing: a comma-ended chunk and a hard cut
+        // are exactly the cases that sound unnatural, and logging every chunk drowns hilog.
+        console.info(`[TTS] cloud chunk break: path=${breakPath}, first=${firstChunk},` +
+          ` tier=${premium ? 'PREMIUM' : 'STANDARD'}, start=${start}, end=${end}`);
+      }
       let chunkStart = start;
       let chunkEnd = end;
       while (chunkStart < chunkEnd && this.isTrimChar(text.charAt(chunkStart))) {
@@ -2703,27 +2881,53 @@ export class SystemTtsReader {
       value === '》' || value === '〉' || value === '」' || value === '』';
   }
 
+  /**
+   * Find the end of the sentence starting at `start`, never looking past `limit`.
+   *
+   * Weak punctuation (，、：) used to end a chunk immediately, so in a long Chinese sentence the
+   * first comma after the minimum length produced a chunk break and the clause was then
+   * synthesized (and intoned) as a complete sentence. Now the whole window is scanned for a
+   * strong sentence end first and weak punctuation is only used when the window has none.
+   */
   private findSentenceBreak(text: string, start: number, limit: number, maxLength: number): number {
     const minBreak = start + Math.min(18, Math.floor(maxLength * 0.35));
+    let weakCandidate = -1;
     for (let i = start; i < limit; i++) {
-      if (i >= minBreak && this.isSentenceEnd(text.charAt(i)) && !this.isNumericDecimalPoint(text, i)) {
+      if (i < minBreak) {
+        continue;
+      }
+      const value = text.charAt(i);
+      if (value === '\n') {
         return i + 1;
       }
-      if (i >= minBreak && text.charAt(i) === '\n') {
+      if (this.isNumericDecimalPoint(text, i)) {
+        continue;
+      }
+      if (this.isStrongSentenceEnd(value)) {
         return i + 1;
       }
+      if (weakCandidate < 0 && this.isWeakSentenceEnd(value)) {
+        weakCandidate = i + 1;
+      }
     }
-    if (limit < text.length) {
-      return limit;
+    if (weakCandidate > 0) {
+      return weakCandidate;
     }
-    return text.length;
+    return limit < text.length ? this.safeHardCutIndex(text, limit) : text.length;
+  }
+
+  private isStrongSentenceEnd(value: string): boolean {
+    return value === '。' || value === '！' || value === '？' || value === '；' ||
+      value === '!' || value === '?' || value === '.' || value === '…';
+  }
+
+  private isWeakSentenceEnd(value: string): boolean {
+    return value === '，' || value === ',' || value === '、' || value === '：' || value === ':';
   }
 
   private isSentenceEnd(value: string): boolean {
-    return value === '。' || value === '！' || value === '？' ||
-      value === '；' || value === '，' || value === ',' || value === ';' || value === '、' ||
-      value === '!' || value === '?' ||
-      value === '.' || value === '…' || value === '：' || value === ':';
+    return this.isStrongSentenceEnd(value) || this.isWeakSentenceEnd(value) ||
+      value === ';';
   }
 
   private isNumericDecimalPoint(text: string, index: number): boolean {
@@ -2735,6 +2939,71 @@ export class SystemTtsReader {
 
   private isTrimChar(value: string): boolean {
     return value === ' ' || value === '\t' || value === '\n' || value === '\r' || value === '\u3000';
+  }
+
+  private isHighSurrogate(code: number): boolean {
+    return code >= 0xd800 && code <= 0xdbff;
+  }
+
+  /**
+   * Last-resort cut position used when no punctuation break exists inside the window.
+   * A raw `start + maximumLength` cut can split a surrogate pair (emoji), split a value from
+   * its unit ("3.5 米" / "80分" / "12%"), split an ASCII word, or leave a leading quote at the
+   * head of the next chunk. Move the cut backwards until none of those apply.
+   */
+  private safeHardCutIndex(text: string, index: number): number {
+    let cut = Math.max(1, Math.min(text.length, Math.round(index)));
+    if (cut >= text.length) {
+      return text.length;
+    }
+    while (cut > 1 && this.isHighSurrogate(text.charCodeAt(cut - 1))) {
+      cut--;
+    }
+    while (cut > 1 && SystemTtsReader.SPEECH_LEADING_CHARS.includes(text.charAt(cut))) {
+      cut--;
+    }
+    while (cut > 1 && SystemTtsReader.SPEECH_TRAILING_CHARS.includes(text.charAt(cut - 1))) {
+      cut--;
+    }
+    while (cut > 1 && /[0-9]/.test(text.charAt(cut - 1)) &&
+      (SystemTtsReader.SPEECH_UNIT_CHARS.includes(text.charAt(cut)) || text.charAt(cut) === '.')) {
+      cut--;
+    }
+    while (cut > 1 && /[A-Za-z0-9]/.test(text.charAt(cut - 1)) && /[A-Za-z0-9]/.test(text.charAt(cut))) {
+      cut--;
+    }
+    return Math.max(1, cut);
+  }
+
+  /**
+   * Move a page boundary onto the nearest sentence boundary so turning a page no longer
+   * inserts a pause in the middle of a sentence. Strong punctuation wins over weak
+   * punctuation, and for equal distance the later position is preferred (fewer cross-page
+   * chunks). When no boundary is in range the original offset is returned unchanged.
+   */
+  private snapPageBreakOffset(text: string, breakOffset: number,
+    lowerBound: number, upperBound: number): number {
+    const radius = SystemTtsReader.SYSTEM_PAGE_BREAK_SNAP_RADIUS;
+    const minPart = SystemTtsReader.SYSTEM_PAGE_BREAK_MIN_PART;
+    const from = Math.max(lowerBound + minPart, breakOffset - radius);
+    const to = Math.min(upperBound - minPart, breakOffset + radius);
+    if (from > to) {
+      return breakOffset;
+    }
+    const strongModes: boolean[] = [true, false];
+    for (const strong of strongModes) {
+      for (let distance = 0; distance <= radius; distance++) {
+        const after = breakOffset + distance;
+        if (after >= from && after <= to && this.isCloudBreak(text.charAt(after - 1), strong)) {
+          return after;
+        }
+        const before = breakOffset - distance;
+        if (before >= from && before <= to && this.isCloudBreak(text.charAt(before - 1), strong)) {
+          return before;
+        }
+      }
+    }
+    return breakOffset;
   }
 
   private createRequestId(): string {

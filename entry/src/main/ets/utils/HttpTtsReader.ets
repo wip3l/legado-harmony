@@ -84,6 +84,14 @@ export class HttpTtsReader {
       if (audio.filePath) {
         this.retainCacheFile(audio.filePath);
       }
+      if (this.templateAppliesSpeed(voice)) {
+        // The provider already synthesized this audio at the requested pace
+        // (the URL template consumed the speed variables). Applying the speed
+        // again would compound it, and the PCM fallback below resamples by
+        // dropping samples, which raises the pitch audibly.
+        audio.speed = 1;
+        return audio;
+      }
       return audio.filePath ? audio : this.applyLocalSpeed(audio, normalizedSpeed);
     } catch (error) {
       if (this.isCancelledError(error as Error) || generation !== this.generation) {
@@ -281,7 +289,7 @@ export class HttpTtsReader {
     }
     const runtime = this.runtimeForVoice(voice, text, speed);
     rawRule.url = runtime.evalTemplate(rawRule.url).trim();
-    rawRule.body = runtime.evalTemplate(rawRule.body || '');
+    rawRule.body = this.renderBody(runtime, rawRule.body, text);
     if (rawRule.bodyJs) {
       const bodyFromJs = runtime.evaluate(rawRule.bodyJs, rawRule.body);
       if (bodyFromJs) {
@@ -304,6 +312,33 @@ export class HttpTtsReader {
       result.body = this.buildBody(rawRule.body, result.headers, result.charset);
     }
     return result;
+  }
+
+  // Renders the request body. When the body is a JSON object/array, every text variable is
+  // JSON-string-escaped before substitution: JsRuntime.evalTemplate is a plain textual replace, so
+  // a half-width quote, backslash or line break in the paragraph would otherwise produce an
+  // invalid payload that the server answers with 400 instead of audio. The variables are restored
+  // afterwards so the URL template (encoded later by encodeUrl) and bodyJs still see the raw text.
+  private renderBody(runtime: JsRuntime, body: string, text: string): string {
+    const template = body || '';
+    if (!this.looksLikeStructuredBody(template)) {
+      return runtime.evalTemplate(template);
+    }
+    const escaped = this.escapeJsonString(text);
+    runtime.setVar('speakText', escaped);
+    runtime.setVar('text', escaped);
+    try {
+      return runtime.evalTemplate(template);
+    } finally {
+      runtime.setVar('speakText', text || '');
+      runtime.setVar('text', text || '');
+    }
+  }
+
+  private escapeJsonString(value: string): string {
+    const encoded = JSON.stringify(value || '');
+    if (encoded.length < 2) return '';
+    return encoded.substring(1, encoded.length - 1);
   }
 
   private parseRule(value: string): TtsRequestRule {
@@ -366,23 +401,27 @@ export class HttpTtsReader {
     }
   }
 
+  // Splits "url,{options}" by scanning forward and returning the comma that sits outside every
+  // brace, immediately before the options object. The previous backward scan counted nesting in
+  // reverse (`depth > 0` on a comma), so a plain "url,{...}" reported -1 and a nested
+  // "url,{...,"body":{...}}" reported an inner comma, truncating the URL and dropping the whole
+  // options object. Mirrors AnalyzeUrl.findOptionIndex, which the book-source path already uses.
   private findOptionIndex(value: string): number {
     let quote = '';
-    let depth = 0;
-    for (let i = value.length - 1; i >= 0; i--) {
+    let brace = 0;
+    for (let i = 0; i < value.length - 1; i++) {
       const ch = value.charAt(i);
-      const prev = i > 0 ? value.charAt(i - 1) : '';
       if (quote) {
-        if (ch === quote && prev !== '\\') quote = '';
+        if (ch === quote && value.charAt(i - 1) !== '\\') quote = '';
         continue;
       }
       if (ch === '"' || ch === "'") {
         quote = ch;
         continue;
       }
-      if (ch === '}') depth++;
-      else if (ch === '{') depth--;
-      else if (ch === ',' && depth > 0) return i;
+      if (ch === '{') brace++;
+      if (ch === '}') brace--;
+      if (ch === ',' && brace === 0 && /^\s*\{/.test(value.substring(i + 1))) return i;
     }
     return -1;
   }
@@ -979,6 +1018,17 @@ export class HttpTtsReader {
 
   private normalizeSpeed(speed: number): number {
     return Math.max(0.5, Math.min(2, speed || 1));
+  }
+
+  // Matches the speed variables injected in runtimeForVoice inside a {{...}}
+  // expression. When the request template consumes one of them, the provider
+  // performs the speed change during synthesis and the local fallback
+  // (applyLocalSpeed / AVPlayer playback rate) must stay off.
+  private static readonly SPEED_VAR_PATTERN: RegExp =
+    new RegExp('\\{\\{[^}]*\\b(speakSpeed|speakSpeedPercent|speechRate|speed|rate)\\b[^}]*\\}\\}');
+
+  private templateAppliesSpeed(voice: HttpTTS): boolean {
+    return HttpTtsReader.SPEED_VAR_PATTERN.test(voice.url || '');
   }
 
   private formatSpeed(speed: number): string {

@@ -16,6 +16,7 @@ import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ReaderTtsPlayerPanel } from '../components/ReaderTtsPlayerPanel';
+import { TtsCatalogSheet, CatalogTitleDataSource } from '../components/TtsCatalogSheet';
 import { BookSourceStageRuntimeHost } from '../components/BookSourceStageRuntimeHost';
 import { BookSourceAudioWebRuntimeHost } from '../components/BookSourceAudioWebRuntimeHost';
 import { WebBookFetchRuntimeHost } from '../components/WebBookFetchRuntimeHost';
@@ -41,28 +42,6 @@ class AudioBookPlaybackListener implements RemoteAudioPlaybackListener {
   }
   onPlaybackCompleted(): void { this.completedCallback(); }
   onPlaybackError(message: string): void { this.errorCallback(message); }
-}
-
-class AudioChapterDataSource implements IDataSource {
-  private chapters: BookChapter[] = [];
-  private listeners: DataChangeListener[] = [];
-
-  totalCount(): number { return this.chapters.length; }
-  getData(index: number): BookChapter { return this.chapters[index]; }
-
-  registerDataChangeListener(listener: DataChangeListener): void {
-    if (!this.listeners.includes(listener)) this.listeners.push(listener);
-  }
-
-  unregisterDataChangeListener(listener: DataChangeListener): void {
-    const index = this.listeners.indexOf(listener);
-    if (index >= 0) this.listeners.splice(index, 1);
-  }
-
-  replace(chapters: BookChapter[]): void {
-    this.chapters = [...chapters];
-    for (const listener of this.listeners) listener.onDataReloaded();
-  }
 }
 
 /**
@@ -117,7 +96,7 @@ struct AudioBookPage {
   private progressSaveQueue: Promise<void> = Promise.resolve();
   private sleepTimerId: number = -1;
   private playbackRetryCount: number = 0;
-  private chapterDataSource: AudioChapterDataSource = new AudioChapterDataSource();
+  private chapterDataSource: CatalogTitleDataSource = new CatalogTitleDataSource();
   private chapterScroller: ListScroller = new ListScroller();
   private loadingSerial: number = 0;
   private audioBackgroundRunning: boolean = false;
@@ -630,98 +609,32 @@ struct AudioBookPage {
 
   @Builder
   chapterListOverlay() {
-    Stack({ alignContent: Alignment.Bottom }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#78000000')
-        .onClick(() => this.closeChapterList())
-      Column({ space: 10 }) {
-        Row() {
-          Text('听书目录')
-            .fontSize(19)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.primaryTextColor())
-          Blank()
-          Stack({ alignContent: Alignment.Center }) {
-            Column({ space: 0 }) {
-              SymbolGlyph($r('sys.symbol.chevron_up'))
-                .fontSize(11)
-                .fontColor([this.chapterReverseOrder ? this.accentColor() : this.primaryTextColor()])
-              SymbolGlyph($r('sys.symbol.chevron_down'))
-                .fontSize(11)
-                .fontColor([this.chapterReverseOrder ? this.accentColor() : this.primaryTextColor()])
-            }
-            .alignItems(HorizontalAlign.Center)
-          }
-            .width(34)
-            .height(34)
-            .borderRadius(17)
-            .backgroundColor(this.chapterReverseOrder ?
-              ThemeRuntime.accentSurfaceColor(this.appDarkMode) : this.inputColor())
-            .accessibilityText(this.chapterReverseOrder ? '切换为正序目录' : '切换为倒序目录')
-            .onClick(() => this.toggleChapterOrder())
-          Text(`${this.chapterIndex + 1} / ${this.chapters.length}`)
-            .fontSize(12)
-            .fontColor(this.subTextColor())
-          SymbolGlyph($r('sys.symbol.xmark'))
-            .fontSize(17)
-            .fontColor([this.primaryTextColor()])
-            .width(40)
-            .height(40)
-            .margin({ left: 6 })
-            .onClick(() => this.closeChapterList())
-        }
-        .width('100%')
-        List({ scroller: this.chapterScroller, space: 4 }) {
-          LazyForEach(this.chapterDataSource, (chapter: BookChapter, index: number) => {
-            ListItem() {
-              Row({ space: 10 }) {
-                Text(`${this.chapterCanonicalIndex(index) + 1}`)
-                  .fontSize(11)
-                  .fontColor(this.chapterCanonicalIndex(index) === this.chapterIndex ? '#FFFFFF' : this.subTextColor())
-                  .textAlign(TextAlign.Center)
-                  .width(34)
-                  .height(26)
-                  .borderRadius(13)
-                  .backgroundColor(this.chapterCanonicalIndex(index) === this.chapterIndex ?
-                    this.accentColor() : this.inputColor())
-                Text(chapter.title || `第${this.chapterCanonicalIndex(index) + 1}章`)
-                  .fontSize(15)
-                  .fontWeight(this.chapterCanonicalIndex(index) === this.chapterIndex ?
-                    FontWeight.Bold : FontWeight.Regular)
-                  .fontColor(this.chapterCanonicalIndex(index) === this.chapterIndex ?
-                    this.accentColor() : this.primaryTextColor())
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .layoutWeight(1)
-              }
-              .width('100%')
-              .constraintSize({ minHeight: 50 })
-              .padding({ left: 8, right: 8, top: 7, bottom: 7 })
-              .borderRadius(10)
-              .backgroundColor(this.chapterCanonicalIndex(index) === this.chapterIndex ?
-                ThemeRuntime.accentSurfaceColor(this.appDarkMode) : Color.Transparent)
-              .onClick(() => this.selectChapter(this.chapterCanonicalIndex(index)))
-            }
-          }, (chapter: BookChapter, index: number) => `${index}_${chapter.url}`)
-        }
-        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-        .width('100%')
-        .layoutWeight(1)
-      }
-      .width('100%')
-      .height('72%')
-      .padding({ left: 16, right: 16, top: 12, bottom: this.navBarHeight + 12 })
-      .backgroundColor(this.cardColor())
-      .borderRadius({ topLeft: 22, topRight: 22 })
-      .transition(TransitionEffect.translate({ y: 520 })
-        .combine(TransitionEffect.opacity(0))
-        .animation({ duration: 280, curve: Curve.Friction }))
-    }
-    .width('100%')
-    .height('100%')
-    .zIndex(20)
+    TtsCatalogSheet({
+      darkMode: this.appDarkMode,
+      accentColor: this.accentColor(),
+      primaryTextColor: this.primaryTextColor(),
+      subTextColor: this.subTextColor(),
+      controlIconColor: this.primaryTextColor(),
+      panelColor: ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'),
+      bookName: this.book?.name || '',
+      bookInitial: this.bookInitial(),
+      cover: this.displayCover(),
+      bookSubtitle: this.book?.author || '',
+      count: this.chapters.length,
+      currentDisplayIndex: this.chapterDisplayIndex(this.chapterIndex),
+      reverseOrder: this.chapterReverseOrder,
+      progressText: `${this.chapterIndex + 1} / ${this.chapters.length}`,
+      bottomInset: this.navBarHeight,
+      viewportHeight: this.viewportHeight,
+      zIndexValue: 20,
+      scroller: this.chapterScroller,
+      source: this.chapterDataSource,
+      isCached: (displayIndex: number): boolean =>
+        this.isChapterCached(this.chapterCanonicalIndex(displayIndex)),
+      onToggleOrder: () => this.toggleChapterOrder(),
+      onSelect: (displayIndex: number) => this.selectChapter(this.chapterCanonicalIndex(displayIndex)),
+      onClose: () => this.closeChapterList()
+    })
   }
 
   async loadBook(): Promise<void> {
@@ -856,6 +769,10 @@ struct AudioBookPage {
 
   openChapterList(): void {
     this.refreshChapterDataSource();
+    // Re-snapshot at open time so the cache chip reflects chapters cached while this
+    // session has been running, instead of the state at session publish time.
+    ReaderTtsFloatingSession.updateCatalogCachedFlags(
+      this.floatingSessionOwnerId, this.chapterCachedFlags());
     animateTo({ duration: 280, curve: Curve.Friction }, () => {
       this.showChapterList = true;
     });
@@ -867,7 +784,8 @@ struct AudioBookPage {
   }
 
   refreshChapterDataSource(): void {
-    this.chapterDataSource.replace(this.chapterReverseOrder ? this.chapters.slice().reverse() : this.chapters);
+    const titles = this.chapters.map((chapter: BookChapter): string => chapter.title || '');
+    this.chapterDataSource.replace(this.chapterReverseOrder ? titles.slice().reverse() : titles);
   }
 
   onChapterOrderChanged(): void {
@@ -1105,7 +1023,6 @@ struct AudioBookPage {
     const action = this.pendingPanelAction;
     this.pendingPanelAction = '';
     if (action === 'voice') this.openVoiceDialog();
-    else if (action === 'catalog') this.openChapterList();
   }
 
   publishFloatingSession(): void {
@@ -1132,7 +1049,6 @@ struct AudioBookPage {
       this.floatingSessionOwnerId,
       this.currentVoiceCode(),
       () => this.openFloatingPanel('voice'),
-      () => this.openFloatingPanel('catalog'),
       (positionMs: number) => {
         const target = Math.max(0, Math.min(positionMs, this.latestDurationMs || positionMs));
         this.latestPositionMs = target;
@@ -1141,13 +1057,14 @@ struct AudioBookPage {
         this.scheduleProgressSave();
       }
     );
-    ReaderTtsFloatingSession.configureAudioCatalog(
+    ReaderTtsFloatingSession.configureCatalog(
       this.floatingSessionOwnerId,
       this.chapters.map((chapter: BookChapter) => chapter.title),
       this.chapterIndex,
       (index: number) => {
         this.selectChapter(index).catch((error: Error) => console.warn('听书目录跳转失败:', error));
-      }
+      },
+      this.chapterCachedFlags()
     );
     this.updateFloatingSession();
   }
@@ -1169,7 +1086,7 @@ struct AudioBookPage {
     );
     ReaderTtsFloatingSession.updateAudioProgress(
       this.floatingSessionOwnerId, this.latestPositionMs, this.latestDurationMs);
-    ReaderTtsFloatingSession.updateAudioCatalogIndex(this.floatingSessionOwnerId, this.chapterIndex);
+    ReaderTtsFloatingSession.updateCatalogIndex(this.floatingSessionOwnerId, this.chapterIndex);
   }
 
   openFloatingPanel(action: string): void {
@@ -1660,6 +1577,26 @@ struct AudioBookPage {
   secondaryTextColor(): string { return ThemeRuntime.subTextColor(this.appDarkMode); }
   subTextColor(): string { return ThemeRuntime.subTextColor(this.appDarkMode); }
   accentColor(): string { return ThemeRuntime.accentColor(this.appDarkMode); }
+
+  bookInitial(): string {
+    const name = (this.book?.name || '书').trim();
+    return name.length > 0 ? name.substring(0, 1) : '书';
+  }
+
+  /** Mirrors the reader catalog's "已缓存" chip; local books have no remote cache state. */
+  isChapterCached(canonicalIndex: number): boolean {
+    if (!this.book || this.book.origin === 'local') return false;
+    if (canonicalIndex < 0 || canonicalIndex >= this.chapters.length) return false;
+    return this.chapters[canonicalIndex].cacheDate > 0;
+  }
+
+  chapterCachedFlags(): boolean[] {
+    const flags: boolean[] = [];
+    for (let index = 0; index < this.chapters.length; index++) {
+      flags.push(this.isChapterCached(index));
+    }
+    return flags;
+  }
 
   syncBars(): void {
     syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());

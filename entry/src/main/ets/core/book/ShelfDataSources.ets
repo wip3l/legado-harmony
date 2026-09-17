@@ -16,13 +16,6 @@ export class ShelfBookDataSource implements IDataSource {
     this.books = [...books]; for (const listener of this.listeners) listener.onDataReloaded();
   }
 }
-export class FloatingCatalogDataSource implements IDataSource {
-  private titles: string[] = []; private listeners: DataChangeListener[] = [];
-  totalCount(): number { return this.titles.length; } getData(index: number): string { return this.titles[index]; }
-  registerDataChangeListener(listener: DataChangeListener): void { if (!this.listeners.includes(listener)) this.listeners.push(listener); }
-  unregisterDataChangeListener(listener: DataChangeListener): void { const i = this.listeners.indexOf(listener); if (i >= 0) this.listeners.splice(i, 1); }
-  replace(titles: string[]): void { this.titles = titles.slice(); for (const listener of this.listeners) listener.onDataReloaded(); }
-}
 export class ShelfTileEntryDataSource implements IDataSource {
   private entries: ShelfTileSortEntry[] = []; private listeners: DataChangeListener[] = [];
   totalCount(): number { return this.entries.length; } getData(index: number): ShelfTileSortEntry { return this.entries[index]; }

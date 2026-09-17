@@ -5,6 +5,7 @@ import { RequestSessionConfig, RequestSessionSupport } from '../http/RequestSess
 import { BookSourceRateLimiter } from '../http/BookSourceRateLimiter';
 import { util } from '@kit.ArkTS';
 import { BookSourceDebugContext } from '../book/BookSourceDebugModels';
+import { BookSourceHeaderRuntime } from '../book/BookSourceHeaderRuntime';
 
 export interface UrlConfig {
   url: string;
@@ -176,16 +177,29 @@ export class AnalyzeUrl {
     }
     // Complex source scripts can compute their header rule using functions from jsLib and the
     // current login state. The bounded stage runtime evaluates that source-owned expression and
-    // passes only its scalar result here. URL-local explicit headers still win during fetch.
-    for (const key of Object.keys(this.runtimeSourceHeaders)) {
-      const name = String(key || '').trim();
-      if (name) headers[name] = String(this.runtimeSourceHeaders[key] || '');
+    // passes only its scalar result here. Runtime headers are source-site scoped: a dynamic
+    // Cookie/Referer must not reach third-party hosts. URL-local explicit headers still win.
+    if (this.isTrustedRequestHost(requestUrl)) {
+      for (const key of Object.keys(this.runtimeSourceHeaders)) {
+        const name = String(key || '').trim();
+        if (name) headers[name] = String(this.runtimeSourceHeaders[key] || '');
+      }
     }
     return headers;
   }
 
   private shouldApplyLoginHeaders(requestUrl: string): boolean {
     if (!this.source || !this.source.loginHeader) return false;
+    return this.isTrustedRequestHost(requestUrl);
+  }
+
+  /**
+   * Source-owned dynamic headers (login header, runtime-evaluated @js: header rule) may only be
+   * sent to the source's own hosts. Third-party hosts reached through the same source (content
+   * proxies, image CDNs) must not receive the source's credentials.
+   */
+  private isTrustedRequestHost(requestUrl: string): boolean {
+    if (!this.source) return false;
     const requestHost = this.urlHost(requestUrl);
     if (!requestHost) return true;
     const trustedUrls: string[] = [this.source.bookSourceUrl || '', this.source.loginUrl || ''];
@@ -434,6 +448,12 @@ export class AnalyzeUrl {
 
   async fetch(urlTemplate: string, maxResponseBytes?: number,
     debugContext: BookSourceDebugContext | null = null): Promise<HttpResponse> {
+    // A `@js:` header rule may compute dynamic values (Referer/Origin/Cookie from source state).
+    // Resolve the complete header map before parsing so those values can join the request; the
+    // result is cached per source+variable and still scoped per host in loadSourceHeaders().
+    if (this.source && /^@?js\s*:/i.test((this.source.header || '').trim())) {
+      this.runtimeSourceHeaders = await BookSourceHeaderRuntime.resolve(this.source);
+    }
     this.parse(urlTemplate);
     const req = this.buildRequest();
     if (maxResponseBytes !== undefined) {

@@ -1088,7 +1088,27 @@ export class SearchCoordinator {
     }
     try {
       const result = await runtime.execute(request);
-      return result.value || '';
+      let value = result.value || '';
+      // Android Legado also applies {{...}} templates to a full-JS search URL's return value.
+      // Sources in that style (for example STV) return "...&findinname={{key}}&p={{page-1}}" and
+      // rely on this second pass; without it the literal braces reach the request. Reuse the same
+      // eval-based substitution as plain templates, driven by the identical variable set.
+      if (isFullJsUrl && value.includes('{{')) {
+        const followUp = new StageWebRuntimeRequest();
+        followUp.applyStageBudget(SourceRuntimeStage.SEARCH);
+        followUp.source = request.source;
+        followUp.baseUrl = request.baseUrl;
+        followUp.ownerId = request.ownerId;
+        followUp.debugContext = request.debugContext;
+        followUp.variables = request.variables;
+        const template = JSON.stringify(value);
+        followUp.code = `const __searchTemplate=${template};` +
+          `result=__searchTemplate.replace(/\\{\\{([\\s\\S]*?)\\}\\}/g,` +
+          `function(_,expr){try{return String(eval(expr));}catch(e){return '';}});result;`;
+        const replaced = await runtime.execute(followUp);
+        if (replaced.value) value = replaced.value;
+      }
+      return value;
     } catch (error) {
       console.warn('[SC] stage runtime search URL failed:', source.bookSourceName, error);
       return '';

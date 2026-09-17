@@ -58,6 +58,110 @@ export class BookDisplayHelper {
       BookDisplayHelper.extractLastUpdateText(book.kind);
   }
 
+  /**
+   * Shelf-facing form of the last update time, always expressed as "x分钟前 / x小时前 / x天前".
+   * The raw field is written by book sources as either an absolute date ("2026-09-13 14:30") or
+   * already-relative wording ("3天前"); both are normalised through the same formatter so the
+   * shelf rows stay visually consistent.
+   */
+  static getLastUpdateRelativeText(book: Book): string {
+    const raw = BookDisplayHelper.getLastUpdateText(book);
+    if (!raw) {
+      return '';
+    }
+    const timestamp = BookDisplayHelper.parseUpdateTimestamp(raw);
+    return timestamp > 0 ? BookDisplayHelper.formatRelativeTime(timestamp) : raw;
+  }
+
+  private static parseUpdateTimestamp(value: string): number {
+    const text = (value || '').trim();
+    if (!text) {
+      return 0;
+    }
+    const now = Date.now();
+    if (text === '刚刚' || text === '今天') {
+      return now;
+    }
+    if (text === '昨天' || text === '昨日') {
+      return now - 24 * 3600 * 1000;
+    }
+    if (text === '前天') {
+      return now - 48 * 3600 * 1000;
+    }
+    const relativeMatch = text.match(/^(\d+)(秒|分钟|小时|天|周|月|年)前$/);
+    if (relativeMatch) {
+      const amount = Number(relativeMatch[1]);
+      const unitMs = BookDisplayHelper.relativeUnitMs(relativeMatch[2]);
+      if (amount > 0 && unitMs > 0) {
+        return now - amount * unitMs;
+      }
+    }
+    const absoluteMatch = text.match(
+      /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T](\d{1,2})[:：](\d{1,2})(?:[:：](\d{1,2}))?)?$/);
+    if (absoluteMatch) {
+      // Local time on purpose: book sources publish wall-clock update times without a timezone.
+      const parsed = new Date(
+        Number(absoluteMatch[1]),
+        Number(absoluteMatch[2]) - 1,
+        Number(absoluteMatch[3]),
+        absoluteMatch[4] ? Number(absoluteMatch[4]) : 0,
+        absoluteMatch[5] ? Number(absoluteMatch[5]) : 0,
+        absoluteMatch[6] ? Number(absoluteMatch[6]) : 0);
+      const time = parsed.getTime();
+      return Number.isNaN(time) ? 0 : time;
+    }
+    return 0;
+  }
+
+  private static relativeUnitMs(unit: string): number {
+    if (unit === '秒') {
+      return 1000;
+    }
+    if (unit === '分钟') {
+      return 60 * 1000;
+    }
+    if (unit === '小时') {
+      return 3600 * 1000;
+    }
+    if (unit === '天') {
+      return 24 * 3600 * 1000;
+    }
+    if (unit === '周') {
+      return 7 * 24 * 3600 * 1000;
+    }
+    if (unit === '月') {
+      return 30 * 24 * 3600 * 1000;
+    }
+    if (unit === '年') {
+      return 365 * 24 * 3600 * 1000;
+    }
+    return 0;
+  }
+
+  private static formatRelativeTime(timestamp: number): string {
+    const elapsed = Math.max(0, Date.now() - timestamp);
+    const minutes = Math.floor(elapsed / (60 * 1000));
+    if (minutes < 1) {
+      return '刚刚';
+    }
+    if (minutes < 60) {
+      return `${minutes}分钟前`;
+    }
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) {
+      return `${hours}小时前`;
+    }
+    const days = Math.floor(hours / 24);
+    if (days < 30) {
+      return `${days}天前`;
+    }
+    const months = Math.floor(days / 30);
+    if (months < 12) {
+      return `${months}个月前`;
+    }
+    return `${Math.floor(months / 12)}年前`;
+  }
+
   static getCover(book: Book): string {
     const covers = BookDisplayHelper.getCoverList(book);
     if (covers.length > 0) {

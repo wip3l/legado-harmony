@@ -4,6 +4,8 @@ import { CookieStore } from '../core/http/CookieStore';
 import { VerificationSupport } from '../core/http/VerificationSupport';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { BookSource } from '../model/data/Book';
+import { ReadBookEngine } from '../core/book/ReadBookEngine';
+import { BookSourceRuntimeSnapshotStore } from '../core/book/BookSourceRuntimeSnapshot';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
@@ -12,17 +14,27 @@ import { ThemeRuntime } from '../theme/ThemeRuntime';
  * Restricted bridge used only by HTML passed to java.showBrowser(). Remote pages do not receive
  * the login runtime object: only navigation, user feedback and same-origin cookie operations are
  * exposed, so enabling this bridge cannot reach files, processes, reflection or arbitrary hosts.
+ * Source-variable access is additionally restricted to pages opened by a book-source browser
+ * payload (java.showBrowser preload session) whose origin matches the payload URL, so an ordinary
+ * verification page can never read or rewrite book-source variables.
  */
 class BookSourceBrowserJavaBridge {
   private readonly activeProvider: () => boolean;
   private readonly currentUrlProvider: () => string;
   private readonly navigate: (url: string, title: string) => void;
+  private readonly variableAccessProvider: () => boolean;
+  private readonly variableGetter: () => string;
+  private readonly variableSetter: (value: string) => void;
 
   constructor(activeProvider: () => boolean, currentUrlProvider: () => string,
-    navigate: (url: string, title: string) => void) {
+    navigate: (url: string, title: string) => void, variableAccessProvider: () => boolean = (): boolean => false,
+    variableGetter: () => string = (): string => '', variableSetter: (value: string) => void = (_: string): void => {}) {
     this.activeProvider = activeProvider;
     this.currentUrlProvider = currentUrlProvider;
     this.navigate = navigate;
+    this.variableAccessProvider = variableAccessProvider;
+    this.variableGetter = variableGetter;
+    this.variableSetter = variableSetter;
   }
 
   toast(message: string): void {
@@ -31,6 +43,23 @@ class BookSourceBrowserJavaBridge {
 
   longToast(message: string): void {
     this.showToast(String(message || ''));
+  }
+
+  getVariable(): string {
+    if (!this.variableAccessProvider()) return '';
+    return this.variableGetter();
+  }
+
+  putVariable(value: string): boolean {
+    if (!this.variableAccessProvider()) return false;
+    this.variableSetter(String(value ?? ''));
+    return true;
+  }
+
+  reLoginView(_refresh: boolean = false): boolean {
+    // The payload page may ask the host to refresh its login view; the reader app re-reads the
+    // persisted source variable when the verification page closes, so this is a no-op here.
+    return this.variableAccessProvider();
   }
 
   startBrowser(url: string, title: string): void {
@@ -126,13 +155,18 @@ struct VerifyWebPage {
   private browserPayloadBaseUrl: string = '';
   private browserPayloadInjectJs: string = '';
   private browserPayloadLoaded: boolean = false;
-  private browserPayloadInjected: boolean = false;
+  private browserSourceUrl: string = '';
+  private browserSourceVariable: string = '';
+  private browserVariableDirty: boolean = false;
   private onlineBookSourceImportPending: boolean = false;
   private fanqieAppLaunchNoticeShown: boolean = false;
   private readonly browserJavaBridge: BookSourceBrowserJavaBridge = new BookSourceBrowserJavaBridge(
     (): boolean => !!this.browserPayloadToken,
     (): string => this.currentUrl || this.browserPayloadBaseUrl || this.url,
-    (url: string, title: string): void => this.openBridgeUrl(url, title));
+    (url: string, title: string): void => this.openBridgeUrl(url, title),
+    (): boolean => this.canAccessBrowserSourceVariable(),
+    (): string => this.browserSourceVariable,
+    (value: string): void => this.storeBrowserSourceVariable(value));
   private readonly mobileUserAgent: string =
     'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
   aboutToAppear(): void {
@@ -149,7 +183,12 @@ struct VerifyWebPage {
       this.browserPayloadHtml = AppStorage.get<string>('bookSourceBrowserPayloadHtml') || '';
       this.browserPayloadBaseUrl = AppStorage.get<string>('bookSourceBrowserPayloadBaseUrl') || initialUrl;
       this.browserPayloadInjectJs = AppStorage.get<string>('bookSourceBrowserPayloadInjectJs') || '';
-      this.url = 'about:blank';
+      this.browserSourceVariable = params?.['bookSourceVariable'] || '';
+      this.browserSourceUrl = AppStorage.get<string>('pendingVerificationSourceUrl') || '';
+      // A payload without HTML is a plain preload session: the page itself must load, the script
+      // rides along on every page load.
+      this.url = !this.browserPayloadHtml && this.isHttpUrl(this.browserPayloadBaseUrl) ?
+        this.browserPayloadBaseUrl : 'about:blank';
       this.currentUrl = this.browserPayloadBaseUrl || initialUrl;
       return;
     }
@@ -183,6 +222,9 @@ struct VerifyWebPage {
   aboutToDisappear(): void {
     if (this.browserAwaitToken && !this.browserAwaitCompleted) {
       this.publishBrowserAwaitResult('', '网页操作已取消');
+    }
+    if (this.browserVariableDirty) {
+      this.persistBrowserSourceVariable();
     }
   }
 
@@ -245,7 +287,7 @@ struct VerifyWebPage {
           name: 'java',
           methodList: [
             'toast', 'longToast', 'startBrowser', 'startBrowserDp', 'open', 'openUrl',
-            'getCookie', 'setCookie', 'removeCookie'
+            'getCookie', 'setCookie', 'removeCookie', 'getVariable', 'putVariable', 'reLoginView'
           ],
           controller: this.controller
         })
@@ -291,6 +333,13 @@ struct VerifyWebPage {
     if (this.browserPayloadToken) {
       this.saveCookies(this.currentUrl || this.browserPayloadBaseUrl);
       CookieStore.saveSync();
+      const variableSaved = this.browserVariableDirty;
+      await this.persistBrowserSourceVariable();
+      if (variableSaved) {
+        this.showToastSafely('登录信息已保存到书源');
+      } else if (this.requireLoginCookie && !this.hasEffectiveBookSourceLoginCookie()) {
+        this.showToastSafely('未检测到有效登录 Cookie，请正常登录后再点完成');
+      }
       this.backSafely();
       return;
     }
@@ -344,11 +393,55 @@ struct VerifyWebPage {
   }
 
   injectBrowserPayloadScript(): void {
-    if (this.browserPayloadInjected || !this.browserPayloadInjectJs) return;
-    this.browserPayloadInjected = true;
-    this.controller.runJavaScript(this.browserPayloadInjectJs).catch((error: Object): void => {
+    if (!this.browserPayloadInjectJs) return;
+    // Preload semantics match Android Legado: the script re-runs on every finished page load so
+    // login pages that navigate (login -> account) always redefine their save-back hook.
+    const shim = '(function(){try{var b=window.java;}' +
+      'catch(e){return;}if(!b)return;' +
+      'window.source={' +
+      'getVariable:function(){try{return String(b.getVariable()||"");}catch(e){return "";}},' +
+      'setVariable:function(v){try{return b.putVariable(String(v));}catch(e){return false;}},' +
+      'putVariable:function(v){try{return b.putVariable(String(v));}catch(e){return false;}}};})();';
+    this.controller.runJavaScript(`${shim}\n${this.browserPayloadInjectJs}`).catch((error: Object): void => {
       console.warn('注入书源网页脚本失败:', error);
     });
+  }
+
+  /** Same-origin book-source payload session only; see the bridge class comment. */
+  canAccessBrowserSourceVariable(): boolean {
+    if (!this.browserPayloadToken || !this.browserPayloadBaseUrl) return false;
+    const current = this.currentUrl || this.browserPayloadBaseUrl;
+    return this.originOf(current) !== '' && this.originOf(current) === this.originOf(this.browserPayloadBaseUrl);
+  }
+
+  storeBrowserSourceVariable(value: string): void {
+    const next = String(value ?? '');
+    if (!next || next === this.browserSourceVariable) return;
+    this.browserSourceVariable = next;
+    this.browserVariableDirty = true;
+  }
+
+  async persistBrowserSourceVariable(): Promise<void> {
+    if (!this.browserVariableDirty || !this.browserSourceUrl) return;
+    this.browserVariableDirty = false;
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const source = await db.getBookSource(this.browserSourceUrl);
+      if (!source) return;
+      source.variable = this.browserSourceVariable;
+      await db.updateBookSourceLoginRuntime(source.bookSourceUrl, source.variable,
+        source.loginHeader, source.loginInfo);
+      // The reading session and the runtime snapshot cache hold their own copies of the source;
+      // refresh both so the freshly saved token is used without reopening the book.
+      const engineSource = ReadBookEngine.get().source;
+      if (engineSource && engineSource.bookSourceUrl === this.browserSourceUrl) {
+        engineSource.variable = this.browserSourceVariable;
+        BookSourceRuntimeSnapshotStore.invalidate(this.browserSourceUrl);
+      }
+    } catch (e) {
+      console.error('保存书源网页登录变量失败:', e);
+    }
   }
 
   handleBrowserLoadIntercept(event?: OnLoadInterceptEvent): boolean {

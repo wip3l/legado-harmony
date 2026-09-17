@@ -42,6 +42,7 @@ import { CloudSyncSettingsStore } from '../account/CloudSyncSettingsStore';
 import { CloudSyncCoordinator } from '../account/CloudSyncCoordinator';
 import { ReaderTtsFloatingSession } from '../utils/ReaderTtsFloatingSession';
 import { ReaderTtsPlayerPanel } from '../components/ReaderTtsPlayerPanel';
+import { TtsCatalogSheet, CatalogTitleDataSource } from '../components/TtsCatalogSheet';
 import { BookTypeSupport } from '../core/book/BookTypeSupport';
 import { WebBookService } from '../core/book/WebBookService';
 import { ChangeSourceResultCache } from '../utils/ChangeSourceResultCache';
@@ -49,7 +50,7 @@ import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 import { ReaderOpenTrace } from '../utils/ReaderOpenTrace';
 import { FullTextCacheCancelCoordinator, FullTextCacheCancelSignal } from '../utils/FullTextCacheCancelCoordinator';
-import { ShelfTileSortEntry, ShelfBookDataSource, FloatingCatalogDataSource, ShelfTileEntryDataSource, ExploreSourceOptionDataSource, ExploreMetadataTask } from '../core/book/ShelfDataSources';
+import { ShelfTileSortEntry, ShelfBookDataSource, ShelfTileEntryDataSource, ExploreSourceOptionDataSource, ExploreMetadataTask } from '../core/book/ShelfDataSources';
 
 const SHELF_FULL_TEXT_CACHE_NOTIFICATION_INTERVAL_MS: number = 5000;
 const SHELF_COVER_INITIAL_PREFETCH_COUNT: number = 16;
@@ -110,6 +111,7 @@ struct Index {
   @StorageLink('globalTtsActive') @Watch('onGlobalTtsActiveChanged') globalTtsActive: boolean = false;
   @StorageLink('globalTtsPaused') globalTtsPaused: boolean = false;
   @StorageLink('globalTtsBookName') globalTtsBookName: string = '';
+  @StorageLink('globalTtsCover') globalTtsCover: ResourceStr = '';
   @StorageLink('globalTtsChapterTitle') globalTtsChapterTitle: string = '';
   @StorageLink('globalTtsMode') globalTtsMode: string = '';
   @StorageLink('globalTtsChapterProgress') globalTtsChapterProgress: string = '';
@@ -124,7 +126,7 @@ struct Index {
   private globalTtsDragOriginX: number = 0;
   private globalTtsDragOriginY: number = 0;
   private globalTtsCatalogScroller: ListScroller = new ListScroller();
-  private globalTtsCatalogSource: FloatingCatalogDataSource = new FloatingCatalogDataSource();
+  private globalTtsCatalogSource: CatalogTitleDataSource = new CatalogTitleDataSource();
 
   aboutToAppear() {
     this.shortcutRoutingActive = true;
@@ -267,6 +269,33 @@ struct Index {
       return;
     }
     this.globalTtsCatalogSource.replace(this.globalTtsCatalogReverseOrder ? titles.slice().reverse() : titles);
+    this.openGlobalTtsCatalogWithFreshCacheFlags();
+  }
+
+  /**
+   * The shelf holds no chapter list of its own, so the cache snapshot is rebuilt
+   * from the database before the sheet appears — otherwise the chips would show
+   * whatever the publishing page last reported.
+   */
+  private openGlobalTtsCatalogWithFreshCacheFlags(): void {
+    const ownerId = ReaderTtsFloatingSession.currentOwnerId();
+    const bookUrl = AppStorage.get<string>('globalTtsBookUrl') || '';
+    if (!ownerId || !bookUrl) {
+      this.presentGlobalTtsCatalog();
+      return;
+    }
+    AppDatabase.getInstance().getBookChapters(bookUrl)
+      .then((chapters: BookChapter[]): void => {
+        ReaderTtsFloatingSession.updateCatalogCachedFlags(ownerId, this.chapterCachedFlagsOf(chapters));
+        this.presentGlobalTtsCatalog();
+      })
+      .catch((error: Error) => {
+        console.warn('刷新听书目录缓存标记失败:', error);
+        this.presentGlobalTtsCatalog();
+      });
+  }
+
+  private presentGlobalTtsCatalog(): void {
     animateTo({ duration: 280, curve: Curve.Friction }, () => {
       this.showGlobalTtsCatalog = true;
     });
@@ -277,6 +306,19 @@ struct Index {
           this.globalTtsCatalogDisplayIndex(ReaderTtsFloatingSession.catalogIndex()), false, ScrollAlign.CENTER);
       } catch (_) {}
     }, 0);
+  }
+
+  /**
+   * Positional, to line up with how every publisher builds the titles array
+   * (`chapters.map(title)`) — the rest of the reader treats array position as the
+   * canonical chapter index too.
+   */
+  private chapterCachedFlagsOf(chapters: BookChapter[]): boolean[] {
+    const flags: boolean[] = [];
+    for (let index = 0; index < chapters.length; index++) {
+      flags.push(chapters[index].cacheDate > 0);
+    }
+    return flags;
   }
 
   closeGlobalTtsCatalog(): void {
@@ -298,12 +340,12 @@ struct Index {
   }
 
   globalTtsCatalogCanonicalIndex(displayIndex: number): number {
-    const count = ReaderTtsFloatingSession.catalogTitles().length;
+    const count = ReaderTtsFloatingSession.catalogCount();
     return this.globalTtsCatalogReverseOrder ? count - 1 - displayIndex : displayIndex;
   }
 
   globalTtsCatalogDisplayIndex(canonicalIndex: number): number {
-    const count = ReaderTtsFloatingSession.catalogTitles().length;
+    const count = ReaderTtsFloatingSession.catalogCount();
     return this.globalTtsCatalogReverseOrder ? count - 1 - canonicalIndex : canonicalIndex;
   }
 
@@ -519,103 +561,43 @@ struct Index {
 
   @Builder
   globalTtsCatalogOverlay() {
-    Stack({ alignContent: Alignment.Bottom }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#78000000')
-        .onClick(() => this.closeGlobalTtsCatalog())
-      Column({ space: 10 }) {
-        Row() {
-          Text('听书目录')
-            .fontSize(19)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(ThemeRuntime.primaryTextColor(this.appDarkMode))
-          Blank()
-          Stack({ alignContent: Alignment.Center }) {
-            Column({ space: 0 }) {
-              SymbolGlyph($r('sys.symbol.chevron_up'))
-                .fontSize(11)
-                .fontColor([this.globalTtsCatalogReverseOrder ? this.tabBarActiveColor() :
-                  ThemeRuntime.primaryTextColor(this.appDarkMode)])
-              SymbolGlyph($r('sys.symbol.chevron_down'))
-                .fontSize(11)
-                .fontColor([this.globalTtsCatalogReverseOrder ? this.tabBarActiveColor() :
-                  ThemeRuntime.primaryTextColor(this.appDarkMode)])
-            }
-            .alignItems(HorizontalAlign.Center)
-          }
-            .width(34)
-            .height(34)
-            .borderRadius(17)
-            .backgroundColor(this.globalTtsCatalogReverseOrder ?
-              ThemeRuntime.accentSurfaceColor(this.appDarkMode) : ThemeRuntime.inputColor(this.appDarkMode))
-            .accessibilityText(this.globalTtsCatalogReverseOrder ? '切换为正序目录' : '切换为倒序目录')
-            .onClick(() => this.toggleGlobalTtsCatalogOrder())
-          Text(`${ReaderTtsFloatingSession.catalogIndex() + 1} / ` +
-            `${ReaderTtsFloatingSession.catalogTitles().length}`)
-            .fontSize(12)
-            .fontColor(ThemeRuntime.subTextColor(this.appDarkMode))
-          SymbolGlyph($r('sys.symbol.xmark'))
-            .fontSize(17)
-            .fontColor([ThemeRuntime.primaryTextColor(this.appDarkMode)])
-            .width(40)
-            .height(40)
-            .margin({ left: 6 })
-            .onClick(() => this.closeGlobalTtsCatalog())
-        }
-        .width('100%')
-        List({ scroller: this.globalTtsCatalogScroller, space: 4 }) {
-          LazyForEach(this.globalTtsCatalogSource, (title: string, index: number) => {
-            ListItem() {
-              Row({ space: 10 }) {
-                Text(`${this.globalTtsCatalogCanonicalIndex(index) + 1}`)
-                  .fontSize(11)
-                  .fontColor(this.globalTtsCatalogCanonicalIndex(index) === ReaderTtsFloatingSession.catalogIndex() ? '#FFFFFF' :
-                    ThemeRuntime.subTextColor(this.appDarkMode))
-                  .textAlign(TextAlign.Center)
-                  .width(34)
-                  .height(26)
-                  .borderRadius(13)
-                  .backgroundColor(this.globalTtsCatalogCanonicalIndex(index) === ReaderTtsFloatingSession.catalogIndex() ?
-                    this.tabBarActiveColor() : ThemeRuntime.inputColor(this.appDarkMode))
-                Text(title || `第${this.globalTtsCatalogCanonicalIndex(index) + 1}章`)
-                  .fontSize(15)
-                  .fontWeight(this.globalTtsCatalogCanonicalIndex(index) === ReaderTtsFloatingSession.catalogIndex() ?
-                    FontWeight.Bold : FontWeight.Regular)
-                  .fontColor(this.globalTtsCatalogCanonicalIndex(index) === ReaderTtsFloatingSession.catalogIndex() ?
-                    this.tabBarActiveColor() : ThemeRuntime.primaryTextColor(this.appDarkMode))
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .layoutWeight(1)
-              }
-              .width('100%')
-              .constraintSize({ minHeight: 50 })
-              .padding({ left: 8, right: 8, top: 7, bottom: 7 })
-              .borderRadius(10)
-              .backgroundColor(this.globalTtsCatalogCanonicalIndex(index) === ReaderTtsFloatingSession.catalogIndex() ?
-                ThemeRuntime.accentSurfaceColor(this.appDarkMode) : Color.Transparent)
-              .onClick(() => this.selectGlobalTtsCatalog(index))
-            }
-          }, (title: string, index: number) => `${index}_${title}`)
-        }
-        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-        .layoutWeight(1)
-        .width('100%')
-        .scrollBar(BarState.Auto)
-      }
-      .width('100%')
-      .height('72%')
-      .padding({ left: 16, right: 16, top: 12, bottom: this.navBarHeight + 12 })
-      .borderRadius({ topLeft: 22, topRight: 22 })
-      .backgroundColor(ThemeRuntime.cardColor(this.appDarkMode))
-      .transition(TransitionEffect.translate({ y: 520 })
-        .combine(TransitionEffect.opacity(0))
-        .animation({ duration: 280, curve: Curve.Friction }))
-    }
-    .width('100%')
-    .height('100%')
-    .zIndex(80)
+    TtsCatalogSheet({
+      darkMode: this.appDarkMode,
+      accentColor: this.tabBarActiveColor(),
+      primaryTextColor: ThemeRuntime.primaryTextColor(this.appDarkMode),
+      subTextColor: ThemeRuntime.subTextColor(this.appDarkMode),
+      controlIconColor: ThemeRuntime.primaryTextColor(this.appDarkMode),
+      panelColor: ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'),
+      bookName: this.globalTtsBookName,
+      bookInitial: this.globalTtsCatalogInitial(),
+      cover: this.globalTtsCover,
+      // The shelf only receives the book name and cover with the TTS session, so the
+      // subtitle falls back to the chapter being played instead of the author.
+      bookSubtitle: this.globalTtsChapterTitle,
+      count: ReaderTtsFloatingSession.catalogCount(),
+      currentDisplayIndex: this.globalTtsCatalogDisplayIndex(ReaderTtsFloatingSession.catalogIndex()),
+      reverseOrder: this.globalTtsCatalogReverseOrder,
+      progressText: `${ReaderTtsFloatingSession.catalogIndex() + 1} / ` +
+        `${ReaderTtsFloatingSession.catalogCount()}`,
+      bottomInset: this.navBarHeight,
+      viewportHeight: this.globalTtsViewportHeight,
+      zIndexValue: 80,
+      scroller: this.globalTtsCatalogScroller,
+      source: this.globalTtsCatalogSource,
+      isCached: (displayIndex: number): boolean => this.isGlobalTtsCatalogChapterCached(displayIndex),
+      onToggleOrder: () => this.toggleGlobalTtsCatalogOrder(),
+      onSelect: (displayIndex: number) => this.selectGlobalTtsCatalog(displayIndex),
+      onClose: () => this.closeGlobalTtsCatalog()
+    })
+  }
+
+  globalTtsCatalogInitial(): string {
+    const name = (this.globalTtsBookName || '书').trim();
+    return name.length > 0 ? name.substring(0, 1) : '书';
+  }
+
+  isGlobalTtsCatalogChapterCached(displayIndex: number): boolean {
+    return ReaderTtsFloatingSession.catalogCachedFlag(this.globalTtsCatalogCanonicalIndex(displayIndex));
   }
 
   supportsImmersiveTabs(): boolean {
@@ -3861,10 +3843,71 @@ struct BookshelfPage {
     return tags;
   }
 
-  getAuthorAndUpdateText(book: Book): string {
-    const author = book.author || '作者未知';
-    const updateText = BookDisplayHelper.getLastUpdateText(book);
-    return updateText ? `${author} · 最后更新 ${updateText}` : author;
+  getShelfAuthorText(book: Book): string {
+    return book.author || '作者未知';
+  }
+
+  /**
+   * Second info line of the compact/loose shelf row: "<x小时前> · <最新章节名>".
+   * The old "作者 · 最后更新 xxx" single line is split so the update time gets its own row and
+   * can carry the latest chapter title. It shares the author line's font and colour.
+   */
+  getShelfUpdateLineText(book: Book): string {
+    const timeText = BookDisplayHelper.getLastUpdateRelativeText(book);
+    const chapterText = (book.latestChapterTitle || '').trim();
+    if (timeText && chapterText) {
+      return `${timeText} · ${chapterText}`;
+    }
+    return timeText || chapterText;
+  }
+
+  // --- 书架行排版尺寸 ---------------------------------------------------------
+  // 封面需要「顶部对齐书名、底部对齐最后一行文字」，所以下面这些行高必须是确定值：
+  // 先用它们算出信息块总高度，再把封面高度设成同一个值，两端自然像素对齐。
+  // 信息块内部恒有一个 Blank()，所以某本书没有更新行时，尾部仍会被顶到底部。
+
+  shelfRowSpace(): number {
+    return 4;
+  }
+
+  shelfTitleLineHeight(): number {
+    return 20;
+  }
+
+  /** 作者名、更新时间行、宽松布局的「xx章未读」：字号 14。 */
+  shelfTextLineHeight(): number {
+    return 19;
+  }
+
+  /** 紧凑布局在关闭进度条时显示的「xx章未读」：字号 12。 */
+  shelfSmallTextLineHeight(): number {
+    return 16;
+  }
+
+  shelfProgressPanelHeight(): number {
+    return this.shelfSmallTextLineHeight() + 4 + 3;
+  }
+
+  /** 信息块最后一行的高度——封面底部与它对齐。 */
+  shelfInfoTailHeight(): number {
+    return this.bookshelfShowProgressBar ? this.shelfProgressPanelHeight() : this.shelfSmallTextLineHeight();
+  }
+
+  /** 紧凑布局信息块高度 = 标题行 + 作者行 + 更新行 + 尾部行 + 4 个行间距。 */
+  shelfCompactInfoHeight(): number {
+    return this.shelfTitleLineHeight() + this.shelfTextLineHeight() + this.shelfTextLineHeight() +
+      this.shelfInfoTailHeight() + this.shelfRowSpace() * 4;
+  }
+
+  /** 宽松布局信息块高度，尾部是「xx章未读」那一行。 */
+  shelfLooseInfoHeight(): number {
+    return this.shelfTitleLineHeight() + this.shelfTextLineHeight() + this.shelfTextLineHeight() +
+      this.shelfTextLineHeight() + this.shelfRowSpace() * 4;
+  }
+
+  /** 封面沿用 7:9 的书籍比例，高度跟随信息块，宽度按比例推导。 */
+  shelfCoverWidth(infoHeight: number): number {
+    return Math.round(infoHeight * 7 / 9);
   }
 
   isCompactLayout(): boolean {
@@ -4781,13 +4824,16 @@ struct BookshelfPage {
   compactBookContent(book: Book) {
     Column({ space: 8 }) {
       Row() {
-        this.coverView(book, 56, 72, ImageFit.Cover)
+        // 封面高度 = 信息块高度，顶部对齐书名行、底部对齐进度条底部。
+        this.coverView(book, this.shelfCoverWidth(this.shelfCompactInfoHeight()),
+          this.shelfCompactInfoHeight(), ImageFit.Cover)
 
-        Column({ space: 4 }) {
+        Column({ space: this.shelfRowSpace() }) {
           Row({ space: 6 }) {
             this.bookTypeNameBadge(book, true)
             Text(this.shelfTileBookDisplayName(book))
               .fontSize(16)
+              .lineHeight(this.shelfTitleLineHeight())
               .fontWeight(FontWeight.Bold)
               .fontColor(this.primaryTextColor())
               .maxLines(1)
@@ -4798,6 +4844,7 @@ struct BookshelfPage {
             if (this.shouldShowBookSource(book)) {
               Text(this.getBookSourceText(book))
                 .fontSize(11)
+                .lineHeight(14)
                 .fontColor(this.sourceTagTextColor())
                 .padding({ left: 6, right: 6, top: 2, bottom: 2 })
                 .backgroundColor(this.sourceTagBackgroundColor())
@@ -4811,26 +4858,40 @@ struct BookshelfPage {
           .width('100%')
           .alignItems(VerticalAlign.Center)
 
-          Text(this.getAuthorAndUpdateText(book))
+          Text(this.getShelfAuthorText(book))
             .fontSize(14)
+            .lineHeight(this.shelfTextLineHeight())
             .fontColor(this.secondaryTextColor())
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
 
+          if (this.getShelfUpdateLineText(book)) {
+            Text(this.getShelfUpdateLineText(book))
+              .fontSize(14)
+              .lineHeight(this.shelfTextLineHeight())
+              .fontColor(this.secondaryTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          }
+
+          // 恒定的 Blank：某本书没有更新行时由它吸收多余空间，尾部仍被顶到底部。
+          Blank()
+
           if (this.bookshelfShowProgressBar) {
-            Blank()
             this.readProgressPanel(book)
           } else {
             Row() {
               Text(this.getShelfProgressText(book))
                 .fontSize(12)
+                .lineHeight(this.shelfSmallTextLineHeight())
                 .fontColor(this.subTextColor())
             }
           }
         }
         .layoutWeight(1)
-        .height(72)
+        .height(this.shelfCompactInfoHeight())
         .margin({ left: 12 })
         .alignItems(HorizontalAlign.Start)
       }
@@ -4848,13 +4909,16 @@ struct BookshelfPage {
   looseBookContent(book: Book) {
     Column({ space: 8 }) {
       Row() {
-        this.coverView(book, 56, 72, ImageFit.Cover)
+        // 封面高度 = 信息块高度，顶部对齐书名行、底部对齐「xx章未读」那一行。
+        this.coverView(book, this.shelfCoverWidth(this.shelfLooseInfoHeight()),
+          this.shelfLooseInfoHeight(), ImageFit.Cover)
 
-        Column({ space: 4 }) {
+        Column({ space: this.shelfRowSpace() }) {
           Row({ space: 6 }) {
             this.bookTypeNameBadge(book, true)
             Text(this.shelfTileBookDisplayName(book))
               .fontSize(16)
+              .lineHeight(this.shelfTitleLineHeight())
               .fontWeight(FontWeight.Bold)
               .fontColor(this.primaryTextColor())
               .maxLines(1)
@@ -4865,14 +4929,32 @@ struct BookshelfPage {
           .width('100%')
           .alignItems(VerticalAlign.Center)
 
-          Text(this.getAuthorAndUpdateText(book))
+          Text(this.getShelfAuthorText(book))
             .fontSize(14)
+            .lineHeight(this.shelfTextLineHeight())
             .fontColor(this.secondaryTextColor())
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+
+          if (this.getShelfUpdateLineText(book)) {
+            Text(this.getShelfUpdateLineText(book))
+              .fontSize(14)
+              .lineHeight(this.shelfTextLineHeight())
+              .fontColor(this.secondaryTextColor())
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          }
+
+          // 恒定的 Blank：某本书没有更新行时由它吸收多余空间，尾部仍被顶到底部。
+          Blank()
 
           Row() {
             if (this.shouldShowBookSource(book)) {
               Text(this.getBookSourceText(book))
                 .fontSize(12)
+                .lineHeight(14)
                 .fontColor(this.sourceTagTextColor())
                 .padding({ left: 8, right: 8, top: 2, bottom: 2 })
                 .backgroundColor(this.sourceTagBackgroundColor())
@@ -4880,12 +4962,15 @@ struct BookshelfPage {
                 .margin({ right: 8 })
             }
 
+            // 与作者名保持一致的格式（字号 14 + 次级文字色）。
             Text(this.getShelfProgressText(book))
-              .fontSize(12)
-              .fontColor(this.subTextColor())
+              .fontSize(14)
+              .lineHeight(this.shelfTextLineHeight())
+              .fontColor(this.secondaryTextColor())
           }
         }
         .layoutWeight(1)
+        .height(this.shelfLooseInfoHeight())
         .margin({ left: 12 })
         .alignItems(HorizontalAlign.Start)
       }
@@ -6950,6 +7035,11 @@ struct BookshelfPage {
         this.pendingShelfSortTimer = -1;
       }
       this.pendingShelfSortMode = '';
+      // 'recentRead' is the default and therefore the mode the user re-taps most often. Re-selecting
+      // the already-active mode must still visibly re-sort: a silent return made "点了排序没反应" look
+      // like the sort itself was broken whenever the retained snapshot was stale for any reason.
+      this.reorderShelfForSortMode(next);
+      this.scheduleLoadBooks();
       return;
     }
     if (this.shelfScopeSwitchAnimating) {
@@ -6973,15 +7063,35 @@ struct BookshelfPage {
     }
     this.pendingShelfSortMode = '';
     this.persistShelfSortMode(next);
-    this.animateShelfContentUpdate(() => {
-      this.sortMode = next;
-      const sorted = this.sortBooks(this.books, next);
-      this.books = sorted;
-      this.shelfListBooksSource.replace(sorted);
-      this.shelfTileBooksSource.replace(this.getTileBooksWithoutLatest(sorted));
-      this.shelfTileEntriesCacheKey = '';
-      this.shelfTileEntriesSource.replace(this.getSortedTileRootEntries(sorted, next));
-    }, 0);
+    this.reorderShelfForSortMode(next);
+    // The synchronous reorder only re-sorts the snapshot the shelf already holds. Follow it with a
+    // DB-backed reload so a snapshot that went stale (e.g. a missed progress notification while the
+    // shelf was covered by the reader) cannot keep rendering yesterday's order.
+    this.scheduleLoadBooks();
+  }
+
+  /**
+   * Re-derive the visible shelf order for the newly selected sort mode.
+   *
+   * This deliberately does not go through animateShelfContentUpdate(): that helper drives the
+   * scope-switch slide transition, so reusing it for sorting routed a plain reorder through a
+   * 115ms delay plus a second animation frame, and re-entrant selections landed in the
+   * shelfScopeSwitchAnimating branch instead of applying. A sort is a one-shot content swap,
+   * it must be applied synchronously to both rendered layouts (compact/loose list + tile grid).
+   */
+  private reorderShelfForSortMode(mode: string): void {
+    this.sortMode = mode;
+    const source = this.booksForShelfScope(this.shelfScope);
+    const sorted = this.sortBooks(source, mode);
+    this.books = sorted;
+    // Both layouts read from their own LazyForEach source, and the tile grid additionally caches
+    // its root entries. Invalidate the cache before rebuilding so the tile layout cannot render a
+    // stale entry order produced by the previous sort mode.
+    this.shelfTileEntriesCacheKey = '';
+    this.shelfTileEntriesCache = [];
+    this.shelfListBooksSource.replace(sorted, true);
+    this.shelfTileBooksSource.replace(this.getTileBooksWithoutLatest(sorted), true);
+    this.shelfTileEntriesSource.replace(this.getSortedTileRootEntries(sorted, mode), true);
   }
 
   private persistShelfSortMode(mode: string): void {
@@ -7142,6 +7252,8 @@ struct BookshelfPage {
     Column({ space: 4 }) {
       Text(this.getReadProgressInfoText(book))
         .fontSize(12)
+        // 行高固定，shelfProgressPanelHeight() 才能算出与封面一致的高度。
+        .lineHeight(this.shelfSmallTextLineHeight())
         .fontColor(this.subTextColor())
         .width('100%')
         .textAlign(TextAlign.Start)

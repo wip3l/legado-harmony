@@ -15,7 +15,13 @@ function applyReaderRulesInTask(text: string, rulesJson: string, scopeText: stri
   } catch (_) {
     return text;
   }
-  let result = text || '';
+  // Reader action markers are app-internal interaction metadata (paragraph-comment bubbles,
+  // source buttons) baked into the content text. They are not book prose, and cleaning rules
+  // such as `\[.*?\]` or "strip non-CJK" must never destroy them, so every rule is applied per
+  // plain-text segment and the markers are reattached verbatim afterwards.
+  const hasMarkers = (text || '').indexOf('[[LEGADO_READER_ACTION') >= 0;
+  const segments: string[] = hasMarkers ?
+    (text || '').split(/(\[\[LEGADO_READER_ACTION(?:_V[23])?:[\s\S]*?\]\])/g) : [text || ''];
   const target = (scopeText || '').toLowerCase();
   for (let index = 0; index < rules.length; index++) {
     const rule = rules[index];
@@ -73,18 +79,27 @@ function applyReaderRulesInTask(text: string, rulesJson: string, scopeText: stri
 
     try {
       const replacement = String(rule['replacement'] || '');
+      let matcher: RegExp | null = null;
+      let plain = '';
       if (rule['isRegex'] !== false) {
         // Nested unbounded quantifiers are a common source of catastrophic backtracking. Imported
         // rules with this shape are skipped instead of occupying a TaskPool worker indefinitely.
         if (/(?:\([^)]*[+*][^)]*\)|\[[^\]]+\][+*])[+*{]/.test(pattern)) continue;
-        result = result.replace(new RegExp(pattern, 'g'), replacement);
+        matcher = new RegExp(pattern, 'g');
       } else {
-        result = result.split(pattern).join(replacement);
+        plain = pattern;
+      }
+      // Even indices are plain text; odd indices are captured markers kept out of rule scope.
+      for (let si = 0; si < segments.length; si += 2) {
+        const segment = segments[si];
+        if (!segment) continue;
+        if (matcher !== null) segments[si] = segment.replace(matcher, replacement);
+        else segments[si] = segment.split(plain).join(replacement);
       }
     } catch (_) {
     }
   }
-  return result;
+  return segments.join('');
 }
 
 export class ReaderContentPreprocessor {

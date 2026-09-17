@@ -44,6 +44,7 @@ struct SearchBookDetailPage {
   @State coverUrl: string = '';
   @State intro: string = '';
   @State latestChapterTitle: string = '';
+  @State totalChapterNum: number = 0;
   @State wordCount: string = '';
   @State updateTime: string = '';
   @State bookType: number = 0;
@@ -111,6 +112,7 @@ struct SearchBookDetailPage {
         this.showAddToShelfOnBackPrompt();
       }
     });
+    this.refreshChapterCount();
     // Some source runtimes need one UI turn after the detail route is mounted (especially when the
     // hidden Web transport is still attaching). Do not keep an empty first response cached forever.
     if (!this.intro && !this.isLoadingBookInfo && this.bookUrl && this.origin) {
@@ -199,25 +201,45 @@ struct SearchBookDetailPage {
             .width('100%')
             .padding({ left: 16, right: 16, top: 16 })
 
-            if (this.latestChapterTitle) {
-              Column() {
-                Text('最新章节')
+            // The catalog is the only entry point to the chapter list, so this card must stay
+            // visible even when the source returned no latest-chapter title.
+            Column() {
+              Row() {
+                Text('目录')
                   .fontSize(15)
                   .fontWeight(FontWeight.Bold)
                   .fontColor(this.primaryTextColor())
-                  .width('100%')
-                Text(this.latestChapterTitle)
-                  .fontSize(14)
-                  .fontColor(this.secondaryTextColor())
-                  .width('100%')
-                  .margin({ top: 8 })
+                  .layoutWeight(1)
+
+                if (this.totalChapterNum > 0) {
+                  Text(`共 ${this.totalChapterNum} 章`)
+                    .fontSize(13)
+                    .fontColor(this.subTextColor())
+                }
+
+                Text('›')
+                  .fontSize(18)
+                  .fontColor(this.subTextColor())
+                  .margin({ left: 6 })
               }
               .width('100%')
-              .padding(16)
-              .backgroundColor(this.cardColor())
-              .borderRadius(8)
-              .margin({ top: 12 })
+
+              Text(this.latestChapterTitle || '点击查看该书源的完整章节列表')
+                .fontSize(14)
+                .fontColor(this.secondaryTextColor())
+                .width('100%')
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .margin({ top: 8 })
             }
+            .width('100%')
+            .padding(16)
+            .backgroundColor(this.cardColor())
+            .borderRadius(8)
+            .margin({ top: 12 })
+            .onClick(() => {
+              this.openChapterList();
+            })
 
             Column() {
               Text('简介')
@@ -250,20 +272,31 @@ struct SearchBookDetailPage {
         .layoutWeight(1)
         .backgroundColor(this.pageColor())
 
-        Row() {
+        Row({ space: 10 }) {
           Button(this.isInShelf ? '已加入书架' : '加入书架')
             .enabled(!this.isInShelf && !this.isSaving)
             .height(44)
+            .fontSize(15)
             .layoutWeight(1)
-            .margin({ right: 10 })
             .backgroundColor(this.buttonColor())
             .fontColor('#FFFFFF')
             .onClick(() => {
               this.addToShelf();
             })
 
+          Button('目录')
+            .height(44)
+            .fontSize(15)
+            .layoutWeight(1)
+            .backgroundColor(this.buttonColor())
+            .fontColor('#FFFFFF')
+            .onClick(() => {
+              this.openChapterList();
+            })
+
           Button(BookTypeSupport.isAudio(this.detailTypeProbe()) ? '开始听书' : '开始阅读')
             .height(44)
+            .fontSize(15)
             .layoutWeight(1)
             .backgroundColor(this.buttonColor())
             .fontColor('#FFFFFF')
@@ -891,6 +924,52 @@ struct SearchBookDetailPage {
     book.type = this.bookType;
     book.variable = this.bookVariable;
     return book;
+  }
+
+  /**
+   * The catalog card shows a chapter count that only exists after the catalog has been fetched at
+   * least once. Prefer the stored column and fall back to counting the cached chapter rows.
+   */
+  private async refreshChapterCount(): Promise<void> {
+    if (!this.bookUrl) return;
+    try {
+      const db = AppDatabase.getInstance();
+      await db.initWithContext(getContext(this));
+      const book = await db.getBook(this.bookUrl);
+      const stored = book ? book.totalChapterNum : 0;
+      this.totalChapterNum = stored > 0 ? stored : await db.getBookChapterCount(this.bookUrl);
+    } catch (e) {
+      console.warn('读取章节总数失败:', e);
+    }
+  }
+
+  openChapterList(): void {
+    if (!this.bookUrl || !this.origin) {
+      promptAction.showToast({ message: '书籍信息不完整，暂时无法查看目录' });
+      return;
+    }
+    router.pushUrl({
+      url: 'pages/BookChapterList',
+      params: {
+        bookUrl: this.bookUrl,
+        tocUrl: this.tocUrl,
+        origin: this.origin,
+        originName: this.originName,
+        name: this.name,
+        author: this.author,
+        kind: this.kind,
+        status: this.status,
+        coverUrl: this.coverUrl,
+        intro: this.intro,
+        latestChapterTitle: this.latestChapterTitle,
+        wordCount: this.wordCount,
+        updateTime: this.updateTime,
+        type: `${this.bookType}`,
+        // Directory rules that carry an init script write back into book.variable; without it the
+        // catalog comes back empty for those sources.
+        variable: this.bookVariable
+      }
+    });
   }
 
   async startRead() {

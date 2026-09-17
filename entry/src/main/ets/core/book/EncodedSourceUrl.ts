@@ -10,6 +10,12 @@ export class EncodedSourcePayload {
   raw: string = '';
   text: string = '';
   type: string = '';
+  /**
+   * `type` declared by the URL's own trailing options object. Android Legado keys its byte-string
+   * contract on exactly this value (AnalyzeUrl.getStrResponseAwait: `if (type != null) ...`), so it
+   * must stay distinguishable from a name carried by the `data:<name>;base64,` prefix.
+   */
+  declaredType: string = '';
   data: EncodedJsonMap = {};
   options: EncodedJsonMap = {};
 }
@@ -46,6 +52,7 @@ export class EncodedSourceUrl {
         payload.options = {};
       }
       payload.type = EncodedSourceUrl.str(payload.options['type']);
+      payload.declaredType = payload.type;
     }
     if (prefix.type) {
       payload.type = prefix.type;

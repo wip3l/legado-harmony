@@ -5,6 +5,7 @@
     "pages/ReadBook",
     "pages/AudioBook",
     "pages/SearchBookDetail",
+    "pages/BookChapterList",
     "pages/SearchResultGroup",
     "pages/BookSource",
     "pages/BookSourceEdit",

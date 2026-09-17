@@ -60,6 +60,8 @@ struct AccountCenterPage {
   private cropPanOriginX: number = 0;
   private cropPanOriginY: number = 0;
   private readonly cropBoxSize: number = 280;
+  private pointsUsageDialogBuilder: CustomBuilder | undefined = undefined;
+  private pointsUsageDialogId: number = -1;
   private context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
 
   aboutToAppear(): void {
@@ -879,9 +881,24 @@ struct AccountCenterPage {
   pointsCard() {
     Row() {
       Column({ space: 5 }) {
-        Text('可用点数')
-          .fontSize(13)
-          .fontColor(this.subTextColor())
+        Row({ space: 6 }) {
+          Text('可用点数')
+            .fontSize(13)
+            .fontColor(this.subTextColor())
+          Text('?')
+            .fontSize(10)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.subTextColor())
+            .textAlign(TextAlign.Center)
+            .width(16)
+            .height(16)
+            .borderRadius(8)
+            .border({ width: 1, color: this.dividerColor() })
+        }
+        .alignItems(VerticalAlign.Center)
+        .onClick(() => {
+          this.showPointsUsageDialog();
+        })
         Text(`${this.points}`)
           .fontSize(32)
           .fontWeight(FontWeight.Bold)
@@ -904,6 +921,61 @@ struct AccountCenterPage {
     .padding(18)
     .borderRadius(16)
     .backgroundColor(this.cardColor())
+  }
+
+  @Builder
+  pointsUsageDialogContent() {
+    Column({ space: 12 }) {
+      Text('点数使用说明')
+        .fontSize(17)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+      Text('• 点数分充值点和赠送点：充值点通过内购获得（1 元 = 10 点），赠送点为每个华为账号首次登录赠送 300 点\n' +
+        '• 兑换精选主题：60 点/个（以主题页标示为准），有效期 365 天，充值点和赠送点均可支付，优先消耗赠送点\n' +
+        '• 兑换在线朗读字数包：在“我的-在线朗读”中兑换，仅支持充值点，赠送点不能兑换\n' +
+        '• 点数仅限本应用内消费，不支持转让或提现；余额与主题权益跨设备同步')
+        .fontSize(13)
+        .fontColor(this.subTextColor())
+        .lineHeight(22)
+        .width('100%')
+      Button('我知道了')
+        .width('100%')
+        .height(42)
+        .fontSize(15)
+        .fontColor(this.accentColor())
+        .backgroundColor(this.inputColor())
+        .borderRadius(12)
+        .onClick(() => {
+          this.closePointsUsageDialog();
+        })
+    }
+    .padding(20)
+  }
+
+  showPointsUsageDialog(): void {
+    this.pointsUsageDialogBuilder = (): void => {
+      this.pointsUsageDialogContent();
+    };
+    // Dialog APIs moved off UIContext to getPromptAction() in this SDK; the
+    // builder overload is what the compatible API level exposes.
+    this.getUIContext().getPromptAction().openCustomDialog({
+      builder: this.pointsUsageDialogBuilder,
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000'
+    }).then((dialogId: number) => {
+      this.pointsUsageDialogId = dialogId;
+    }).catch((error: Error) => {
+      console.warn('显示点数使用说明失败:', error);
+    });
+  }
+
+  closePointsUsageDialog(): void {
+    if (this.pointsUsageDialogId >= 0) {
+      this.getUIContext().getPromptAction().closeCustomDialog(this.pointsUsageDialogId);
+      this.pointsUsageDialogId = -1;
+    }
   }
 
   @Builder

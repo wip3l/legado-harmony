@@ -10,11 +10,13 @@ export class ReaderTtsFloatingSession {
   private static speedAction: ((value: number) => void) | null = null;
   private static timerAction: ((minutes: number) => void) | null = null;
   private static voiceAction: (() => void) | null = null;
-  private static catalogAction: (() => void) | null = null;
   private static audioSeekAction: ((positionMs: number) => void) | null = null;
-  private static audioCatalogTitles: string[] = [];
-  private static audioCatalogIndex: number = 0;
-  private static audioCatalogSelectAction: ((index: number) => void) | null = null;
+  // Chapter catalog for the floating panel. Both reader modes publish one: the
+  // audio mode from the book source, the TTS mode from the loaded chapters.
+  private static catalogTitleLabels: string[] = [];
+  private static catalogCachedFlags: boolean[] = [];
+  private static catalogCurrentIndex: number = 0;
+  private static catalogSelectAction: ((index: number) => void) | null = null;
   private static ttsVoiceLabels: string[] = [];
   private static ttsVoiceSelectedIndex: number = 0;
   private static ttsVoiceSelectAction: ((index: number) => void) | null = null;
@@ -109,11 +111,9 @@ export class ReaderTtsFloatingSession {
   }
 
   static configureAudioControls(ownerId: string, voiceCode: string,
-    voiceAction: () => void, catalogAction: () => void,
-    seekAction: (positionMs: number) => void): void {
+    voiceAction: () => void, seekAction: (positionMs: number) => void): void {
     if (!ReaderTtsFloatingSession.isOwner(ownerId)) return;
     ReaderTtsFloatingSession.voiceAction = voiceAction;
-    ReaderTtsFloatingSession.catalogAction = catalogAction;
     ReaderTtsFloatingSession.audioSeekAction = seekAction;
     AppStorage.setOrCreate('globalTtsMode', 'audio');
     AppStorage.setOrCreate('globalTtsVoiceCode', voiceCode || '默认');
@@ -141,36 +141,67 @@ export class ReaderTtsFloatingSession {
     if (action) action();
   }
 
-  static openCatalog(): void {
-    const action = ReaderTtsFloatingSession.catalogAction;
-    if (action) action();
+  static configureCatalog(ownerId: string, titles: string[], currentIndex: number,
+    selectAction: (index: number) => void, cachedFlags: boolean[] = []): void {
+    if (!ReaderTtsFloatingSession.isOwner(ownerId)) return;
+    ReaderTtsFloatingSession.catalogTitleLabels = titles.slice();
+    // Published alongside the titles so a catalog opened from another page (the
+    // shelf) can render the cache chip without resolving the book itself.
+    ReaderTtsFloatingSession.catalogCachedFlags = cachedFlags.slice();
+    ReaderTtsFloatingSession.catalogCurrentIndex = currentIndex;
+    ReaderTtsFloatingSession.catalogSelectAction = selectAction;
+    ReaderTtsFloatingSession.updateCatalogChapterAvailability(currentIndex);
   }
 
-  static configureAudioCatalog(ownerId: string, titles: string[], currentIndex: number,
-    selectAction: (index: number) => void): void {
+  static updateCatalogIndex(ownerId: string, currentIndex: number): void {
     if (!ReaderTtsFloatingSession.isOwner(ownerId)) return;
-    ReaderTtsFloatingSession.audioCatalogTitles = titles.slice();
-    ReaderTtsFloatingSession.audioCatalogIndex = currentIndex;
-    ReaderTtsFloatingSession.audioCatalogSelectAction = selectAction;
-    ReaderTtsFloatingSession.updateAudioChapterAvailability(currentIndex);
-  }
-
-  static updateAudioCatalogIndex(ownerId: string, currentIndex: number): void {
-    if (!ReaderTtsFloatingSession.isOwner(ownerId)) return;
-    ReaderTtsFloatingSession.audioCatalogIndex = currentIndex;
-    ReaderTtsFloatingSession.updateAudioChapterAvailability(currentIndex);
+    if (ReaderTtsFloatingSession.catalogCurrentIndex === currentIndex) return;
+    ReaderTtsFloatingSession.catalogCurrentIndex = currentIndex;
+    ReaderTtsFloatingSession.updateCatalogChapterAvailability(currentIndex);
   }
 
   static catalogTitles(): string[] {
-    return ReaderTtsFloatingSession.audioCatalogTitles.slice();
+    return ReaderTtsFloatingSession.catalogTitleLabels.slice();
+  }
+
+  /**
+   * Cache flag for one chapter, in the canonical chapter order published by
+   * `configureCatalog` (i.e. pass a canonical index, not a display one).
+   */
+  static catalogCachedFlag(canonicalIndex: number): boolean {
+    return ReaderTtsFloatingSession.catalogCachedFlags[canonicalIndex] === true;
+  }
+
+  /** Owner of the session currently holding the catalog, for re-publishers. */
+  static currentOwnerId(): string {
+    return ReaderTtsFloatingSession.ownerId;
+  }
+
+  /**
+   * Refreshes the cache snapshot of an already-published catalog. Every entry point
+   * calls this right before it opens the catalog, so a chapter cached mid-session
+   * shows up immediately instead of waiting for the next `configureCatalog`.
+   * `ownerId` guards against a page that no longer owns the session clobbering it.
+   */
+  static updateCatalogCachedFlags(ownerId: string, cachedFlags: boolean[]): void {
+    if (!ReaderTtsFloatingSession.isOwner(ownerId)) return;
+    ReaderTtsFloatingSession.catalogCachedFlags = cachedFlags.slice();
+  }
+
+  /**
+   * Count-only accessor. Index math and row decoration run per visible row, and
+   * `catalogTitles()` would copy the whole label array every call.
+   */
+  static catalogCount(): number {
+    return ReaderTtsFloatingSession.catalogTitleLabels.length;
   }
 
   static catalogIndex(): number {
-    return ReaderTtsFloatingSession.audioCatalogIndex;
+    return ReaderTtsFloatingSession.catalogCurrentIndex;
   }
 
   static selectCatalogIndex(index: number): void {
-    const action = ReaderTtsFloatingSession.audioCatalogSelectAction;
+    const action = ReaderTtsFloatingSession.catalogSelectAction;
     if (action) action(index);
   }
 
@@ -330,8 +361,8 @@ export class ReaderTtsFloatingSession {
     }
   }
 
-  private static updateAudioChapterAvailability(currentIndex: number): void {
-    const count = ReaderTtsFloatingSession.audioCatalogTitles.length;
+  private static updateCatalogChapterAvailability(currentIndex: number): void {
+    const count = ReaderTtsFloatingSession.catalogTitleLabels.length;
     const canPrevious = count > 0 && currentIndex > 0;
     const canNext = count > 0 && currentIndex < count - 1;
     if (AppStorage.get<boolean>('globalTtsCanPrevious') !== canPrevious) {
@@ -356,11 +387,11 @@ export class ReaderTtsFloatingSession {
     ReaderTtsFloatingSession.speedAction = null;
     ReaderTtsFloatingSession.timerAction = null;
     ReaderTtsFloatingSession.voiceAction = null;
-    ReaderTtsFloatingSession.catalogAction = null;
     ReaderTtsFloatingSession.audioSeekAction = null;
-    ReaderTtsFloatingSession.audioCatalogTitles = [];
-    ReaderTtsFloatingSession.audioCatalogIndex = 0;
-    ReaderTtsFloatingSession.audioCatalogSelectAction = null;
+    ReaderTtsFloatingSession.catalogTitleLabels = [];
+    ReaderTtsFloatingSession.catalogCachedFlags = [];
+    ReaderTtsFloatingSession.catalogCurrentIndex = 0;
+    ReaderTtsFloatingSession.catalogSelectAction = null;
     ReaderTtsFloatingSession.ttsVoiceLabels = [];
     ReaderTtsFloatingSession.ttsVoiceSelectedIndex = 0;
     ReaderTtsFloatingSession.ttsVoiceSelectAction = null;

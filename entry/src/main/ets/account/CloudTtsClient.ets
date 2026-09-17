@@ -43,6 +43,11 @@ class CloudTtsBinaryMetadata {
 export class CloudTtsClient {
   private static readonly CACHE_DIR_NAME: string = 'sis_tts';
   private static readonly MAX_CACHE_FILES: number = 120;
+  // Bump whenever the client-side segmentation/text-normalization changes. The cache key is a
+  // hash of user/voice/speed/text only, so without a version the same book text keeps hitting
+  // audio that was synthesized with the old (comma-splitting, comma-stripping) rules and the
+  // fix is silent.
+  private static readonly SEGMENTATION_VERSION: number = 2;
   private generation: number = 0;
   private clients: http.HttpRequest[] = [];
 
@@ -166,7 +171,7 @@ export class CloudTtsClient {
     const dir = `${root}/${CloudTtsClient.CACHE_DIR_NAME}`;
     this.ensureDir(dir);
     const userId = AccountSessionStore.account().userId;
-    const key = `${userId}\n${voiceId}\n${speed.toFixed(1)}\n${text}`;
+    const key = `${CloudTtsClient.SEGMENTATION_VERSION}\n${userId}\n${voiceId}\n${speed.toFixed(1)}\n${text}`;
     return `${dir}/${this.hashText(key)}.bin`;
   }
 

@@ -1211,16 +1211,61 @@ export class WebBookService {
     return (content || '').replace(/<img\b[^>]*>/gi, (tag: string): string => {
       const data = /data:image\/[A-Za-z0-9.+-]+;base64,([A-Za-z0-9+/=]+),(\{[\s\S]*\})/i.exec(tag);
       if (!data || !data[2]) return tag;
-      const action = /["'](?:click|js)["']\s*:\s*(["'])([\s\S]*?)\1(?:\s*,|\s*})/i.exec(data[2]);
-      if (!action || !action[2]) return tag;
-      const count = this.readerDataImageLabel(data[1] || '');
-      const label = count ? `段评 ${count}` : '段评';
-      const marker = ReaderActionMarker.createSourceScript(label, this.decodeHtmlEntities(action[2]), '段评');
+      const action = this.readerImageOptionString(data[2], 'click') ||
+        this.readerImageOptionString(data[2], 'js');
+      if (!action) return tag;
+      // Chapter-tail cards mark themselves with a distinct marker id; everything else with a
+      // count bubble is a paragraph comment.
+      const isChapterTail = this.readerImageOptionString(data[2], 'marker').startsWith('xyCommentTail');
+      const count = isChapterTail ? '' : this.readerDataImageLabel(data[1] || '');
+      const label = isChapterTail ? '章评' : (count ? `段评 ${count}` : '段评');
+      const marker = ReaderActionMarker.createSourceScript(label, action, isChapterTail ? '章评' : '段评');
       // This data-image is an interaction control, not正文 artwork. If its imported click script exceeds the
       // bounded action budget, drop the control instead of passing the enormous base64/options tag into the
       // ordinary image pipeline (the latter can exhaust memory while opening the chapter).
       return marker ? `${marker}\n` : '';
     });
+  }
+
+  /**
+   * Read one string option from the trailing source options of a data-image tag. The options are
+   * JSON whose string values may embed quote characters escaped as `\"` (Legado sources quote
+   * URLs inside the click expression), so a naive "read until the next quote" scan truncates the
+   * script mid-expression. Parse as JSON first, then fall back to an escape-aware scan.
+   */
+  private readerImageOptionString(optionsText: string, key: string): string {
+    const value = String(optionsText || '');
+    if (!value) return '';
+    try {
+      const parsed = JSON.parse(value) as Record<string, Object> | null;
+      const direct = parsed ? parsed[key] : '';
+      if (typeof direct === 'string' && direct.trim()) {
+        return this.decodeHtmlEntities(direct).trim();
+      }
+    } catch (_) {
+    }
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const head = new RegExp(`["']${escapedKey}["']\\s*:\\s*(["'])`, 'i').exec(value);
+    if (!head) return '';
+    const quote = head[1];
+    let collected = '';
+    for (let index = head.index + head[0].length; index < value.length; index++) {
+      const char = value.charAt(index);
+      if (char === '\\') {
+        collected += char;
+        if (index + 1 < value.length) collected += value.charAt(index + 1);
+        index++;
+        continue;
+      }
+      if (char === quote) break;
+      collected += char;
+    }
+    // The scanned value is a string-literal body: resolve JSON/JS escapes such as \" before use.
+    try {
+      collected = JSON.parse(`"${collected}"`) as string;
+    } catch (_) {
+    }
+    return this.decodeHtmlEntities(collected).trim();
   }
 
   private readerDataImageLabel(encoded: string): string {
@@ -1680,8 +1725,9 @@ export class WebBookService {
     console.info('[WS] stage content input:', source.bookSourceName,
       virtualChapterPayload ? `virtual(${virtualChapterPayload.length})` : `url(${(chapter.url || '').length})`);
     const payload = EncodedSourceUrl.decode(chapter.url);
-    if (payload && this.ruleExpectsHexDataUrlInput(rawRule)) {
-      content = this.textToHex(payload.text);
+    const dataUrlInput = this.stageDataUrlContentInput(chapter.url, rawRule);
+    if (dataUrlInput) {
+      content = dataUrlInput;
     } else if (payload) {
       // A source-defined data URL is an opaque chapter descriptor. Legado exposes its decoded
       // identity to the content script; it must never be sent to the native HTTP client as if it
@@ -1799,6 +1845,30 @@ export class WebBookService {
     if (!this.ruleExpectsHexDataUrlInput(rawRule)) return fallback;
     const payload = EncodedSourceUrl.decode(url);
     return payload ? this.textToHex(payload.text) : fallback;
+  }
+
+  /**
+   * Input prepared for a content rule whose chapter address is a source-owned data URL.
+   *
+   * Android Legado exposes a data URI to the rule pipeline as the hexadecimal encoding of its
+   * decoded bytes whenever the URL's trailing options object declares a `type`
+   * (`AnalyzeUrl.getStrResponseAwait`: `if (type != null) StrResponse(url, HexUtil.encodeHexStr(...))`).
+   * That declaration belongs to the address, not to the rule: packed sources routinely hide the
+   * decoder in jsLib (`var payload = xyChapterPayload(this, result)` where the helper calls
+   * java.hexDecodeToString), so scanning the content rule alone misses the contract and hands the
+   * script plain JSON text instead of the byte string. The script then fails while decoding the
+   * address and no request is ever issued, which surfaces as an empty chapter.
+   *
+   * Returns '' when the address is not a data URL, or when neither the address nor the rule asks
+   * for the byte-string form.
+   */
+  private stageDataUrlContentInput(chapterUrl: string, rawRule: string): string {
+    const payload = EncodedSourceUrl.decode(chapterUrl);
+    if (!payload) return '';
+    if (payload.declaredType) return this.textToHex(payload.text);
+    // Compatibility fallback for sources that spell the decoder inside the content rule itself.
+    if (this.ruleExpectsHexDataUrlInput(rawRule)) return this.textToHex(payload.text);
+    return '';
   }
 
   private ruleExpectsHexDataUrlInput(rawRule: string): boolean {

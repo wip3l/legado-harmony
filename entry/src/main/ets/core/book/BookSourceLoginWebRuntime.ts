@@ -61,7 +61,7 @@ export class BookSourceLoginWebRuntime {
       fixedNow: fixedNow,
       randomSeed: randomSeed
     });
-    const completeLibrary = `${source.jsLib || ''}\n${source.loginUrl || ''}`;
+    const completeLibrary = `${source.jsLib || ''}\n${this.unwrapJsWrapper(source.loginUrl || '')}`;
     const actionLibrary = this.shouldIsolateActionScript(completeLibrary) ?
       this.selectActionScript(completeLibrary, action || '') : completeLibrary;
     const library = this.normalizeScript(actionLibrary);
@@ -317,8 +317,20 @@ export class BookSourceLoginWebRuntime {
     return new util.Base64Helper().encodeToStringSync(bytes);
   }
 
-  private static normalizeScript(script: string): string {
-    // Some ArkWeb versions reject an unparenthesized object literal that is indexed directly
+  /**
+   * Legado wraps loginUrl JavaScript in `<js>...</js>` (or a leading `@js:`). Inside a composed
+   * script those wrappers are parsed as comparison operators / an unterminated regex literal, so
+   * the login functions the source actually defines never come into scope. Plain URL loginUrl
+   * values pass through unchanged.
+   */
+  private static unwrapJsWrapper(raw: string): string {
+    const text = (raw || '').trim();
+    if (/^<js>/i.test(text)) return text.replace(/^<js>\s*/i, '').replace(/\s*<\/js>$/i, '');
+    if (/^@?js:/i.test(text)) return text.replace(/^@?js:\s*/i, '');
+    return text;
+  }
+
+  private static normalizeScript(script: string): string {    // Some ArkWeb versions reject an unparenthesized object literal that is indexed directly
     // in a variable initializer: `const value = { a: 1 }[key]`. Parentheses are equivalent and
     // are accepted by both the Web engine and the JavaScript dialect used by Android Legado.
     return (script || '')

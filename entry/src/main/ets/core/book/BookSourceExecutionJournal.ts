@@ -11,14 +11,18 @@ export class BookSourceHostActionKind {
  */
 export class BookSourceExecutionJournal {
   responses: Record<string, string> = {};
+  // Response headers keyed by the same request spec as `responses`, JSON-encoded with
+  // original header casing. The ArkWeb bridge replays them into responseObject.headers().
+  responseHeaders: Record<string, string> = {};
   private startedRequestIds: string[] = [];
   private completedRequestIds: string[] = [];
   private appliedOperationIds: string[] = [];
   private appliedOperationPayloads: string[] = [];
-  sideEffectsStarted: boolean = false;
+  private sideEffectsStarted: boolean = false;
 
   reset(): void {
     this.responses = {};
+    this.responseHeaders = {};
     this.startedRequestIds = [];
     this.completedRequestIds = [];
     this.appliedOperationIds = [];
@@ -47,6 +51,19 @@ export class BookSourceExecutionJournal {
     this.responses[key] = response || '';
     const id = this.stableId(`request\n${key}`);
     if (!this.completedRequestIds.includes(id)) this.completedRequestIds.push(id);
+  }
+
+  /** Stores the fetched response's headers so the bridge can expose responseObject.headers(). */
+  recordResponseHeaders(request: string, headers: Record<string, string>): void {
+    const key = request || '';
+    const record: Record<string, string> = {};
+    for (const name of Object.keys(headers || {})) {
+      const value = headers[name];
+      if (name && value !== undefined && value !== null && typeof value !== 'object') {
+        record[name] = String(value);
+      }
+    }
+    this.responseHeaders[key] = JSON.stringify(record);
   }
 
   markOperationApplied(kind: string, payload: string): boolean {
