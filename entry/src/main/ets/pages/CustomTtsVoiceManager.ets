@@ -1,4 +1,4 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
@@ -14,6 +14,8 @@ import { FormDraftStore } from '../utils/FormDraftStore';
 import deviceInfo from '@ohos.deviceInfo';
 import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { HdsFeedback } from '../utils/HdsFeedback';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
 
 class VoiceEditFormDraft {
   editingVoiceId: string = '';
@@ -58,7 +60,8 @@ struct CustomTtsVoiceManagerPage {
   @State selectionMode: boolean = false;
   @State selectedVoiceIds: string[] = [];
   @State showAddDialog: boolean = false;
-  @State showImportUrlDialog: boolean = false;
+  private importUrlDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onSystemDialogFlagChanged') showImportUrlDialog: boolean = false;
   @State showEditDialog: boolean = false;
   @State importUrl: string = '';
   @State isImporting: boolean = false;
@@ -161,10 +164,14 @@ struct CustomTtsVoiceManagerPage {
               }
             }, (voice: HttpTTS) => this.voiceKey(voice))
 
-            ListItem() {
-              Row()
-                .height(Math.max(20, this.navBarHeight + 12))
-            }
+            // 底部避让 spacer 按 lanes 列数复制占满整行，否则多列时最后一行卡片没有底部避让。
+            ForEach(this.voiceListSpacerKeys(), (_spacerKey: string) => {
+              ListItem() {
+                Row()
+                  .height(this.voiceListBottomInset())
+                  .hitTestBehavior(HitTestMode.None)
+              }
+            }, (spacerKey: string) => spacerKey)
           }
           .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
           .width('100%')
@@ -199,9 +206,7 @@ struct CustomTtsVoiceManagerPage {
         this.addDialog()
       }
 
-      if (this.showImportUrlDialog) {
-        this.importUrlDialog()
-      }
+
 
       if (this.showEditDialog) {
         this.editVoiceDialog()
@@ -290,6 +295,22 @@ struct CustomTtsVoiceManagerPage {
       (voice.url || '').toLowerCase().includes(keyword));
   }
 
+  // List.lanes 的列数；底部避让 spacer 按列数复制，保证多列时占满一整行。
+  voiceListSpacerKeys(): string[] {
+    const laneCount = ResponsiveManagerListLayout.laneCount(this.contextViewportWidth);
+    const keys: string[] = [];
+    for (let i = 0; i < laneCount; i++) {
+      keys.push(`voice_list_spacer_${i}`);
+    }
+    return keys;
+  }
+
+  // 列表底部避让：右下角悬浮新增按钮（52 高，底边距 navBarHeight+22）必须完整让出，
+  // 否则最后一条卡片被按钮盖住，左滑露出的操作键无法点按。
+  voiceListBottomInset(): number {
+    return Math.max(20, this.navBarHeight + 88);
+  }
+
   toggleVoiceEnabled(voice: HttpTTS, enabled: boolean): void {
     this.voices = this.voices.map((item: HttpTTS) => {
       if (String(item.id) === String(voice.id)) {
@@ -306,7 +327,7 @@ struct CustomTtsVoiceManagerPage {
   toggleVoiceState(voice: HttpTTS): void {
     const enabled = !voice.enabled;
     this.toggleVoiceEnabled(voice, enabled);
-    promptAction.showToast({ message: enabled ? '音色已启用' : '音色已禁用' });
+    HdsFeedback.showToast(enabled ? '音色已启用' : '音色已禁用');
   }
 
   deleteVoice(voice: HttpTTS): void {
@@ -317,7 +338,7 @@ struct CustomTtsVoiceManagerPage {
     this.voices = this.voices.filter((item: HttpTTS) => String(item.id) !== id);
     this.selectedVoiceIds = this.selectedVoiceIds.filter((selectedId: string) => selectedId !== id);
     this.saveSettings();
-    promptAction.showToast({ message: '音色已删除' });
+    HdsFeedback.showToast('音色已删除');
   }
 
   clearCustomVoiceSelection(): void {
@@ -402,7 +423,7 @@ struct CustomTtsVoiceManagerPage {
         this.clearCustomVoiceSelection();
       }
       this.saveSettings();
-      promptAction.showToast({ message: `已${enabled ? '启用' : '禁用'} ${this.selectedVoiceIds.length} 个音色` });
+      HdsFeedback.showToast(`已${enabled ? '启用' : '禁用'} ${this.selectedVoiceIds.length} 个音色`);
     } finally {
       this.isBatchOperating = false;
     }
@@ -420,7 +441,7 @@ struct CustomTtsVoiceManagerPage {
     this.selectedVoiceIds = [];
     this.exitSelectionMode();
     this.saveSettings();
-    promptAction.showToast({ message: `已删除 ${count} 个音色` });
+    HdsFeedback.showToast(`已删除 ${count} 个音色`);
   }
 
   openEditDialog(voice: HttpTTS): void {
@@ -533,11 +554,11 @@ struct CustomTtsVoiceManagerPage {
     const name = this.editName.trim();
     const url = this.editUrl.trim();
     if (!name) {
-      promptAction.showToast({ message: '请输入音色名称' });
+      HdsFeedback.showToast('请输入音色名称');
       return;
     }
     if (!url) {
-      promptAction.showToast({ message: '请输入音色 URL' });
+      HdsFeedback.showToast('请输入音色 URL');
       return;
     }
     const targetId = this.editingVoiceId;
@@ -559,7 +580,7 @@ struct CustomTtsVoiceManagerPage {
       this.voices = [...this.voices, voice];
       this.saveSettings();
       this.closeEditDialog();
-      promptAction.showToast({ message: '已新建音色' });
+      HdsFeedback.showToast('已新建音色');
       return;
     }
     this.voices = this.voices.map((voice: HttpTTS) => {
@@ -581,13 +602,13 @@ struct CustomTtsVoiceManagerPage {
     });
     this.saveSettings();
     this.closeEditDialog();
-    promptAction.showToast({ message: '已保存音色' });
+    HdsFeedback.showToast('已保存音色');
   }
 
   async importFromUrl(): Promise<void> {
     const url = this.importUrl.trim();
     if (!url) {
-      promptAction.showToast({ message: '请输入音色 JSON URL' });
+      HdsFeedback.showToast('请输入音色 JSON URL');
       return;
     }
     if (this.isImporting) {
@@ -608,7 +629,7 @@ struct CustomTtsVoiceManagerPage {
       this.showImportUrlDialog = false;
       this.showAddDialog = false;
     } catch (error) {
-      promptAction.showToast({ message: `导入失败：${this.shortErrorMessage(error as Object)}` });
+      HdsFeedback.showToast(`导入失败：${this.shortErrorMessage(error as Object)}`);
     } finally {
       this.isImporting = false;
     }
@@ -631,7 +652,7 @@ struct CustomTtsVoiceManagerPage {
       this.importFromJson(content);
       this.showAddDialog = false;
     } catch (error) {
-      promptAction.showToast({ message: `导入失败：${this.shortErrorMessage(error as Object)}` });
+      HdsFeedback.showToast(`导入失败：${this.shortErrorMessage(error as Object)}`);
     } finally {
       this.isImporting = false;
     }
@@ -640,7 +661,7 @@ struct CustomTtsVoiceManagerPage {
   importFromJson(content: string): void {
     const incoming = SystemTtsReader.parseCustomVoices(content);
     if (incoming.length === 0) {
-      promptAction.showToast({ message: '未识别到有效自定义音色' });
+      HdsFeedback.showToast('未识别到有效自定义音色');
       return;
     }
     const merged = this.voices.slice();
@@ -658,7 +679,7 @@ struct CustomTtsVoiceManagerPage {
     }
     this.voices = merged;
     this.saveSettings();
-    promptAction.showToast({ message: `已导入 ${changed} 个自定义音色` });
+    HdsFeedback.showToast(`已导入 ${changed} 个自定义音色`);
   }
 
   ensureUniqueVoiceId(voice: HttpTTS, existing: HttpTTS[]): void {
@@ -1228,7 +1249,7 @@ struct CustomTtsVoiceManagerPage {
         this.addVoiceMenuItem('从 URL 导入', () => {
           this.showAddDialog = false;
           this.importUrl = '';
-          this.showImportUrlDialog = true;
+          this.openImportUrlDialog();
         })
         this.addVoiceMenuItem('从文件导入', () => {
           this.showAddDialog = false;
@@ -1269,61 +1290,65 @@ struct CustomTtsVoiceManagerPage {
     .onClick(action)
   }
 
+
+  onSystemDialogFlagChanged(): void {
+    if (!this.showImportUrlDialog) this.importUrlDialogSession.close(this.getUIContext());
+  }
+
+  openImportUrlDialog(): void {
+    this.showImportUrlDialog = true;
+    this.importUrlDialogSession.open(this.getUIContext(), (): void => {
+      this.importUrlDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示音色URL导入弹窗失败:'
+    });
+  }
+
   @Builder
-  importUrlDialog() {
+  importUrlDialogContent() {
     Column() {
-      Column() {
-        Text('从URL导入')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 14 })
-        TextInput({ placeholder: '音色 JSON URL', text: this.importUrl })
-          .width('100%')
-          .height(44)
+      Text('从URL导入')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 14 })
+      TextInput({ placeholder: '音色 JSON URL', text: this.importUrl })
+        .width('100%')
+        .height(44)
+        .backgroundColor(this.inputColor())
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.subTextColor())
+        .onChange((value: string) => {
+          this.importUrl = value;
+        })
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(42)
           .backgroundColor(this.inputColor())
           .fontColor(this.primaryTextColor())
-          .placeholderColor(this.subTextColor())
-          .onChange((value: string) => {
-            this.importUrl = value;
+          .onClick(() => {
+            this.showImportUrlDialog = false;
           })
-        Row({ space: 10 }) {
-          Button('取消')
-            .layoutWeight(1)
-            .height(42)
-            .backgroundColor(this.inputColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.showImportUrlDialog = false;
-            })
-          Button(this.isImporting ? '导入中' : '导入')
-            .layoutWeight(1)
-            .height(42)
-            .backgroundColor(this.buttonColor())
-            .fontColor('#FFFFFF')
-            .enabled(!this.isImporting)
-            .onClick(() => {
-              this.importFromUrl();
-            })
-        }
-        .width('100%')
-        .margin({ top: 14 })
+        Button(this.isImporting ? '导入中' : '导入')
+          .layoutWeight(1)
+          .height(42)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .enabled(!this.isImporting)
+          .onClick(() => {
+            this.importFromUrl();
+          })
       }
-      .width('86%')
-      .padding(20)
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#66000000')
-    .justifyContent(FlexAlign.Center)
+      .width('100%')
+      .margin({ top: 14 })
+    }    .padding(20)
   }
+
 
   @Builder
   editVoiceDialog() {

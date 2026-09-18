@@ -1,8 +1,9 @@
 import { bundleManager, common } from '@kit.AbilityKit';
-import { promptAction, router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 @Entry
 @Component
@@ -245,7 +246,7 @@ struct AboutPage {
 
   showToastSafely(message: string): void {
     try {
-      promptAction.showToast({ message: message });
+      HdsFeedback.showToast(message);
     } catch (error) {
       console.error('显示关于页提示失败:', error);
     }

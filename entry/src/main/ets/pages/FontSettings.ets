@@ -1,4 +1,4 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
@@ -7,6 +7,7 @@ import fs from '@ohos.file.fs';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -225,7 +226,7 @@ struct FontSettingsPage {
     this.readerFontRegistered = false;
     this.applyApplicationFont(ThemeRuntime.fontFamily() || systemFontFamily);
     this.saveFontSettings();
-    promptAction.showToast({ message: '已恢复主题默认字体' });
+    HdsFeedback.showToast('已恢复主题默认字体');
   }
 
   selectCustomFont(item: ReaderCustomFontItem): void {
@@ -234,13 +235,13 @@ struct FontSettingsPage {
     }
     if (!this.fontFileExists(item.filePath)) {
       this.reloadCustomFonts();
-      promptAction.showToast({ message: '字体文件不存在' });
+      HdsFeedback.showToast('字体文件不存在');
       return;
     }
     this.readerFontMode = 'custom';
     const registeredFamily = this.registerCustomFont(item);
     if (!registeredFamily) {
-      promptAction.showToast({ message: '字体注册失败，请更换字体文件' });
+      HdsFeedback.showToast('字体注册失败，请更换字体文件');
       return;
     }
     this.readerFontFamily = item.familyName;
@@ -248,7 +249,7 @@ struct FontSettingsPage {
     this.readerFontSourceName = ReaderFontHelper.resolveDisplayName(item.sourceName, item.filePath);
     this.applyApplicationFont(registeredFamily);
     this.saveFontSettings();
-    promptAction.showToast({ message: `已选择字体：${this.readerFontSourceName}` });
+    HdsFeedback.showToast(`已选择字体：${this.readerFontSourceName}`);
   }
 
   saveFontSettings(): void {

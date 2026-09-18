@@ -12,6 +12,7 @@ import { BookSourceDataUrlSupport } from './BookSourceDataUrlSupport';
 import { BookUrlResolver } from './BookUrlResolver';
 import { BookFieldSanitizer } from '../../utils/BookFieldSanitizer';
 import { BookSourceMetadataSupport } from './BookSourceMetadataSupport';
+import { BookTypeSupport } from './BookTypeSupport';
 import { BookSourceRuntimeRouter, SourceRuntimeStage } from './BookSourceRuntimeRouter';
 import { BookSourceStageWebRuntime, StageWebRuntimeRequest } from './BookSourceStageWebRuntime';
 import { BookSourceStageRuleSupport } from './BookSourceStageRuleSupport';
@@ -487,6 +488,12 @@ export class SearchCoordinator {
         }
         book.origin = source.bookSourceUrl;
         BookSourceMetadataSupport.applySearchBook(source, book, [book.bookUrl]);
+        // The searchUrl script declares the media type it searched for (source.put('type',…)).
+        // Honor it so an audio-tab search opens as audio instead of defaulting to text.
+        if (!Number(book.type)) {
+          const searchedType = this.readSourceRuntimeMediaType(source);
+          if (searchedType) book.type = searchedType;
+        }
         book.bookSourceComment = source.bookSourceComment;
         book.customOrder = source.customOrder;
         book.weight = source.weight;
@@ -626,6 +633,25 @@ export class SearchCoordinator {
       return a.index - b.index;
     });
     return scored.map((item: ScoredSearchBook): SearchBook => item.book);
+  }
+
+  /**
+   * Media type the source's searchUrl/bookUrl script wrote into its persisted runtime state
+   * (type=audio/comic/novel/…), mapped onto the Legado book type bits.
+   */
+  private readSourceRuntimeMediaType(source: BookSource): number {
+    try {
+      const loginInfo = JSON.parse(source.loginInfo || '{}') as Record<string, Object>;
+      let runtime = loginInfo['__legadoHarmonyRuntime'];
+      if (typeof runtime === 'string') runtime = JSON.parse(runtime) as Object;
+      const state = runtime && typeof runtime === 'object' && !Array.isArray(runtime) ?
+        (runtime as Record<string, Object>)['source'] : null;
+      const value = state && typeof state === 'object' && !Array.isArray(state) ?
+        String((state as Record<string, Object>)['type'] || '') : '';
+      return BookTypeSupport.typeFromTab(value);
+    } catch (_) {
+      return 0;
+    }
   }
 
   private sanitizeSearchBook(book: SearchBook): void {

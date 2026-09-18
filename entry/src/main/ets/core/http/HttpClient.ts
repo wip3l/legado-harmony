@@ -20,6 +20,9 @@ export interface HttpRequest {
   useWebView?: boolean;
   webJs?: string;
   debugContext?: BookSourceDebugContext;
+  // Script-bridge requests run inside a serial runtime: a hung request stalls every queued
+  // task, so the doubled-timeout idempotent retry is skipped for them (caller re-runs instead).
+  noTimeoutRetry?: boolean;
 }
 
 export interface HttpResponse {
@@ -106,7 +109,7 @@ export class HttpClient {
       console.info('[HttpClient] HTTP/2 failed; retrying once with HTTP/1.1:', this.hostForLog(req.url));
       return await this.executeWithProtocol(req, true);
     }
-    if (!response.success && this.shouldRetryTimeout(req, response.error || '')) {
+    if (!response.success && !req.noTimeoutRetry && this.shouldRetryTimeout(req, response.error || '')) {
       const retryTimeout = Math.min(30000, Math.max(this.timeout * 2, 15000));
       console.info('[HttpClient] idempotent request timed out; retrying once:', this.hostForLog(req.url));
       return await this.executeWithProtocol({

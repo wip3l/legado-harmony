@@ -110,7 +110,7 @@ export class BookSourceLoginWebRuntime {
       `const loginInfoView=new Proxy(loginMap,{get:function(target,key){if(typeof key!=='string')return target[key];` +
       `if(key in target)return target[key];return loginInfoValue(key);}});` +
       `const source={` +
-      `bookSourceUrl:S.sourceUrl,bookSourceName:S.sourceName,loginUi:S.loginUi,header:S.sourceHeader,` +
+      `key:S.sourceUrl,bookSourceUrl:S.sourceUrl,bookSourceName:S.sourceName,loginUi:S.loginUi,header:S.sourceHeader,` +
       `getKey:function(){return S.sourceUrl;},getTag:function(){return S.sourceName;},` +
       `getSource:function(){return this;},` +
       `getVariable:function(){return S.variable||'';},` +

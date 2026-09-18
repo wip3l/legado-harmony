@@ -2,7 +2,7 @@ import { util } from '@kit.ArkTS';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { CookieStore } from '../http/CookieStore';
 import { JsonPathEvaluator } from './JsonPathEvaluator';
-import { QuickJsShadowComparator } from '../script/QuickJsScriptRuntime';
+import { QuickJsScriptRuntime, QuickJsShadowComparator } from '../script/QuickJsScriptRuntime';
 import { QuickJsObservationContext } from '../script/QuickJsRuntimeStatus';
 
 export class JsRuntime {
@@ -54,6 +54,7 @@ export class JsRuntime {
   }
 
   private evalExpr(expr: string): string {
+    const originalExpr = expr;
     try {
       const statements = this.splitStatements(expr);
       if (statements.length > 1) {
@@ -110,6 +111,10 @@ export class JsRuntime {
       // outer java.put first used to persist the unevaluated inner rule text.
       expr = this.replaceGetStringListCalls(expr);
       expr = this.replaceFunctionCalls(expr, 'java.getString', (v: string) => this.javaGetStringCall(v));
+      // Source runtime state (tone/type/exploreType written by login-panel actions) is seeded as
+      // `source.<name>` variables; sources read it through these Rhino-style bean calls.
+      expr = this.replaceFunctionCalls(expr, 'source.get', (v: string) => this.quoteString(this.sourceRuntimeValue(this.evalStr(v))));
+      expr = this.replaceFunctionCalls(expr, 'source.put', (v: string) => this.putSourceRuntimeValue(v));
       expr = this.replaceFunctionCalls(expr, 'java.getElement', (v: string) => this.javaGetStringCall(v));
       expr = this.replaceFunctionCalls(expr, 'java.timeFormatUTC',
         (v: string) => this.timeFormatCall(v, true));
@@ -118,6 +123,14 @@ export class JsRuntime {
       expr = this.replaceFunctionCalls(expr, 'java.put', (v: string) => this.putVar(v));
       expr = this.replaceFunctionCalls(expr, 'java.get', (v: string) => this.getVarCall(v));
       expr = this.replaceFunctionCalls(expr, 'java.t2s', (v: string) => this.evalStr(v));
+      // All java.* value shims have run by this point, so a remaining `String("…").replace(…)`
+      // chain is plain JavaScript over quoted literals. Evaluate it natively BEFORE the String
+      // shim runs: that shim strips quotes eagerly and would corrupt the surrounding expression
+      // (the 1970-date `.replace(…)` leak in rendered intros).
+      if (expr !== originalExpr) {
+        const quickValue = QuickJsScriptRuntime.evaluateResidualExpression(expr, this.vars, 150);
+        if (quickValue.success) return quickValue.value;
+      }
       expr = this.replaceFunctionCalls(expr, 'String', (v: string) => this.evalStr(v));
       expr = this.replaceFunctionCalls(expr, 'encodeURIComponent', (v: string) => encodeURIComponent(this.evalStr(v)));
       expr = this.replaceFunctionCalls(expr, 'encodeURI', (v: string) => encodeURI(this.evalStr(v)));
@@ -141,6 +154,16 @@ export class JsRuntime {
       if (truncateMatch && truncateMatch[1]) {
         return String(Math.trunc(this.evalNumber(truncateMatch[1])));
       }
+      // The textual shim resolves known calls but cannot execute the JavaScript that remains
+      // around them (String/method chains, ternaries, comparisons). The residue is a
+      // shim-processed fragment, so hand it to the sandboxed QuickJS engine with a screen tuned
+      // for that shape — the strict pure-expression gate rejects regex literals and comparisons
+      // that legitimately occur here. Expressions the shim never touched (raw `$.json.path`
+      // rules) are left to the native evaluator untouched.
+      if (expr !== originalExpr) {
+        const quickValue = QuickJsScriptRuntime.evaluateResidualExpression(expr, this.vars, 150);
+        if (quickValue.success) return quickValue.value;
+      }
       if (/^[\d\s+\-*/%.()eE]+$/.test(expr)) {
         return String(this.evalNumber(expr));
       }
@@ -160,7 +183,17 @@ export class JsRuntime {
   private evalStr(s: string): string {
     let v = s.trim();
     v = this.replaceDateExpressions(v);
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.substring(1, v.length - 1);
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.substring(1, v.length - 1);
+      // A quoted token is a JavaScript string literal: honor its escape sequences, otherwise
+      // templates like {{"\n"}} leak the literal backslash-n into rendered text.
+      v = v.replace(/\\(.)/g, (_: string, ch: string): string => {
+        if (ch === 'n') return '\n';
+        if (ch === 't') return '\t';
+        if (ch === 'r') return '\r';
+        return ch;
+      });
+    }
     const parts = this.splitConcat(v);
     if (parts.length > 1) return parts.map((part: string) => this.evalStr(part)).join('');
     for (const k in this.vars) v = v.replace(new RegExp('\\b' + k + '\\b', 'g'), this.vars[k]);
@@ -262,6 +295,20 @@ export class JsRuntime {
       start = this.indexOfFunctionCall(result, 'java.getStringList');
     }
     return result;
+  }
+
+  private sourceRuntimeValue(key: string): string {
+    if (!key) return '';
+    const value = this.vars[`source.${key}`];
+    return value === undefined ? '' : value;
+  }
+
+  private putSourceRuntimeValue(rawArgs: string): string {
+    const args = this.splitArgs(rawArgs);
+    const key = this.evalStr(args[0] || '');
+    const value = this.evalStr(args.slice(1).join(','));
+    if (key) this.vars[`source.${key}`] = value;
+    return value;
   }
 
   private javaGetStringCall(rawArgs: string): string {

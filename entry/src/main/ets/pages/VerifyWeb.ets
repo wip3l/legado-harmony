@@ -9,6 +9,7 @@ import { BookSourceRuntimeSnapshotStore } from '../core/book/BookSourceRuntimeSn
 import { syncSystemBars } from '../utils/SystemBars';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 /**
  * Restricted bridge used only by HTML passed to java.showBrowser(). Remote pages do not receive
@@ -128,7 +129,7 @@ class BookSourceBrowserJavaBridge {
   private showToast(message: string): void {
     if (!this.activeProvider() || !message) return;
     try {
-      promptAction.showToast({ message: message.substring(0, 4000) });
+      HdsFeedback.showToast(message.substring(0, 4000));
     } catch (_) {}
   }
 }
@@ -682,7 +683,7 @@ struct VerifyWebPage {
 
   showToastSafely(message: string): void {
     try {
-      promptAction.showToast({ message: message });
+      HdsFeedback.showToast(message);
     } catch (e) {
       console.error('显示网页验证提示失败:', e);
     }

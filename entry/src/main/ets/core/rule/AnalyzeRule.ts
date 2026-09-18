@@ -873,7 +873,18 @@ export class AnalyzeRule {
   private evalJsonPath(rule: string): Object | string | undefined {
     rule = this.normalizeJsonPath(rule);
     const isBareKey = /^[A-Za-z_][A-Za-z0-9_]*$/.test(rule);
-    if (!rule.startsWith('$') && !rule.startsWith('@.') && !isBareKey) return undefined;
+    if (!rule.startsWith('$') && !rule.startsWith('@.') && !isBareKey) {
+      // Legado interprets `data.list[*]`-style rules as root-relative JSON paths even without
+      // the leading `$`; tolerate the same spelling for JSON content instead of dropping them.
+      try {
+        const data = JSON.parse(this.content) as Object;
+        const values = JsonPathEvaluator.evaluate(data, '$.' + rule);
+        if (values.length === 0) return undefined;
+        return values.length === 1 ? values[0] as Object | string : values as Object[];
+      } catch (_) {
+        return undefined;
+      }
+    }
     try {
       const data = JSON.parse(this.content) as Object;
       if (/^\$\d+$/.test(rule)) return (data as Record<string, Object>)[rule] as Object | string;

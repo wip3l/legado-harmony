@@ -2,7 +2,7 @@ import { BookSource } from '../../model/data/Book';
 import { BookSourceStageWebRuntime, StageWebRuntimeRequest } from '../book/BookSourceStageWebRuntime';
 import { BookSourceRuntimeRouter, SourceRuntimeDecision } from '../book/BookSourceRuntimeRouter';
 import { BookUrlResolver } from '../book/BookUrlResolver';
-import { CooperativeCancellationToken, CooperativeScheduler } from '../concurrency/CooperativeScheduler';
+import { CooperativeCancellationToken, CooperativeScheduler, CooperativeTimeSlice } from '../concurrency/CooperativeScheduler';
 import { AnalyzeRule } from './AnalyzeRule';
 import { RuleContext } from './RuleContext';
 import { RuleBatchExecutionRequest, RuleBatchExecutionResult, RuleFieldRequest } from './RuleExecutionModels';
@@ -67,23 +67,32 @@ export class RuleExecutionService {
         const embeddedCandidate = code === null ? this.extractEmbeddedJsProcessor(field.rule) : null;
         const embeddedDecision = embeddedCandidate === null ? null :
           BookSourceRuntimeRouter.decide(request.stage, embeddedCandidate.code);
+        // Object-state calls (source.put/get, cookie.*, cache.*) have no lightweight emulations:
+        // such processors silently degrade to no-ops on the legacy interpreter. Route them to
+        // ArkWeb alongside processors that need complete JavaScript syntax.
+        const embeddedNeedsBridge = embeddedDecision !== null && (
+          embeddedDecision.runtime === 'arkweb' ||
+          embeddedDecision.capabilities.requiredSourceMethods.length > 0 ||
+          embeddedDecision.capabilities.requiredCookieMethods.length > 0 ||
+          embeddedDecision.capabilities.requiredCacheMethods.length > 0);
         // Combined extraction + <js> rules were historically evaluated by AnalyzeRule per item.
         // Keep that compatible path unless the processor really needs complete JavaScript syntax.
-        const embeddedProcessor = embeddedDecision?.runtime === 'arkweb' ? embeddedCandidate : null;
+        const embeddedProcessor = embeddedCandidate === null ? null :
+          embeddedNeedsBridge ? embeddedCandidate : null;
         const postProcessor = code === null && embeddedProcessor === null ?
           this.extractPostProcessorJs(field.rule) : null;
         if (code === null && embeddedProcessor === null && postProcessor === null) continue;
         try {
           if (code !== null) {
             fullJsValues[field.name] = QuickJsScriptRuntime.isPureExpressionCandidate(code) ?
-              await this.executeRoutedPureJsFieldBatch(request, field, code, token) :
+              await this.executeRoutedPureJsFieldBatch(request, field, code, token, slice) :
               await this.executeFullJsFieldBatch(request, field, code, token);
           } else if (embeddedProcessor !== null) {
             fullJsValues[field.name] = await this.executePostProcessorJsFieldBatch(request, field,
-              embeddedProcessor.baseRule, embeddedProcessor.code, token, embeddedProcessor.trailingRule);
+              embeddedProcessor.baseRule, embeddedProcessor.code, token, slice, embeddedProcessor.trailingRule);
           } else if (postProcessor !== null) {
             fullJsValues[field.name] = await this.executePostProcessorJsFieldBatch(request, field,
-              postProcessor.baseRule, postProcessor.code, token);
+              postProcessor.baseRule, postProcessor.code, token, slice);
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error || '完整脚本执行失败');
@@ -118,7 +127,8 @@ export class RuleExecutionService {
         this.throwIfDeadlineExceeded(deadlineAt, request.stage);
         const content = this.itemText(request, itemIndex);
         const analyzer = new AnalyzeRule(content, request.baseUrl);
-        this.seedSourceVariables(analyzer.getContext(), request.source, request.contextValues);
+this.seedSourceVariables(analyzer.getContext(), request.source, request.contextValues);
+        this.applySourceJsVars(analyzer, request.source, request.contextValues);
         const itemValues: Record<string, string> = {};
         for (const field of request.fields) {
           token.throwIfCancelled();
@@ -186,7 +196,7 @@ export class RuleExecutionService {
   }
 
   private async executeRoutedPureJsFieldBatch(request: RuleBatchExecutionRequest, field: RuleFieldRequest,
-    code: string, token: CooperativeCancellationToken): Promise<string[]> {
+    code: string, token: CooperativeCancellationToken, slice: CooperativeTimeSlice): Promise<string[]> {
     let legacyValuesPromise: Promise<string[]> | null = null;
     const getLegacyValues = (): Promise<string[]> => {
       if (!legacyValuesPromise) {
@@ -198,6 +208,7 @@ export class RuleExecutionService {
     const itemCount = this.itemCount(request);
     for (let index = 0; index < itemCount; index++) {
       token.throwIfCancelled();
+      await slice.checkpoint(token);
       const contentValue = this.itemValue(request, index);
       const runtimeValue = contentValue.runtimeValue();
       const bindings: Record<string, Object> = {};
@@ -279,16 +290,21 @@ export class RuleExecutionService {
    * Android-style combined rules first extract/template a value and then run an `@js:` suffix
    * with that value exposed as `result`. Keep the original item as the JSON/path context (`$`,
    * `src`, java.getString) while the full script runs in the bounded host runtime.
+   *
+   * The per-item loops re-use the caller's time slice: a large catalog otherwise keeps the main
+   * thread inside one synchronous batch past the freeze watchdog.
    */
   private async executePostProcessorJsFieldBatch(request: RuleBatchExecutionRequest, field: RuleFieldRequest,
-    baseRule: string, code: string, token: CooperativeCancellationToken,
+    baseRule: string, code: string, token: CooperativeCancellationToken, slice: CooperativeTimeSlice,
     trailingRule: string = ''): Promise<string[]> {
     const baseValues: string[] = [];
     const itemCount = this.itemCount(request);
     for (let index = 0; index < itemCount; index++) {
       token.throwIfCancelled();
+      await slice.checkpoint(token);
       const analyzer = new AnalyzeRule(this.itemText(request, index), request.baseUrl);
       this.seedSourceVariables(analyzer.getContext(), request.source, request.contextValues);
+      this.applySourceJsVars(analyzer, request.source, request.contextValues);
       baseValues.push(field.listResult ? JSON.stringify(analyzer.getStringList(baseRule)) :
         (field.joinMatches ? analyzer.getString(baseRule) : analyzer.analyzeFirst(baseRule)));
     }
@@ -313,9 +329,11 @@ export class RuleExecutionService {
       `const __postBases=${JSON.stringify(baseValues)};const __postTemplate=${JSON.stringify(code)};` +
       `JSON.stringify(__postItems.map(function(__postItem,__postIndex){java.__setContextContent(__postItem);` +
       `try{const $=__postItem;const __postSource=typeof __postItem==='string'?__postItem:JSON.stringify(__postItem);` +
-      `globalThis.src=__postSource;globalThis.result=String(__postBases[__postIndex]||'').replace(` +
+      // A leading <js> rule (empty base) must see the raw item as `result`, exactly like Android
+      // Legado; only overwrite when the base rule actually produced a value.
+      `globalThis.src=__postSource;if(__postBases[__postIndex]){globalThis.result=String(__postBases[__postIndex]).replace(` +
       `/\\{\\{([\\s\\S]*?)\\}\\}/g,function(_all,__expr){try{const __inner=eval(__expr);` +
-      `return __inner==null?'':String(__inner);}catch(__baseInnerError){return '';}});` +
+      `return __inner==null?'':String(__inner);}catch(__baseInnerError){return '';}});}` +
       `const __postCode=__postTemplate.replace(/\\{\\{([\\s\\S]*?)\\}\\}/g,function(_all,__expr){` +
       `try{const __inner=eval(__expr);return __inner==null?'':String(__inner);}catch(__innerError){return '';}});` +
       `const __postValue=eval(__postCode);if(__postValue==null)return String(globalThis.result||'');` +
@@ -334,8 +352,10 @@ export class RuleExecutionService {
       const transformed: string[] = [];
       for (const value of values) {
         token.throwIfCancelled();
+        await slice.checkpoint(token);
         const analyzer = new AnalyzeRule(value, request.baseUrl);
-        this.seedSourceVariables(analyzer.getContext(), request.source, request.contextValues);
+this.seedSourceVariables(analyzer.getContext(), request.source, request.contextValues);
+        this.applySourceJsVars(analyzer, request.source, request.contextValues);
         transformed.push(field.listResult ? JSON.stringify(analyzer.getStringList(trailingRule)) :
           (field.joinMatches ? analyzer.getString(trailingRule) : analyzer.analyzeFirst(trailingRule)));
       }
@@ -409,7 +429,11 @@ export class RuleExecutionService {
     const baseRule = (match[1] || '').trim();
     const code = (match[2] || '').trim();
     const trailingRule = (match[3] || '').trim();
-    if (!baseRule || !code) return null;
+    if (!code) return null;
+    // A leading `<js>` block followed by a template ( Legado's `type` dispatch pattern: the script
+    // records source state, the template builds the URL ) is a valid processor even without a
+    // base selector, as long as something follows the script.
+    if (!baseRule && !trailingRule) return null;
     return { baseRule: baseRule, code: code, trailingRule: trailingRule };
   }
 
@@ -453,6 +477,41 @@ export class RuleExecutionService {
     ctx.put('jsLib', source.jsLib || '');
     ctx.put('source.variable', source.variable || '');
     for (const key of Object.keys(contextValues)) ctx.put(key, contextValues[key] || '');
+  }
+
+  /**
+   * Mirror the source bindings into the analyzer's template evaluator. Template expressions such
+   * as `{{source.key}}` or `{{source.get('tone')}}` are resolved from these variables; without
+   * them the literal expression text leaks into the produced URL or intro text.
+   */
+  private applySourceJsVars(analyzer: AnalyzeRule, source: BookSource,
+    contextValues: Record<string, string>): void {
+    analyzer.setJsVar('source.key', source.bookSourceUrl || '');
+    analyzer.setJsVar('source.bookSourceUrl', source.bookSourceUrl || '');
+    analyzer.setJsVar('source.bookSourceName', source.bookSourceName || '');
+    analyzer.setJsVar('source.bookSourceGroup', source.bookSourceGroup || '');
+    analyzer.setJsVar('source.bookSourceComment', source.bookSourceComment || '');
+    analyzer.setJsVar('source.variable', source.variable || '');
+    const runtime = this.parseLoginRuntimeSourceState(source.loginInfo || '');
+    for (const key of Object.keys(runtime)) analyzer.setJsVar(`source.${key}`, runtime[key]);
+    for (const key of Object.keys(contextValues)) analyzer.setJsVar(key, contextValues[key] || '');
+  }
+
+  private parseLoginRuntimeSourceState(raw: string): Record<string, string> {
+    const result: Record<string, string> = {};
+    try {
+      const loginInfo = JSON.parse(raw || '{}') as Record<string, Object>;
+      let runtime = loginInfo['__legadoHarmonyRuntime'];
+      if (typeof runtime === 'string') runtime = JSON.parse(runtime) as Object;
+      if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) return result;
+      const state = (runtime as Record<string, Object>)['source'];
+      if (!state || typeof state !== 'object' || Array.isArray(state)) return result;
+      for (const key of Object.keys(state as Record<string, Object>)) {
+        result[key] = String((state as Record<string, Object>)[key] ?? '');
+      }
+    } catch (_) {
+    }
+    return result;
   }
 
   private throwIfDeadlineExceeded(deadlineAt: number, stage: string): void {

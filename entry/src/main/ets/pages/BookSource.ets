@@ -18,6 +18,7 @@ import { CookieStore } from '../core/http/CookieStore';
 import { TlsTrustStore } from '../core/http/TlsTrustStore';
 import { BookSourceGroupStore } from '../utils/BookSourceGroupStore';
 import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
 import deviceInfo from '@ohos.deviceInfo';
 import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
@@ -45,6 +46,7 @@ import {
   ExploreReadingValidationResult,
   ExploreReadingValidator
 } from '../core/book/ExploreReadingValidator';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const BOOK_SOURCE_IMPORT_TIMEOUT_MS = 20000;
@@ -113,7 +115,15 @@ struct BookSourcePage {
   @State isLoading: boolean = false;
   @State searchText: string = '';
   @State activeSourceGroup: string = '__all__';
-  @State showSourceFilterDialog: boolean = false;
+  private sourceFilterDialogSession: SystemDialogSession = new SystemDialogSession();
+  private importSourceSelectionDialogSession: SystemDialogSession = new SystemDialogSession();
+  private sourceDeleteDialogSession: SystemDialogSession = new SystemDialogSession();
+  private renameSourceGroupDialogSession: SystemDialogSession = new SystemDialogSession();
+  private deleteSourceGroupDialogSession: SystemDialogSession = new SystemDialogSession();
+  private addSourceGroupDialogSession: SystemDialogSession = new SystemDialogSession();
+  private sourceGroupManagerDialogSession: SystemDialogSession = new SystemDialogSession();
+  private deleteSelectedSourceGroupsDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onSystemDialogFlagChanged') showSourceFilterDialog: boolean = false;
   @State sourceEnabledFilter: string = 'all';
   @State sourceExplorePageFilter: string = 'all';
   @State sourceExploreEnabledFilter: string = 'all';
@@ -122,7 +132,7 @@ struct BookSourcePage {
   @State sourceSortMode: string = 'custom';
   @State showAddDialog: boolean = false;
   @State showImportUrlDialog: boolean = false;
-  @State showImportSourceSelectionDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showImportSourceSelectionDialog: boolean = false;
   @State pendingImportSources: BookSource[] = [];
   @State selectedImportSourceUrls: string[] = [];
   @State selectionMode: boolean = false;
@@ -135,14 +145,14 @@ struct BookSourcePage {
   @State sourceLoginItems: BookSourceLoginItem[] = [];
   @State isExecutingLoginAction: boolean = false;
   @State loginRuntimeActive: boolean = false;
-  @State showSourceDeleteDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showSourceDeleteDialog: boolean = false;
   @State showSourceGroupToolsMenu: boolean = false;
   @State showSourceGroupActionMenu: boolean = false;
-  @State showRenameSourceGroupDialog: boolean = false;
-  @State showDeleteSourceGroupDialog: boolean = false;
-  @State showAddSourceGroupDialog: boolean = false;
-  @State showSourceGroupManagerDialog: boolean = false;
-  @State showDeleteSelectedSourceGroupsDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showRenameSourceGroupDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showDeleteSourceGroupDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showAddSourceGroupDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showSourceGroupManagerDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showDeleteSelectedSourceGroupsDialog: boolean = false;
   @State selectedManagedSourceGroups: string[] = [];
   @State pendingSourceGroup: string = '';
   @State renameSourceGroupInput: string = '';
@@ -325,7 +335,7 @@ struct BookSourcePage {
     this.pendingOpenLoginSourceUrl = '';
     const source = await AppDatabase.getInstance().getBookSource(sourceUrl);
     if (!source || !this.sourceNeedsLogin(source)) {
-      promptAction.showToast({ message: '未找到可用的书源登录配置' });
+      HdsFeedback.showToast('未找到可用的书源登录配置');
       return;
     }
     this.actionSourceUrl = source.bookSourceUrl;
@@ -430,11 +440,13 @@ struct BookSourcePage {
         } else {
           Stack({ alignContent: Alignment.TopEnd }) {
             List({ space: 8, scroller: this.sourceListScroller }) {
-            ListItem() {
-              Row()
-                .height(this.sourceListTopInset())
-                .hitTestBehavior(HitTestMode.None)
-            }
+            ForEach(this.sourceListSpacerKeys(), (_spacerKey: string) => {
+              ListItem() {
+                Row()
+                  .height(this.sourceListTopInset())
+                  .hitTestBehavior(HitTestMode.None)
+              }
+            }, (spacerKey: string) => spacerKey)
 
             LazyForEach(this.currentSourceListDataSource(), (source: BookSource) => {
               if (deviceInfo.sdkApiVersion >= 26) {
@@ -583,10 +595,13 @@ struct BookSourcePage {
               }
             }, (source: BookSource) => this.sourceListItemKey(source))
 
-            ListItem() {
-              Row()
-                .height(Math.max(20, this.navBarHeight + 12))
-            }
+            ForEach(this.sourceListSpacerKeys(), (_spacerKey: string) => {
+              ListItem() {
+                Row()
+                  .height(this.sourceListBottomInset())
+                  .hitTestBehavior(HitTestMode.None)
+              }
+            }, (spacerKey: string) => `${spacerKey}_bottom`)
             }
             .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
             .width('100%')
@@ -598,18 +613,20 @@ struct BookSourcePage {
             .cachedCount(8)
             .clip(true)
             .onScrollIndex((start: number, end: number) => {
-              this.sourceFirstVisibleIndex = Math.max(0, start - 1);
+              // 顶部 spacer 按列数占满一整行，源条目索引 = ListItem 索引 - 列数（单列时退化为 -1）。
+              this.sourceFirstVisibleIndex = Math.max(0, start - this.sourceListLaneCount());
               this.sourceVisibleItemCount = Math.max(1, end - start + 1);
             })
             .onItemDragStart((_event: ItemDragInfo, itemIndex: number) => {
-              const sourceIndex = itemIndex - 1;
+              const sourceIndex = itemIndex - this.sourceListLaneCount();
               this.draggingSourceUrl = !this.selectionMode && sourceIndex >= 0 &&
                 sourceIndex < this.visibleSources.length ? this.visibleSources[sourceIndex].bookSourceUrl : '';
               return this.sourceDragPreview;
             })
             .onItemDrop((_event: ItemDragInfo, itemIndex: number, insertIndex: number, isSuccess: boolean) => {
               if (isSuccess && this.draggingSourceUrl) {
-                this.moveVisibleSourceTo(itemIndex - 1, Math.max(0, insertIndex - 1));
+                const laneCount = this.sourceListLaneCount();
+                this.moveVisibleSourceTo(itemIndex - laneCount, Math.max(0, insertIndex - laneCount));
               }
               this.draggingSourceUrl = '';
             })
@@ -758,9 +775,6 @@ struct BookSourcePage {
         })
       }
 
-      if (this.showImportSourceSelectionDialog) {
-        this.importSourceSelectionDialog()
-      }
 
       if (this.showBatchDeleteDialog) {
         Column() {
@@ -927,29 +941,11 @@ struct BookSourcePage {
         this.sourceGroupToolsMenu()
       }
 
-      if (this.showSourceGroupManagerDialog) {
-        this.sourceGroupManagerDialog()
-      }
 
-      if (this.showRenameSourceGroupDialog) {
-        this.renameSourceGroupDialog()
-      }
 
-      if (this.showDeleteSourceGroupDialog) {
-        this.deleteSourceGroupDialog()
-      }
 
-      if (this.showDeleteSelectedSourceGroupsDialog) {
-        this.deleteSelectedSourceGroupsDialog()
-      }
 
-      if (this.showAddSourceGroupDialog) {
-        this.addSourceGroupDialog()
-      }
 
-      if (this.showSourceFilterDialog) {
-        this.sourceFilterDialog()
-      }
 
       if (this.showCheckOptionsDialog) {
         this.checkOptionsDialog()
@@ -963,9 +959,6 @@ struct BookSourcePage {
         this.sourceLoginUiDialog()
       }
 
-      if (this.showSourceDeleteDialog) {
-        this.sourceDeleteDialog()
-      }
 
       if (this.showCheckDialog) {
         Column() {
@@ -1301,7 +1294,7 @@ struct BookSourcePage {
         .accessibilityText(this.hasActiveSourceFilters() ?
           `筛选，已启用 ${this.activeSourceFilterCount()} 项` : '筛选书源')
         .onClick(() => {
-          this.showSourceFilterDialog = true;
+          this.openSourceFilterDialog();
         })
 
         Text('校验')
@@ -1492,64 +1485,51 @@ struct BookSourcePage {
   }
 
   @Builder
-  sourceFilterDialog() {
-    Column() {
-      Column({ space: 14 }) {
-        Row() {
-          Text('筛选书源')
-            .fontSize(18)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.primaryTextColor())
-            .layoutWeight(1)
-          Text(`当前 ${this.sources.length}/${this.allSources.length}`)
-            .fontSize(12)
-            .fontColor(this.subTextColor())
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        this.sourceSortFilterRow()
-        this.sourceFilterRow('书源状态', 'enabled', '已启用', '未启用')
-        this.sourceValidationFilterRow()
-        this.sourceFilterRow('发现页面', 'explorePage', '有发现页', '无发现页')
-        this.sourceFilterRow('发现状态', 'exploreEnabled', '已启用', '未启用')
-        this.sourceFilterRow('登录要求', 'login', '需要登录', '无需登录')
-
-        Row({ space: 10 }) {
-          Button('重置', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .enabled(this.hasActiveSourceFilters())
-            .backgroundColor(this.inputColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.resetSourceFilters())
-          Button('完成', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor(this.buttonColor())
-            .fontColor('#FFFFFF')
-            .onClick(() => this.showSourceFilterDialog = false)
-        }
-        .width('100%')
-        .margin({ top: 4 })
+  sourceFilterDialogContent() {
+    Column({ space: 14 }) {
+      Row() {
+        Text('筛选书源')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .layoutWeight(1)
+        Text(`当前 ${this.sources.length}/${this.allSources.length}`)
+          .fontSize(12)
+          .fontColor(this.subTextColor())
       }
-      .width('92%')
-      .constraintSize({ maxWidth: 540 })
-      .padding(22)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#80000000')
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      this.sourceSortFilterRow()
+      this.sourceFilterRow('书源状态', 'enabled', '已启用', '未启用')
+      this.sourceValidationFilterRow()
+      this.sourceFilterRow('发现页面', 'explorePage', '有发现页', '无发现页')
+      this.sourceFilterRow('发现状态', 'exploreEnabled', '已启用', '未启用')
+      this.sourceFilterRow('登录要求', 'login', '需要登录', '无需登录')
+
+      Row({ space: 10 }) {
+        Button('重置', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .enabled(this.hasActiveSourceFilters())
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.resetSourceFilters())
+        Button('完成', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => this.showSourceFilterDialog = false)
+      }
+      .width('100%')
+      .margin({ top: 4 })
+    }    .constraintSize({ maxWidth: 540 })
+    .padding(22)
   }
+
 
   @Builder
   sourceSortFilterRow() {
@@ -1830,7 +1810,7 @@ struct BookSourcePage {
         if (!this.actionSourceLocked()) {
           this.contextActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => {
               this.showSourceActionDialog = false;
-              this.showSourceDeleteDialog = true;
+              this.openSourceDeleteDialog();
             })
         }
       }
@@ -2244,64 +2224,46 @@ struct BookSourcePage {
   }
 
   @Builder
-  sourceDeleteDialog() {
+  sourceDeleteDialogContent() {
     Column() {
-      Column() {
-        Text('删除书源')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-
-        Text(`确定删除“${this.actionSourceName()}”吗？删除后不可恢复。`)
-          .fontSize(14)
-          .fontColor(this.secondaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ top: 12, bottom: 20 })
-
-        Row({ space: 10 }) {
-          Button('取消')
-            .layoutWeight(1)
-            .height(44)
-            .backgroundColor(this.inputColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.showSourceDeleteDialog = false;
-              this.actionSourceUrl = '';
-            })
-
-          Button('删除')
-            .layoutWeight(1)
-            .height(44)
-            .backgroundColor('#B71C1C')
-            .fontColor('#FFFFFF')
-            .onClick(() => {
-              this.deleteActionSource();
-            })
-        }
+      Text('删除书源')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
+        .textAlign(TextAlign.Center)
+
+      Text(`确定删除“${this.actionSourceName()}”吗？删除后不可恢复。`)
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ top: 12, bottom: 20 })
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.showSourceDeleteDialog = false;
+            this.actionSourceUrl = '';
+          })
+
+        Button('删除')
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor('#B71C1C')
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.deleteActionSource();
+          })
       }
-      .width('86%')
-      .padding(22)
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-      .onClick(() => {
-      })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#80000000')
-    .justifyContent(FlexAlign.Center)
-    .onClick(() => {
-      this.showSourceDeleteDialog = false;
-      this.actionSourceUrl = '';
-    })
+      .width('100%')
+    }    .padding(22)
   }
+
 
   @Builder
   sourceDragPreview() {
@@ -2457,8 +2419,8 @@ struct BookSourcePage {
       if (pending < 0 || this.sources.length === 0) return;
       const target = Math.max(0, Math.min(pending, this.sources.length - 1));
       try {
-        // The first ListItem is the top inset spacer, so source indexes start at one.
-        this.sourceListScroller.scrollToIndex(target + 1, false, ScrollAlign.START);
+        // 顶部 spacer 按列数占满一整行，源条目索引与 ListItem 索引相差一个列数。
+        this.sourceListScroller.scrollToIndex(target + this.sourceListLaneCount(), false, ScrollAlign.START);
       } catch (e) {
         console.warn('拖动书源滚动条定位失败:', e);
       }
@@ -2469,117 +2431,125 @@ struct BookSourcePage {
     return 56 + this.statusBarHeight + 98;
   }
 
+  // 列表底部避让：右下角悬浮新增按钮（52 高，底边距 navBarHeight+22）必须完整让出，
+  // 否则最后一条卡片被按钮盖住，左滑露出的操作键无法点按。
+  sourceListBottomInset(): number {
+    return Math.max(20, this.navBarHeight + 88);
+  }
+
+  // List.lanes 的列数。多列时一行放多个 ListItem，顶部/底部避让 spacer 必须按列数占满整行，
+  // 否则第一行卡片会钻到悬浮头部下面、最后一行卡片会缺少底部避让而被裁切。
+  sourceListLaneCount(): number {
+    return ResponsiveManagerListLayout.laneCount(this.contextViewportWidth);
+  }
+
+  sourceListSpacerKeys(): string[] {
+    const laneCount = this.sourceListLaneCount();
+    const keys: string[] = [];
+    for (let i = 0; i < laneCount; i++) {
+      keys.push(`source_list_spacer_${i}`);
+    }
+    return keys;
+  }
+
   @Builder
-  importSourceSelectionDialog() {
-    Column() {
-      Column({ space: 12 }) {
-        Text('选择要导入的书源')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-
-        Text(`共 ${this.pendingImportSources.length} 个书源，已选择 ${this.selectedImportSourceUrls.length} 个`)
-          .fontSize(13)
-          .fontColor(this.secondaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-
-        Row() {
-          Toggle({ type: ToggleType.Checkbox, isOn: this.areAllImportSourcesSelected() })
-            .selectedColor(this.buttonColor())
-            .onChange((isOn: boolean) => {
-              // ArkUI may invoke onChange again while the controlled `isOn`
-              // value is being refreshed. Only handle a genuine user change;
-              // otherwise a single-item toggle could clear every selection.
-              if (isOn !== this.areAllImportSourcesSelected()) {
-                this.selectAllImportSources(isOn);
-              }
-            })
-          Text(this.areAllImportSourcesSelected() ? '取消全选' : '全选')
-            .fontSize(14)
-            .fontColor(this.accentColor())
-            .margin({ left: 8 })
-          Blank().layoutWeight(1)
-        }
+  importSourceSelectionDialogContent() {
+    Column({ space: 12 }) {
+      Text('选择要导入的书源')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
+        .textAlign(TextAlign.Center)
 
-        Scroll() {
-          Column({ space: 6 }) {
-            ForEach(this.pendingImportSources, (source: BookSource) => {
-              Row() {
-                Toggle({ type: ToggleType.Checkbox, isOn: this.isImportSourceSelected(source) })
-                  .selectedColor(this.buttonColor())
-                  .onChange((isOn: boolean) => {
-                    // Ignore callbacks caused by the controlled value being
-                    // re-rendered after another checkbox changes.
-                    if (isOn !== this.isImportSourceSelected(source)) {
-                      this.setImportSourceSelected(source, isOn);
-                    }
-                  })
-                Column() {
-                  Text(source.bookSourceName || '未命名书源')
-                    .fontSize(15)
-                    .fontColor(this.primaryTextColor())
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text(source.bookSourceUrl || '')
-                    .fontSize(11)
-                    .fontColor(this.subTextColor())
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .margin({ top: 2 })
-                }
-                .layoutWeight(1)
-                .margin({ left: 8 })
-              }
-              .width('100%')
-              .padding({ left: 6, right: 6, top: 8, bottom: 8 })
-              .borderRadius(10)
-              .backgroundColor(this.inputColor())
-            }, (source: BookSource) => source.bookSourceUrl)
-          }
-          .width('100%')
-        }
+      Text(`共 ${this.pendingImportSources.length} 个书源，已选择 ${this.selectedImportSourceUrls.length} 个`)
+        .fontSize(13)
+        .fontColor(this.secondaryTextColor())
         .width('100%')
-        .constraintSize({ maxHeight: 360 })
-        .scrollBar(BarState.Auto)
+        .textAlign(TextAlign.Center)
 
-        Row({ space: 10 }) {
-          Button('取消', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
+      Row() {
+        Toggle({ type: ToggleType.Checkbox, isOn: this.areAllImportSourcesSelected() })
+          .selectedColor(this.buttonColor())
+          .onChange((isOn: boolean) => {
+            // ArkUI may invoke onChange again while the controlled `isOn`
+            // value is being refreshed. Only handle a genuine user change;
+            // otherwise a single-item toggle could clear every selection.
+            if (isOn !== this.areAllImportSourcesSelected()) {
+              this.selectAllImportSources(isOn);
+            }
+          })
+        Text(this.areAllImportSourcesSelected() ? '取消全选' : '全选')
+          .fontSize(14)
+          .fontColor(this.accentColor())
+          .margin({ left: 8 })
+        Blank().layoutWeight(1)
+      }
+      .width('100%')
+
+      Scroll() {
+        Column({ space: 6 }) {
+          ForEach(this.pendingImportSources, (source: BookSource) => {
+            Row() {
+              Toggle({ type: ToggleType.Checkbox, isOn: this.isImportSourceSelected(source) })
+                .selectedColor(this.buttonColor())
+                .onChange((isOn: boolean) => {
+                  // Ignore callbacks caused by the controlled value being
+                  // re-rendered after another checkbox changes.
+                  if (isOn !== this.isImportSourceSelected(source)) {
+                    this.setImportSourceSelected(source, isOn);
+                  }
+                })
+              Column() {
+                Text(source.bookSourceName || '未命名书源')
+                  .fontSize(15)
+                  .fontColor(this.primaryTextColor())
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(source.bookSourceUrl || '')
+                  .fontSize(11)
+                  .fontColor(this.subTextColor())
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .margin({ top: 2 })
+              }
+              .layoutWeight(1)
+              .margin({ left: 8 })
+            }
+            .width('100%')
+            .padding({ left: 6, right: 6, top: 8, bottom: 8 })
             .borderRadius(10)
-            .backgroundColor(this.glassCardColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.cancelImportSourceSelection())
-          Button('导入所选', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .enabled(this.selectedImportSourceUrls.length > 0 && !this.isImporting)
-            .backgroundColor(this.buttonColor())
-            .fontColor('#FFFFFF')
-            .onClick(() => this.confirmImportSourceSelection())
+            .backgroundColor(this.inputColor())
+          }, (source: BookSource) => source.bookSourceUrl)
         }
         .width('100%')
       }
-      .width('90%')
-      .constraintSize({ maxWidth: 520 })
-      .padding(22)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#80000000')
+      .width('100%')
+      .constraintSize({ maxHeight: 360 })
+      .scrollBar(BarState.Auto)
+
+      Row({ space: 10 }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor(this.glassCardColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.cancelImportSourceSelection())
+        Button('导入所选', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .enabled(this.selectedImportSourceUrls.length > 0 && !this.isImporting)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => this.confirmImportSourceSelection())
+      }
+      .width('100%')
+    }    .constraintSize({ maxWidth: 520 })
+    .padding(22)
   }
+
 
   @Builder
   sourceGroupBar() {
@@ -2616,7 +2586,7 @@ struct BookSourcePage {
           .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
           .onClick(() => {
             this.newSourceGroupInput = '';
-            this.showAddSourceGroupDialog = true;
+            this.openAddSourceGroupDialog();
           })
       }
       .padding({ left: 16, right: 16, bottom: 8 })
@@ -2645,7 +2615,7 @@ struct BookSourcePage {
         this.contextActionItem($r('sys.symbol.list_bullet'), '分组管理', this.primaryTextColor(), () => {
           this.showSourceGroupToolsMenu = false;
           this.selectedManagedSourceGroups = [];
-          this.showSourceGroupManagerDialog = true;
+          this.openSourceGroupManagerDialog();
         })
         this.contextActionItem($r('sys.symbol.trash'), '清除空分组', this.primaryTextColor(), () => {
           this.showSourceGroupToolsMenu = false;
@@ -2654,7 +2624,7 @@ struct BookSourcePage {
         this.contextActionItem($r('sys.symbol.plus'), '新建分组', this.primaryTextColor(), () => {
           this.showSourceGroupToolsMenu = false;
           this.newSourceGroupInput = '';
-          this.showAddSourceGroupDialog = true;
+          this.openAddSourceGroupDialog();
         })
       }
       .width(166)
@@ -2671,146 +2641,133 @@ struct BookSourcePage {
   }
 
   @Builder
-  sourceGroupManagerDialog() {
+  sourceGroupManagerDialogContent() {
     Column() {
-      Column() {
-        Row() {
-          Text('分组管理')
-            .fontSize(18)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.primaryTextColor())
-            .layoutWeight(1)
-          Text('新建')
-            .fontSize(14)
-            .fontColor(this.accentColor())
-            .padding({ left: 10, right: 2, top: 8, bottom: 8 })
-            .onClick(() => {
-              this.newSourceGroupInput = '';
-              this.showAddSourceGroupDialog = true;
-            })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        if (this.getSourceGroups().length === 0) {
-          Column({ space: 8 }) {
-            SymbolGlyph($r('sys.symbol.folder'))
-              .fontSize(30)
-              .fontColor([this.subTextColor()])
-            Text('暂无书源分组')
-              .fontSize(14)
-              .fontColor(this.subTextColor())
-          }
-          .width('100%')
-          .height(150)
-          .justifyContent(FlexAlign.Center)
-        } else {
-          Row() {
-            Toggle({ type: ToggleType.Checkbox, isOn: this.areAllManagedSourceGroupsSelected() })
-              .selectedColor(this.buttonColor())
-              .onChange((isOn: boolean) => this.selectAllManagedSourceGroups(isOn))
-            Text(this.areAllManagedSourceGroupsSelected() ? '取消全选' : '全选')
-              .fontSize(13)
-              .fontColor(this.secondaryTextColor())
-              .margin({ left: 8 })
-              .layoutWeight(1)
-            Text(`已选 ${this.selectedManagedSourceGroups.length} 项`)
-              .fontSize(12)
-              .fontColor(this.subTextColor())
-          }
-          .width('100%')
-          .height(40)
-          .padding({ left: 4, right: 4 })
-
-          Scroll() {
-            Column({ space: 6 }) {
-              ForEach(this.getSourceGroups(), (group: string) => {
-                Row() {
-                  Toggle({ type: ToggleType.Checkbox, isOn: this.isManagedSourceGroupSelected(group) })
-                    .selectedColor(this.buttonColor())
-                    .onChange((isOn: boolean) => this.setManagedSourceGroupSelected(group, isOn))
-                  Column() {
-                    Text(group)
-                      .fontSize(15)
-                      .fontColor(this.primaryTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(`${this.sourceGroupCount(group)} 个书源`)
-                      .fontSize(11)
-                      .fontColor(this.subTextColor())
-                      .margin({ top: 2 })
-                  }
-                  .layoutWeight(1)
-                  .margin({ left: 8 })
-                  .alignItems(HorizontalAlign.Start)
-                  Text('编辑')
-                    .fontSize(13)
-                    .fontColor(this.accentColor())
-                    .height(36)
-                    .padding({ left: 9, right: 9 })
-                    .textAlign(TextAlign.Center)
-                    .onClick(() => this.openManagedSourceGroupRename(group))
-                  Text('删除')
-                    .fontSize(13)
-                    .fontColor('#E53935')
-                    .height(36)
-                    .padding({ left: 9, right: 4 })
-                    .textAlign(TextAlign.Center)
-                    .onClick(() => this.openManagedSourceGroupDelete(group))
-                }
-                .width('100%')
-                .height(56)
-                .padding({ left: 8, right: 8 })
-                .borderRadius(9)
-                .backgroundColor(this.inputColor())
-              }, (group: string) => group)
-            }
-            .width('100%')
-          }
-          .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-          .width('100%')
-          .constraintSize({ maxHeight: 360 })
-          .scrollBar(BarState.Auto)
-        }
-
-        Row({ space: 10 }) {
-          Button('关闭', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor(this.glassCardColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.showSourceGroupManagerDialog = false;
-              this.selectedManagedSourceGroups = [];
-            })
-          Button('删除所选', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .enabled(this.selectedManagedSourceGroups.length > 0 && !this.isBatchOperating)
-            .backgroundColor('#E53935')
-            .fontColor('#FFFFFF')
-            .onClick(() => this.showDeleteSelectedSourceGroupsDialog = true)
-        }
-        .width('100%')
-        .margin({ top: 16 })
+      Row() {
+        Text('分组管理')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .layoutWeight(1)
+        Text('新建')
+          .fontSize(14)
+          .fontColor(this.accentColor())
+          .padding({ left: 10, right: 2, top: 8, bottom: 8 })
+          .onClick(() => {
+            this.newSourceGroupInput = '';
+            this.openAddSourceGroupDialog();
+          })
       }
-      .width('90%')
-      .constraintSize({ maxWidth: 520 })
-      .padding(22)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#80000000')
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.getSourceGroups().length === 0) {
+        Column({ space: 8 }) {
+          SymbolGlyph($r('sys.symbol.folder'))
+            .fontSize(30)
+            .fontColor([this.subTextColor()])
+          Text('暂无书源分组')
+            .fontSize(14)
+            .fontColor(this.subTextColor())
+        }
+        .width('100%')
+        .height(150)
+        .justifyContent(FlexAlign.Center)
+      } else {
+        Row() {
+          Toggle({ type: ToggleType.Checkbox, isOn: this.areAllManagedSourceGroupsSelected() })
+            .selectedColor(this.buttonColor())
+            .onChange((isOn: boolean) => this.selectAllManagedSourceGroups(isOn))
+          Text(this.areAllManagedSourceGroupsSelected() ? '取消全选' : '全选')
+            .fontSize(13)
+            .fontColor(this.secondaryTextColor())
+            .margin({ left: 8 })
+            .layoutWeight(1)
+          Text(`已选 ${this.selectedManagedSourceGroups.length} 项`)
+            .fontSize(12)
+            .fontColor(this.subTextColor())
+        }
+        .width('100%')
+        .height(40)
+        .padding({ left: 4, right: 4 })
+
+        Scroll() {
+          Column({ space: 6 }) {
+            ForEach(this.getSourceGroups(), (group: string) => {
+              Row() {
+                Toggle({ type: ToggleType.Checkbox, isOn: this.isManagedSourceGroupSelected(group) })
+                  .selectedColor(this.buttonColor())
+                  .onChange((isOn: boolean) => this.setManagedSourceGroupSelected(group, isOn))
+                Column() {
+                  Text(group)
+                    .fontSize(15)
+                    .fontColor(this.primaryTextColor())
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(`${this.sourceGroupCount(group)} 个书源`)
+                    .fontSize(11)
+                    .fontColor(this.subTextColor())
+                    .margin({ top: 2 })
+                }
+                .layoutWeight(1)
+                .margin({ left: 8 })
+                .alignItems(HorizontalAlign.Start)
+                Text('编辑')
+                  .fontSize(13)
+                  .fontColor(this.accentColor())
+                  .height(36)
+                  .padding({ left: 9, right: 9 })
+                  .textAlign(TextAlign.Center)
+                  .onClick(() => this.openManagedSourceGroupRename(group))
+                Text('删除')
+                  .fontSize(13)
+                  .fontColor('#E53935')
+                  .height(36)
+                  .padding({ left: 9, right: 4 })
+                  .textAlign(TextAlign.Center)
+                  .onClick(() => this.openManagedSourceGroupDelete(group))
+              }
+              .width('100%')
+              .height(56)
+              .padding({ left: 8, right: 8 })
+              .borderRadius(9)
+              .backgroundColor(this.inputColor())
+            }, (group: string) => group)
+          }
+          .width('100%')
+        }
+        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+        .width('100%')
+        .constraintSize({ maxHeight: 360 })
+        .scrollBar(BarState.Auto)
+      }
+
+      Row({ space: 10 }) {
+        Button('关闭', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor(this.glassCardColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.showSourceGroupManagerDialog = false;
+            this.selectedManagedSourceGroups = [];
+          })
+        Button('删除所选', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .enabled(this.selectedManagedSourceGroups.length > 0 && !this.isBatchOperating)
+          .backgroundColor('#E53935')
+          .fontColor('#FFFFFF')
+          .onClick(() => this.openDeleteSelectedSourceGroupsDialog())
+      }
+      .width('100%')
+      .margin({ top: 16 })
+    }    .constraintSize({ maxWidth: 520 })
+    .padding(22)
   }
+
 
   @Builder
   sourceGroupChip(label: string, groupKey: string, editable: boolean = false) {
@@ -2849,11 +2806,11 @@ struct BookSourcePage {
         this.contextActionItem($r('sys.symbol.square_and_pencil'), '重命名', this.primaryTextColor(), () => {
             this.renameSourceGroupInput = this.pendingSourceGroup;
             this.showSourceGroupActionMenu = false;
-            this.showRenameSourceGroupDialog = true;
+            this.openRenameSourceGroupDialog();
           })
         this.contextActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => {
             this.showSourceGroupActionMenu = false;
-            this.showDeleteSourceGroupDialog = true;
+            this.openDeleteSourceGroupDialog();
           })
       }
       .width(148)
@@ -2870,197 +2827,244 @@ struct BookSourcePage {
   }
 
   @Builder
-  addSourceGroupDialog() {
-    Column() {
-      Column({ space: 16 }) {
-        Text('新增书源分组')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
+  addSourceGroupDialogContent() {
+    Column({ space: 16 }) {
+      Text('新增书源分组')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
 
-        TextInput({ placeholder: '输入分组名称', text: this.newSourceGroupInput })
-          .width('100%')
+      TextInput({ placeholder: '输入分组名称', text: this.newSourceGroupInput })
+        .width('100%')
+        .height(42)
+        .backgroundColor(this.inputColor())
+        .fontColor(this.primaryTextColor())
+        .borderRadius(10)
+        .onChange((value: string) => this.newSourceGroupInput = value)
+
+      Row({ space: 12 }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
           .height(42)
-          .backgroundColor(this.inputColor())
-          .fontColor(this.primaryTextColor())
           .borderRadius(10)
-          .onChange((value: string) => this.newSourceGroupInput = value)
-
-        Row({ space: 12 }) {
-          Button('取消', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor(this.glassCardColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.closeAddSourceGroupDialog())
-          Button('新增', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor(this.buttonColor())
-            .fontColor('#FFFFFF')
-            .enabled(!!this.newSourceGroupInput.trim() && !this.isBatchOperating)
-            .onClick(() => this.addSourceGroup())
-        }
-        .width('100%')
-      }
-      .width('85%')
-      .padding(22)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#80000000')
-  }
-
-  @Builder
-  renameSourceGroupDialog() {
-    Column() {
-      Column({ space: 16 }) {
-        Text('重命名书源分组')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
+          .backgroundColor(this.glassCardColor())
           .fontColor(this.primaryTextColor())
-
-        TextInput({ placeholder: '输入分组名称', text: this.renameSourceGroupInput })
-          .width('100%')
+          .onClick(() => this.closeAddSourceGroupDialog())
+        Button('新增', { type: ButtonType.Normal })
+          .layoutWeight(1)
           .height(42)
-          .backgroundColor(this.inputColor())
-          .fontColor(this.primaryTextColor())
           .borderRadius(10)
-          .onChange((value: string) => this.renameSourceGroupInput = value)
-
-        Row({ space: 12 }) {
-          Button('取消', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor(this.glassCardColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.closeRenameSourceGroupDialog())
-          Button('保存', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor(this.buttonColor())
-            .fontColor('#FFFFFF')
-            .enabled(!!this.renameSourceGroupInput.trim() && !this.isBatchOperating)
-            .onClick(() => this.renameSourceGroup())
-        }
-        .width('100%')
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .enabled(!!this.newSourceGroupInput.trim() && !this.isBatchOperating)
+          .onClick(() => this.addSourceGroup())
       }
-      .width('85%')
-      .padding(22)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#80000000')
+      .width('100%')
+    }    .padding(22)
   }
 
-  @Builder
-  deleteSourceGroupDialog() {
-    Column() {
-      Column({ space: 16 }) {
-        Text('删除书源分组')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-        Text(`删除“${this.pendingSourceGroup}”后，分组内书源将移到未分组，书源本身不会删除。`)
-          .fontSize(14)
-          .fontColor(this.secondaryTextColor())
-          .textAlign(TextAlign.Center)
-        Row({ space: 12 }) {
-          Button('取消', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor(this.glassCardColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.closeDeleteSourceGroupDialog())
-          Button('删除', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor('#E53935')
-            .fontColor('#FFFFFF')
-            .enabled(!this.isBatchOperating)
-            .onClick(() => this.deleteSourceGroup())
-        }
-        .width('100%')
-      }
-      .width('85%')
-      .padding(22)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#80000000')
-  }
 
   @Builder
-  deleteSelectedSourceGroupsDialog() {
-    Column() {
-      Column({ space: 16 }) {
-        Text('删除所选分组')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-        Text(`确定删除所选 ${this.selectedManagedSourceGroups.length} 个分组吗？分组内书源将移到未分组。`)
-          .fontSize(14)
-          .fontColor(this.secondaryTextColor())
-          .textAlign(TextAlign.Center)
-        Row({ space: 12 }) {
-          Button('取消', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor(this.glassCardColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.showDeleteSelectedSourceGroupsDialog = false)
-          Button('删除', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor('#E53935')
-            .fontColor('#FFFFFF')
-            .enabled(this.selectedManagedSourceGroups.length > 0 && !this.isBatchOperating)
-            .onClick(() => this.deleteSelectedSourceGroups())
-        }
+  renameSourceGroupDialogContent() {
+    Column({ space: 16 }) {
+      Text('重命名书源分组')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+
+      TextInput({ placeholder: '输入分组名称', text: this.renameSourceGroupInput })
         .width('100%')
+        .height(42)
+        .backgroundColor(this.inputColor())
+        .fontColor(this.primaryTextColor())
+        .borderRadius(10)
+        .onChange((value: string) => this.renameSourceGroupInput = value)
+
+      Row({ space: 12 }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor(this.glassCardColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.closeRenameSourceGroupDialog())
+        Button('保存', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .enabled(!!this.renameSourceGroupInput.trim() && !this.isBatchOperating)
+          .onClick(() => this.renameSourceGroup())
       }
-      .width('85%')
-      .padding(22)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#80000000')
+      .width('100%')
+    }    .padding(22)
+  }
+
+
+  @Builder
+  deleteSourceGroupDialogContent() {
+    Column({ space: 16 }) {
+      Text('删除书源分组')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+      Text(`删除“${this.pendingSourceGroup}”后，分组内书源将移到未分组，书源本身不会删除。`)
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+        .textAlign(TextAlign.Center)
+      Row({ space: 12 }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor(this.glassCardColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.closeDeleteSourceGroupDialog())
+        Button('删除', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor('#E53935')
+          .fontColor('#FFFFFF')
+          .enabled(!this.isBatchOperating)
+          .onClick(() => this.deleteSourceGroup())
+      }
+      .width('100%')
+    }    .padding(22)
+  }
+
+
+  @Builder
+  deleteSelectedSourceGroupsDialogContent() {
+    Column({ space: 16 }) {
+      Text('删除所选分组')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+      Text(`确定删除所选 ${this.selectedManagedSourceGroups.length} 个分组吗？分组内书源将移到未分组。`)
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+        .textAlign(TextAlign.Center)
+      Row({ space: 12 }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor(this.glassCardColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.showDeleteSelectedSourceGroupsDialog = false)
+        Button('删除', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor('#E53935')
+          .fontColor('#FFFFFF')
+          .enabled(this.selectedManagedSourceGroups.length > 0 && !this.isBatchOperating)
+          .onClick(() => this.deleteSelectedSourceGroups())
+      }
+      .width('100%')
+    }    .padding(22)
+  }
+
+
+  onSystemDialogFlagChanged(): void {
+    if (!this.showSourceFilterDialog) this.sourceFilterDialogSession.close(this.getUIContext());
+    if (!this.showImportSourceSelectionDialog) this.importSourceSelectionDialogSession.close(this.getUIContext());
+    if (!this.showSourceDeleteDialog) this.sourceDeleteDialogSession.close(this.getUIContext());
+    if (!this.showRenameSourceGroupDialog) this.renameSourceGroupDialogSession.close(this.getUIContext());
+    if (!this.showDeleteSourceGroupDialog) this.deleteSourceGroupDialogSession.close(this.getUIContext());
+    if (!this.showAddSourceGroupDialog) this.addSourceGroupDialogSession.close(this.getUIContext());
+    if (!this.showSourceGroupManagerDialog) this.sourceGroupManagerDialogSession.close(this.getUIContext());
+    if (!this.showDeleteSelectedSourceGroupsDialog) this.deleteSelectedSourceGroupsDialogSession.close(this.getUIContext());
+  }
+
+  openSourceFilterDialog(): void {
+    this.showSourceFilterDialog = true;
+    this.sourceFilterDialogSession.open(this.getUIContext(), (): void => {
+      this.sourceFilterDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示筛选书源弹窗失败:'
+    });
+  }
+
+  openImportSourceSelectionDialog(): void {
+    this.showImportSourceSelectionDialog = true;
+    this.importSourceSelectionDialogSession.open(this.getUIContext(), (): void => {
+      this.importSourceSelectionDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示导入选择弹窗失败:'
+    });
+  }
+
+  openSourceDeleteDialog(): void {
+    this.showSourceDeleteDialog = true;
+    this.sourceDeleteDialogSession.open(this.getUIContext(), (): void => {
+      this.sourceDeleteDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示删除书源弹窗失败:'
+    });
+  }
+
+  openRenameSourceGroupDialog(): void {
+    this.showRenameSourceGroupDialog = true;
+    this.renameSourceGroupDialogSession.open(this.getUIContext(), (): void => {
+      this.renameSourceGroupDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示重命名分组弹窗失败:'
+    });
+  }
+
+  openDeleteSourceGroupDialog(): void {
+    this.showDeleteSourceGroupDialog = true;
+    this.deleteSourceGroupDialogSession.open(this.getUIContext(), (): void => {
+      this.deleteSourceGroupDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示删除分组弹窗失败:'
+    });
+  }
+
+  openAddSourceGroupDialog(): void {
+    this.showAddSourceGroupDialog = true;
+    this.addSourceGroupDialogSession.open(this.getUIContext(), (): void => {
+      this.addSourceGroupDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示新增分组弹窗失败:'
+    });
+  }
+
+  openSourceGroupManagerDialog(): void {
+    this.showSourceGroupManagerDialog = true;
+    this.sourceGroupManagerDialogSession.open(this.getUIContext(), (): void => {
+      this.sourceGroupManagerDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示分组管理弹窗失败:'
+    });
+  }
+
+  openDeleteSelectedSourceGroupsDialog(): void {
+    this.showDeleteSelectedSourceGroupsDialog = true;
+    this.deleteSelectedSourceGroupsDialogSession.open(this.getUIContext(), (): void => {
+      this.deleteSelectedSourceGroupsDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示删除所选分组弹窗失败:'
+    });
   }
 
   syncBars(): void {
@@ -3322,12 +3326,12 @@ struct BookSourcePage {
   openManagedSourceGroupRename(group: string): void {
     this.pendingSourceGroup = group;
     this.renameSourceGroupInput = group;
-    this.showRenameSourceGroupDialog = true;
+    this.openRenameSourceGroupDialog();
   }
 
   openManagedSourceGroupDelete(group: string): void {
     this.pendingSourceGroup = group;
-    this.showDeleteSourceGroupDialog = true;
+    this.openDeleteSourceGroupDialog();
   }
 
   async addSourceGroup(): Promise<void> {
@@ -3336,7 +3340,7 @@ struct BookSourcePage {
       return;
     }
     if (this.getSourceGroups().includes(groupName)) {
-      promptAction.showToast({ message: '分组名称已存在' });
+      HdsFeedback.showToast('分组名称已存在');
       return;
     }
     this.isBatchOperating = true;
@@ -3345,10 +3349,10 @@ struct BookSourcePage {
       this.activeSourceGroup = groupName;
       this.applySourceFilters();
       this.closeAddSourceGroupDialog();
-      promptAction.showToast({ message: '书源分组已新增' });
+      HdsFeedback.showToast('书源分组已新增');
     } catch (e) {
       console.error('新增书源分组失败:', e);
-      promptAction.showToast({ message: '新增分组失败' });
+      HdsFeedback.showToast('新增分组失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -3379,10 +3383,10 @@ struct BookSourcePage {
       this.selectedManagedSourceGroups = [];
       this.showDeleteSelectedSourceGroupsDialog = false;
       await this.loadSources();
-      promptAction.showToast({ message: `已删除 ${groupsToDelete.length} 个分组` });
+      HdsFeedback.showToast(`已删除 ${groupsToDelete.length} 个分组`);
     } catch (e) {
       console.error('批量删除书源分组失败:', e);
-      promptAction.showToast({ message: '删除分组失败' });
+      HdsFeedback.showToast('删除分组失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -3418,7 +3422,7 @@ struct BookSourcePage {
       const occupiedGroups = this.sourceGroupsFromSources();
       const emptyGroups = this.getSourceGroups().filter((group: string) => !occupiedGroups.includes(group));
       if (emptyGroups.length === 0) {
-        promptAction.showToast({ message: '没有空分组' });
+        HdsFeedback.showToast('没有空分组');
         return;
       }
 
@@ -3429,10 +3433,10 @@ struct BookSourcePage {
       this.sourceGroups = groups;
       this.ensureActiveSourceGroup();
       this.applySourceFilters();
-      promptAction.showToast({ message: `已清除 ${emptyGroups.length} 个空分组` });
+      HdsFeedback.showToast(`已清除 ${emptyGroups.length} 个空分组`);
     } catch (e) {
       console.error('清除空书源分组失败:', e);
-      promptAction.showToast({ message: '清除空分组失败' });
+      HdsFeedback.showToast('清除空分组失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -3449,7 +3453,7 @@ struct BookSourcePage {
       return;
     }
     if (this.getSourceGroups().includes(newName)) {
-      promptAction.showToast({ message: '分组名称已存在' });
+      HdsFeedback.showToast('分组名称已存在');
       return;
     }
 
@@ -3474,10 +3478,10 @@ struct BookSourcePage {
       this.renameSourceGroupInput = '';
       this.pendingSourceGroup = '';
       await this.loadSources();
-      promptAction.showToast({ message: '书源分组已重命名' });
+      HdsFeedback.showToast('书源分组已重命名');
     } catch (e) {
       console.error('重命名书源分组失败:', e);
-      promptAction.showToast({ message: '重命名失败' });
+      HdsFeedback.showToast('重命名失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -3507,10 +3511,10 @@ struct BookSourcePage {
       this.showDeleteSourceGroupDialog = false;
       this.pendingSourceGroup = '';
       await this.loadSources();
-      promptAction.showToast({ message: '分组已删除，书源已移到未分组' });
+      HdsFeedback.showToast('分组已删除，书源已移到未分组');
     } catch (e) {
       console.error('删除书源分组失败:', e);
-      promptAction.showToast({ message: '删除分组失败' });
+      HdsFeedback.showToast('删除分组失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -3568,10 +3572,10 @@ struct BookSourcePage {
         orderedSources.map((source: BookSource) => source.bookSourceUrl));
       const revision = AppStorage.get<number>('bookSourceOrderRevision') || 0;
       AppStorage.setOrCreate('bookSourceOrderRevision', revision + 1);
-      if (successMessage) promptAction.showToast({ message: successMessage });
+      if (successMessage) HdsFeedback.showToast(successMessage);
     } catch (e) {
       console.error('保存书源排序失败:', e);
-      promptAction.showToast({ message: '保存排序失败' });
+      HdsFeedback.showToast('保存排序失败');
       for (let index = 0; index < previousSources.length; index++) {
         previousSources[index].customOrder = index;
       }
@@ -3591,7 +3595,7 @@ struct BookSourcePage {
     this.sourceVisibleItemCount = Math.max(1, visibleCount);
     setTimeout(() => {
       if (targetIndex < this.visibleSources.length) {
-        this.sourceListScroller.scrollToIndex(targetIndex, false, ScrollAlign.START);
+        this.sourceListScroller.scrollToIndex(targetIndex + this.sourceListLaneCount(), false, ScrollAlign.START);
       }
     }, 0);
   }
@@ -3934,10 +3938,10 @@ struct BookSourcePage {
     if (!host) return;
     try {
       await TlsTrustStore.revokeHost(getContext(this) as common.UIAbilityContext, host);
-      promptAction.showToast({ message: `已恢复 ${host} 的严格证书校验` });
+      HdsFeedback.showToast(`已恢复 ${host} 的严格证书校验`);
     } catch (e) {
       console.error('取消证书信任失败:', e);
-      promptAction.showToast({ message: '取消证书信任失败' });
+      HdsFeedback.showToast('取消证书信任失败');
     }
   }
 
@@ -3982,7 +3986,7 @@ struct BookSourcePage {
     if (!source) return;
     if (source.isLocked) {
       this.closeSourceActions();
-      promptAction.showToast({ message: '请先解锁书源' });
+      HdsFeedback.showToast('请先解锁书源');
       return;
     }
     const sourceUrl = source.bookSourceUrl;
@@ -4001,14 +4005,14 @@ struct BookSourcePage {
     source.isLocked = locked;
     this.closeSourceActions();
     await this.loadSources();
-    promptAction.showToast({ message: locked ? '书源已锁定' : '书源已解锁' });
+    HdsFeedback.showToast(locked ? '书源已锁定' : '书源已解锁');
   }
 
   openActionSourceSearch(): void {
     const source = this.actionSource();
     if (!source) {
       this.closeSourceActions();
-      promptAction.showToast({ message: '书源不存在' });
+      HdsFeedback.showToast('书源不存在');
       return;
     }
     const nonce = AppStorage.get<number>('singleSourceSearchNonce') || 0;
@@ -4026,7 +4030,7 @@ struct BookSourcePage {
     }
     const source = await AppDatabase.getInstance().getBookSource(summary.bookSourceUrl);
     if (!source || !this.sourceNeedsLogin(source)) {
-      promptAction.showToast({ message: '书源不存在' });
+      HdsFeedback.showToast('书源不存在');
       return;
     }
     this.showSourceActionDialog = false;
@@ -4036,9 +4040,7 @@ struct BookSourcePage {
       loginItems = await this.resolveSourceLoginItems(source);
     } catch (error) {
       this.actionSourceUrl = '';
-      promptAction.showToast({
-        message: `登录界面脚本执行失败：${this.importErrorMessage(error as Object)}`
-      });
+      HdsFeedback.showToast(`登录界面脚本执行失败：${this.importErrorMessage(error as Object)}`);
       return;
     }
     if (loginItems.length > 0) {
@@ -4070,14 +4072,14 @@ struct BookSourcePage {
     }
     if (dynamicLoginUi) {
       this.actionSourceUrl = '';
-      promptAction.showToast({ message: '登录界面脚本未返回有效控件，请检查书源 loginUi 配置' });
+      HdsFeedback.showToast('登录界面脚本未返回有效控件，请检查书源 loginUi 配置');
       return;
     }
     const loginEntryUrl = VerificationSupport.resolveBookSourceLoginUrl(source) ||
       VerificationSupport.pickVerificationUrl(source, source.bookSourceUrl);
     if (!loginEntryUrl || !/^https?:\/\//i.test(loginEntryUrl)) {
       this.actionSourceUrl = '';
-      promptAction.showToast({ message: '未找到可用的网页登录地址，请检查书源登录配置' });
+      HdsFeedback.showToast('未找到可用的网页登录地址，请检查书源登录配置');
       return;
     }
     this.openSourceLoginBrowser(source, loginEntryUrl, `${source.bookSourceName || '书源'} 登录`, true);
@@ -4140,15 +4142,14 @@ struct BookSourcePage {
       this.sourceLoginItems = this.sourceLoginItems.slice();
       this.markSourceLoginCompleted(item, result);
       if (result.toastMessage) {
-        promptAction.showToast({ message: result.toastMessage.trim() || '操作成功' });
+        HdsFeedback.showToast(result.toastMessage.trim() || '操作成功');
       } else if (result.variable !== previousVariable && result.variable.trim()) {
-        promptAction.showToast({ message: /token/i.test(`${item.name}\n${item.action}`) ?
-          'Token 已获取并保存到书源变量' : '书源变量已更新' });
+        HdsFeedback.showToast(/token/i.test(`${item.name}\n${item.action}`) ? 'Token 已获取并保存到书源变量' : '书源变量已更新');
       } else if (result.logMessage) {
-        promptAction.showToast({ message: result.logMessage.trim() });
+        HdsFeedback.showToast(result.logMessage.trim());
       } else if (!result.requestedSearchKeyword && !result.refreshExploreRequested &&
         !result.requestedUrl && !result.requestedHtml) {
-        promptAction.showToast({ message: '操作已执行，书源没有返回提示信息' });
+        HdsFeedback.showToast('操作已执行，书源没有返回提示信息');
       }
       if (result.requestedSearchKeyword) {
         this.openRuntimeSourceSearch(source, result.requestedSearchKeyword);
@@ -4177,9 +4178,7 @@ struct BookSourcePage {
       console.error('[SourceLoginRuntime] action failed:', currentSource.bookSourceName, item.name,
         this.importErrorMessage(error as Object));
       const missing = BookSourceRuntimeRouter.missingCapabilityMessage(this.loginRuntimeDecision);
-      promptAction.showToast({
-        message: `登录动作失败：${this.importErrorMessage(error as Object)}${missing ? `\n${missing}` : ''}`
-      });
+      HdsFeedback.showToast(`登录动作失败：${this.importErrorMessage(error as Object)}${missing ? `\n${missing}` : ''}`);
     } finally {
       this.isExecutingLoginAction = false;
     }
@@ -5045,7 +5044,7 @@ struct BookSourcePage {
     }
     if (source.isLocked) {
       this.closeSourceActions();
-      promptAction.showToast({ message: '请先解锁书源' });
+      HdsFeedback.showToast('请先解锁书源');
       return;
     }
     this.closeSourceActions();
@@ -5059,7 +5058,7 @@ struct BookSourcePage {
     const source = this.actionSource();
     if (!source) {
       this.closeSourceActions();
-      promptAction.showToast({ message: '书源不存在' });
+      HdsFeedback.showToast('书源不存在');
       return;
     }
     this.closeSourceActions();
@@ -5083,7 +5082,7 @@ struct BookSourcePage {
       return;
     }
     if (source.isLocked) {
-      promptAction.showToast({ message: '锁定的书源不能修改' });
+      HdsFeedback.showToast('锁定的书源不能修改');
       return;
     }
     const enabled = !source.enabled;
@@ -5092,7 +5091,7 @@ struct BookSourcePage {
     this.allSources = this.allSources.map((item: BookSource) =>
       item.bookSourceUrl === source.bookSourceUrl ? source : item);
     this.reapplySourceFiltersPreservingViewport();
-    promptAction.showToast({ message: enabled ? '书源已启用' : '书源已禁用' });
+    HdsFeedback.showToast(enabled ? '书源已启用' : '书源已禁用');
   }
 
   async deleteSourceFromSwipe(source: BookSource): Promise<void> {
@@ -5100,25 +5099,12 @@ struct BookSourcePage {
       return;
     }
     if (source.isLocked) {
-      promptAction.showToast({ message: '锁定的书源不能删除' });
+      HdsFeedback.showToast('锁定的书源不能删除');
       return;
     }
-    this.isBatchOperating = true;
-    this.batchOperationText = '正在删除书源...';
-    try {
-      await AppDatabase.getInstance().deleteBookSource(source.bookSourceUrl);
-      this.sources = this.sources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
-      this.allSources = this.allSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
-      this.visibleSources = this.visibleSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
-      this.selectedSourceUrls = this.selectedSourceUrls.filter((url: string) => url !== source.bookSourceUrl);
-      await this.reconcileSourceGroups();
-      promptAction.showToast({ message: '书源已删除' });
-    } catch (e) {
-      console.error('滑动删除书源失败:', e);
-      promptAction.showToast({ message: '删除书源失败' });
-    } finally {
-      this.isBatchOperating = false;
-    }
+    // 滑动删除与长按菜单共用同一二次确认弹窗，避免误触直接删除。
+    this.actionSourceUrl = source.bookSourceUrl;
+    this.openSourceDeleteDialog();
   }
 
   async deleteActionSource(): Promise<void> {
@@ -5128,7 +5114,7 @@ struct BookSourcePage {
     }
     if (source.isLocked) {
       this.showSourceDeleteDialog = false;
-      promptAction.showToast({ message: '锁定的书源不能删除' });
+      HdsFeedback.showToast('锁定的书源不能删除');
       return;
     }
     this.showSourceDeleteDialog = false;
@@ -5140,12 +5126,13 @@ struct BookSourcePage {
       this.sources = this.sources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
       this.allSources = this.allSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
       this.visibleSources = this.visibleSources.filter((item: BookSource) => item.bookSourceUrl !== source.bookSourceUrl);
+      this.selectedSourceUrls = this.selectedSourceUrls.filter((url: string) => url !== source.bookSourceUrl);
       this.actionSourceUrl = '';
       await this.reconcileSourceGroups();
-      promptAction.showToast({ message: '书源已删除' });
+      HdsFeedback.showToast('书源已删除');
     } catch (e) {
       console.error('删除书源失败:', e);
-      promptAction.showToast({ message: '删除书源失败' });
+      HdsFeedback.showToast('删除书源失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -5295,7 +5282,7 @@ struct BookSourcePage {
     }
     const selectedSources = this.mutableGroupingSources();
     if (selectedSources.length === 0) {
-      promptAction.showToast({ message: '所选书源均已锁定' });
+      HdsFeedback.showToast('所选书源均已锁定');
       return;
     }
 
@@ -5322,10 +5309,10 @@ struct BookSourcePage {
       this.ensureActiveSourceGroup();
       this.applySourceFilters();
       this.closeSourceGroupDialog();
-      promptAction.showToast({ message: groupName ? `已加入分组：${groupName}` : '已移出分组' });
+      HdsFeedback.showToast(groupName ? `已加入分组：${groupName}` : '已移出分组');
     } catch (e) {
       console.error('设置书源分组失败:', e);
-      promptAction.showToast({ message: '设置分组失败' });
+      HdsFeedback.showToast('设置分组失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -5337,7 +5324,7 @@ struct BookSourcePage {
     }
     const selectedSources = this.getSelectedMutableSources();
     if (selectedSources.length === 0) {
-      promptAction.showToast({ message: '所选书源均已锁定' });
+      HdsFeedback.showToast('所选书源均已锁定');
       return;
     }
 
@@ -5350,10 +5337,10 @@ struct BookSourcePage {
         await db.updateBookSourceListFields(source.bookSourceUrl, { enabled: enabled ? 1 : 0 });
       }
       this.reapplySourceFiltersPreservingViewport();
-      promptAction.showToast({ message: `已${enabled ? '启用' : '禁用'} ${selectedSources.length} 个书源` });
+      HdsFeedback.showToast(`已${enabled ? '启用' : '禁用'} ${selectedSources.length} 个书源`);
     } catch (e) {
       console.error('批量更新书源失败:', e);
-      promptAction.showToast({ message: '批量操作失败' });
+      HdsFeedback.showToast('批量操作失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -5365,7 +5352,7 @@ struct BookSourcePage {
     }
     const selectedSources = this.getSelectedMutableSources();
     if (selectedSources.length === 0) {
-      promptAction.showToast({ message: '所选书源均已锁定' });
+      HdsFeedback.showToast('所选书源均已锁定');
       return;
     }
 
@@ -5378,10 +5365,10 @@ struct BookSourcePage {
         await db.updateBookSourceListFields(source.bookSourceUrl, { enabledExplore: enabled ? 1 : 0 });
       }
       this.reapplySourceFiltersPreservingViewport();
-      promptAction.showToast({ message: `已${enabled ? '启用' : '禁用'} ${selectedSources.length} 个书源的发现` });
+      HdsFeedback.showToast(`已${enabled ? '启用' : '禁用'} ${selectedSources.length} 个书源的发现`);
     } catch (e) {
       console.error('批量更新发现状态失败:', e);
-      promptAction.showToast({ message: '批量操作失败' });
+      HdsFeedback.showToast('批量操作失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -5394,7 +5381,7 @@ struct BookSourcePage {
     const selectedSources = this.getSelectedSources()
       .filter((source: BookSource) => source.isLocked !== locked);
     if (selectedSources.length === 0) {
-      promptAction.showToast({ message: locked ? '所选书源均已锁定' : '所选书源均已解锁' });
+      HdsFeedback.showToast(locked ? '所选书源均已锁定' : '所选书源均已解锁');
       return;
     }
 
@@ -5407,11 +5394,11 @@ struct BookSourcePage {
         source.isLocked = locked;
       }
       this.reapplySourceFiltersPreservingViewport();
-      promptAction.showToast({ message: `已${locked ? '锁定' : '解锁'} ${selectedSources.length} 个书源` });
+      HdsFeedback.showToast(`已${locked ? '锁定' : '解锁'} ${selectedSources.length} 个书源`);
     } catch (e) {
       console.error(`批量${locked ? '锁定' : '解锁'}书源失败:`, e);
       await this.loadSources();
-      promptAction.showToast({ message: `批量${locked ? '锁定' : '解锁'}失败` });
+      HdsFeedback.showToast(`批量${locked ? '锁定' : '解锁'}失败`);
     } finally {
       this.isBatchOperating = false;
     }
@@ -5423,7 +5410,7 @@ struct BookSourcePage {
     }
     const selectedUrls = this.getSelectedMutableSources().map((source: BookSource) => source.bookSourceUrl);
     if (selectedUrls.length === 0) {
-      promptAction.showToast({ message: '所选书源均已锁定' });
+      HdsFeedback.showToast('所选书源均已锁定');
       return;
     }
 
@@ -5437,10 +5424,10 @@ struct BookSourcePage {
       this.selectedSourceUrls = [];
       await this.loadSources();
       this.selectionMode = false;
-      promptAction.showToast({ message: `已删除 ${selectedUrls.length} 个书源` });
+      HdsFeedback.showToast(`已删除 ${selectedUrls.length} 个书源`);
     } catch (e) {
       console.error('批量删除书源失败:', e);
-      promptAction.showToast({ message: '批量删除失败' });
+      HdsFeedback.showToast('批量删除失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -5464,7 +5451,7 @@ struct BookSourcePage {
       return;
     }
     if (this.isCheckingSources) {
-      promptAction.showToast({ message: '正在校验中' });
+      HdsFeedback.showToast('正在校验中');
       return;
     }
     this.showCheckOptionsDialog = true;
@@ -5475,7 +5462,7 @@ struct BookSourcePage {
       return;
     }
     if (this.isCheckingSources) {
-      promptAction.showToast({ message: '正在校验中' });
+      HdsFeedback.showToast('正在校验中');
       return;
     }
 
@@ -5485,7 +5472,7 @@ struct BookSourcePage {
     const db = AppDatabase.getInstance();
     const enabledSources = await db.getEnabledBookSources();
     if (enabledSources.length === 0) {
-      promptAction.showToast({ message: '暂无启用书源' });
+      HdsFeedback.showToast('暂无启用书源');
       return;
     }
 
@@ -5496,16 +5483,16 @@ struct BookSourcePage {
     const summary = this.actionSource();
     this.closeSourceActions();
     if (!summary) {
-      promptAction.showToast({ message: '书源不存在' });
+      HdsFeedback.showToast('书源不存在');
       return;
     }
     if (this.isCheckingSources) {
-      promptAction.showToast({ message: '正在校验中' });
+      HdsFeedback.showToast('正在校验中');
       return;
     }
     const source = await AppDatabase.getInstance().getBookSource(summary.bookSourceUrl);
     if (!source) {
-      promptAction.showToast({ message: '书源不存在' });
+      HdsFeedback.showToast('书源不存在');
       return;
     }
     await this.startCheckSources([source], 'none');
@@ -5513,12 +5500,12 @@ struct BookSourcePage {
 
   async checkSelectedSources(): Promise<void> {
     if (this.isCheckingSources) {
-      promptAction.showToast({ message: '正在校验中' });
+      HdsFeedback.showToast('正在校验中');
       return;
     }
     const selectedUrls = new Set<string>(this.selectedSourceUrls);
     if (selectedUrls.size === 0) {
-      promptAction.showToast({ message: '请先选择书源' });
+      HdsFeedback.showToast('请先选择书源');
       return;
     }
 
@@ -5526,13 +5513,13 @@ struct BookSourcePage {
       const allSources = await AppDatabase.getInstance().getAllBookSources();
       const targetSources = allSources.filter((source: BookSource) => selectedUrls.has(source.bookSourceUrl));
       if (targetSources.length === 0) {
-        promptAction.showToast({ message: '所选书源不存在' });
+        HdsFeedback.showToast('所选书源不存在');
         return;
       }
       await this.startCheckSources(targetSources, 'none');
     } catch (e) {
       console.error('加载所选书源失败:', e);
-      promptAction.showToast({ message: '加载所选书源失败' });
+      HdsFeedback.showToast('加载所选书源失败');
     }
   }
 
@@ -5631,7 +5618,7 @@ struct BookSourcePage {
       }
       console.error('校验书源失败:', e);
       this.checkStatus = '校验失败，请稍后重试';
-      promptAction.showToast({ message: '校验失败' });
+      HdsFeedback.showToast('校验失败');
     } finally {
       if (taskSerial !== this.checkTaskSerial) {
         return;
@@ -5674,7 +5661,7 @@ struct BookSourcePage {
     this.checkBackgroundMode = false;
     this.checkStatus = `校验已取消（${this.checkDone}/${this.checkTotal}）`;
     if (showToast) {
-      promptAction.showToast({ message: '已停止书源校验' });
+      HdsFeedback.showToast('已停止书源校验');
     }
     if (this.checkInvalidAction !== 'none') {
       this.loadSources().catch((e: Error) => {
@@ -5701,7 +5688,7 @@ struct BookSourcePage {
     }
     this.checkBackgroundMode = true;
     this.showCheckDialog = false;
-    promptAction.showToast({ message: '书源校验将在后台继续，可在通知栏取消' });
+    HdsFeedback.showToast('书源校验将在后台继续，可在通知栏取消');
     await this.startBookSourceCheckBackgroundRunning();
     await this.requestBookSourceCheckNotificationEnabled();
     if (this.isCheckingSources && this.checkBackgroundMode) {
@@ -6037,16 +6024,16 @@ struct BookSourcePage {
       const allSources = await AppDatabase.getInstance().getAllBookSources();
       const retrySources = allSources.filter((source: BookSource) => retryUrls.has(source.bookSourceUrl));
       if (retrySources.length === 0) {
-        promptAction.showToast({ message: '已保存证书信任，但原书源已不存在' });
+        HdsFeedback.showToast('已保存证书信任，但原书源已不存在');
         this.checkTlsTrustHosts = [];
         this.checkTlsRetrySourceUrls = [];
         return;
       }
-      promptAction.showToast({ message: `已仅信任 ${hosts.length} 个主机，正在重新校验` });
+      HdsFeedback.showToast(`已仅信任 ${hosts.length} 个主机，正在重新校验`);
       await this.startCheckSources(retrySources, 'none');
     } catch (e) {
       console.error('保存证书信任失败:', e);
-      promptAction.showToast({ message: '保存证书信任失败' });
+      HdsFeedback.showToast('保存证书信任失败');
     }
   }
 
@@ -6082,7 +6069,7 @@ struct BookSourcePage {
       .map((source: BookSource) => source.bookSourceUrl));
     const failedUrls = this.checkBadUrls.filter((url: string) => !lockedUrls.has(url));
     if (failedUrls.length === 0) {
-      promptAction.showToast({ message: '明确失败的书源均已锁定，未执行禁用' });
+      HdsFeedback.showToast('明确失败的书源均已锁定，未执行禁用');
       return;
     }
 
@@ -6101,10 +6088,10 @@ struct BookSourcePage {
       const disabledCount = failedUrls.length;
       this.showCheckDialog = false;
       await this.loadSources();
-      promptAction.showToast({ message: `已禁用 ${disabledCount} 个明确失败的书源` });
+      HdsFeedback.showToast(`已禁用 ${disabledCount} 个明确失败的书源`);
     } catch (e) {
       console.error('禁用异常书源失败:', e);
-      promptAction.showToast({ message: '禁用失败' });
+      HdsFeedback.showToast('禁用失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -6118,7 +6105,7 @@ struct BookSourcePage {
       .map((source: BookSource) => source.bookSourceUrl));
     const failedUrls = this.checkBadUrls.filter((url: string) => !lockedUrls.has(url));
     if (failedUrls.length === 0) {
-      promptAction.showToast({ message: '明确失败的书源均已锁定，未执行删除' });
+      HdsFeedback.showToast('明确失败的书源均已锁定，未执行删除');
       return;
     }
 
@@ -6132,10 +6119,10 @@ struct BookSourcePage {
       this.checkBadUrls = [];
       this.showCheckDialog = false;
       await this.loadSources();
-      promptAction.showToast({ message: `已删除 ${failedUrls.length} 个明确失败的书源` });
+      HdsFeedback.showToast(`已删除 ${failedUrls.length} 个明确失败的书源`);
     } catch (e) {
       console.error('删除异常书源失败:', e);
-      promptAction.showToast({ message: '删除失败' });
+      HdsFeedback.showToast('删除失败');
     } finally {
       this.isBatchOperating = false;
     }
@@ -6155,14 +6142,14 @@ struct BookSourcePage {
       this.isImporting = true;
       const content = await this.readTextFile(pickerResult[0]);
       if (!content.trim()) {
-        promptAction.showToast({ message: '文件内容为空' });
+        HdsFeedback.showToast('文件内容为空');
         return;
       }
       await this.importSourcesFromJson(content);
     } catch (e) {
       console.error('从文件导入失败:', e);
       const errMsg = this.importErrorMessage(e as Object);
-      promptAction.showToast({ message: `导入失败: ${errMsg}` });
+      HdsFeedback.showToast(`导入失败: ${errMsg}`);
     } finally {
       this.isImporting = false;
     }
@@ -6179,14 +6166,14 @@ struct BookSourcePage {
     try {
       const content = onlineUrl ? await this.fetchImportUrlBody(onlineUrl) : await this.readTextFile(uri);
       if (!content.trim()) {
-        promptAction.showToast({ message: '文件内容为空' });
+        HdsFeedback.showToast('文件内容为空');
         return;
       }
       await this.importSourcesFromJson(content);
     } catch (e) {
       console.error('打开 JSON 书源文件失败:', e);
       const message = this.importErrorMessage(e as Object);
-      promptAction.showToast({ message: `导入失败: ${message}` });
+      HdsFeedback.showToast(`导入失败: ${message}`);
     } finally {
       this.isImporting = false;
       if (AppStorage.get<string>('pendingBookSourceImportUri') ||
@@ -6198,14 +6185,14 @@ struct BookSourcePage {
 
   async exportSelectedSources(): Promise<void> {
     if (this.selectedSourceUrls.length === 0 || this.isBatchOperating) {
-      promptAction.showToast({ message: '请先选择书源' });
+      HdsFeedback.showToast('请先选择书源');
       return;
     }
     const selectedLookup = this.getSelectedSourceUrlLookup();
     const selectedSummaries = this.sources.filter((source: BookSource) =>
       selectedLookup.has(source.bookSourceUrl));
     if (selectedSummaries.length === 0) {
-      promptAction.showToast({ message: '未找到可导出的书源' });
+      HdsFeedback.showToast('未找到可导出的书源');
       return;
     }
 
@@ -6234,11 +6221,11 @@ struct BookSourcePage {
       await fs.write(file.fd, bytes.buffer, { offset: 0, length: bytes.byteLength });
       await fs.close(file);
       file = null;
-      promptAction.showToast({ message: `已导出 ${selected.length} 个书源` });
+      HdsFeedback.showToast(`已导出 ${selected.length} 个书源`);
     } catch (e) {
       console.error('导出书源失败:', e);
       const message = e instanceof Error ? e.message : String(e);
-      promptAction.showToast({ message: `导出失败: ${message}` });
+      HdsFeedback.showToast(`导出失败: ${message}`);
     } finally {
       if (file) {
         try {
@@ -6338,7 +6325,7 @@ struct BookSourcePage {
     this.hideKeyboard();
     const url = this.importUrl.trim();
     if (!url) {
-      promptAction.showToast({ message: '请输入URL' });
+      HdsFeedback.showToast('请输入URL');
       return;
     }
 
@@ -6351,7 +6338,7 @@ struct BookSourcePage {
     } catch (e) {
       console.error('从URL导入失败:', e);
       const errMsg = this.importErrorMessage(e as Object);
-      promptAction.showToast({ message: `导入失败: ${errMsg}` });
+      HdsFeedback.showToast(`导入失败: ${errMsg}`);
     } finally {
       this.isImporting = false;
     }
@@ -6714,7 +6701,7 @@ struct BookSourcePage {
       console.log('解析到书源数量:', sources.length);
 
       if (sources.length === 0) {
-        promptAction.showToast({ message: '未找到有效的书源' });
+        HdsFeedback.showToast('未找到有效的书源');
         return;
       }
 
@@ -6723,7 +6710,7 @@ struct BookSourcePage {
       if (sources.length > 1) {
         this.pendingImportSources = sources;
         this.selectedImportSourceUrls = sources.map((source: BookSource) => source.bookSourceUrl);
-        this.showImportSourceSelectionDialog = true;
+        this.openImportSourceSelectionDialog();
         return;
       }
 
@@ -6731,7 +6718,7 @@ struct BookSourcePage {
     } catch (e) {
       console.error('解析书源失败:', e);
       const errMsg = this.importErrorMessage(e as Object);
-      promptAction.showToast({ message: `书源格式错误: ${errMsg}` });
+      HdsFeedback.showToast(`书源格式错误: ${errMsg}`);
     }
   }
 
@@ -6764,7 +6751,7 @@ struct BookSourcePage {
 
     if (importCount === 0) {
       if (lockedCount > 0 && failedCount === 0) {
-        promptAction.showToast({ message: `未导入：${lockedCount} 个同地址书源已锁定，请先解锁后重试` });
+        HdsFeedback.showToast(`未导入：${lockedCount} 个同地址书源已锁定，请先解锁后重试`);
         return;
       }
       throw new Error(lastInsertError || '书源未能写入本地数据库');
@@ -6774,9 +6761,7 @@ struct BookSourcePage {
     const loginMessage = loginCount > 0 ? `，其中 ${loginCount} 个需要登录` : '';
     const failedMessage = failedCount > 0 ? `，${failedCount} 个失败` : '';
     const lockedMessage = lockedCount > 0 ? `，${lockedCount} 个已锁定未覆盖` : '';
-    promptAction.showToast({
-      message: `成功导入 ${importCount} 个书源${failedMessage}${lockedMessage}${loginMessage}`
-    });
+    HdsFeedback.showToast(`成功导入 ${importCount} 个书源${failedMessage}${lockedMessage}${loginMessage}`);
     await this.loadSources();
   }
 
@@ -6821,7 +6806,7 @@ struct BookSourcePage {
       this.cancelImportSourceSelection();
     } catch (e) {
       console.error('导入所选书源失败:', e);
-      promptAction.showToast({ message: `导入失败: ${this.importErrorMessage(e as Object)}` });
+      HdsFeedback.showToast(`导入失败: ${this.importErrorMessage(e as Object)}`);
     } finally {
       this.isImporting = false;
     }

@@ -1,10 +1,11 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { BookSource } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { SearchExploreSettings, SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 @Entry
 @Component
@@ -42,7 +43,7 @@ struct ExploreSourceSortPage {
       this.saveOrder(false);
     } catch (e) {
       console.error('加载发现书源排序失败:', e);
-      promptAction.showToast({ message: '加载书源失败' });
+      HdsFeedback.showToast('加载书源失败');
     } finally {
       this.isLoading = false;
     }
@@ -238,12 +239,12 @@ struct ExploreSourceSortPage {
       return SearchExploreSettingsStore.save(getContext(this), settings);
     }).then(() => {
       if (showToast) {
-        promptAction.showToast({ message: '排序已保存' });
+        HdsFeedback.showToast('排序已保存');
       }
     }).catch((e: Error) => {
       console.warn('保存发现书源排序失败:', e);
       if (showToast) {
-        promptAction.showToast({ message: '保存排序失败' });
+        HdsFeedback.showToast('保存排序失败');
       }
     });
   }

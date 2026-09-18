@@ -1,4 +1,4 @@
-import { promptAction, router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { Context } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import { LengthMetrics } from '@ohos.arkui.node';
@@ -19,6 +19,7 @@ import { QuickJsValidationCandidate, QuickJsValidationSeed, QuickJsValidationSna
   QuickJsValidationStore } from '../core/script/QuickJsValidationStore';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { syncSystemBars } from '../utils/SystemBars';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 class QuickJsCategoryStat {
   category: string = '';
@@ -485,10 +486,10 @@ struct QuickJsRegressionPage {
 
   private async startRegression(): Promise<void> {
     if (this.selectedSourceUrls.length === 0) {
-      promptAction.showToast({ message: '请至少选择一个书源' }); return;
+      HdsFeedback.showToast('请至少选择一个书源'); return;
     }
     if (this.selectedStages.length === 0) {
-      promptAction.showToast({ message: '请至少选择一个执行阶段' }); return;
+      HdsFeedback.showToast('请至少选择一个执行阶段'); return;
     }
     const selectedUrls = this.selectedSourceUrls.slice(0, 50);
     const selectedSources: BookSource[] = [];
@@ -515,7 +516,7 @@ struct QuickJsRegressionPage {
         this.refreshArtifacts();
       }
       if (report.totalCandidates === 0 && !report.error) {
-        promptAction.showToast({ message: '所选范围没有符合安全边界的表达式' });
+        HdsFeedback.showToast('所选范围没有符合安全边界的表达式');
       }
     } catch (error) {
       const failed = new QuickJsRegressionReport();
@@ -557,7 +558,7 @@ struct QuickJsRegressionPage {
       selected.push(source.bookSourceUrl);
     }
     this.selectedSourceUrls = selected;
-    if (truncated) promptAction.showToast({ message: '单次最多选择 50 个书源' });
+    if (truncated) HdsFeedback.showToast('单次最多选择 50 个书源');
   }
 
   private toggleSource(url: string): void {
@@ -567,7 +568,7 @@ struct QuickJsRegressionPage {
       return;
     }
     if (this.selectedSourceUrls.length >= 50) {
-      promptAction.showToast({ message: '单次最多选择 50 个书源' });
+      HdsFeedback.showToast('单次最多选择 50 个书源');
       return;
     }
     this.selectedSourceUrls = [...this.selectedSourceUrls, url];
@@ -591,7 +592,7 @@ struct QuickJsRegressionPage {
   private async rerunIssueFixtures(): Promise<void> {
     const cases = QuickJsRegressionArtifactStore.replayCases();
     if (cases.length === 0) {
-      promptAction.showToast({ message: '当前没有待复测的问题用例' });
+      HdsFeedback.showToast('当前没有待复测的问题用例');
       return;
     }
     this.isRunning = true;
@@ -612,10 +613,7 @@ struct QuickJsRegressionPage {
         this.refreshArtifacts();
       }
       if (!report.error) {
-        promptAction.showToast({
-          message: `复测完成：${report.matchCount} 个已通过，${report.excludedCount} 个退出迁移，` +
-            `${report.mismatchCount + report.failureCount} 个仍有问题`
-        });
+        HdsFeedback.showToast(`复测完成：${report.matchCount} 个已通过，${report.excludedCount} 个退出迁移，` + `${report.mismatchCount + report.failureCount} 个仍有问题`);
       }
     } catch (error) {
       const failed = new QuickJsRegressionReport();
@@ -660,10 +658,10 @@ struct QuickJsRegressionPage {
       await fs.write(file.fd, bytes.buffer, { offset: 0, length: bytes.byteLength });
       await fs.close(file);
       file = null;
-      promptAction.showToast({ message: '脱敏回归报告已导出' });
+      HdsFeedback.showToast('脱敏回归报告已导出');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error || '未知错误');
-      promptAction.showToast({ message: `导出失败：${message}` });
+      HdsFeedback.showToast(`导出失败：${message}`);
     } finally {
       if (file) {
         try { await fs.close(file); } catch (_) {}
@@ -761,11 +759,11 @@ struct QuickJsRegressionPage {
     await QuickJsMigrationStore.setMode(context, QuickJsRuntimeMode.SHADOW);
     QuickJsShadowComparator.resetSampling();
     if (!await QuickJsValidationStore.start(context)) {
-      promptAction.showToast({ message: '没有离线回归一致的候选表达式' });
+      HdsFeedback.showToast('没有离线回归一致的候选表达式');
       return;
     }
     this.refreshValidation();
-    promptAction.showToast({ message: '真实影子验证已开始，请正常搜索或阅读所选书源' });
+    HdsFeedback.showToast('真实影子验证已开始，请正常搜索或阅读所选书源');
   }
 
   private async enableCanary(): Promise<void> {
@@ -774,7 +772,7 @@ struct QuickJsRegressionPage {
     await QuickJsValidationStore.stop(context);
     await QuickJsMigrationStore.setMode(context, QuickJsRuntimeMode.CANARY);
     this.refreshValidation();
-    promptAction.showToast({ message: '已开启灰度接管，异常会自动回退旧引擎' });
+    HdsFeedback.showToast('已开启灰度接管，异常会自动回退旧引擎');
   }
 
   private refreshValidation(): void {

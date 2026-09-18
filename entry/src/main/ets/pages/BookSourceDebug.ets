@@ -1,4 +1,4 @@
-import { router, window, promptAction } from '@kit.ArkUI';
+import { router, window } from '@kit.ArkUI';
 import { Context } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import picker from '@ohos.file.picker';
@@ -16,6 +16,7 @@ import { BookSourceDebugContext, BookSourceDebugSession, BookSourceDebugStep,
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { syncSystemBars } from '../utils/SystemBars';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 class BookSourceDebugExportReport {
   reportVersion: number = 1;
@@ -505,7 +506,7 @@ struct BookSourceDebugPage {
 
   private async copyDebugContent(): Promise<void> {
     if (this.debugContent.length === 0) {
-      promptAction.showToast({ message: '暂无可复制的正文内容' });
+      HdsFeedback.showToast('暂无可复制的正文内容');
       return;
     }
     const maxCopyLength = 200000;
@@ -516,7 +517,7 @@ struct BookSourceDebugPage {
 
   private async copyDebugReport(): Promise<void> {
     if (!this.hasDebugReport() && this.debugContent.length === 0) {
-      promptAction.showToast({ message: '暂无可复制的调试内容' });
+      HdsFeedback.showToast('暂无可复制的调试内容');
       return;
     }
     const report = new BookSourceDebugClipboardReport();
@@ -537,10 +538,10 @@ struct BookSourceDebugPage {
     try {
       const board = pasteboard.getSystemPasteboard();
       await board.setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
-      promptAction.showToast({ message: successMessage });
+      HdsFeedback.showToast(successMessage);
     } catch (error) {
       console.error('复制调试内容失败:', error);
-      promptAction.showToast({ message: '复制失败，请稍后重试' });
+      HdsFeedback.showToast('复制失败，请稍后重试');
     }
   }
   private publishSession(debug: BookSourceDebugContext): void {
@@ -552,7 +553,7 @@ struct BookSourceDebugPage {
 
   private async exportDebugReport(): Promise<void> {
     if (!this.hasDebugReport()) {
-      promptAction.showToast({ message: '请先运行一次调试' });
+      HdsFeedback.showToast('请先运行一次调试');
       return;
     }
     if (this.exporting) return;
@@ -579,10 +580,10 @@ struct BookSourceDebugPage {
       await fs.write(file.fd, bytes.buffer, { offset: 0, length: bytes.byteLength });
       await fs.close(file);
       file = null;
-      promptAction.showToast({ message: '调试报告已导出' });
+      HdsFeedback.showToast('调试报告已导出');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error || '未知错误');
-      promptAction.showToast({ message: `导出失败：${message}` });
+      HdsFeedback.showToast(`导出失败：${message}`);
     } finally {
       if (file) {
         try { await fs.close(file); } catch (_) {}

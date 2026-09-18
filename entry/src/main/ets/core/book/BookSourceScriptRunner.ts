@@ -223,6 +223,8 @@ export class BookSourceScriptRunner {
 
   private static seedContext(env: ScriptEngineContext, source: BookSource, key: string, page: string): void {
     env.ctx.put('source.bookSourceUrl', source.bookSourceUrl || '');
+    // Legado's Rhino bridge exposes getKey() as the bean property `source.key`; sources rely on it.
+    env.ctx.put('source.key', source.bookSourceUrl || '');
     env.ctx.put('bookSourceUrl', source.bookSourceUrl || '');
     env.ctx.put('source.bookSourceName', source.bookSourceName || '');
     env.ctx.put('bookSourceName', source.bookSourceName || '');

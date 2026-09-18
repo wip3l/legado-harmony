@@ -9,6 +9,8 @@ import {
   AppDataBackupSelection,
   AppDataBackupService
 } from '../utils/AppDataBackupService';
+import { HdsFeedback } from '../utils/HdsFeedback';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
 
 @Entry
 @Component
@@ -40,8 +42,10 @@ struct DataBackupPage {
   @State busy: boolean = false;
   @State busyText: string = '';
   @State busyProgress: number = 0;
-  @State showExportPasswordDialog: boolean = false;
-  @State showImportPasswordDialog: boolean = false;
+  private exportPasswordDialogSession: SystemDialogSession = new SystemDialogSession();
+  private importPasswordDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onSystemDialogFlagChanged') showExportPasswordDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showImportPasswordDialog: boolean = false;
   @State exportPassword: string = '';
   @State exportPasswordConfirm: string = '';
   @State importPassword: string = '';
@@ -152,13 +156,7 @@ struct DataBackupPage {
 
       this.titleBar()
 
-      if (this.showExportPasswordDialog) {
-        this.passwordDialog(true)
-      }
 
-      if (this.showImportPasswordDialog) {
-        this.passwordDialog(false)
-      }
 
       if (this.busy) {
         Stack({ alignContent: Alignment.Center }) {
@@ -283,90 +281,117 @@ struct DataBackupPage {
       .padding({ left: 16, right: 16, top: 20, bottom: 8 })
   }
 
+
+  onSystemDialogFlagChanged(): void {
+    if (!this.showExportPasswordDialog) this.exportPasswordDialogSession.close(this.getUIContext());
+    if (!this.showImportPasswordDialog) this.importPasswordDialogSession.close(this.getUIContext());
+  }
+
+  openExportPasswordDialog(): void {
+    this.showExportPasswordDialog = true;
+    this.exportPasswordDialogSession.open(this.getUIContext(), (): void => {
+      this.exportPasswordDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示导出密码弹窗失败:'
+    });
+  }
+
+  openImportPasswordDialog(): void {
+    this.showImportPasswordDialog = true;
+    this.importPasswordDialogSession.open(this.getUIContext(), (): void => {
+      this.importPasswordDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示导入密码弹窗失败:'
+    });
+  }
+
   @Builder
-  passwordDialog(exporting: boolean) {
+  exportPasswordDialogContent() {
+    this.passwordDialogContent(true)
+  }
+
+  @Builder
+  importPasswordDialogContent() {
+    this.passwordDialogContent(false)
+  }
+
+  @Builder
+  passwordDialogContent(exporting: boolean) {
     Column() {
-      Column() {
-        Text(exporting ? '设置备份密码' : '输入备份密码')
-          .fontSize(19)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
+      Text(exporting ? '设置备份密码' : '输入备份密码')
+        .fontSize(19)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
 
-        Text(exporting ? '密码至少 8 个字符。密码不会被保存，遗忘后无法恢复此备份。' :
-          '该备份已加密，请输入创建备份时设置的密码。')
-          .fontSize(12)
-          .fontColor(this.subTextColor())
-          .lineHeight(18)
-          .width('100%')
-          .margin({ top: 8, bottom: 14 })
+      Text(exporting ? '密码至少 8 个字符。密码不会被保存，遗忘后无法恢复此备份。' :
+        '该备份已加密，请输入创建备份时设置的密码。')
+        .fontSize(12)
+        .fontColor(this.subTextColor())
+        .lineHeight(18)
+        .width('100%')
+        .margin({ top: 8, bottom: 14 })
 
-        TextInput({
-          text: exporting ? this.exportPassword : this.importPassword,
-          placeholder: exporting ? '输入备份密码' : '输入密码'
+      TextInput({
+        text: exporting ? this.exportPassword : this.importPassword,
+        placeholder: exporting ? '输入备份密码' : '输入密码'
+      })
+        .type(InputType.Password)
+        .height(44)
+        .fontColor(this.primaryTextColor())
+        .backgroundColor(this.softColor())
+        .onChange((value: string) => {
+          if (exporting) this.exportPassword = value;
+          else this.importPassword = value;
+          this.passwordError = '';
         })
+
+      if (exporting) {
+        TextInput({ text: this.exportPasswordConfirm, placeholder: '再次输入密码' })
           .type(InputType.Password)
           .height(44)
           .fontColor(this.primaryTextColor())
           .backgroundColor(this.softColor())
+          .margin({ top: 10 })
           .onChange((value: string) => {
-            if (exporting) this.exportPassword = value;
-            else this.importPassword = value;
+            this.exportPasswordConfirm = value;
             this.passwordError = '';
           })
-
-        if (exporting) {
-          TextInput({ text: this.exportPasswordConfirm, placeholder: '再次输入密码' })
-            .type(InputType.Password)
-            .height(44)
-            .fontColor(this.primaryTextColor())
-            .backgroundColor(this.softColor())
-            .margin({ top: 10 })
-            .onChange((value: string) => {
-              this.exportPasswordConfirm = value;
-              this.passwordError = '';
-            })
-        }
-
-        if (this.passwordError) {
-          Text(this.passwordError)
-            .fontSize(12)
-            .fontColor('#E84026')
-            .width('100%')
-            .margin({ top: 9 })
-        }
-
-        Row({ space: 10 }) {
-          Button('取消')
-            .layoutWeight(1)
-            .height(42)
-            .backgroundColor(this.softColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.closePasswordDialog(exporting))
-          Button(exporting ? '继续导出' : '解密备份')
-            .layoutWeight(1)
-            .height(42)
-            .backgroundColor(this.accentColor())
-            .onClick(() => {
-              if (exporting) this.confirmExportPassword();
-              else this.confirmImportPassword();
-            })
-        }
-        .width('100%')
-        .margin({ top: 18 })
       }
-      .width('calc(100% - 44vp)')
-      .padding(20)
-      .borderRadius(18)
-      .backgroundColor(this.cardColor())
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
-    .backgroundColor('#66000000')
-    .justifyContent(FlexAlign.Center)
-    .zIndex(20)
+
+      if (this.passwordError) {
+        Text(this.passwordError)
+          .fontSize(12)
+          .fontColor('#E84026')
+          .width('100%')
+          .margin({ top: 9 })
+      }
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(42)
+          .backgroundColor(this.softColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.closePasswordDialog(exporting))
+        Button(exporting ? '继续导出' : '解密备份')
+          .layoutWeight(1)
+          .height(42)
+          .backgroundColor(this.accentColor())
+          .onClick(() => {
+            if (exporting) this.confirmExportPassword();
+            else this.confirmImportPassword();
+          })
+      }
+      .width('100%')
+      .margin({ top: 18 })
+    }    .padding(20)
   }
+
 
   selectionValue(exporting: boolean, category: string): boolean {
     if (category === AppDataBackupService.CATEGORY_SOURCES) return exporting ? this.exportSources : this.importSources;
@@ -422,7 +447,7 @@ struct DataBackupPage {
     this.exportPassword = '';
     this.exportPasswordConfirm = '';
     this.passwordError = '';
-    this.showExportPasswordDialog = true;
+    this.openExportPasswordDialog();
   }
 
   closePasswordDialog(exporting: boolean): void {
@@ -486,10 +511,10 @@ struct DataBackupPage {
       this.busyProgress = 97;
       await this.writeBackupToUri(backup.archivePath, result[0]);
       this.busyProgress = 100;
-      promptAction.showToast({ message: '加密备份已导出' });
+      HdsFeedback.showToast('加密备份已导出');
     } catch (e) {
       console.error('导出应用数据失败:', e);
-      promptAction.showToast({ message: `导出失败：${e instanceof Error ? e.message : String(e)}` });
+      HdsFeedback.showToast(`导出失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       await AppDataBackupService.discardExport(archivePath);
       this.busy = false;
@@ -516,7 +541,7 @@ struct DataBackupPage {
       await this.loadImportFile('', true);
     } catch (e) {
       console.error('选择应用备份失败:', e);
-      promptAction.showToast({ message: `选择失败：${e instanceof Error ? e.message : String(e)}` });
+      HdsFeedback.showToast(`选择失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -565,14 +590,14 @@ struct DataBackupPage {
         this.importDescription = '该备份已加密，请输入密码';
         this.importPassword = '';
         this.passwordError = '';
-        this.showImportPasswordDialog = true;
+        this.openImportPasswordDialog();
       } else {
         this.importDescription = '备份文件读取失败';
         this.passwordError = message;
         if (this.showImportPasswordDialog) {
           this.passwordError = message;
         } else {
-          promptAction.showToast({ message: `读取失败：${message}` });
+          HdsFeedback.showToast(`读取失败：${message}`);
         }
       }
     } finally {
@@ -602,14 +627,14 @@ struct DataBackupPage {
           this.busyText = message;
           this.busyProgress = percent;
         });
-      promptAction.showToast({ message: `导入完成：${result.summary()}` });
+      HdsFeedback.showToast(`导入完成：${result.summary()}`);
       this.importDescription = `导入完成：${result.summary()}。设置项重启应用后完全生效。`;
       await AppDataBackupService.discardImport(this.importSession);
       this.importSession = null;
       this.importReady = false;
     } catch (e) {
       console.error('导入应用数据失败:', e);
-      promptAction.showToast({ message: `导入失败：${e instanceof Error ? e.message : String(e)}` });
+      HdsFeedback.showToast(`导入失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       this.busy = false;
       this.busyText = '';

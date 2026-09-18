@@ -138,6 +138,10 @@ export class ReadBookEngine {
       }
     }
     this.applyLatestReadingProgress(book);
+    // External writers (shelf background caching, cache-range tasks) commit chapter content with
+    // their own engine instances and never touch this retained session. Without a re-sync the
+    // catalog's "已缓存" badges keep showing the state captured when this session was opened.
+    await this.syncChapterCacheDates();
   }
 
   private applyLatestReadingProgress(book: Book): void {
@@ -661,8 +665,9 @@ export class ReadBookEngine {
     }
     if (storedIdentity === nextIdentity) return;
     // Migrate identities generated before the versioned signature without destroying content
-    // that was already cached under the same source interaction state.
-    if (!storedIdentity.startsWith('v2:')) {
+    // that was already cached under the same source interaction state. v3 narrows the identity to
+    // the interaction switches themselves, so a v2 marker is a semantic change, not a state change.
+    if (!storedIdentity.startsWith('v3:')) {
       expectedBook.putVariable(ReadBookEngine.SOURCE_INTERACTION_IDENTITY_KEY, nextIdentity);
       await appDb.updateBook(expectedBook, false);
       return;
@@ -683,7 +688,7 @@ export class ReadBookEngine {
       hash ^= raw.charCodeAt(index);
       hash = Math.imul(hash, 16777619);
     }
-    return `v2:${source.bookSourceUrl || ''}:${(hash >>> 0).toString(16)}`;
+    return `v3:${source.bookSourceUrl || ''}:${(hash >>> 0).toString(16)}`;
   }
 
   preloadAround(idx: number, forwardCount: number = 2, backwardCount: number = 1): void {

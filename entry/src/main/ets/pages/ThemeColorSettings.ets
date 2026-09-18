@@ -1,4 +1,4 @@
-import { promptAction, router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { AppThemeSettings, AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 import { CustomThemeScheme, CustomThemeSchemeStore } from '../utils/CustomThemeSchemeStore';
@@ -13,6 +13,7 @@ import { ThemeStartupCover } from '../components/ThemeStartupCover';
 import { ReaderThemeBackground } from '../components/ReaderThemeBackground';
 import { StartupCoverImageStore } from '../utils/StartupCoverImageStore';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 @Component
 struct ThemeColorOption {
@@ -398,10 +399,10 @@ struct ThemeColorSettingsPage {
       else this.lightStartupImagePath = imagePath;
       await this.onSettingChanged();
       if (oldPath && oldPath !== imagePath) StartupCoverImageStore.remove(getContext(this), oldPath);
-      promptAction.showToast({ message: `${darkMode ? '深色' : '浅色'}启动封面已更新` });
+      HdsFeedback.showToast(`${darkMode ? '深色' : '浅色'}启动封面已更新`);
     } catch (e) {
       console.error('上传自定义启动封面失败:', e);
-      promptAction.showToast({ message: '上传启动封面失败，请重试' });
+      HdsFeedback.showToast('上传启动封面失败，请重试');
     }
   }
 
@@ -413,7 +414,7 @@ struct ThemeColorSettingsPage {
     else this.lightStartupImagePath = '';
     await this.onSettingChanged();
     StartupCoverImageStore.remove(getContext(this), oldPath);
-    promptAction.showToast({ message: '已恢复所选主题的启动封面' });
+    HdsFeedback.showToast('已恢复所选主题的启动封面');
   }
 
   customPreviewTheme(): ThemePack {

@@ -1,4 +1,4 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { Book, BookChapter } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { WebBookService } from '../core/book/WebBookService';
@@ -14,6 +14,7 @@ import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { BookSourceStageRuntimeHost } from '../components/BookSourceStageRuntimeHost';
 import { WebBookFetchRuntimeHost } from '../components/WebBookFetchRuntimeHost';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 /** 未分组书架条目的分组 ID，必须与 SearchBookShelfHelper 里临时阅读书的写入值一致。 */
 const TEMP_SHELF_GROUP: number = -2147483645;
@@ -460,7 +461,7 @@ struct BookChapterListPage {
       });
     } catch (e) {
       console.error('打开章节失败:', e);
-      promptAction.showToast({ message: '打开章节失败' });
+      HdsFeedback.showToast('打开章节失败');
     } finally {
       this.openingChapter = false;
     }

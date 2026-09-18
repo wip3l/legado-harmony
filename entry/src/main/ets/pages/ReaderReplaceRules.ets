@@ -15,6 +15,8 @@ import { util } from '@kit.ArkTS';
 import { HttpClient } from '../core/http/HttpClient';
 import { JavaRegexCompat } from '../core/rule/JavaRegexCompat';
 import { ReplaceRuleImport } from '../core/rule/ReplaceRuleImport';
+import { HdsFeedback } from '../utils/HdsFeedback';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
 
 const REPLACE_RULE_IMPORT_FILE_LIMIT_BYTES: number = 5 * 1024 * 1024;
 const REPLACE_RULE_IMPORT_TIMEOUT_MS: number = 20000;
@@ -45,7 +47,8 @@ struct ReaderReplaceRulesPage {
   @State showRuleActionDialog: boolean = false;
   @State showRuleMoreDialog: boolean = false;
   @State showAddRuleDialog: boolean = false;
-  @State showImportUrlDialog: boolean = false;
+  private importUrlDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onSystemDialogFlagChanged') showImportUrlDialog: boolean = false;
   @State importUrl: string = '';
   @State isImporting: boolean = false;
   @State actionRuleId: number = 0;
@@ -99,12 +102,7 @@ struct ReaderReplaceRulesPage {
     if (this.selectionMode) {
       this.exitRuleSelectionMode();
       return true;
-    }
-    if (this.showImportUrlDialog) {
-      this.showImportUrlDialog = false;
-      return true;
-    }
-    if (this.showAddRuleDialog) {
+    }    if (this.showAddRuleDialog) {
       this.showAddRuleDialog = false;
       return true;
     }
@@ -135,7 +133,7 @@ struct ReaderReplaceRulesPage {
       await this.importRulesFromJson(content);
     } catch (e) {
       console.error('从文件导入替换规则失败:', e);
-      promptAction.showToast({ message: `导入失败: ${this.importErrorMessage(e as Object)}` });
+      HdsFeedback.showToast(`导入失败: ${this.importErrorMessage(e as Object)}`);
     } finally {
       this.isImporting = false;
     }
@@ -144,7 +142,7 @@ struct ReaderReplaceRulesPage {
   async importRulesFromUrl(): Promise<void> {
     const url = this.importUrl.trim();
     if (!url) {
-      promptAction.showToast({ message: '请输入URL' });
+      HdsFeedback.showToast('请输入URL');
       return;
     }
     try {
@@ -165,7 +163,7 @@ struct ReaderReplaceRulesPage {
       this.importUrl = '';
     } catch (e) {
       console.error('从URL导入替换规则失败:', e);
-      promptAction.showToast({ message: `导入失败: ${this.importErrorMessage(e as Object)}` });
+      HdsFeedback.showToast(`导入失败: ${this.importErrorMessage(e as Object)}`);
     } finally {
       this.isImporting = false;
     }
@@ -184,7 +182,7 @@ struct ReaderReplaceRulesPage {
         ]
       });
       if (confirmed.index !== 1) {
-        promptAction.showToast({ message: '已取消导入' });
+        HdsFeedback.showToast('已取消导入');
         return;
       }
       this.isImporting = true;
@@ -218,7 +216,7 @@ struct ReaderReplaceRulesPage {
     const skipped = result.skipped > 0 ? `，跳过 ${result.skipped} 条无匹配规则` : '';
     const contentScope = result.ignoredContentScope > 0 ?
       `，${result.ignoredContentScope} 条正文范围条件已忽略` : '';
-    promptAction.showToast({ message: `已导入 ${importedCount} 条替换规则${source}${skipped}${contentScope}` });
+    HdsFeedback.showToast(`已导入 ${importedCount} 条替换规则${source}${skipped}${contentScope}`);
   }
 
   async readRuleTextFile(uri: string): Promise<string> {
@@ -242,12 +240,12 @@ struct ReaderReplaceRulesPage {
 
   async exportRules(): Promise<void> {
     if (!this.selectionMode) {
-      promptAction.showToast({ message: '请先进入选择模式' });
+      HdsFeedback.showToast('请先进入选择模式');
       return;
     }
     const selected = this.rules.filter((rule: ReaderReplaceRule) => this.selectedRuleIds.includes(rule.id));
     if (selected.length === 0) {
-      promptAction.showToast({ message: '请先选择规则' });
+      HdsFeedback.showToast('请先选择规则');
       return;
     }
     let file: fs.File | null = null;
@@ -263,10 +261,10 @@ struct ReaderReplaceRulesPage {
       await fs.write(file.fd, bytes.buffer, { offset: 0, length: bytes.byteLength });
       await fs.close(file);
       file = null;
-      promptAction.showToast({ message: `已导出 ${selected.length} 条替换规则` });
+      HdsFeedback.showToast(`已导出 ${selected.length} 条替换规则`);
     } catch (e) {
       console.error('导出替换规则失败:', e);
-      promptAction.showToast({ message: `导出失败: ${this.importErrorMessage(e as Object)}` });
+      HdsFeedback.showToast(`导出失败: ${this.importErrorMessage(e as Object)}`);
     } finally {
       if (file) {
         try { await fs.close(file); } catch (_) {}
@@ -322,9 +320,6 @@ struct ReaderReplaceRulesPage {
         this.addRuleDropdown()
       }
 
-      if (this.showImportUrlDialog) {
-        this.importUrlDialog()
-      }
 
       if (this.isImporting) {
         this.importingOverlay()
@@ -413,7 +408,7 @@ struct ReaderReplaceRulesPage {
         this.ruleAddActionItem($r('sys.symbol.arrow_right_up_and_square'), '从 URL 导入', () => {
           this.showAddRuleDialog = false;
           this.importUrl = '';
-          this.showImportUrlDialog = true;
+          this.openImportUrlDialog();
         })
         this.ruleAddActionItem($r('sys.symbol.download'), '从文件导入', () => {
           this.showAddRuleDialog = false;
@@ -460,67 +455,67 @@ struct ReaderReplaceRulesPage {
     .width('100%')
   }
 
-  @Builder
-  importUrlDialog() {
-    Column() {
-      Column() {
-        Text('从 URL 导入替换规则')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 16 })
 
-        TextInput({ placeholder: '规则 URL（兼容阅读/YueDu 导出）', text: this.importUrl })
-          .width('100%')
-          .height(48)
-          .borderRadius(8)
+  onSystemDialogFlagChanged(): void {
+    if (!this.showImportUrlDialog) this.importUrlDialogSession.close(this.getUIContext());
+  }
+
+  openImportUrlDialog(): void {
+    this.showImportUrlDialog = true;
+    this.importUrlDialogSession.open(this.getUIContext(), (): void => {
+      this.importUrlDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示URL导入弹窗失败:'
+    });
+  }
+
+  @Builder
+  importUrlDialogContent() {
+    Column() {
+      Text('从 URL 导入替换规则')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 16 })
+
+      TextInput({ placeholder: '规则 URL（兼容阅读/YueDu 导出）', text: this.importUrl })
+        .width('100%')
+        .height(48)
+        .borderRadius(8)
+        .backgroundColor(this.inputColor())
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.subTextColor())
+        .padding({ left: 12, right: 12 })
+        .margin({ bottom: 16 })
+        .onChange((value: string) => this.importUrl = value)
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(44)
           .backgroundColor(this.inputColor())
           .fontColor(this.primaryTextColor())
-          .placeholderColor(this.subTextColor())
-          .padding({ left: 12, right: 12 })
-          .margin({ bottom: 16 })
-          .onChange((value: string) => this.importUrl = value)
-
-        Row({ space: 10 }) {
-          Button('取消')
-            .layoutWeight(1)
-            .height(44)
-            .backgroundColor(this.inputColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.showImportUrlDialog = false;
-              this.importUrl = '';
-            })
-          Button('导入')
-            .layoutWeight(1)
-            .height(44)
-            .backgroundColor(this.buttonColor())
-            .fontColor('#FFFFFF')
-            .enabled(!this.isImporting)
-            .onClick(() => this.importRulesFromUrl())
-        }
-        .width('100%')
+          .onClick(() => {
+            this.showImportUrlDialog = false;
+            this.importUrl = '';
+          })
+        Button('导入')
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .enabled(!this.isImporting)
+          .onClick(() => this.importRulesFromUrl())
       }
-      .width('88%')
-      .constraintSize({ maxWidth: 420 })
-      .padding(24)
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-      .onClick(() => {})
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#80000000')
-    .justifyContent(FlexAlign.Center)
-    .onClick(() => {
-      this.showImportUrlDialog = false;
-    })
+      .width('100%')
+    }    .constraintSize({ maxWidth: 420 })
+    .padding(24)
   }
+
 
   @Builder
   importingOverlay() {
@@ -619,9 +614,12 @@ struct ReaderReplaceRulesPage {
           }, (rule: ReaderReplaceRule) =>
             `${rule.id}_${rule.enabled ? '1' : '0'}_${this.selectionMode ? 'select' : 'normal'}`)
 
-          ListItem() {
-            Column().height(84)
-          }
+          // 底部避让 spacer 必须按 lanes 列数复制占满整行，否则多列时最后一行卡片没有底部避让。
+          ForEach(this.ruleListSpacerKeys(), (_spacerKey: string) => {
+            ListItem() {
+              Column().height(84)
+            }
+          }, (spacerKey: string) => spacerKey)
         }
         .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
         .layoutWeight(1)
@@ -804,17 +802,35 @@ struct ReaderReplaceRulesPage {
 
   loadPreviewContext(): void {
     const params = router.getParams() as Record<string, string>;
-    if (!params || params['previewCurrentChapter'] !== 'true') return;
-    const book = new Book();
-    book.name = AppStorage.get<string>('readerReplacePreviewBookName') || '';
-    book.author = AppStorage.get<string>('readerReplacePreviewBookAuthor') || '';
-    book.originName = AppStorage.get<string>('readerReplacePreviewBookOriginName') || '';
-    book.origin = AppStorage.get<string>('readerReplacePreviewBookOrigin') || '';
-    book.bookUrl = AppStorage.get<string>('readerReplacePreviewBookUrl') || '';
-    this.previewBook = book;
-    this.previewTitle = AppStorage.get<string>('readerReplacePreviewTitle') || '';
-    this.previewContent = AppStorage.get<string>('readerReplacePreviewContent') || '';
-    this.previewMode = true;
+    if (!params) return;
+    if (params['previewCurrentChapter'] === 'true') {
+      const book = new Book();
+      book.name = AppStorage.get<string>('readerReplacePreviewBookName') || '';
+      book.author = AppStorage.get<string>('readerReplacePreviewBookAuthor') || '';
+      book.originName = AppStorage.get<string>('readerReplacePreviewBookOriginName') || '';
+      book.origin = AppStorage.get<string>('readerReplacePreviewBookOrigin') || '';
+      book.bookUrl = AppStorage.get<string>('readerReplacePreviewBookUrl') || '';
+      this.previewBook = book;
+      this.previewTitle = AppStorage.get<string>('readerReplacePreviewTitle') || '';
+      this.previewContent = AppStorage.get<string>('readerReplacePreviewContent') || '';
+      this.previewMode = true;
+    }
+    if (params['prefillReplacePattern'] === 'true') {
+      this.openPrefilledNewRule();
+    }
+  }
+
+  openPrefilledNewRule(): void {
+    const pattern = (AppStorage.get<string>('readerReplaceRulePrefillPattern') || '').trim();
+    // 预填内容只消费一次，避免之后正常进入本页时误带出旧选中文本。
+    AppStorage.setOrCreate('readerReplaceRulePrefillPattern', '');
+    if (!pattern) return;
+    this.openNewRule();
+    this.draft.pattern = pattern;
+    // 长按选中的是纯文本，默认按字面匹配；需要正则时由用户在编辑器里手动开启。
+    this.draft.isRegex = false;
+    this.draftIsRegex = false;
+    this.saveRuleFormDraft();
   }
 
   ruleEffectCheck(rule: ReaderReplaceRule): ReaderReplaceRuleCheck {
@@ -1269,6 +1285,16 @@ struct ReaderReplaceRulesPage {
       `${rule.name}\n${rule.pattern}`.toLowerCase().includes(keyword));
   }
 
+  // List.lanes 的列数；底部避让 spacer 按列数复制，保证多列时占满一整行。
+  ruleListSpacerKeys(): string[] {
+    const laneCount = ResponsiveManagerListLayout.laneCount(this.contextViewportWidth);
+    const keys: string[] = [];
+    for (let i = 0; i < laneCount; i++) {
+      keys.push(`rule_list_spacer_${i}`);
+    }
+    return keys;
+  }
+
   ruleScopeSummary(rule: ReaderReplaceRule): string {
     const targets: string[] = [];
     if (rule.applyToTitle) targets.push('标题');
@@ -1344,7 +1370,7 @@ struct ReaderReplaceRulesPage {
       });
       await ReaderReplaceRuleStore.save(getContext(this), next);
       this.rules = next;
-      promptAction.showToast({ message: `已${enabled ? '启用' : '禁用'} ${count} 条规则` });
+      HdsFeedback.showToast(`已${enabled ? '启用' : '禁用'} ${count} 条规则`);
     } finally {
       this.isBatchOperating = false;
     }
@@ -1365,7 +1391,7 @@ struct ReaderReplaceRulesPage {
       await ReaderReplaceRuleStore.save(getContext(this), next);
       this.rules = next;
       this.exitRuleSelectionMode();
-      promptAction.showToast({ message: `已删除 ${count} 条规则` });
+      HdsFeedback.showToast(`已删除 ${count} 条规则`);
     } finally {
       this.isBatchOperating = false;
     }
@@ -1618,11 +1644,11 @@ struct ReaderReplaceRulesPage {
   async saveDraft(): Promise<void> {
     const pattern = (this.draft.pattern || '').trim();
     if (!pattern) {
-      promptAction.showToast({ message: '请填写匹配规则' });
+      HdsFeedback.showToast('请填写匹配规则');
       return;
     }
     if (!this.draftApplyToTitle && !this.draftApplyToContent) {
-      promptAction.showToast({ message: '请至少选择标题或正文' });
+      HdsFeedback.showToast('请至少选择标题或正文');
       return;
     }
     if (this.draftIsRegex) {
@@ -1630,7 +1656,7 @@ struct ReaderReplaceRulesPage {
         JavaRegexCompat.compile(pattern, 'g');
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        promptAction.showToast({ message: `正则表达式无效：${reason}` });
+        HdsFeedback.showToast(`正则表达式无效：${reason}`);
         return;
       }
     }
@@ -1648,7 +1674,7 @@ struct ReaderReplaceRulesPage {
     this.rules = await ReaderReplaceRuleStore.load(getContext(this), true);
     this.editing = false;
     FormDraftStore.removePersistent(getContext(this), 'replace_rule:edit');
-    promptAction.showToast({ message: '规则已保存' });
+    HdsFeedback.showToast('规则已保存');
   }
 
   async setRuleEnabled(id: number, enabled: boolean): Promise<void> {

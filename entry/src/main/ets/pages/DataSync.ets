@@ -6,6 +6,7 @@ import { CloudSyncStateStore } from '../account/CloudSyncStateStore';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { syncSystemBars } from '../utils/SystemBars';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 @Entry
 @Component
@@ -57,7 +58,7 @@ struct DataSyncPage {
       this.loadedUserId = userId;
     } catch (e) {
       console.warn('读取云同步设置失败:', e);
-      promptAction.showToast({ message: '读取同步设置失败' });
+      HdsFeedback.showToast('读取同步设置失败');
     } finally {
       this.loadingSettings = false;
     }
@@ -133,16 +134,16 @@ struct DataSyncPage {
           Column() {
             this.actionItem('同步设备', '查看和管理使用当前账号同步的设备', true, () => {
               if (!this.accountLoggedIn) {
-                promptAction.showToast({ message: '请先登录华为账号' });
+                HdsFeedback.showToast('请先登录华为账号');
                 return;
               }
               router.pushUrl({ url: 'pages/SyncDevices' });
             })
             this.actionItem('同步问题', this.syncErrorMessage || '当前没有需要处理的同步问题', true, () => {
               if (this.syncErrorMessage) {
-                promptAction.showToast({ message: this.syncErrorMessage });
+                HdsFeedback.showToast(this.syncErrorMessage);
               } else {
-                promptAction.showToast({ message: '当前没有同步问题' });
+                HdsFeedback.showToast('当前没有同步问题');
               }
             })
             this.actionItem('重新从云端同步', '保留本机待上传修改，重新获取云端数据', false, () => {
@@ -331,7 +332,7 @@ struct DataSyncPage {
 
   async setCloudSyncEnabled(value: boolean): Promise<void> {
     if (value && !this.accountLoggedIn) {
-      promptAction.showToast({ message: '请先登录华为账号' });
+      HdsFeedback.showToast('请先登录华为账号');
       router.pushUrl({ url: 'pages/AccountCenter' });
       return;
     }
@@ -345,9 +346,7 @@ struct DataSyncPage {
         const conflictPolicy = await this.initialConflictPolicy();
         await this.syncNow(conflictPolicy);
       } catch (e) {
-        promptAction.showToast({
-          message: e instanceof Error ? e.message : '暂时无法检查云端数据'
-        });
+        HdsFeedback.showToast(e instanceof Error ? e.message : '暂时无法检查云端数据');
       }
     }
   }
@@ -377,7 +376,7 @@ struct DataSyncPage {
       (this.bookSourcesEnabled || this.readingPreferencesEnabled || this.applicationPreferencesEnabled) :
       (this.readingDataEnabled || this.bookSourcesEnabled || this.applicationPreferencesEnabled);
     if (!value && !otherEnabled) {
-      promptAction.showToast({ message: '请至少保留一项同步内容' });
+      HdsFeedback.showToast('请至少保留一项同步内容');
       return;
     }
     if (readingData) {
@@ -396,7 +395,7 @@ struct DataSyncPage {
   async setApplicationScopeEnabled(value: boolean): Promise<void> {
     if (!value && !this.readingDataEnabled && !this.bookSourcesEnabled &&
       !this.readingPreferencesEnabled) {
-      promptAction.showToast({ message: '请至少保留一项同步内容' });
+      HdsFeedback.showToast('请至少保留一项同步内容');
       return;
     }
     this.applicationPreferencesEnabled = value;
@@ -411,7 +410,7 @@ struct DataSyncPage {
   async setBookSourcesEnabled(value: boolean): Promise<void> {
     if (!value && !this.readingDataEnabled && !this.readingPreferencesEnabled &&
       !this.applicationPreferencesEnabled) {
-      promptAction.showToast({ message: '请至少保留一项同步内容' });
+      HdsFeedback.showToast('请至少保留一项同步内容');
       return;
     }
     this.bookSourcesEnabled = value;
@@ -432,7 +431,7 @@ struct DataSyncPage {
       this.loadedUserId = userId;
     } catch (e) {
       console.warn('保存云同步设置失败:', e);
-      promptAction.showToast({ message: '保存同步设置失败' });
+      HdsFeedback.showToast('保存同步设置失败');
     } finally {
       this.saving = false;
     }
@@ -444,7 +443,7 @@ struct DataSyncPage {
       return;
     }
     if (!this.cloudSyncEnabled) {
-      promptAction.showToast({ message: '请先开启云同步' });
+      HdsFeedback.showToast('请先开启云同步');
       return;
     }
     this.saving = true;
@@ -454,10 +453,10 @@ struct DataSyncPage {
       if (result.uploaded > 0) details.push(`上传 ${result.uploaded} 项`);
       if (result.downloaded > 0) details.push(`下载 ${result.downloaded} 项`);
       if (result.conflicts > 0) details.push(`处理 ${result.conflicts} 个冲突`);
-      promptAction.showToast({ message: details.length > 0 ? `同步完成：${details.join('，')}` : '所有数据已同步' });
+      HdsFeedback.showToast(details.length > 0 ? `同步完成：${details.join('，')}` : '所有数据已同步');
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      promptAction.showToast({ message: `同步失败：${message}` });
+      HdsFeedback.showToast(`同步失败：${message}`);
     } finally {
       this.saving = false;
     }
@@ -465,7 +464,7 @@ struct DataSyncPage {
 
   async confirmReloadFromCloud(): Promise<void> {
     if (!this.accountLoggedIn || !this.cloudSyncEnabled) {
-      promptAction.showToast({ message: this.accountLoggedIn ? '请先开启云同步' : '请先登录华为账号' });
+      HdsFeedback.showToast(this.accountLoggedIn ? '请先开启云同步' : '请先登录华为账号');
       return;
     }
     const result = await promptAction.showDialog({

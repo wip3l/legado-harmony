@@ -1,4 +1,4 @@
-import { promptAction, router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { SearchBook } from '../model/data/Book';
 import { SearchBookResultList } from '../components/book/SearchBookResultList';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
@@ -6,6 +6,7 @@ import { SearchResultAggregationStore, SearchResultGroupSnapshot } from '../util
 import { SearchBookShelfChange, SearchBookShelfHelper } from '../utils/SearchBookShelfHelper';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { syncSystemBars } from '../utils/SystemBars';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 @Entry
 @Component
@@ -148,7 +149,7 @@ struct SearchResultGroupPage {
       }
     } catch (e) {
       console.error('更新聚合搜索结果书架状态失败:', e);
-      promptAction.showToast({ message: '操作失败' });
+      HdsFeedback.showToast('操作失败');
     } finally {
       this.busyBookKeys = SearchBookShelfHelper.withoutKey(this.busyBookKeys, key);
     }
@@ -165,7 +166,7 @@ struct SearchResultGroupPage {
           this.shelfBookKeys, change.shelfKey || change.requestKey);
       } catch (e) {
         console.error('准备阅读书籍失败:', e);
-        promptAction.showToast({ message: '书籍准备失败，请稍后重试' });
+        HdsFeedback.showToast('书籍准备失败，请稍后重试');
         return;
       } finally {
         this.busyBookKeys = SearchBookShelfHelper.withoutKey(this.busyBookKeys, key);
@@ -173,7 +174,7 @@ struct SearchResultGroupPage {
     }
     const shelfBook = await SearchBookShelfHelper.findShelfBookByKey(key, true);
     if (!shelfBook?.bookUrl) {
-      promptAction.showToast({ message: '书籍准备失败，请稍后重试' });
+      HdsFeedback.showToast('书籍准备失败，请稍后重试');
       return;
     }
     router.pushUrl({ url: 'pages/ReadBook', params: { bookUrl: shelfBook.bookUrl } });

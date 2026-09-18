@@ -1,4 +1,4 @@
-import { promptAction, router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
@@ -8,6 +8,7 @@ import { LocalBookService } from '../core/book/LocalBookService';
 import { ThemeStartupCover } from '../components/ThemeStartupCover';
 import { ThemeIds } from '../theme/ThemeModels';
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 @Entry
 @Component
@@ -134,7 +135,7 @@ struct StartupPage {
     } catch (e) {
       console.error('导入外部本地书籍失败:', e);
       const message = e instanceof Error ? e.message : String(e);
-      promptAction.showToast({ message: `导入本地书籍失败: ${message}` });
+      HdsFeedback.showToast(`导入本地书籍失败: ${message}`);
       await this.replaceToIndex();
     }
   }

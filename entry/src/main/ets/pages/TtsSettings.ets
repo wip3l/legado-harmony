@@ -20,6 +20,7 @@ import { AdaptiveIconButton } from '../components/AdaptiveIconButton';
 import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 const TTS_CUSTOM_VOICE_IMPORT_LIMIT_BYTES: number = 2 * 1024 * 1024;
 
@@ -524,11 +525,11 @@ struct TtsSettingsPage {
       return;
     }
     if (!AccountSessionStore.isLoggedIn()) {
-      promptAction.showToast({ message: '请先在“我的-账号与点数”登录' });
+      HdsFeedback.showToast('请先在“我的-账号与点数”登录');
       return;
     }
     if (this.paidPoints < item.points) {
-      promptAction.showToast({ message: '充值点不足，请先充值点数' });
+      HdsFeedback.showToast('充值点不足，请先充值点数');
       return;
     }
     const tierName = item.tier === 'PREMIUM' ? '精品音色' : '标准音色';
@@ -557,9 +558,9 @@ struct TtsSettingsPage {
       } catch (refreshError) {
         console.warn('兑换后刷新在线朗读字数失败:', refreshError);
       }
-      promptAction.showToast({ message: `已到账 ${this.formatTtsChars(item.chars)}` });
+      HdsFeedback.showToast(`已到账 ${this.formatTtsChars(item.chars)}`);
     } catch (e) {
-      promptAction.showToast({ message: this.commerceErrorMessage(e as Object, '兑换失败') });
+      HdsFeedback.showToast(this.commerceErrorMessage(e as Object, '兑换失败'));
     } finally {
       this.redeemingTtsSku = '';
     }
@@ -751,7 +752,7 @@ struct TtsSettingsPage {
       if (voice.downloadable) {
         await this.downloadAndSelectVoice(voice);
       } else {
-        promptAction.showToast({ message: '该系统音色当前不可用' });
+        HdsFeedback.showToast('该系统音色当前不可用');
       }
       return;
     }
@@ -775,7 +776,7 @@ struct TtsSettingsPage {
 
   applyCustomVoice(voice: HttpTTS): void {
     if (voice.enabled === false) {
-      promptAction.showToast({ message: '该自定义音色已禁用' });
+      HdsFeedback.showToast('该自定义音色已禁用');
       return;
     }
     if (this.isPreviewing) {
@@ -786,12 +787,12 @@ struct TtsSettingsPage {
     this.ttsCloudVoiceId = '';
     this.selectedVoiceKey = this.customVoiceKey(voice);
     this.saveSettings();
-    promptAction.showToast({ message: `已启用 ${voice.name}` });
+    HdsFeedback.showToast(`已启用 ${voice.name}`);
   }
 
   applyCloudVoice(voice: TtsVoiceInfo): void {
     if (!AccountSessionStore.isLoggedIn()) {
-      promptAction.showToast({ message: '请先登录华为账号后使用云端音色' });
+      HdsFeedback.showToast('请先登录华为账号后使用云端音色');
       return;
     }
     if (this.isPreviewing) {
@@ -802,7 +803,7 @@ struct TtsSettingsPage {
     this.ttsCustomVoiceId = '';
     this.selectedVoiceKey = `cloud_${voice.id}`;
     this.saveSettings();
-    promptAction.showToast({ message: `已启用 ${voice.name}` });
+    HdsFeedback.showToast(`已启用 ${voice.name}`);
   }
 
   findCurrentCloudVoice(): TtsVoiceInfo | undefined {
@@ -821,18 +822,18 @@ struct TtsSettingsPage {
 
   async downloadAndSelectVoice(voice: TtsVoiceOption): Promise<void> {
     if (!SystemTtsReader.supportsVoiceDownload()) {
-      promptAction.showToast({ message: '当前系统版本不支持下载系统音色，请升级系统后重试' });
+      HdsFeedback.showToast('当前系统版本不支持下载系统音色，请升级系统后重试');
       return;
     }
     if (this.downloadingVoiceKey) {
-      promptAction.showToast({ message: '正在下载音色，请稍候' });
+      HdsFeedback.showToast('正在下载音色，请稍候');
       return;
     }
     const key = this.voiceKey(voice);
     this.downloadingVoiceKey = key;
     this.downloadProgressText = '';
     try {
-      promptAction.showToast({ message: `开始下载 ${voice.name}` });
+      HdsFeedback.showToast(`开始下载 ${voice.name}`);
       await SystemTtsReader.downloadVoice(voice, {
         onStart: (_message: string) => {
           this.downloadProgressText = '准备中';
@@ -849,9 +850,9 @@ struct TtsSettingsPage {
         this.voices = this.applyInstalledOverrides(this.mergeWithDefaultVoice(this.voices.concat([downloaded])));
       }
       this.applyVoice(downloaded, true);
-      promptAction.showToast({ message: `已启用 ${downloaded.name}` });
+      HdsFeedback.showToast(`已启用 ${downloaded.name}`);
     } catch (error) {
-      promptAction.showToast({ message: `音色下载失败：${this.shortErrorMessage(error as Object)}` });
+      HdsFeedback.showToast(`音色下载失败：${this.shortErrorMessage(error as Object)}`);
     } finally {
       this.downloadingVoiceKey = '';
       this.downloadProgressText = '';
@@ -1005,7 +1006,7 @@ struct TtsSettingsPage {
   async importCustomVoicesFromUrl(): Promise<void> {
     const url = this.customVoiceImportUrl.trim();
     if (!url) {
-      promptAction.showToast({ message: '请输入音色 JSON URL' });
+      HdsFeedback.showToast('请输入音色 JSON URL');
       return;
     }
     if (this.isImportingCustomVoices) {
@@ -1024,7 +1025,7 @@ struct TtsSettingsPage {
       }
       this.importCustomVoicesFromJson(response.body);
     } catch (error) {
-      promptAction.showToast({ message: `导入失败：${this.shortErrorMessage(error as Object)}` });
+      HdsFeedback.showToast(`导入失败：${this.shortErrorMessage(error as Object)}`);
     } finally {
       this.isImportingCustomVoices = false;
     }
@@ -1046,7 +1047,7 @@ struct TtsSettingsPage {
       const content = await this.readTextFile(result[0]);
       this.importCustomVoicesFromJson(content);
     } catch (error) {
-      promptAction.showToast({ message: `导入失败：${this.shortErrorMessage(error as Object)}` });
+      HdsFeedback.showToast(`导入失败：${this.shortErrorMessage(error as Object)}`);
     } finally {
       this.isImportingCustomVoices = false;
     }
@@ -1055,7 +1056,7 @@ struct TtsSettingsPage {
   importCustomVoicesFromJson(content: string): void {
     const incoming = SystemTtsReader.parseCustomVoices(content);
     if (incoming.length === 0) {
-      promptAction.showToast({ message: '未识别到有效自定义音色' });
+      HdsFeedback.showToast('未识别到有效自定义音色');
       return;
     }
     const merged: HttpTTS[] = this.customVoices.slice();
@@ -1078,7 +1079,7 @@ struct TtsSettingsPage {
       this.selectedVoiceKey = this.customVoiceKey(incoming[0]);
     }
     this.saveSettings();
-    promptAction.showToast({ message: `已导入 ${changed} 个自定义音色` });
+    HdsFeedback.showToast(`已导入 ${changed} 个自定义音色`);
   }
 
   ensureUniqueCustomVoiceId(voice: HttpTTS, existing: HttpTTS[]): void {
@@ -1346,12 +1347,12 @@ struct TtsSettingsPage {
         },
         onError: (message: string) => {
           this.isPreviewing = false;
-          promptAction.showToast({ message });
+          HdsFeedback.showToast(message);
         }
       });
     } catch (e) {
       this.isPreviewing = false;
-      promptAction.showToast({ message: '试听失败' });
+      HdsFeedback.showToast('试听失败');
     }
   }
 

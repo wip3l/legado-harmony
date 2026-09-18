@@ -1,10 +1,11 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { syncSystemBars } from '../utils/SystemBars';
 import { AppIconManager, AppIconOption } from '../utils/AppIconManager';
 import { AppIconSettings, AppIconSettingsStore } from '../utils/AppIconSettingsStore';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 @Entry
 @Component
@@ -138,7 +139,7 @@ struct AppIconSettingsPage {
 
   showToastSafely(message: string): void {
     try {
-      promptAction.showToast({ message: message });
+      HdsFeedback.showToast(message);
     } catch (e) {
       hilog.warn(0x0000, 'appIcon', 'Show app icon toast failed err=%{public}s', JSON.stringify(e));
     }

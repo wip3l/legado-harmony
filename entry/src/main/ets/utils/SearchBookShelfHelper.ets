@@ -1,4 +1,3 @@
-import { promptAction } from '@kit.ArkUI';
 import { Context } from '@kit.AbilityKit';
 import { Book, SearchBook } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
@@ -11,6 +10,7 @@ import { BookFieldSanitizer } from './BookFieldSanitizer';
 import { SearchExplorePendingBook } from './SearchExplorePendingBook';
 import { AppThemeSettingsStore } from './AppThemeSettingsStore';
 import { BookTypeSupport } from '../core/book/BookTypeSupport';
+import { HdsFeedback } from './HdsFeedback';
 
 export class SearchBookShelfChange {
   requestKey: string = '';
@@ -100,7 +100,7 @@ export class SearchBookShelfHelper {
 
   static async addToShelf(context: Context, searchBook: SearchBook): Promise<SearchBookShelfChange> {
     if (!searchBook.bookUrl) {
-      promptAction.showToast({ message: '书籍地址为空' });
+      HdsFeedback.showToast('书籍地址为空');
       return new SearchBookShelfChange();
     }
 
@@ -122,7 +122,7 @@ export class SearchBookShelfHelper {
       SearchExplorePendingBook.clearPendingAddToShelf(existing);
       await db.updateBook(existing, true, 'search_result_explicit_add_existing');
       SearchBookShelfHelper.markShelfChanged();
-      promptAction.showToast({ message: '已在书架' });
+      HdsFeedback.showToast('已在书架');
       return new SearchBookShelfChange(searchKey, searchKey);
     }
 
@@ -163,7 +163,7 @@ export class SearchBookShelfHelper {
         SearchExplorePendingBook.clearPendingAddToShelf(resolvedExisting);
         await db.updateBook(resolvedExisting, true, 'search_result_explicit_add_resolved');
         SearchBookShelfHelper.markShelfChanged();
-        promptAction.showToast({ message: '已在书架' });
+        HdsFeedback.showToast('已在书架');
         return new SearchBookShelfChange(searchKey, resolvedKey);
       }
     }
@@ -171,13 +171,13 @@ export class SearchBookShelfHelper {
     await db.insertBook(book, 'search_result_explicit_add');
     const shelfKey = resolvedKey || searchKey;
     SearchBookShelfHelper.markShelfChanged();
-    promptAction.showToast({ message: '已加入书架' });
+    HdsFeedback.showToast('已加入书架');
     return new SearchBookShelfChange(searchKey, shelfKey);
   }
 
   static async removeFromShelf(context: Context, searchBook: SearchBook): Promise<SearchBookShelfChange> {
     if (!searchBook.bookUrl) {
-      promptAction.showToast({ message: '书籍地址为空' });
+      HdsFeedback.showToast('书籍地址为空');
       return new SearchBookShelfChange();
     }
 
@@ -190,7 +190,7 @@ export class SearchBookShelfHelper {
     }
     await db.deleteBook(existing?.bookUrl || searchBook.bookUrl, 'search_result_explicit_remove');
     SearchBookShelfHelper.markShelfChanged();
-    promptAction.showToast({ message: '已移出书架' });
+    HdsFeedback.showToast('已移出书架');
     return new SearchBookShelfChange(key, key);
   }
 

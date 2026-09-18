@@ -281,7 +281,20 @@ export class WebBookService {
     const au = new AnalyzeUrl(source, this.http);
     let resp = EncodedSourceUrl.canHandle(tocUrl) ?
       await this.fetchEncodedDataUrl(tocUrl, source) : await au.fetch(tocUrl, undefined, debugContext);
-    if (!resp.success || !resp.body) return [];
+    if (!resp.success || !resp.body) {
+      // A silent empty return left the chapter list showing a generic placeholder with no hint
+      // of whether the network, the tocUrl composition or the API failed.
+      AppStorage.setOrCreate('bookSourceStageLastError', `目录请求失败：${!resp.success ?
+        (resp.statusCode > 0 ? `HTTP ${resp.statusCode}` : (resp.error || '网络异常')) : '接口返回空响应'}`);
+      return [];
+    }
+    const tocApiFailure = this.apiFailureMessage(resp.body);
+    if (tocApiFailure) {
+      // Servers commonly answer a malformed tocUrl (e.g. a missing bookid) with a JSON error.
+      // Record it so the chapter list page can show the real cause instead of 暂无目录.
+      AppStorage.setOrCreate('bookSourceStageLastError', `目录接口返回失败：${tocApiFailure}`);
+      return [];
+    }
     const ctx = new RuleContext();
     ctx.loadFromJson(book.variable);
     this.seedBookVariables(ctx, book.bookUrl);
@@ -363,6 +376,32 @@ export class WebBookService {
     return chapters;
   }
 
+  /**
+   * Extract a server-declared failure from a JSON body. Only called before rule parsing; a body
+   * carrying meaningful data keys is treated as success regardless of its message fields.
+   */
+  private apiFailureMessage(body: string): string {
+    const value = (body || '').trim();
+    if (!value.startsWith('{') || value.length > 4096) return '';
+    try {
+      const record = JSON.parse(value) as Record<string, Object>;
+      if (!record || typeof record !== 'object' || Array.isArray(record)) return '';
+      const message = String(record['msg'] || record['message'] || record['error'] || '').trim();
+      if (!message || !/失败|错误|异常|参数|未登录|请登录|无权限|拒绝|invalid|error|fail|missing|cannot/i.test(message)) {
+        return '';
+      }
+      for (const key of ['data', 'list', 'records', 'items', 'books', 'result', 'item_data_list']) {
+        const field = record[key];
+        if (Array.isArray(field) && field.length > 0) return '';
+        if (field && typeof field === 'object' && !Array.isArray(field) &&
+          Object.keys(field as Record<string, Object>).length > 0) return '';
+      }
+      return message.substring(0, 160);
+    } catch (_) {
+      return '';
+    }
+  }
+
   private bridgeVirtualCatalogMetadata(tocUrl: string, detailUrl: string, allowedKeys: string[]): string {
     const tocPayload = EncodedSourceUrl.decode(tocUrl || '');
     const detailPayload = EncodedSourceUrl.decode(detailUrl || '');
@@ -424,6 +463,9 @@ export class WebBookService {
       contextValues = batch.contextValues;
       if (batch.errors.length > 0) {
         console.warn('[WS] toc field errors:', source.bookSourceName, batch.errors.join('; '));
+        // A failed chapterUrl rule silently empties every chapter; surface the cause on the
+        // catalog page instead of a generic 暂无目录.
+        AppStorage.setOrCreate('bookSourceStageLastError', `目录字段解析失败：${batch.errors[0]}`);
       }
     } finally {
       RuleExecutionService.get().clearOwner(fieldRequest.ownerId);
@@ -463,6 +505,13 @@ export class WebBookService {
         chap.variable = BookUrlResolver.setVariableJson(chap.variable, 'updateTime', updateTime);
       }
       if (chap.title && chap.url) chapters.push(chap);
+    }
+    if (chapters.length === 0 && items.length > 0) {
+      // Every chapter was dropped (chapterUrl rule produced nothing usable). Record why so the
+      // catalog page shows the real cause instead of a silent empty state.
+      const droppedError = AppStorage.get<string>('bookSourceStageLastError') ||
+        `目录匹配 ${items.length} 章，但章节地址全部为空（chapterUrl 规则未生成有效地址）`;
+      AppStorage.setOrCreate('bookSourceStageLastError', droppedError);
     }
     if (contextValues.length > 0) ctx.loadFromJson(contextValues[contextValues.length - 1]);
     return chapters;

@@ -1,4 +1,4 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 import http from '@ohos.net.http';
 import fs from '@ohos.file.fs';
@@ -7,6 +7,7 @@ import { CookieStore } from '../core/http/CookieStore';
 import { JsRuntime } from '../core/rule/JsRuntime';
 import { TtsAvAudioPlayer } from './TtsAvAudioPlayer';
 import { PcmPlaybackCue, TtsPcmAudioPlayer } from './TtsPcmAudioPlayer';
+import { HdsFeedback } from './HdsFeedback';
 
 class TtsRequestRule {
   url: string = '';
@@ -555,7 +556,7 @@ export class HttpTtsReader {
     const now = Date.now();
     if (now - (this.loginPromptedAt[key] || 0) < 60000) return;
     this.loginPromptedAt[key] = now;
-    promptAction.showToast({ message: `${voice.name || '自定义音色'} 需要登录` });
+    HdsFeedback.showToast(`${voice.name || '自定义音色'} 需要登录`);
     AppStorage.setOrCreate('pendingVerificationUrl', loginUrl);
     AppStorage.setOrCreate('pendingVerificationTitle', `${voice.name || '自定义音色'} 登录`);
     AppStorage.setOrCreate('pendingVerificationSourceUrl', requestUrl);

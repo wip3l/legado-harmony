@@ -38,6 +38,9 @@ export class StageWebRuntimeRequest {
       this.maxTotalResponseBytes = 4 * 1024 * 1024;
       this.maxInputBytes = 8 * 1024 * 1024;
       this.maxRequestCount = 6;
+      // Menu/URL scripts feed interactive screens and run on the serial bridge; a shorter
+      // timeout keeps one hung endpoint from stalling every queued source.
+      this.networkTimeoutMs = 15000;
     } else if (this.stage === SourceRuntimeStage.BOOK_INFO) {
       this.maxResponseBytes = 4 * 1024 * 1024;
       this.maxTotalResponseBytes = 6 * 1024 * 1024;
@@ -121,8 +124,9 @@ export class BookSourceStageWebRuntime {
   private static readonly MAX_CACHE_BYTES_TOTAL: number = 4 * 1024 * 1024;
   // ArkWeb keeps native compiler/renderer allocations outside the ArkTS heap. Rebuilding the
   // hidden host frequently prevents a sequence of large user-supplied libraries from growing
-  // those allocations until HarmonyOS reports a foreground THREAD_BLOCK freeze.
-  private static readonly RECYCLE_TASK_INTERVAL: number = 3;
+  // those allocations until HarmonyOS reports a foreground THREAD_BLOCK freeze. Six completed
+  // tasks still bounds growth while halving the rebuild stalls multi-request sources incur.
+  private static readonly RECYCLE_TASK_INTERVAL: number = 6;
   // A wait that stays unsuccessful past this point is treated as a stuck host (missing
   // lifecycle callback or an unfinished reset) instead of a normal attach race.
   private static readonly RECOVERY_GRACE_MS: number = 1500;
@@ -367,6 +371,34 @@ export class BookSourceStageWebRuntime {
       ` queued=${this.tasks.length} done=${this.completedTaskCount}`;
   }
 
+  /** Compact URL preview for diagnostics. Keeps the query (to spot per-replay changes) but
+   *  drops obvious credential params and truncates. */
+  private summarizeUrl(spec: string): string {
+    let value = (spec || '').trim();
+    const optionAt = value.indexOf(',{');
+    if (optionAt > 0) value = value.substring(0, optionAt).trim();
+    value = value.replace(/([?&](?:token|sign|key|secret|password|session|auth)[^&]*)/gi, '$1·');
+    return value.length > 160 ? value.substring(0, 160) + '…' : value;
+  }
+
+  /** Translates raw transport errors (e.g. HarmonyOS "Operation timeout") into readable text. */
+  private humanizeNetworkError(raw: string): string {
+    const value = (raw || '').trim();
+    if (!value) return '书源脚本网络请求失败';
+    if (/2300028|operation\s+timeout|timed?\s*out|timeout/i.test(value)) {
+      return `接口请求超时：源站长时间无响应（${this.hostFromSpec(value)}）`;
+    }
+    if (/2300002|2300003|2300005|2300006|2300007|connect/i.test(value)) {
+      return `无法连接源站（${this.hostFromSpec(value)}）：${value}`;
+    }
+    return value;
+  }
+
+  private hostFromSpec(spec: string): string {
+    const match = (spec || '').match(/^https?:\/\/([^/?#]+)/i);
+    return match ? match[1] : '未知主机';
+  }
+
   private startNext(): void {
     if (this.running) return;
     if (!this.findReadyController()) {
@@ -405,13 +437,13 @@ export class BookSourceStageWebRuntime {
     // unauthenticated request or overwrite the newly saved state when the stage completes.
     const persistedAtStart = await AppDatabase.getInstance().getBookSource(request.source.bookSourceUrl);
     if (persistedAtStart) {
-      if (!request.source.variable && persistedAtStart.variable) request.source.variable = persistedAtStart.variable;
-      if (!request.source.loginHeader && persistedAtStart.loginHeader) {
-        request.source.loginHeader = persistedAtStart.loginHeader;
-      }
-      if ((!request.source.loginInfo || request.source.loginInfo === '{}') && persistedAtStart.loginInfo) {
-        request.source.loginInfo = persistedAtStart.loginInfo;
-      }
+      // Persisted state is authoritative: the login panel (tone/type/explore switches) and the
+      // editor write runtime state through the database, while coordinators may still hold a
+      // snapshot captured before that save. A stale non-empty snapshot previously won whenever
+      // it was not literally empty, silently ignoring freshly saved settings.
+      request.source.variable = persistedAtStart.variable || request.source.variable;
+      request.source.loginHeader = persistedAtStart.loginHeader || request.source.loginHeader;
+      request.source.loginInfo = persistedAtStart.loginInfo || request.source.loginInfo;
     }
     const sourceKey = request.source.bookSourceUrl || request.source.bookSourceName || 'source';
     const journal = new BookSourceExecutionJournal();
@@ -428,6 +460,10 @@ export class BookSourceStageWebRuntime {
     let requestCount = 0;
     let totalResponseBytes = 0;
     let lastResponseBody = '';
+    // A replay that requests the SAME spec again means the cached response was not reused —
+    // that is the runaway pattern the request guard exists to stop. Distinct legitimate
+    // requests (a source fetching several categories/tabs) are bounded separately.
+    const issuedSpecs: Record<string, number> = {};
     for (let stepIndex = 0; stepIndex < 20; stepIndex++) {
       this.ensureNotCancelled(request);
       const script = this.buildScript(request, responses, stringResults, cookies, cacheState,
@@ -491,14 +527,46 @@ export class BookSourceStageWebRuntime {
         continue;
       }
       if (step.pendingAjax) {
+        const spec = step.pendingAjax;
+        const reissued = Object.prototype.hasOwnProperty.call(issuedSpecs, spec);
+        issuedSpecs[spec] = (issuedSpecs[spec] || 0) + 1;
+        const repeatCount = issuedSpecs[spec];
         requestCount++;
-        const requestLimit = Math.max(1, Math.min(request.maxRequestCount || 12, 12));
-        if (requestCount > requestLimit) throw new Error('书源脚本网络请求次数过多');
-        journal.markRequestStarted(`${BookSourceHostActionKind.HTTP_REQUEST}\n${step.pendingAjax}`);
-        const response = await this.fetch(request, step.pendingAjax, step.pendingHeaders);
+        // Distinct legitimate requests are allowed up to a hard ceiling tied to the 20-pass
+        // replay limit; reissuing the SAME spec repeatedly (cached response never consumed)
+        // trips the tighter runaway threshold regardless of budget.
+        const distinctLimit = Math.max(request.maxRequestCount || 12, 16);
+        const repeatLimit = Math.max(1, Math.min(request.maxRequestCount || 12, 12));
+        console.info('[StageWebRuntime] fetch #' + requestCount +
+          ' step=' + stepIndex + (reissued ? ' reissue=' + repeatCount : '') +
+          ' src=' + (request.source.bookSourceName || '') +
+          ' url=' + this.summarizeUrl(spec));
+        if (reissued && repeatCount > repeatLimit) {
+          console.warn('[StageWebRuntime] repeated request storm for ' +
+            (request.source.bookSourceName || '') + ' x' + repeatCount + ', ' + this.describeState());
+          throw new Error('书源脚本网络请求次数过多');
+        }
+        if (requestCount > distinctLimit) {
+          console.warn('[StageWebRuntime] request ceiling exceeded for ' +
+            (request.source.bookSourceName || '') + ', ' + this.describeState());
+          throw new Error('书源脚本网络请求次数过多');
+        }
+        journal.markRequestStarted(`${BookSourceHostActionKind.HTTP_REQUEST}\n${spec}`);
+        const fetchStartedAt = Date.now();
+        const response = await this.fetch(request, spec, step.pendingHeaders);
+        console.info('[StageWebRuntime] fetch done in ' + (Date.now() - fetchStartedAt) + 'ms' +
+          ' status=' + response.statusCode + (response.success ? '' : ' err=' + (response.error || '').slice(0, 60)));
         this.ensureNotCancelled(request);
         if (!response.success && response.statusCode === 0) {
-          throw new Error(response.error || '书源脚本网络请求失败');
+          // Rhino raises inside java.ajax so the source script's own try/catch can absorb a dead
+          // optional endpoint. The replay host cannot throw into the script; recording the
+          // failure as the response body gives the script the same chance to recover instead of
+          // killing the whole stage (e.g. paragraph-comment servers that are simply offline).
+          console.warn('[StageWebRuntime] request failed, recording error body: ' +
+            (response.error || 'network error'));
+          journal.recordResponse(spec,
+            JSON.stringify({ code: 599, message: this.humanizeNetworkError(response.error) }));
+          continue;
         }
         // A UTF-8 BOM is transport metadata, not part of the JavaScript-facing response body.
         // Some imported source helpers feed java.ajax() directly into JSON.parse(), where ArkWeb
@@ -687,8 +755,9 @@ export class BookSourceStageWebRuntime {
         }
       } catch (_) {
       }
-      return await new AnalyzeUrl(request.source, client, runtimeHeaders).fetch(requestUrl, responseLimit,
-        request.debugContext);
+      return await new AnalyzeUrl(request.source, client, runtimeHeaders)
+        .setNoTimeoutRetry(true)
+        .fetch(requestUrl, responseLimit, request.debugContext);
     } finally {
       if (this.activeHttpClient === client) this.activeHttpClient = null;
     }
@@ -1021,7 +1090,7 @@ export class BookSourceStageWebRuntime {
       `const m=String(v[k]??'').match(/^Bearer\\s+([A-Za-z0-9_-]+)\\.([A-Za-z0-9_-]+)\\./i);if(!m)continue;try{` +
       `let p=m[2].replace(/-/g,'+').replace(/_/g,'/');while(p.length%4)p+='=';const d=JSON.parse(b64d(p)||'{}');` +
       `if(Number(d.exp||0)>0&&Number(d.exp)*1000<=Number(S.fixedNow)+30000)return null;}catch(e){}}return v;}` +
-      `const source={bookSourceUrl:S.sourceUrl,bookSourceName:S.sourceName,header:S.sourceHeader,loginUrl:S.sourceLoginUrl||'',` +
+      `const source={key:S.sourceUrl,bookSourceUrl:S.sourceUrl,bookSourceName:S.sourceName,header:S.sourceHeader,loginUrl:S.sourceLoginUrl||'',` +
       `getKey:function(){return S.sourceUrl;},getTag:function(){return S.sourceName;},getSource:function(){return this;},` +
       `getLoginHeader:function(){return S.sourceLoginHeader||'';},` +
       `getLoginHeaderMap:loginHeaderMap,` +

@@ -1,4 +1,4 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
@@ -15,6 +15,9 @@ import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { EyeTurnController } from '../core/reader/EyeTurnController';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import fs from '@ohos.file.fs';
+import { HdsFeedback } from '../utils/HdsFeedback';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
+import { TapZoneSettingsDialogContent } from '../components/TapZoneSettingsDialog';
 class ReaderCustomFontItem {
   familyName: string = '';
   filePath: string = '';
@@ -72,6 +75,7 @@ struct SettingsPage {
   @StorageLink('readerScreenTimeoutMinutes') readerScreenTimeoutMinutes: number =
     ReaderSettingsStore.SCREEN_TIMEOUT_ALWAYS_ON;
   @StorageLink('readerExtendToStatusBar') readerExtendToStatusBar: boolean = false;
+  @StorageLink('readerKeepParagraphIndent') keepParagraphIndent: boolean = false;
   @StorageLink('readerHeaderEnabled') readerHeaderEnabled: boolean = false;
   @StorageLink('readerHeaderContentMode') readerHeaderContentMode: string = 'chapter';
   @StorageLink('readerFooterEnabled') readerFooterEnabled: boolean = true;
@@ -94,7 +98,8 @@ struct SettingsPage {
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   @State customFonts: ReaderCustomFontItem[] = [];
   @State previewFontRenderVersion: number = 0;
-  @State showTapZoneSettings: boolean = false;
+  private tapZoneDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onSystemDialogFlagChanged') showTapZoneSettings: boolean = false;
   @State customThemeNameDraft: string = '';
   private readerEyePermissionRequestSerial: number = 0;
 
@@ -165,6 +170,9 @@ struct SettingsPage {
             this.readerReplaceRulesEntryItem()
             this.switchItem('正文扩展至状态栏', '开启后正文阅读区域会延伸到顶部状态栏安全区', this.readerExtendToStatusBar, (value: boolean) => {
               this.setReaderExtendToStatusBar(value);
+            })
+            this.switchItem('保留段首缩进', '章节开头与页首保留原文的全角空格缩进', this.keepParagraphIndent, (value: boolean) => {
+              this.setKeepParagraphIndent(value);
             })
           }
           .width('calc(100% - 24vp)')
@@ -292,9 +300,6 @@ struct SettingsPage {
 
       this.titleBar()
 
-      if (this.showTapZoneSettings) {
-        this.tapZoneSettingsDialog()
-      }
     }
     .width('100%')
     .height('100%')
@@ -576,6 +581,7 @@ struct SettingsPage {
     this.readerVolumeTurnPage = settings.volumeTurnPage;
     this.readerScreenTimeoutMinutes = settings.screenTimeoutMinutes;
     this.readerExtendToStatusBar = settings.extendToStatusBar;
+    this.keepParagraphIndent = settings.keepParagraphIndent;
     this.readerHeaderEnabled = settings.readerHeaderEnabled;
     this.readerHeaderContentMode = settings.readerHeaderContentMode;
     this.readerFooterEnabled = settings.readerFooterEnabled;
@@ -642,7 +648,7 @@ struct SettingsPage {
     this.previewFontRenderVersion++;
     this.applyApplicationFont(ThemeRuntime.fontFamily() || systemFontFamily);
     this.saveFontSettings();
-    promptAction.showToast({ message: '已恢复主题默认字体' });
+    HdsFeedback.showToast('已恢复主题默认字体');
   }
 
   rememberCurrentSystemFont(): void {
@@ -657,14 +663,14 @@ struct SettingsPage {
     }
     if (!this.fontFileExists(item.filePath)) {
       this.reloadCustomFonts();
-      promptAction.showToast({ message: '字体文件不存在' });
+      HdsFeedback.showToast('字体文件不存在');
       return;
     }
     this.rememberCurrentSystemFont();
     this.readerFontMode = 'custom';
     const registeredFamily = this.registerCustomFont(item);
     if (!registeredFamily) {
-      promptAction.showToast({ message: '字体注册失败，请更换字体文件' });
+      HdsFeedback.showToast('字体注册失败，请更换字体文件');
       return;
     }
     this.readerFontFamily = item.familyName;
@@ -674,7 +680,7 @@ struct SettingsPage {
     this.applyApplicationFont(registeredFamily);
     this.saveFontSettings();
     if (showToast) {
-      promptAction.showToast({ message: `已选择字体：${this.readerFontSourceName}` });
+      HdsFeedback.showToast(`已选择字体：${this.readerFontSourceName}`);
     }
   }
 
@@ -1302,7 +1308,7 @@ struct SettingsPage {
   deleteCurrentCustomTheme(): void {
     const data = this.customThemeData();
     if (ReaderCustomThemeHelper.schemesForMode(data, this.appDarkMode).length <= 1) {
-      promptAction.showToast({ message: '至少保留一套自定义背景' });
+      HdsFeedback.showToast('至少保留一套自定义背景');
       return;
     }
     ReaderCustomThemeHelper.removeSelected(data, this.appDarkMode);
@@ -1347,7 +1353,7 @@ struct SettingsPage {
       this.persistCustomThemeData(data);
     } catch (e) {
       console.error('选择阅读背景图片失败:', e);
-      promptAction.showToast({ message: '选择背景图片失败' });
+      HdsFeedback.showToast('选择背景图片失败');
     }
   }
 
@@ -1507,18 +1513,18 @@ struct SettingsPage {
         this.readerEyeTurnEnabled = granted;
         this.saveReaderEyeTurnSettings();
         if (!granted) {
-          promptAction.showToast({ message: '需要相机权限才能使用眼动翻页' });
+          HdsFeedback.showToast('需要相机权限才能使用眼动翻页');
           return;
         }
         if (!this.readerEyeTurnPortraitCalibration && !this.readerEyeTurnLandscapeCalibration) {
-          promptAction.showToast({ message: '已开启，请进入正文阅读设置完成眼动校准' });
+          HdsFeedback.showToast('已开启，请进入正文阅读设置完成眼动校准');
         }
       })
       .catch((error: Error): void => {
         if (serial !== this.readerEyePermissionRequestSerial) return;
         this.readerEyeTurnEnabled = false;
         this.saveReaderEyeTurnSettings();
-        promptAction.showToast({ message: `眼动翻页启用失败：${error.message}` });
+        HdsFeedback.showToast(`眼动翻页启用失败：${error.message}`);
       });
   }
 
@@ -1626,6 +1632,13 @@ struct SettingsPage {
   setReaderExtendToStatusBar(enabled: boolean): void {
     this.readerExtendToStatusBar = enabled;
     this.saveReaderInteractionSettings();
+  }
+
+  setKeepParagraphIndent(enabled: boolean): void {
+    this.keepParagraphIndent = enabled;
+    ReaderSettingsStore.saveKeepParagraphIndent(getContext(this), enabled).catch((e: Error) => {
+      console.error('保存保留段首缩进设置失败:', e);
+    });
   }
 
   setReaderPreloadEnabled(enabled: boolean): void {
@@ -1853,6 +1866,32 @@ struct SettingsPage {
       .padding({ left: 16, right: 16, top: 20, bottom: 8 })
   }
 
+
+  onSystemDialogFlagChanged(): void {
+    if (!this.showTapZoneSettings) this.tapZoneDialogSession.close(this.getUIContext());
+  }
+
+  presentTapZoneSettings(): void {
+    this.showTapZoneSettings = true;
+    this.tapZoneDialogSession.open(this.getUIContext(), (): void => {
+      this.tapZoneSettingsContent();
+    }, {
+      autoCancel: false,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示点击区域设置弹窗失败:'
+    });
+  }
+
+  @Builder
+  tapZoneSettingsContent() {
+    TapZoneSettingsDialogContent({
+      onDone: (): void => {
+        this.showTapZoneSettings = false;
+        this.tapZoneDialogSession.close(this.getUIContext());
+      }
+    })
+  }
+
   @Builder
   fontSettingPanel() {
     Row() {
@@ -2041,7 +2080,7 @@ struct SettingsPage {
         .fontColor('#FFFFFF')
         .margin({ left: 12 })
         .onClick(() => {
-          this.showTapZoneSettings = true;
+          this.presentTapZoneSettings();
         })
     }
     .width('100%')
@@ -2052,103 +2091,7 @@ struct SettingsPage {
     .alignItems(VerticalAlign.Center)
   }
 
-  @Builder
-  tapZoneSettingsDialog() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column({ space: 14 }) {
-        Row() {
-          Text('点击区域动作')
-            .fontSize(18)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.primaryTextColor())
-            .layoutWeight(1)
 
-          Button('×')
-            .fontSize(24)
-            .fontColor(this.primaryTextColor())
-            .width(44)
-            .height(44)
-            .backgroundColor(Color.Transparent)
-            .padding(0)
-            .onClick(() => {
-              this.showTapZoneSettings = false;
-            })
-        }
-        .width('100%')
-        .height(48)
-        .alignItems(VerticalAlign.Center)
-
-        Text('点击九宫格可循环设置：无动作、菜单、下一页、上一页')
-          .fontSize(12)
-          .fontColor(this.subTextColor())
-          .width('100%')
-
-        Column() {
-          ForEach([0, 1, 2], (row: number) => {
-            Row() {
-              ForEach([0, 1, 2], (column: number) => {
-                this.tapZoneCell(row * 3 + column)
-              }, (column: number) => `${row}_${column}`)
-            }
-            .width('100%')
-            .layoutWeight(1)
-          }, (row: number) => `${row}`)
-        }
-        .width('100%')
-        .height(280)
-        .border({ width: 1, color: this.appDarkMode ? '#44FFFFFF' : '#22000000' })
-        .clip(true)
-
-        Row({ space: 12 }) {
-          Button('重置默认')
-            .layoutWeight(1)
-            .height(40)
-            .fontSize(14)
-            .backgroundColor(this.inputColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.setTapZoneActions('3,3,3,3,1,2,2,2,2');
-            })
-
-          Button('完成')
-            .layoutWeight(1)
-            .height(40)
-            .fontSize(14)
-            .backgroundColor(this.buttonColor())
-            .fontColor('#FFFFFF')
-            .onClick(() => {
-              this.showTapZoneSettings = false;
-            })
-        }
-        .width('100%')
-      }
-      .width('calc(100% - 40vp)')
-      .padding(18)
-      .borderRadius(16)
-      .backgroundColor(this.cardColor())
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ top: this.statusBarHeight, bottom: this.navBarHeight })
-    .backgroundColor('#66000000')
-  }
-
-  @Builder
-  tapZoneCell(index: number) {
-    Text(this.tapActionLabel(this.readerTapZoneActionAt(index)))
-      .fontSize(16)
-      .fontWeight(FontWeight.Medium)
-      .fontColor(this.primaryTextColor())
-      .textAlign(TextAlign.Center)
-      .width('100%')
-      .height('100%')
-      .layoutWeight(1)
-      .backgroundColor(this.tapZoneCellColor(this.readerTapZoneActionAt(index)))
-      .border({ width: 0.5, color: this.appDarkMode ? '#33FFFFFF' : '#22000000' })
-      .onClick(() => {
-        this.cycleTapZoneAction(index);
-      })
-  }
 
   @Builder
   readerThemePanel() {
@@ -2556,7 +2499,7 @@ struct SettingsPage {
     .border({ width: { bottom: 0.5 }, color: this.settingsDividerColor() })
     .alignItems(VerticalAlign.Center)
     .onClick((): void => {
-      promptAction.showToast({ message: '请打开任意书籍，在正文阅读设置中点击“眼动校准”' });
+      HdsFeedback.showToast('请打开任意书籍，在正文阅读设置中点击“眼动校准”');
     })
   }
 

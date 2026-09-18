@@ -1,4 +1,4 @@
-import { promptAction, router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { avSession } from '@kit.AVSessionKit';
@@ -20,6 +20,8 @@ import { TtsCatalogSheet, CatalogTitleDataSource } from '../components/TtsCatalo
 import { BookSourceStageRuntimeHost } from '../components/BookSourceStageRuntimeHost';
 import { BookSourceAudioWebRuntimeHost } from '../components/BookSourceAudioWebRuntimeHost';
 import { WebBookFetchRuntimeHost } from '../components/WebBookFetchRuntimeHost';
+import { HdsFeedback } from '../utils/HdsFeedback';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
 
 class AudioBookPlaybackListener implements RemoteAudioPlaybackListener {
   private readonly stateCallback: (state: string) => void;
@@ -74,7 +76,8 @@ struct AudioBookPage {
   @State showChapterList: boolean = false;
   @StorageLink('globalTtsAudioCatalogReverseOrder') @Watch('onChapterOrderChanged')
   chapterReverseOrder: boolean = false;
-  @State showVoiceDialog: boolean = false;
+  private voiceDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onSystemDialogFlagChanged') showVoiceDialog: boolean = false;
   @State voiceCodeInput: string = '';
   @State sleepMinutes: number = 0;
   @State sleepRemainingSeconds: number = 0;
@@ -183,9 +186,6 @@ struct AudioBookPage {
 
       if (this.showChapterList) {
         this.chapterListOverlay()
-      }
-      if (this.showVoiceDialog) {
-        this.voiceCodeDialog()
       }
       BookSourceStageRuntimeHost()
       BookSourceAudioWebRuntimeHost()
@@ -361,6 +361,22 @@ struct AudioBookPage {
     .onClick(() => { if (this.playbackState !== 'loading') this.togglePlayback(); })
   }
 
+
+  onSystemDialogFlagChanged(): void {
+    if (!this.showVoiceDialog) this.voiceDialogSession.close(this.getUIContext());
+  }
+
+  openVoiceCodeDialog(): void {
+    this.showVoiceDialog = true;
+    this.voiceDialogSession.open(this.getUIContext(), (): void => {
+      this.voiceCodeDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示音色代码弹窗失败:'
+    });
+  }
+
   @Builder
   audioPanelActions() {
     Row({ space: 10 }) {
@@ -381,57 +397,42 @@ struct AudioBookPage {
   }
 
   @Builder
-  voiceCodeDialog() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column()
+  voiceCodeDialogContent() {
+    Column({ space: 14 }) {
+      Text('听书音色代码')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+      Text('填写书源详情中列出的数字音色代码；留空使用书源默认音色')
+        .fontSize(13)
+        .fontColor(this.subTextColor())
+      TextInput({ text: this.voiceCodeInput, placeholder: '留空使用书源默认音色' })
+        .type(InputType.Number)
+        .height(44)
         .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .onClick(() => {
-          this.showVoiceDialog = false;
+        .backgroundColor(this.inputColor())
+        .fontColor(this.primaryTextColor())
+        .onChange((value: string) => {
+          this.voiceCodeInput = value;
         })
-      Column({ space: 14 }) {
-        Text('听书音色代码')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-        Text('填写书源详情中列出的数字音色代码；留空使用书源默认音色')
-          .fontSize(13)
-          .fontColor(this.subTextColor())
-        TextInput({ text: this.voiceCodeInput, placeholder: '留空使用书源默认音色' })
-          .type(InputType.Number)
-          .height(44)
-          .width('100%')
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
           .backgroundColor(this.inputColor())
           .fontColor(this.primaryTextColor())
-          .onChange((value: string) => {
-            this.voiceCodeInput = value;
+          .onClick(() => {
+            this.showVoiceDialog = false;
           })
-        Row({ space: 10 }) {
-          Button('取消')
-            .layoutWeight(1)
-            .backgroundColor(this.inputColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.showVoiceDialog = false;
-            })
-          Button('保存并重新加载')
-            .layoutWeight(1)
-            .backgroundColor(this.accentColor())
-            .fontColor('#FFFFFF')
-            .onClick(() => this.saveVoiceCode())
-        }
-        .width('100%')
+        Button('保存并重新加载')
+          .layoutWeight(1)
+          .backgroundColor(this.accentColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => this.saveVoiceCode())
       }
-      .width('86%')
-      .padding(20)
-      .borderRadius(16)
-      .backgroundColor(this.cardColor())
-    }
-    .width('100%')
-    .height('100%')
-    .zIndex(30)
+      .width('100%')
+    }    .padding(20)
   }
+
 
   @Builder
   coverSection() {
@@ -912,7 +913,7 @@ struct AudioBookPage {
     }
     this.playbackState = 'error';
     this.statusText = `播放失败：${message}`;
-    promptAction.showToast({ message: this.statusText });
+    HdsFeedback.showToast(this.statusText);
   }
 
   changeSpeed(value: number): void {
@@ -943,7 +944,7 @@ struct AudioBookPage {
       if (this.sleepRemainingSeconds <= 0) {
         this.clearSleepTimer();
         this.sleepMinutes = 0;
-        promptAction.showToast({ message: '定时停止已生效' });
+        HdsFeedback.showToast('定时停止已生效');
       }
     }, 1000);
   }
@@ -1007,7 +1008,7 @@ struct AudioBookPage {
 
   openVoiceDialog(): void {
     this.voiceCodeInput = this.book?.getVariable('custom') || '';
-    this.showVoiceDialog = true;
+    this.openVoiceCodeDialog();
   }
 
   currentVoiceCode(): string {

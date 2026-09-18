@@ -16,6 +16,8 @@ import { WebDavConnection, WebDavEntry } from '../webdav/WebDavModels';
 import { WebDavSecretStore } from '../webdav/WebDavSecretStore';
 import { WebDavSettingsStore } from '../webdav/WebDavSettingsStore';
 import { FormDraftStore } from '../utils/FormDraftStore';
+import { HdsFeedback } from '../utils/HdsFeedback';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
 
 class WebDavFormDraft {
   connectionJson: string = '';
@@ -49,7 +51,9 @@ struct WebDavPage {
   @State encryptBackup: boolean = false;
   @State backupPassword: string = '';
   @State includeLocalBooks: boolean = false;
-  @State showRestorePasswordDialog: boolean = false;
+  private restorePasswordDialogSession: SystemDialogSession = new SystemDialogSession();
+  private entryNameDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onSystemDialogFlagChanged') showRestorePasswordDialog: boolean = false;
   @State restorePassword: string = '';
   @State restorePasswordError: string = '';
   @State pendingRestoreSourcePath: string = '';
@@ -59,7 +63,7 @@ struct WebDavPage {
   @State contextMenuY: number = 96;
   @State contextViewportWidth: number = 360;
   @State contextViewportHeight: number = 720;
-  @State showEntryNameDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showEntryNameDialog: boolean = false;
   @State entryNameMode: string = '';
   @State entryNameDraft: string = '';
   private connectionInitialized: boolean = false;
@@ -84,16 +88,7 @@ struct WebDavPage {
     this.persistFormDraftNow();
   }
 
-  onBackPress(): boolean {
-    if (this.showRestorePasswordDialog) {
-      this.cancelRestorePassword();
-      return true;
-    }
-    if (this.showEntryNameDialog) {
-      this.closeEntryNameDialog();
-      return true;
-    }
-    if (this.showEntryActionMenu) {
+  onBackPress(): boolean {    if (this.showEntryActionMenu) {
       this.closeEntryActions();
       return true;
     }
@@ -126,13 +121,7 @@ struct WebDavPage {
         this.entryActionMenu()
       }
 
-      if (this.showEntryNameDialog) {
-        this.entryNameDialog()
-      }
 
-      if (this.showRestorePasswordDialog) {
-        this.restorePasswordDialog()
-      }
 
       if (this.busy) {
         Column({ space: 12 }) {
@@ -347,121 +336,119 @@ struct WebDavPage {
     .onClick(action)
   }
 
-  @Builder
-  entryNameDialog() {
-    Column() {
-      Column() {
-        Text(this.entryNameMode === 'create' ? '创建文件夹' : '重命名')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 14 })
-          TextInput({ text: this.entryNameDraft,
-          placeholder: this.entryNameMode === 'create' ? '文件夹名称' : '新名称' })
-          .width('100%')
-          .height(44)
-          .backgroundColor(this.softColor())
-          .fontColor(this.primaryTextColor())
-          .placeholderColor(this.subTextColor())
-          .onChange((value: string) => {
-            this.entryNameDraft = value;
-            this.scheduleFormDraftSave();
-          })
-        Row({ space: 10 }) {
-          Button('取消')
-            .layoutWeight(1)
-            .height(42)
-            .backgroundColor(this.softColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.closeEntryNameDialog())
-          Button(this.entryNameMode === 'create' ? '创建' : '保存')
-            .layoutWeight(1)
-            .height(42)
-            .backgroundColor(this.accentColor())
-            .fontColor('#FFFFFF')
-            .onClick(() => this.submitEntryNameDialog())
-        }
-        .width('100%')
-        .margin({ top: 14 })
-      }
-      .width('86%')
-      .padding(20)
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'),
-        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#66000000')
-    .justifyContent(FlexAlign.Center)
+
+  onSystemDialogFlagChanged(): void {
+    if (!this.showEntryNameDialog) this.entryNameDialogSession.close(this.getUIContext());
+    if (!this.showRestorePasswordDialog) this.restorePasswordDialogSession.close(this.getUIContext());
+  }
+
+  openEntryNameDialog(): void {
+    this.showEntryNameDialog = true;
+    this.entryNameDialogSession.open(this.getUIContext(), (): void => {
+      this.entryNameDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示文件命名弹窗失败:'
+    });
+  }
+
+  openRestorePasswordDialog(): void {
+    this.showRestorePasswordDialog = true;
+    this.restorePasswordDialogSession.open(this.getUIContext(), (): void => {
+      this.restorePasswordDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示恢复密码弹窗失败:'
+    });
   }
 
   @Builder
-  restorePasswordDialog() {
+  entryNameDialogContent() {
     Column() {
-      Column({ space: 12 }) {
-        Text('输入备份密码')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-        Text('检测到该远端备份已加密，请输入创建备份时设置的密码。')
-          .fontSize(13)
-          .fontColor(this.subTextColor())
-          .width('100%')
-        TextInput({ text: this.restorePassword, placeholder: '输入备份密码' })
-          .type(InputType.Password)
-          .height(44)
-          .backgroundColor(this.softColor())
-          .onChange((value: string) => {
-            this.restorePassword = value;
-            this.restorePasswordError = '';
-          })
-        if (this.restorePasswordError) {
-          Text(this.restorePasswordError)
-            .fontSize(12)
-            .fontColor('#D9485F')
-            .width('100%')
-        }
-        Row({ space: 10 }) {
-          Button('取消')
-            .layoutWeight(1)
-            .height(40)
-            .fontColor(this.primaryTextColor())
-            .backgroundColor(this.softColor())
-            .onClick(() => this.cancelRestorePassword())
-          Button('继续恢复')
-            .layoutWeight(1)
-            .height(40)
-            .fontColor(Color.White)
-            .backgroundColor(this.accentColor())
-            .onClick(() => this.confirmRestorePassword())
-        }
+      Text(this.entryNameMode === 'create' ? '创建文件夹' : '重命名')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 14 })
+        TextInput({ text: this.entryNameDraft,
+        placeholder: this.entryNameMode === 'create' ? '文件夹名称' : '新名称' })
+        .width('100%')
+        .height(44)
+        .backgroundColor(this.softColor())
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.subTextColor())
+        .onChange((value: string) => {
+          this.entryNameDraft = value;
+          this.scheduleFormDraftSave();
+        })
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(42)
+          .backgroundColor(this.softColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.closeEntryNameDialog())
+        Button(this.entryNameMode === 'create' ? '创建' : '保存')
+          .layoutWeight(1)
+          .height(42)
+          .backgroundColor(this.accentColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => this.submitEntryNameDialog())
       }
-      .width('86%')
-      .padding(20)
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'),
-        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#66000000')
-    .justifyContent(FlexAlign.Center)
+      .width('100%')
+      .margin({ top: 14 })
+    }    .padding(20)
   }
+
+
+  @Builder
+  restorePasswordDialogContent() {
+    Column({ space: 12 }) {
+      Text('输入备份密码')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+      Text('检测到该远端备份已加密，请输入创建备份时设置的密码。')
+        .fontSize(13)
+        .fontColor(this.subTextColor())
+        .width('100%')
+      TextInput({ text: this.restorePassword, placeholder: '输入备份密码' })
+        .type(InputType.Password)
+        .height(44)
+        .backgroundColor(this.softColor())
+        .onChange((value: string) => {
+          this.restorePassword = value;
+          this.restorePasswordError = '';
+        })
+      if (this.restorePasswordError) {
+        Text(this.restorePasswordError)
+          .fontSize(12)
+          .fontColor('#D9485F')
+          .width('100%')
+      }
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(40)
+          .fontColor(this.primaryTextColor())
+          .backgroundColor(this.softColor())
+          .onClick(() => this.cancelRestorePassword())
+        Button('继续恢复')
+          .layoutWeight(1)
+          .height(40)
+          .fontColor(Color.White)
+          .backgroundColor(this.accentColor())
+          .onClick(() => this.confirmRestorePassword())
+      }
+      .width('100%')
+    }    .padding(20)
+  }
+
 
   @Builder
   backupPanel() {
@@ -829,11 +816,11 @@ struct WebDavPage {
     if (this.busy) return;
     const baseUrl = WebDavSettingsStore.normalizeBaseUrl(this.connection.baseUrl);
     if (!/^https?:\/\//i.test(baseUrl)) {
-      promptAction.showToast({ message: 'WebDAV 地址必须以 http:// 或 https:// 开头' });
+      HdsFeedback.showToast('WebDAV 地址必须以 http:// 或 https:// 开头');
       return;
     }
     if (!this.connection.username || !this.password) {
-      promptAction.showToast({ message: '请输入用户名和密码' });
+      HdsFeedback.showToast('请输入用户名和密码');
       return;
     }
     this.connection.baseUrl = baseUrl;
@@ -863,9 +850,9 @@ struct WebDavPage {
       this.entries = await new WebDavClient(saved, this.password).list('');
       this.tab = 'files';
       this.busyProgress = 100;
-      promptAction.showToast({ message: `WebDAV 连接已保存${credentialWarning}` });
+      HdsFeedback.showToast(`WebDAV 连接已保存${credentialWarning}`);
     } catch (error) {
-      promptAction.showToast({ message: `连接失败：${this.message(error)}` });
+      HdsFeedback.showToast(`连接失败：${this.message(error)}`);
     } finally {
       this.busy = false;
       this.busyText = '';
@@ -898,7 +885,7 @@ struct WebDavPage {
       this.entries = await new WebDavClient(this.connection, this.password).list(this.currentPath);
       this.busyProgress = 100;
     } catch (error) {
-      promptAction.showToast({ message: `读取失败：${this.message(error)}` });
+      HdsFeedback.showToast(`读取失败：${this.message(error)}`);
     } finally {
       this.busy = false;
       this.busyText = '';
@@ -913,7 +900,7 @@ struct WebDavPage {
       return;
     }
     if (!entry.readableBook()) {
-      promptAction.showToast({ message: '当前仅支持 TXT 和 EPUB' });
+      HdsFeedback.showToast('当前仅支持 TXT 和 EPUB');
       return;
     }
     if (this.busy) return;
@@ -929,7 +916,7 @@ struct WebDavPage {
       this.busy = false;
       await router.pushUrl({ url: 'pages/ReadBook', params: { bookUrl: book.bookUrl } });
     } catch (error) {
-      promptAction.showToast({ message: `打开失败：${this.message(error)}` });
+      HdsFeedback.showToast(`打开失败：${this.message(error)}`);
     } finally {
       this.busy = false;
       this.busyText = '';
@@ -948,7 +935,7 @@ struct WebDavPage {
     this.actionEntryPath = '';
     this.entryNameMode = 'create';
     this.entryNameDraft = '';
-    this.showEntryNameDialog = true;
+    this.openEntryNameDialog();
   }
 
   openEntryActions(entry: WebDavEntry, event?: GestureEvent): void {
@@ -976,7 +963,7 @@ struct WebDavPage {
     this.showEntryActionMenu = false;
     this.entryNameMode = 'rename';
     this.entryNameDraft = entry.name;
-    this.showEntryNameDialog = true;
+    this.openEntryNameDialog();
   }
 
   closeEntryNameDialog(): void {
@@ -991,7 +978,7 @@ struct WebDavPage {
     const name = this.entryNameDraft.trim();
     const validation = this.validateEntryName(name);
     if (validation) {
-      promptAction.showToast({ message: validation });
+      HdsFeedback.showToast(validation);
       return;
     }
     const entry = this.entryNameMode === 'rename' ? this.actionEntry() : null;
@@ -1002,7 +989,7 @@ struct WebDavPage {
     const duplicate = this.entries.some((item: WebDavEntry): boolean =>
       item.name === name && (!entry || item.relativePath !== entry.relativePath));
     if (duplicate) {
-      promptAction.showToast({ message: '同名文件或文件夹已存在' });
+      HdsFeedback.showToast('同名文件或文件夹已存在');
       return;
     }
     const mode = this.entryNameMode;
@@ -1020,9 +1007,9 @@ struct WebDavPage {
       this.busyProgress = 80;
       this.entries = await client.list(this.currentPath);
       this.busyProgress = 100;
-      promptAction.showToast({ message: mode === 'create' ? '文件夹已创建' : '重命名完成' });
+      HdsFeedback.showToast(mode === 'create' ? '文件夹已创建' : '重命名完成');
     } catch (error) {
-      promptAction.showToast({ message: `${mode === 'create' ? '创建' : '重命名'}失败：${this.message(error)}` });
+      HdsFeedback.showToast(`${mode === 'create' ? '创建' : '重命名'}失败：${this.message(error)}`);
     } finally {
       this.busy = false;
       this.busyText = '';
@@ -1053,9 +1040,9 @@ struct WebDavPage {
       this.busyProgress = 80;
       this.entries = await client.list(this.currentPath);
       this.busyProgress = 100;
-      promptAction.showToast({ message: '删除完成' });
+      HdsFeedback.showToast('删除完成');
     } catch (error) {
-      promptAction.showToast({ message: `删除失败：${this.message(error)}` });
+      HdsFeedback.showToast(`删除失败：${this.message(error)}`);
     } finally {
       this.busy = false;
       this.busyText = '';
@@ -1074,7 +1061,7 @@ struct WebDavPage {
     } catch (error) {
       const message = this.message(error);
       if (!message.toLowerCase().includes('cancel')) {
-        promptAction.showToast({ message: `选择文件失败：${message}` });
+        HdsFeedback.showToast(`选择文件失败：${message}`);
       }
       return;
     }
@@ -1108,12 +1095,12 @@ struct WebDavPage {
       this.entries = await client.list(this.currentPath);
       this.busyProgress = 100;
       if (failed === 0) {
-        promptAction.showToast({ message: `已上传 ${uploaded} 个文件` });
+        HdsFeedback.showToast(`已上传 ${uploaded} 个文件`);
       } else {
-        promptAction.showToast({ message: `上传完成：成功 ${uploaded}，失败 ${failed}；${firstFailure}` });
+        HdsFeedback.showToast(`上传完成：成功 ${uploaded}，失败 ${failed}；${firstFailure}`);
       }
     } catch (error) {
-      promptAction.showToast({ message: `上传失败：${this.message(error)}` });
+      HdsFeedback.showToast(`上传失败：${this.message(error)}`);
     } finally {
       this.busy = false;
       this.busyText = '';
@@ -1147,7 +1134,7 @@ struct WebDavPage {
       this.backups = await new WebDavClient(this.connection, this.password).listBackups();
       this.busyProgress = 100;
     } catch (error) {
-      promptAction.showToast({ message: `读取备份失败：${this.message(error)}` });
+      HdsFeedback.showToast(`读取备份失败：${this.message(error)}`);
     } finally {
       this.busy = false;
       this.busyText = '';
@@ -1158,7 +1145,7 @@ struct WebDavPage {
   async uploadBackup(): Promise<void> {
     if (this.busy) return;
     if (this.encryptBackup && this.backupPassword.length < 8) {
-      promptAction.showToast({ message: '备份加密密码至少需要 8 个字符' });
+      HdsFeedback.showToast('备份加密密码至少需要 8 个字符');
       return;
     }
     const encryptionPassword = this.encryptBackup ? this.backupPassword : '';
@@ -1184,10 +1171,10 @@ struct WebDavPage {
           this.busyProgress = 66 + Math.min(33, Math.floor(ratio * 33));
         });
       this.busyProgress = 100;
-      promptAction.showToast({ message: this.encryptBackup ? 'WebDAV 加密备份上传完成' : 'WebDAV 备份上传完成' });
+      HdsFeedback.showToast(this.encryptBackup ? 'WebDAV 加密备份上传完成' : 'WebDAV 备份上传完成');
       this.backups = await new WebDavClient(this.connection, this.password).listBackups();
     } catch (error) {
-      promptAction.showToast({ message: `备份失败：${this.message(error)}` });
+      HdsFeedback.showToast(`备份失败：${this.message(error)}`);
     } finally {
       await AppDataBackupService.discardExport(archivePath);
       this.busy = false;
@@ -1217,16 +1204,16 @@ struct WebDavPage {
         });
       const summary = await this.importDownloadedBackup(sourcePath, '');
       this.busyProgress = 100;
-      promptAction.showToast({ message: `恢复完成：${summary}` });
+      HdsFeedback.showToast(`恢复完成：${summary}`);
     } catch (error) {
       if (this.isBackupPasswordRequired(error)) {
         keepSourceForPassword = true;
         this.pendingRestoreSourcePath = sourcePath;
         this.restorePassword = '';
         this.restorePasswordError = '';
-        this.showRestorePasswordDialog = true;
+        this.openRestorePasswordDialog();
       } else {
-        promptAction.showToast({ message: `恢复失败：${this.message(error)}` });
+        HdsFeedback.showToast(`恢复失败：${this.message(error)}`);
       }
     } finally {
       if (!keepSourceForPassword) this.deleteRestoreSource(sourcePath);
@@ -1245,7 +1232,7 @@ struct WebDavPage {
     const sourcePath = this.pendingRestoreSourcePath;
     if (!sourcePath || !fs.accessSync(sourcePath)) {
       this.cancelRestorePassword();
-      promptAction.showToast({ message: '待恢复的备份文件已失效，请重新选择' });
+      HdsFeedback.showToast('待恢复的备份文件已失效，请重新选择');
       return;
     }
     this.showRestorePasswordDialog = false;
@@ -1259,7 +1246,7 @@ struct WebDavPage {
       this.deleteRestoreSource(sourcePath);
       this.pendingRestoreSourcePath = '';
       this.restorePassword = '';
-      promptAction.showToast({ message: `恢复完成：${summary}` });
+      HdsFeedback.showToast(`恢复完成：${summary}`);
     } catch (error) {
       this.restorePasswordError = this.message(error);
       this.showRestorePasswordDialog = true;
@@ -1319,9 +1306,9 @@ struct WebDavPage {
     try {
       await new WebDavClient(this.connection, this.password).deleteBackup(entry.relativePath);
       this.backups = this.backups.filter((item: WebDavEntry): boolean => item.relativePath !== entry.relativePath);
-      promptAction.showToast({ message: '远端备份已删除' });
+      HdsFeedback.showToast('远端备份已删除');
     } catch (error) {
-      promptAction.showToast({ message: `删除失败：${this.message(error)}` });
+      HdsFeedback.showToast(`删除失败：${this.message(error)}`);
     } finally {
       this.busy = false;
       this.busyText = '';

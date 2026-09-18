@@ -401,7 +401,8 @@ assert(readerSettingsPage.includes("this.selectItem('翻页方式'") &&
 assert(readerSettingsPage.includes('if (this.readerPageTurnMode === 2)') &&
   readerSettingsPage.includes('this.tapZoneSettingItem()') &&
   readerSettingsPage.includes('ReaderSettingsStore.saveTapZoneActions') &&
-  readerSettingsPage.includes('tapZoneSettingsDialog()'),
+  readerSettingsPage.includes('TapZoneSettingsDialogContent({') &&
+  reader.includes('TapZoneSettingsDialogContent({'),
   'Reading settings must expose the shared tap-zone action editor for click page turning');
 assert(bookSourcePage.includes('checkOptionsDialog()') &&
   bookSourcePage.includes("this.checkActionOption('自动禁用'") &&

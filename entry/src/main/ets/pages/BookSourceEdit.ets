@@ -2,11 +2,12 @@ import { router, window } from '@kit.ArkUI';
 import { KeyboardAvoidMode } from '@ohos.arkui.UIContext';
 import { BookSource } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
-import { promptAction } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { FormDraftStore } from '../utils/FormDraftStore';
+import { HdsFeedback } from '../utils/HdsFeedback';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
 
 class BookSourceEditDraft {
   sourceJson: string = '';
@@ -31,8 +32,10 @@ struct BookSourceEditPage {
   @State currentTab: number = 0;
   @State sourceLoadedVersion: number = 0;
   @State savedSourceSnapshot: string = '';
-  @State showUnsavedDialog: boolean = false;
-  @State showDraftConflictDialog: boolean = false;
+  private unsavedDialogSession: SystemDialogSession = new SystemDialogSession();
+  private draftConflictDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onSystemDialogFlagChanged') showUnsavedDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showDraftConflictDialog: boolean = false;
   @State keyboardInset: number = 0;
   private keyboardAvoidModeConfigured: boolean = false;
   private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
@@ -92,7 +95,7 @@ struct BookSourceEditPage {
             return;
           }
           this.conflictingDraftRaw = raw;
-          this.showDraftConflictDialog = true;
+          this.openDraftConflictDialog();
         } catch (_) {
           FormDraftStore.removePersistent(getContext(this), this.draftKey());
         }
@@ -123,15 +126,15 @@ struct BookSourceEditPage {
 
   async saveSource() {
     if (this.source.isLocked) {
-      promptAction.showToast({ message: '锁定的书源不能修改，请先在书源管理中解锁' });
+      HdsFeedback.showToast('锁定的书源不能修改，请先在书源管理中解锁');
       return;
     }
     if (!this.source.bookSourceUrl) {
-      promptAction.showToast({ message: '请输入书源地址' });
+      HdsFeedback.showToast('请输入书源地址');
       return;
     }
     if (!this.source.bookSourceName) {
-      promptAction.showToast({ message: '请输入书源名称' });
+      HdsFeedback.showToast('请输入书源名称');
       return;
     }
 
@@ -143,7 +146,7 @@ struct BookSourceEditPage {
       if (originalUrl !== this.source.bookSourceUrl) {
         const conflicting = await db.getBookSource(this.source.bookSourceUrl);
         if (conflicting) {
-          promptAction.showToast({ message: '新的书源地址已存在，请更换地址后再保存' });
+          HdsFeedback.showToast('新的书源地址已存在，请更换地址后再保存');
           return;
         }
       }
@@ -156,21 +159,21 @@ struct BookSourceEditPage {
       }
       this.clearDraft();
       this.markSourceSaved();
-      promptAction.showToast({ message: '保存成功' });
+      HdsFeedback.showToast('保存成功');
       router.back();
     } catch (e) {
       console.error('保存书源失败:', e);
-      promptAction.showToast({ message: '保存失败' });
+      HdsFeedback.showToast('保存失败');
     }
   }
 
   async saveSourceAndBackFromDialog(): Promise<void> {
     if (!this.source.bookSourceUrl) {
-      promptAction.showToast({ message: '请输入书源地址' });
+      HdsFeedback.showToast('请输入书源地址');
       return;
     }
     if (!this.source.bookSourceName) {
-      promptAction.showToast({ message: '请输入书源名称' });
+      HdsFeedback.showToast('请输入书源名称');
       return;
     }
     this.showUnsavedDialog = false;
@@ -345,13 +348,7 @@ struct BookSourceEditPage {
       .backgroundColor(this.pageColor())
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
-      if (this.showUnsavedDialog) {
-        this.unsavedChangesDialog()
-      }
 
-      if (this.showDraftConflictDialog) {
-        this.draftConflictDialog()
-      }
     }
     .width('100%')
     .height('100%')
@@ -360,7 +357,7 @@ struct BookSourceEditPage {
 
   openDebugDraft(): void {
     if (!this.source.bookSourceUrl) {
-      promptAction.showToast({ message: '请先填写书源地址' });
+      HdsFeedback.showToast('请先填写书源地址');
       return;
     }
     this.synchronizeRawSourceJson();
@@ -374,7 +371,7 @@ struct BookSourceEditPage {
 
   requestBack(): boolean {
     if (this.hasUnsavedChanges()) {
-      this.showUnsavedDialog = true;
+      this.openUnsavedDialog();
       return true;
     }
     router.back();
@@ -510,7 +507,7 @@ struct BookSourceEditPage {
     this.conflictingDraftRaw = '';
     this.showDraftConflictDialog = false;
     if (!raw || !this.restoreDraft(raw)) {
-      promptAction.showToast({ message: '草稿已失效，已使用最新书源' });
+      HdsFeedback.showToast('草稿已失效，已使用最新书源');
     }
   }
 
@@ -596,124 +593,126 @@ struct BookSourceEditPage {
     parts.push(`${text.length}:${text};`);
   }
 
-  @Builder
-  unsavedChangesDialog() {
-    Column() {
-      Column() {
-        Text('保存书源修改？')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 10 })
 
-        Text('当前书源有未保存的编辑，返回前请选择是否保存。')
-          .fontSize(14)
-          .fontColor(this.secondaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 18 })
+  onSystemDialogFlagChanged(): void {
+    if (!this.showUnsavedDialog) this.unsavedDialogSession.close(this.getUIContext());
+    if (!this.showDraftConflictDialog) this.draftConflictDialogSession.close(this.getUIContext());
+  }
 
-        Button('保存并返回')
-          .width('100%')
-          .height(44)
-          .backgroundColor(this.buttonColor())
-          .fontColor('#FFFFFF')
-          .margin({ bottom: 10 })
-          .onClick(() => {
-            this.saveSourceAndBackFromDialog();
-          })
+  openUnsavedDialog(): void {
+    this.showUnsavedDialog = true;
+    this.unsavedDialogSession.open(this.getUIContext(), (): void => {
+      this.unsavedChangesDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示未保存确认弹窗失败:'
+    });
+  }
 
-        Button('放弃修改')
-          .width('100%')
-          .height(44)
-          .backgroundColor(this.inputColor())
-          .fontColor(this.primaryTextColor())
-          .margin({ bottom: 10 })
-          .onClick(() => {
-            this.showUnsavedDialog = false;
-            this.clearDraft();
-            router.back();
-          })
-
-        Button('取消')
-          .width('100%')
-          .height(44)
-          .backgroundColor(this.inputColor())
-          .fontColor(this.primaryTextColor())
-          .onClick(() => {
-            this.showUnsavedDialog = false;
-          })
-      }
-      .width('88%')
-      .padding(22)
-      .backgroundColor(this.cardColor())
-      .borderRadius(14)
-      .onClick(() => {
-      })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#80000000')
-    .justifyContent(FlexAlign.Center)
-    .onClick(() => {
-      this.showUnsavedDialog = false;
-    })
+  openDraftConflictDialog(): void {
+    this.showDraftConflictDialog = true;
+    // 两个按钮都是明确的决定，蒙层不可关闭。
+    this.draftConflictDialogSession.open(this.getUIContext(), (): void => {
+      this.draftConflictDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示草稿冲突弹窗失败:'
+    });
   }
 
   @Builder
-  draftConflictDialog() {
+  unsavedChangesDialogContent() {
     Column() {
-      Column() {
-        Text('书源已经更新')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 10 })
+      Text('保存书源修改？')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 10 })
 
-        Text('检测到这个书源有一份基于旧版本的未保存草稿。使用新版可保留刚导入的内容；恢复草稿后再次保存会覆盖新版。')
-          .fontSize(14)
-          .fontColor(this.secondaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 18 })
+      Text('当前书源有未保存的编辑，返回前请选择是否保存。')
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 18 })
 
-        Button('使用导入的新版')
-          .width('100%')
-          .height(44)
-          .backgroundColor(this.buttonColor())
-          .fontColor('#FFFFFF')
-          .margin({ bottom: 10 })
-          .onClick(() => {
-            this.useImportedSourceInsteadOfDraft();
-          })
+      Button('保存并返回')
+        .width('100%')
+        .height(44)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .margin({ bottom: 10 })
+        .onClick(() => {
+          this.saveSourceAndBackFromDialog();
+        })
 
-        Button('恢复未保存草稿')
-          .width('100%')
-          .height(44)
-          .backgroundColor(this.inputColor())
-          .fontColor(this.primaryTextColor())
-          .onClick(() => {
-            this.restoreConflictingDraft();
-          })
-      }
-      .width('88%')
-      .padding(22)
-      .backgroundColor(this.cardColor())
-      .borderRadius(14)
-      .onClick(() => {
-      })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#80000000')
-    .justifyContent(FlexAlign.Center)
-    .onClick(() => {
-    })
+      Button('放弃修改')
+        .width('100%')
+        .height(44)
+        .backgroundColor(this.inputColor())
+        .fontColor(this.primaryTextColor())
+        .margin({ bottom: 10 })
+        .onClick(() => {
+          this.showUnsavedDialog = false;
+          this.clearDraft();
+          router.back();
+        })
+
+      Button('取消')
+        .width('100%')
+        .height(44)
+        .backgroundColor(this.inputColor())
+        .fontColor(this.primaryTextColor())
+        .onClick(() => {
+          this.showUnsavedDialog = false;
+        })
+    }    .padding(22)
   }
+
+
+  @Builder
+  draftConflictDialogContent() {
+    Column() {
+      Text('书源已经更新')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 10 })
+
+      Text('检测到这个书源有一份基于旧版本的未保存草稿。使用新版可保留刚导入的内容；恢复草稿后再次保存会覆盖新版。')
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 18 })
+
+      Button('使用导入的新版')
+        .width('100%')
+        .height(44)
+        .backgroundColor(this.buttonColor())
+        .fontColor('#FFFFFF')
+        .margin({ bottom: 10 })
+        .onClick(() => {
+          this.useImportedSourceInsteadOfDraft();
+        })
+
+      Button('恢复未保存草稿')
+        .width('100%')
+        .height(44)
+        .backgroundColor(this.inputColor())
+        .fontColor(this.primaryTextColor())
+        .onClick(() => {
+          this.restoreConflictingDraft();
+        })
+    }    .padding(22)
+  }
+
 
   @Builder
   basicTabBuilder() {

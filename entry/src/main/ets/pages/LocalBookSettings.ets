@@ -1,10 +1,11 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { LocalBookScanResult, LocalBookService } from '../core/book/LocalBookService';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { Book } from '../model/data/Book';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 @Entry
 @Component
@@ -173,7 +174,7 @@ struct LocalBookSettingsPage {
     } catch (e) {
       console.error('添加本地书籍失败:', e);
       this.statusText = '导入失败，请重新选择文件';
-      promptAction.showToast({ message: '导入失败' });
+      HdsFeedback.showToast('导入失败');
     } finally {
       this.isScanning = false;
     }
@@ -183,7 +184,7 @@ struct LocalBookSettingsPage {
     const failed = result.failed > 0 ? `，${result.failed}本失败` : '';
     this.statusText = `导入完成：成功${result.imported}本${failed}`;
     AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-    promptAction.showToast({ message: this.statusText });
+    HdsFeedback.showToast(this.statusText);
   }
 
   pageColor(): string {

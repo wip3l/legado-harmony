@@ -26,12 +26,12 @@ import { ReadBookEngine } from '../core/book/ReadBookEngine';
 import { BookTypeSupport } from '../core/book/BookTypeSupport';
 import { LocalBookService } from '../core/book/LocalBookService';
 import { WebDavBookService } from '../webdav/WebDavBookService';
-import { SearchCoordinator, SearchProgress } from '../core/book/SearchCoordinator';
 import { WebBookService } from '../core/book/WebBookService';
 import { VerificationSupport } from '../core/http/VerificationSupport';
 import { ReaderActionData, ReaderActionMarker, ReaderActionMatch } from '../core/book/ReaderActionMarker';
 import { BookSourceRuntimeSnapshotStore, BookSourceSettingValue } from '../core/book/BookSourceRuntimeSnapshot';
 import { ReaderInteractionProviderRegistry } from '../core/book/ReaderInteractionProvider';
+import { HdsFeedback } from '../utils/HdsFeedback';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { SystemTtsReader, TtsChunk, TtsVoiceOption } from '../utils/SystemTtsReader';
@@ -61,7 +61,9 @@ import { ReaderSystemFontHelper } from '../utils/ReaderSystemFontHelper';
 import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
-import { ChangeSourceResultCache } from '../utils/ChangeSourceResultCache';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
+import { BookChangeSourceDialog } from '../components/BookChangeSourceDialog';
+import { TapZoneSettingsDialogContent } from '../components/TapZoneSettingsDialog';
 import { SearchBookShelfHelper } from '../utils/SearchBookShelfHelper';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
 import { BookCoverCache } from '../utils/BookCoverCache';
@@ -99,7 +101,7 @@ import { ArEyeSignal, ArEyeTurnHost } from '../core/reader/ArEyeTypes';
 import { FullTextCacheCancelCoordinator, FullTextCacheCancelSignal } from '../utils/FullTextCacheCancelCoordinator';
 import { ReaderComicPageDataSource } from '../core/reader/ReaderDataSources';
 import { ReaderCustomFontItem, ReaderCustomFontData, ReaderTxtCharsetOption } from '../core/reader/ReaderSettingsModels';
-import { PageTurnPreview, ReaderParagraphMetrics, ReaderInlineActionBoundsTask, ReaderMergedActionBoundsTask, ReaderTextParagraph, ReadTextSlice, ReaderPaginationResult, ReaderViewportSize, ReaderTextParagraphGroup, ReaderParagraphMeasureFallback, ReaderV2HighlightRect, ReaderContinuousSelectionChunk } from '../core/reader/ReaderPageModels';
+import { PageTurnPreview, ReaderParagraphMetrics, ReaderInlineActionBoundsTask, ReaderMergedActionBoundsTask, ReaderTextParagraph, ReadTextSlice, ReaderPaginationResult, ReaderViewportSize, ReaderTextParagraphGroup, ReaderParagraphMeasureFallback, ReaderV2HighlightRect } from '../core/reader/ReaderPageModels';
 import { ReaderEyeCalibrationPoint } from '../core/reader/ReaderEyeModels';
 
 // Three-point fixation calibration: centre, then the bottom turn zone, then the top turn
@@ -136,6 +138,8 @@ const READER_PAGINATION_BATCH_DELAY_MS = 64;
 const READER_INTERACTIVE_PAGINATION_BATCH_DELAY_MS = 56;
 const READER_PAGINATION_BUSY_RETRY_DELAY_MS = 48;
 const READER_DOUBLE_PAGE_DIVIDER_WIDTH = 1;
+// 正文选中菜单里的自定义“替换”项 ID，用于与系统菜单项（复制/全选/翻译等）区分。
+const READER_REPLACE_MENU_ITEM_ID: string = 'reader_replace_rule';
 // Page-curl textures are transient animation rasters, not the settled正文 surface. Capturing a full 2080x3120
 // page and sampling it through every mesh triangle can block the ArkUI thread for several seconds on tablets.
 // A 0.42 raster remains sharp while moving on high-density screens and reduces texture fill by another 29%
@@ -201,7 +205,11 @@ struct ReadBookPage {
   @State readerMenuAnchorSide: number = 1;
   @State showReaderActionMenu: boolean = false;
   @State showLayoutElementSettings: boolean = false;
-  @State showTxtCharsetDialog: boolean = false;
+  private txtCharsetDialogSession: SystemDialogSession = new SystemDialogSession();
+  private readerCacheDialogSession: SystemDialogSession = new SystemDialogSession();
+  private chapterCacheDialogSession: SystemDialogSession = new SystemDialogSession();
+  private tapZoneDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onSystemDialogFlagChanged') showTxtCharsetDialog: boolean = false;
   @State txtCharsetDraft: string = '';
   @State txtCharsetApplying: boolean = false;
   @State showReaderCommentPanel: boolean = false;
@@ -229,7 +237,7 @@ struct ReadBookPage {
   @State bookmarkActionMenuX: number = 16;
   @State bookmarkActionMenuY: number = 96;
   @State showSettings: boolean = false;
-  @State showTapZoneSettings: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showTapZoneSettings: boolean = false;
   @State settingsPanelTab: number = 0;
   @State readerTypographySelection: number = 0;
   @State showReaderTypographyValueInput: boolean = false;
@@ -238,10 +246,7 @@ struct ReadBookPage {
   @State verificationUrl: string = '';
   @State verificationTitle: string = '网页验证';
   @State showChangeSourceDialog: boolean = false;
-  @State changeSourceResults: SearchBook[] = [];
-  @State isChangingSource: boolean = false;
-  @State isSwitchingSource: boolean = false;
-  @State changeSourceStatus: string = '';
+  @State pendingSwitchedBook: Book | null = null;
   @State contentPages: string[] = [];
   @State currentPageIndex: number = 0;
   @State currentPageText: string = '';
@@ -260,6 +265,8 @@ struct ReadBookPage {
   @State readerWebFetchRuntimeNeeded: boolean = false;
   @State readerComicMode: boolean = false;
   @State readerComicImageRatios: number[] = [];
+  // 加载失败（onError）的图片页下标；用于占位提示与失败原因诊断。
+  @State readerComicBrokenPages: number[] = [];
   @State readerComicPaginationParsing: boolean = false;
   @State readerComicPaginationParsedPages: number = 0;
   @State readerComicPaginationTotalPages: number = 0;
@@ -323,11 +330,17 @@ struct ReadBookPage {
   private readerComicImageRatioLoading: Set<string> = new Set();
   private readerComicScrollRestoreSerial: number = 0;
   private readerComicScrollRestoring: boolean = false;
+  private readerComicReanchorSerial: number = 0;
   private readerComicProgressSaveTimerId: number = -1;
   private readerPagedProgressSaveTimerId: number = -1;
   private readerComicPanLastOffsetY: number = 0;
   private readerComicPanMoved: boolean = false;
+  // isAtEnd()/currentOffset() 是同步跨线程查询，手势更新事件频率高于刷新率；
+  // 边界方向探测按时间片取样，提示徽标晚一两帧出现无感知。
+  private readerComicBoundaryProbeNotUntil: number = 0;
   private readerComicBoundaryPullOriginY: number = 0;
+  private readerContinuousScrollOffsetMemoAt: number = 0;
+  private readerContinuousScrollOffsetMemo: number = 0;
   private readerComicSuppressClickUntil: number = 0;
   private ttsReader: SystemTtsReader = new SystemTtsReader();
   private ttsAutoContinue: boolean = false;
@@ -398,6 +411,9 @@ struct ReadBookPage {
   private readerPreparedContentCache: Map<string, string> = new Map();
   private readerParagraphMetricsCache: Map<string, ReaderParagraphMetrics> = new Map();
   private readerAdaptiveLineHeightCache: Map<string, number> = new Map();
+  // 滚动模式下每个分块的正文解析在选择层、渲染层、测量层被反复调用；按块文本缓存切分结果，
+  // 避免快速滑动时每个新 LazyForEach 项重复做整块正则归一化与逐段切分。
+  private readerTextParagraphsCache: Map<string, ReaderTextParagraph[]> = new Map();
   private readerPaginationHeightScaleIdentity: string = '';
   private readerPaginationHeightScale: number = 1;
   private readerPaginationHeightCalibrationResolvedIdentity: string = '';
@@ -465,8 +481,7 @@ struct ReadBookPage {
   private queuedPageTurnGeneration: number = 0;
   private pendingScrollPreviousChapterTurn: boolean = false;
   private pageTurnCrossChapterHandoff: boolean = false;
-  private changeSourceSessionId: number = 0;
-  private activeChangeSourceCoordinator: SearchCoordinator | null = null;
+
   private lastRecentReadCardReloadAt: number = 0;
   private lastRecentReadCardChapterIndex: number = -1;
   private readerTouchStartX: number = 0;
@@ -495,15 +510,6 @@ struct ReadBookPage {
   private readerSourceActionBoundsFlushPending: boolean = false;
   private readerInlineActionTextControllers: Map<string, TextController> = new Map<string, TextController>();
   private readerSelectableTextControllers: Map<string, TextController> = new Map<string, TextController>();
-  private readerContinuousMountedSelectionControllers: Map<string, TextController> = new Map<string, TextController>();
-  private readerContinuousSelectionOverlayController: TextController = new TextController();
-  @State private readerContinuousSelectionOverlayText: string = '';
-  @State private readerContinuousSelectionOverlayX: number = 0;
-  @State private readerContinuousSelectionOverlayY: number = 0;
-  @State private readerContinuousSelectionOverlayWidth: number = 1;
-  @State private readerContinuousSelectionStart: number = -1;
-  @State private readerContinuousSelectionEnd: number = -1;
-  @State private readerContinuousSelectionPaintVersion: number = 0;
   private readerSelectableTextAreas: Map<string, number[]> = new Map<string, number[]>();
   private readerSelectableTextScrollOffsets: Map<string, number> = new Map<string, number>();
   private readerSelectableTextValues: Map<string, string> = new Map<string, string>();
@@ -535,6 +541,16 @@ struct ReadBookPage {
   private readerContinuousSelectionDownY: number = -1;
   private readerContinuousSelectionDownAt: number = 0;
   private readerContinuousSelectionMoved: boolean = false;
+  // A tap outside a live selection dismisses it. The pointer is tracked separately from the page-turn
+  // gesture state because a selection owns the stream: no page turn, menu or scroll may run.
+  private readerSelectionDismissDownX: number = -1;
+  private readerSelectionDismissDownY: number = -1;
+  private readerSelectionDismissDownAt: number = 0;
+  private readerSelectionDismissMoved: boolean = false;
+  // True only for a pointer stream whose Down began while a selection was already live. The release of
+  // the long press that CREATES a selection also ends a stream; that stream must never dismiss it.
+  private readerSelectionDismissArmed: boolean = false;
+  private readerTextSelectionClearPending: boolean = false;
   private readerTapLayerGlobalX: number = 0;
   private readerTapLayerGlobalY: number = 0;
   // Paragraph-comment pills are visually small, but their interaction target should be close to the platform
@@ -560,6 +576,8 @@ struct ReadBookPage {
   @StorageLink('readerTextAlign') @Watch('onReadLayoutChanged') readerTextAlign: string = 'justify';
   @StorageLink('readerLineHeight') @Watch('onReadLayoutChanged') readerLineHeight: number = 12;
   @StorageLink('readerParagraphSpacing') @Watch('onReadLayoutChanged') readerParagraphSpacing: number = 0;
+  // 保留段首缩进：开启后分页/分块起点不再裁掉原文的全角空格缩进。
+  @StorageLink('readerKeepParagraphIndent') @Watch('onReadLayoutChanged') keepParagraphIndent: boolean = false;
   @StorageLink('readerMarginLeft') @Watch('onReadLayoutChanged') readerMarginLeft: number = 18;
   @StorageLink('readerMarginRight') @Watch('onReadLayoutChanged') readerMarginRight: number = 18;
   @StorageLink('readerMarginTop') @Watch('onReadLayoutChanged') readerMarginTop: number = 18;
@@ -658,8 +676,8 @@ struct ReadBookPage {
   @State fullTextCacheDone: number = 0;
   @State fullTextCacheTotal: number = 0;
   @State fullTextCacheStatus: string = '';
-  @State showReaderCacheDialog: boolean = false;
-  @State showReaderChapterCacheDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showReaderCacheDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showReaderChapterCacheDialog: boolean = false;
   @State readerCacheChapters: BookChapter[] = [];
   @State readerCacheStatus: string = '';
   @State readerCacheRangeDraft: string = '';
@@ -906,6 +924,10 @@ struct ReadBookPage {
       if (!this.txtCharsetApplying) this.showTxtCharsetDialog = false;
       return true;
     }
+    if (this.showTapZoneSettings) {
+      this.showTapZoneSettings = false;
+      return true;
+    }
     if (this.showLayoutElementSettings) {
       this.showLayoutElementSettings = false;
       return true;
@@ -916,10 +938,6 @@ struct ReadBookPage {
     }
     if (this.showChangeSourceDialog) {
       this.showChangeSourceDialog = false;
-      return true;
-    }
-    if (this.showTapZoneSettings) {
-      this.showTapZoneSettings = false;
       return true;
     }
     if (this.showToc || this.showSettings || this.showMenu) {
@@ -1362,6 +1380,7 @@ struct ReadBookPage {
     this.contentPageEnds = [];
     this.pagedContentText = '';
     this.readerParagraphMetricsCache.clear();
+    this.readerTextParagraphsCache.clear();
     if (this.readerExtendLayoutRefreshTimerId >= 0) {
       clearTimeout(this.readerExtendLayoutRefreshTimerId);
       this.readerExtendLayoutRefreshTimerId = -1;
@@ -1377,11 +1396,7 @@ struct ReadBookPage {
     this.readerSelectableTextScrollOffsets.clear();
     this.readerSelectableTextValues.clear();
     this.readerSelectableTextControllers.clear();
-    this.readerContinuousMountedSelectionControllers.clear();
     this.setReaderTextSelectionActive(false);
-    this.readerContinuousSelectionOverlayText = '';
-    this.readerContinuousSelectionStart = -1;
-    this.readerContinuousSelectionEnd = -1;
     this.readerContinuousVisibleStart = 0;
     this.readerContinuousVisibleEnd = 0;
     this.readerContinuousReachedEnd = false;
@@ -1413,6 +1428,7 @@ struct ReadBookPage {
     this.readerComicScrollRestoring = false;
     this.clearReaderComicProgressSaveTimer();
     this.readerComicPageDataSource.replace([]);
+    this.readerComicBrokenPages = [];
     this.pendingRestorePageIndex = -1;
     this.readerProgressAnchorChapterIndex = -1;
     this.readerProgressAnchorPageIndex = 0;
@@ -1578,7 +1594,7 @@ struct ReadBookPage {
         this.preloadReaderContentLater(720);
         await this.saveReadingProgress();
         if (refreshSerial !== this.contentLoadSerial || chapterIndex !== this.currentChapterIndex) return;
-        promptAction.showToast({ message: '本章已刷新' });
+        HdsFeedback.showToast('本章已刷新');
       } else {
         if (refreshSerial !== this.contentLoadSerial || chapterIndex !== this.currentChapterIndex) return;
         this.updatePendingVerification();
@@ -1588,11 +1604,11 @@ struct ReadBookPage {
             '章节正文刷新失败。请点击右上角“更多操作”，选择“重试”。');
         this.content = loadedContent;
         this.paginateContent(loadedContent);
-        promptAction.showToast({ message: '刷新本章失败' });
+        HdsFeedback.showToast('刷新本章失败');
       }
     } catch (e) {
       console.error('刷新本章失败:', e);
-      promptAction.showToast({ message: '刷新本章失败' });
+      HdsFeedback.showToast('刷新本章失败');
     } finally {
       if (refreshSerial === this.contentLoadSerial) {
         this.isLoading = false;
@@ -1625,7 +1641,7 @@ struct ReadBookPage {
 
   openReaderCacheDialog(): void {
     if (!this.book || LocalBookService.isLocalBook(this.book)) {
-      promptAction.showToast({ message: '当前书籍暂无可缓存章节' });
+      HdsFeedback.showToast('当前书籍暂无可缓存章节');
       return;
     }
     this.showReaderActionMenu = false;
@@ -1635,6 +1651,13 @@ struct ReadBookPage {
     this.readerCacheRangeDraft = '';
     this.readerCacheStatus = '';
     this.refreshReaderCacheChapters();
+    this.readerCacheDialogSession.open(this.getUIContext(), (): void => {
+      this.readerCacheDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: this.isReaderThemeDark() ? '#99000000' : '#33000000',
+      warnTag: '显示全文缓存弹窗失败:'
+    });
   }
 
   openReaderChapterCacheDialog(): void {
@@ -1647,6 +1670,13 @@ struct ReadBookPage {
     this.readerCacheRangeDraft = '';
     this.readerCacheStatus = '正在加载目录...';
     this.refreshReaderCacheChapters();
+    this.chapterCacheDialogSession.open(this.getUIContext(), (): void => {
+      this.readerChapterCacheDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: this.isReaderThemeDark() ? '#99000000' : '#33000000',
+      warnTag: '显示章节缓存弹窗失败:'
+    });
   }
 
   closeReaderCacheDialog(): void {
@@ -1718,7 +1748,7 @@ struct ReadBookPage {
     const total = this.readerCacheChapters.length > 0 ? this.readerCacheChapters.length : this.chapters.length;
     const indexes = this.parseReaderChapterRange(this.readerCacheRangeDraft, total);
     if (indexes.length === 0) {
-      promptAction.showToast({ message: `请输入有效章节范围（1-${total}）` });
+      HdsFeedback.showToast(`请输入有效章节范围（1-${total}）`);
       return;
     }
     await this.cacheReaderChapterIndexes(indexes);
@@ -1760,14 +1790,12 @@ struct ReadBookPage {
       this.readerCacheStatus = failedCount > 0 ?
         `缓存完成：${successCount}章成功，${failedCount}章失败` :
         (successCount > 0 ? `已缓存 ${successCount} 章` : '所选章节均已缓存');
-      promptAction.showToast({
-        message: failedCount > 0 ? `缓存完成，${failedCount} 章失败` : `已缓存 ${successCount} 章`
-      });
+      HdsFeedback.showToast(failedCount > 0 ? `缓存完成，${failedCount} 章失败` : `已缓存 ${successCount} 章`);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     } catch (error) {
       console.error('阅读页缓存指定章节失败:', error);
       this.readerCacheStatus = '章节缓存失败';
-      promptAction.showToast({ message: '章节缓存失败' });
+      HdsFeedback.showToast('章节缓存失败');
     } finally {
       this.readerCacheRangeCaching = false;
     }
@@ -1794,27 +1822,27 @@ struct ReadBookPage {
         });
       }
       this.readerCacheStatus = '已清除缓存章节';
-      promptAction.showToast({ message: '已清除缓存章节' });
+      HdsFeedback.showToast('已清除缓存章节');
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     } catch (error) {
       console.error('阅读页清除缓存章节失败:', error);
       this.readerCacheStatus = '清除缓存失败';
-      promptAction.showToast({ message: '清除缓存失败' });
+      HdsFeedback.showToast('清除缓存失败');
     }
   }
 
   startFullTextCache(): void {
     if (this.fullTextCaching) {
-      promptAction.showToast({ message: this.fullTextCacheStatus || '全文缓存正在后台进行' });
+      HdsFeedback.showToast(this.fullTextCacheStatus || '全文缓存正在后台进行');
       return;
     }
     if (!this.book || this.chapters.length === 0 || !this.book.origin || this.book.origin === 'local') {
-      promptAction.showToast({ message: '当前书籍暂无可缓存章节' });
+      HdsFeedback.showToast('当前书籍暂无可缓存章节');
       return;
     }
 
     this.hideReaderPanels();
-    promptAction.showToast({ message: '已转入后台缓存，可在通知栏取消' });
+    HdsFeedback.showToast('已转入后台缓存，可在通知栏取消');
     this.runFullTextCache(++this.fullTextCacheTaskId).catch(async (error: Error): Promise<void> => {
       if (this.fullTextCacheCancelRequested) {
         if (this.fullTextCacheStoppingNotificationTask) await this.fullTextCacheStoppingNotificationTask;
@@ -1830,7 +1858,7 @@ struct ReadBookPage {
       console.error('全文缓存任务失败:', error);
       this.fullTextCaching = false;
       this.fullTextCacheStatus = '全文缓存失败';
-      promptAction.showToast({ message: '全文缓存失败' });
+      HdsFeedback.showToast('全文缓存失败');
       this.publishFullTextCacheNotification('全文缓存失败', this.fullTextCacheProgressText(), false).catch((e: Error) => {
         console.warn('更新全文缓存失败通知失败:', e);
       });
@@ -1913,9 +1941,9 @@ struct ReadBookPage {
       false
     );
     if (canceled) {
-      promptAction.showToast({ message: '缓存已停止' });
+      HdsFeedback.showToast('缓存已停止');
     } else {
-      promptAction.showToast({ message: '全文缓存完成' });
+      HdsFeedback.showToast('全文缓存完成');
     }
     await this.stopFullTextCacheBackgroundRunning();
     this.releaseFullTextCacheCancelRegistration();
@@ -1931,7 +1959,7 @@ struct ReadBookPage {
     this.fullTextCacheStoppingNotificationTask = this.publishFullTextCacheNotification(
       '正在停止缓存…', this.fullTextCacheProgressText(), true)
       .catch((error: Error) => console.warn('更新正在停止缓存通知失败:', error));
-    if (showHint) promptAction.showToast({ message: '正在停止缓存…' });
+    if (showHint) HdsFeedback.showToast('正在停止缓存…');
   }
 
   releaseFullTextCacheCancelRegistration(): void {
@@ -2200,6 +2228,9 @@ struct ReadBookPage {
   }
 
   shouldShowReaderLoadingOverlay(): boolean {
+    // 翻页进行中由翻页提示页（上一章排版中/加载中）负责覆盖屏幕；恢复进度遮罩若在动画期间浮现，
+    // 会盖住提示页并造成“提交后又闪加载框”的割裂感。
+    if (this.isPageTurning) return false;
     return this.shouldRenderPrimaryReaderContent() &&
       !this.readerComicChapterSwitching &&
       (this.isLoading || this.isPagedReaderAwaitingPagination() || !this.readerInitialPageReady);
@@ -2281,40 +2312,56 @@ struct ReadBookPage {
         LazyForEach(this.readerComicPageDataSource, (page: string, index: number) => {
           ListItem() {
             if (this.isReaderImageOnlyPage(page)) {
-              Image(this.getReaderEpubImageUri(page))
-                .width('100%')
-                .height(this.getReaderComicImageRenderHeight(index))
-                .margin({ top: -this.getReaderComicImageSeamOverlap(index) })
-                .objectFit(this.getReaderComicImageFit(index))
-                .draggable(false)
-                .onAppear(() => {
-                  this.ensureReaderComicImageRatio(index, page).catch((error: Error) => {
-                    console.warn('预读取漫画图片尺寸失败:', error);
-                  });
-                })
-                .onComplete((event) => {
-                  if (event) {
-                    this.updateReaderComicImageRatio(index, event.width, event.height);
+              Stack({ alignContent: Alignment.Center }) {
+                Image(this.getReaderEpubImageUri(page))
+                  .width('100%')
+                  .height(this.getReaderComicImageRenderHeight(index))
+                  .margin({ top: -this.getReaderComicImageSeamOverlap(index) })
+                  .objectFit(this.getReaderComicImageFit(index))
+                  .draggable(false)
+                  .onAppear(() => {
+                    this.ensureReaderComicImageRatio(index, page).catch((error: Error) => {
+                      console.warn('预读取漫画图片尺寸失败:', error);
+                    });
+                  })
+                  .onComplete((event) => {
+                    if (event) {
+                      this.updateReaderComicImageRatio(index, event.width, event.height);
+                    }
+                  })
+                  .onError((error: ImageError) => {
+                    this.markReaderComicImageBroken(index, page, error);
+                  })
+                if (this.readerComicBrokenPages.includes(index)) {
+                  Column({ space: 6 }) {
+                    Text('⚠ 图片加载失败')
+                      .fontSize(13)
+                      .fontColor(this.getSubTextColor())
+                    Text(/^(?:https?:|data:)/i.test(LocalBookService.epubImagePathFromMarker(page)) ?
+                      '网络图片加载失败，点击重试' : '文件可能已被移动、删除或尚未重新导入')
+                      .fontSize(11)
+                      .fontColor(this.getSubTextColor())
+                      .opacity(0.8)
                   }
-                })
-            } else if (this.isReaderNovelContinuousScrollModeActive()) {
-              Stack({ alignContent: Alignment.TopStart }) {
-                Column() {
-                  this.styledReaderText(
-                    page,
-                    0,
-                    this.currentChapterIndex,
-                    0,
-                    this.pageRenderVersion,
-                    `reader_vertical_scroll_${this.currentChapterIndex}_${index}`,
-                    index,
-                    0
-                  )
+                  .width('100%')
+                  .onClick(() => {
+                    this.retryReaderComicImage(index);
+                  })
                 }
-                .width('100%')
-                // One selectable owner per lazy chunk lets the temporary selection surface extend across all
-                // paragraphs in that chunk. It is absolutely positioned and therefore cannot affect List height.
-                this.readerContinuousNativeSelectionPage(page, index)
+              }
+              .width('100%')
+            } else if (this.isReaderNovelContinuousScrollModeActive()) {
+              Column() {
+                this.styledReaderText(
+                  page,
+                  0,
+                  this.currentChapterIndex,
+                  0,
+                  this.pageRenderVersion,
+                  `reader_vertical_scroll_${this.currentChapterIndex}_${index}`,
+                  index,
+                  0
+                )
               }
               .width('100%')
             } else {
@@ -2340,6 +2387,10 @@ struct ReadBookPage {
       })
       .enableScrollInteraction(!this.readerTextSelectionActive)
       .scrollBar(BarState.Off)
+      // 每个滚动块都是整屏正文（可见 Text + 透明选择 Text 两次排版）。默认只在进入视口时才构建，
+      // 快速滑动时会临时排版掉帧；预构建视口外 2 块把排版开销挪到滑动间隙的空闲帧。
+      // 漫画模式条目是带显式高度的图片，保持原有时序以隔离行为差异。
+      .cachedCount(this.isReaderNovelContinuousScrollModeActive() ? 2 : 0)
       .translate({ y: this.readerComicChapterTransitionY })
       .opacity(this.readerComicChapterTransitionOpacity)
       .onScrollIndex((start: number, end: number) => {
@@ -2369,8 +2420,6 @@ struct ReadBookPage {
       .width('100%')
       .height('100%')
       .hitTestBehavior(HitTestMode.None)
-
-      this.readerContinuousSelectionOverlay()
 
       if (this.readerComicBoundaryDirection !== 0 || this.readerComicChapterSwitching) {
         this.readerComicBoundaryHint()
@@ -2674,7 +2723,10 @@ struct ReadBookPage {
       .width('100%')
       .height('100%')
       .padding({ top: this.getReaderTopSafePadding() })
-      .backgroundColor(this.readerContentLayerColor())
+      // 正文未就绪时整列充当加载遮罩。列顶部的状态栏内边距会让遮罩上缘缩进状态栏高度，
+      // 主题带背景画时该缝隙会露出 ReaderThemeBackground 的装饰图，因此遮罩期间强制铺不透明底色。
+      .backgroundColor(this.shouldRenderPrimaryReaderContent() ? this.readerContentLayerColor() :
+        this.getBackgroundColor())
       .hitTestBehavior(HitTestMode.Default)
 
       if (!this.isReaderContinuousScrollSurfaceActive() && !this.showMenu && !this.showToc && !this.showSettings &&
@@ -2718,20 +2770,10 @@ struct ReadBookPage {
         this.readerActionMenu()
       }
 
-      if (this.showReaderCacheDialog) {
-        this.readerCacheDialog()
-      }
 
-      if (this.showReaderChapterCacheDialog) {
-        this.readerChapterCacheDialog()
-      }
 
       if (this.showLayoutElementSettings) {
         this.readerLayoutElementSettingsDialog()
-      }
-
-      if (this.showTxtCharsetDialog) {
-        this.readerTxtCharsetDialog()
       }
 
       if (this.showMenu && !this.showToc && !this.showSettings && this.chapters.length > 0) {
@@ -2807,12 +2849,28 @@ struct ReadBookPage {
         this.bookmarkActionMenu()
       }
 
-      if (this.showTapZoneSettings) {
-        this.tapZoneSettingsDialog()
-      }
-
       if (this.showChangeSourceDialog) {
-        this.changeSourceDialog()
+        BookChangeSourceDialog({
+          targetBook: this.book,
+          markReadOnSwitch: true,
+          onBeforeSwitch: (): Promise<void> => {
+            return this.saveReadingProgress();
+          },
+          onSwitched: (fullBook: Book): void => {
+            this.pendingSwitchedBook = fullBook;
+          },
+          onClosed: (): void => {
+            this.showChangeSourceDialog = false;
+            if (this.pendingSwitchedBook) {
+              const fullBook = this.pendingSwitchedBook;
+              this.pendingSwitchedBook = null;
+              this.bookUrl = fullBook.bookUrl;
+              this.book = fullBook;
+              this.loadBook();
+              this.loadBookmarks();
+            }
+          }
+        })
       }
 
       if (this.showReaderCommentPanel) {
@@ -3370,10 +3428,7 @@ struct ReadBookPage {
     AppThemeModeStore.save(context, nextMode).catch((e: Error) => {
       console.warn('保存日间/夜间/自动模式失败:', e);
     });
-    promptAction.showToast({
-      message: nextMode === 'light' ? '已切换至日间模式' :
-        (nextMode === 'dark' ? '已切换至夜间模式' : '已切换至自动模式')
-    });
+    HdsFeedback.showToast(nextMode === 'light' ? '已切换至日间模式' : (nextMode === 'dark' ? '已切换至夜间模式' : '已切换至自动模式'));
   }
 
   @Builder
@@ -4267,72 +4322,91 @@ struct ReadBookPage {
     .height('100%')
   }
 
-  @Builder
-  readerCacheDialog() {
-    Stack() {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.isReaderThemeDark() ? '#66000000' : '#26000000')
-        .backdropBlur(ThemeRuntime.glassBlur('overlay', 18))
-        .onClick(() => {
-          if (!this.fullTextCaching && !this.readerCacheRangeCaching) {
-            this.closeReaderCacheDialog();
-          }
-        })
 
-      Column() {
-        Text(`缓存《${this.book?.name || '当前书籍'}》`)
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.getTextColor())
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+  onSystemDialogFlagChanged(): void {
+    if (!this.showTxtCharsetDialog) this.txtCharsetDialogSession.close(this.getUIContext());
+    if (!this.showReaderCacheDialog) this.readerCacheDialogSession.close(this.getUIContext());
+    if (!this.showReaderChapterCacheDialog) this.chapterCacheDialogSession.close(this.getUIContext());
+    if (!this.showTapZoneSettings) this.tapZoneDialogSession.close(this.getUIContext());
+  }
+
+  presentTapZoneSettings(): void {
+    this.showTapZoneSettings = true;
+    this.tapZoneDialogSession.open(this.getUIContext(), (): void => {
+      this.tapZoneSettingsContent();
+    }, {
+      autoCancel: false,
+      maskColor: this.isReaderThemeDark() ? '#99000000' : '#33000000',
+      warnTag: '显示点击区域设置弹窗失败:'
+    });
+  }
+
+  @Builder
+  tapZoneSettingsContent() {
+    TapZoneSettingsDialogContent({
+      onDone: (): void => {
+        this.showTapZoneSettings = false;
+        this.tapZoneDialogSession.close(this.getUIContext());
+      }
+    })
+  }
+
+  async openChangeSourceDialog(): Promise<void> {
+    if (!this.book || !this.book.name) {
+      HdsFeedback.showToast('当前书籍信息不完整');
+      return;
+    }
+    this.showMenu = false;
+    this.showToc = false;
+    this.showSettings = false;
+    this.showChangeSourceDialog = true;
+  }
+
+  @Builder
+  readerCacheDialogContent() {
+    Column() {
+      Text(`缓存《${this.book?.name || '当前书籍'}》`)
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.getTextColor())
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 8 })
+
+      if (this.readerCachePanelStatus()) {
+        Text(this.readerCachePanelStatus())
+          .fontSize(13)
+          .fontColor(this.getSubTextColor())
           .width('100%')
           .textAlign(TextAlign.Center)
           .margin({ bottom: 8 })
-
-        if (this.readerCachePanelStatus()) {
-          Text(this.readerCachePanelStatus())
-            .fontSize(13)
-            .fontColor(this.getSubTextColor())
-            .width('100%')
-            .textAlign(TextAlign.Center)
-            .margin({ bottom: 8 })
-        }
-
-        this.readerCacheActionItem(this.fullTextCaching ? '正在缓存...' : '缓存全文', () => {
-          this.startFullTextCache();
-        }, this.fullTextCaching || this.readerCacheRangeCaching)
-        this.readerCacheActionItem('缓存指定章节', () => {
-          this.openReaderChapterCacheDialog();
-        }, this.fullTextCaching || this.readerCacheRangeCaching)
-        this.readerCacheActionItem('清除已缓存章节', () => {
-          this.clearReaderCachedChapters();
-        }, this.fullTextCaching || this.readerCacheRangeCaching, '#E53935')
-
-        Button('取消')
-          .width('100%')
-          .height(44)
-          .margin({ top: 10 })
-          .backgroundColor(this.isReaderThemeDark() ? '#24272D' : '#F5F5F5')
-          .fontColor(this.getTextColor())
-          .enabled(!this.fullTextCaching && !this.readerCacheRangeCaching)
-          .onClick(() => this.closeReaderCacheDialog())
       }
-      .width('calc(100% - 32vp)')
-      .constraintSize({ maxWidth: 520 })
-      .padding({ left: 18, right: 18, top: 18, bottom: 18 })
-      .backgroundColor(this.readerGlassPanelColor())
-      .borderRadius(ThemeRuntime.glassCornerRadius(18, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 4 })
-      .margin({ bottom: this.readerFloatingPanelBottomInset() })
-    }
-    .width('100%')
-    .height('100%')
+
+      this.readerCacheActionItem(this.fullTextCaching ? '正在缓存...' : '缓存全文', () => {
+        this.startFullTextCache();
+      }, this.fullTextCaching || this.readerCacheRangeCaching)
+      this.readerCacheActionItem('缓存指定章节', () => {
+        this.openReaderChapterCacheDialog();
+      }, this.fullTextCaching || this.readerCacheRangeCaching)
+      this.readerCacheActionItem('清除已缓存章节', () => {
+        this.clearReaderCachedChapters();
+      }, this.fullTextCaching || this.readerCacheRangeCaching, '#E53935')
+
+      Button('取消')
+        .width('100%')
+        .height(44)
+        .margin({ top: 10 })
+        .backgroundColor(this.isReaderThemeDark() ? '#24272D' : '#F5F5F5')
+        .fontColor(this.getTextColor())
+        .enabled(!this.fullTextCaching && !this.readerCacheRangeCaching)
+        .onClick(() => this.closeReaderCacheDialog())
+    }    .width('calc(100% - 32vp)')
+    .constraintSize({ maxWidth: 520 })
+    .padding({ left: 18, right: 18, top: 18, bottom: 18 })
   }
+
 
   @Builder
   readerCacheActionItem(label: string, action: () => void, disabled: boolean = false,
@@ -4349,128 +4423,107 @@ struct ReadBookPage {
   }
 
   @Builder
-  readerChapterCacheDialog() {
-    Stack() {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.isReaderThemeDark() ? '#66000000' : '#26000000')
-        .backdropBlur(ThemeRuntime.glassBlur('overlay', 18))
-        .onClick(() => {
-          if (!this.fullTextCaching && !this.readerCacheRangeCaching) {
-            this.closeReaderCacheDialog();
-          }
-        })
+  readerChapterCacheDialogContent() {
+    Column() {
+      Row() {
+        Text('选择章节缓存')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.getTextColor())
+          .layoutWeight(1)
+        Button('关闭')
+          .height(34)
+          .fontSize(13)
+          .borderRadius(17)
+          .enabled(!this.fullTextCaching && !this.readerCacheRangeCaching)
+          .onClick(() => this.closeReaderCacheDialog())
+      }
+      .width('100%')
+      .height(46)
 
-      Column() {
-        Row() {
-          Text('选择章节缓存')
-            .fontSize(18)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.getTextColor())
-            .layoutWeight(1)
-          Button('关闭')
-            .height(34)
-            .fontSize(13)
-            .borderRadius(17)
-            .enabled(!this.fullTextCaching && !this.readerCacheRangeCaching)
-            .onClick(() => this.closeReaderCacheDialog())
-        }
-        .width('100%')
-        .height(46)
-
-        if (this.readerCachePanelStatus()) {
-          Text(this.readerCachePanelStatus())
-            .fontSize(13)
-            .fontColor(this.getSubTextColor())
-            .width('100%')
-            .margin({ bottom: 8 })
-        }
-
-        Row({ space: 8 }) {
-          TextInput({ placeholder: '章节范围，如 1-10', text: this.readerCacheRangeDraft })
-            .type(InputType.Normal)
-            .fontSize(14)
-            .fontColor(this.getTextColor())
-            .placeholderColor(this.getSubTextColor())
-            .layoutWeight(1)
-            .height(42)
-            .padding({ left: 10, right: 10 })
-            .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
-            .borderRadius(10)
-            .enabled(!this.fullTextCaching && !this.readerCacheRangeCaching)
-            .onChange((value: string) => {
-              this.readerCacheRangeDraft = value;
-            })
-          Button(this.readerCacheRangeCaching ? '缓存中…' : '缓存范围')
-            .width(96)
-            .height(42)
-            .fontSize(13)
-            .fontColor('#FFFFFF')
-            .backgroundColor(this.accentColor())
-            .enabled(!this.fullTextCaching && !this.readerCacheRangeCaching)
-            .onClick(() => this.cacheReaderChapterRange())
-        }
-        .width('100%')
-        Text('支持 1-10、1,3,5-8 等格式')
-          .fontSize(11)
+      if (this.readerCachePanelStatus()) {
+        Text(this.readerCachePanelStatus())
+          .fontSize(13)
           .fontColor(this.getSubTextColor())
           .width('100%')
-          .margin({ top: 4, bottom: 6 })
-
-        if (this.readerCacheChapters.length === 0) {
-          Text('暂未获取到目录')
-            .fontSize(13)
-            .fontColor(this.getSubTextColor())
-            .width('100%')
-            .textAlign(TextAlign.Center)
-            .layoutWeight(1)
-        } else {
-          List({ space: 2 }) {
-            ForEach(this.readerCacheChapters, (chapter: BookChapter, index: number) => {
-              ListItem() {
-                Row({ space: 8 }) {
-                  Text(chapter.title)
-                    .fontSize(15)
-                    .fontColor(chapter.cacheDate > 0 ? this.readerCachedChapterTextColor() : this.getTextColor())
-                    .maxLines(2)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .layoutWeight(1)
-                  if (chapter.cacheDate > 0) {
-                    Text('已缓存')
-                      .fontSize(11)
-                      .fontColor(this.isReaderThemeDark() ? '#7CC7A0' : '#1F8F55')
-                      .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-                      .backgroundColor(this.isReaderThemeDark() ? '#24382F' : '#E6F4EC')
-                      .borderRadius(4)
-                  }
-                }
-                .width('100%')
-                .padding({ left: 2, right: 2, top: 12, bottom: 12 })
-                .onClick(() => this.cacheReaderSingleChapter(index))
-              }
-            }, (chapter: BookChapter, index: number) => `${index}_${chapter.url || chapter.title}`)
-          }
-          .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-          .width('100%')
-          .layoutWeight(1)
-          .scrollBar(BarState.Auto)
-        }
+          .margin({ bottom: 8 })
       }
-      .width('calc(100% - 32vp)')
-      .constraintSize({ maxWidth: 560 })
-      .height(Math.min(660, Math.max(420, this.pageViewHeight - 72)))
-      .padding({ left: 18, right: 18, top: 18, bottom: 18 })
-      .backgroundColor(this.readerGlassPanelColor())
-      .borderRadius(ThemeRuntime.glassCornerRadius(18, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 4 })
-      .margin({ bottom: this.readerFloatingPanelBottomInset() })
-    }
-    .width('100%')
-    .height('100%')
+
+      Row({ space: 8 }) {
+        TextInput({ placeholder: '章节范围，如 1-10', text: this.readerCacheRangeDraft })
+          .type(InputType.Normal)
+          .fontSize(14)
+          .fontColor(this.getTextColor())
+          .placeholderColor(this.getSubTextColor())
+          .layoutWeight(1)
+          .height(42)
+          .padding({ left: 10, right: 10 })
+          .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
+          .borderRadius(10)
+          .enabled(!this.fullTextCaching && !this.readerCacheRangeCaching)
+          .onChange((value: string) => {
+            this.readerCacheRangeDraft = value;
+          })
+        Button(this.readerCacheRangeCaching ? '缓存中…' : '缓存范围')
+          .width(96)
+          .height(42)
+          .fontSize(13)
+          .fontColor('#FFFFFF')
+          .backgroundColor(this.accentColor())
+          .enabled(!this.fullTextCaching && !this.readerCacheRangeCaching)
+          .onClick(() => this.cacheReaderChapterRange())
+      }
+      .width('100%')
+      Text('支持 1-10、1,3,5-8 等格式')
+        .fontSize(11)
+        .fontColor(this.getSubTextColor())
+        .width('100%')
+        .margin({ top: 4, bottom: 6 })
+
+      if (this.readerCacheChapters.length === 0) {
+        Text('暂未获取到目录')
+          .fontSize(13)
+          .fontColor(this.getSubTextColor())
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .layoutWeight(1)
+      } else {
+        List({ space: 2 }) {
+          ForEach(this.readerCacheChapters, (chapter: BookChapter, index: number) => {
+            ListItem() {
+              Row({ space: 8 }) {
+                Text(chapter.title)
+                  .fontSize(15)
+                  .fontColor(chapter.cacheDate > 0 ? this.readerCachedChapterTextColor() : this.getTextColor())
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+                if (chapter.cacheDate > 0) {
+                  Text('已缓存')
+                    .fontSize(11)
+                    .fontColor(this.isReaderThemeDark() ? '#7CC7A0' : '#1F8F55')
+                    .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                    .backgroundColor(this.isReaderThemeDark() ? '#24382F' : '#E6F4EC')
+                    .borderRadius(4)
+                }
+              }
+              .width('100%')
+              .padding({ left: 2, right: 2, top: 12, bottom: 12 })
+              .onClick(() => this.cacheReaderSingleChapter(index))
+            }
+          }, (chapter: BookChapter, index: number) => `${index}_${chapter.url || chapter.title}`)
+        }
+        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+        .width('100%')
+        .layoutWeight(1)
+        .scrollBar(BarState.Auto)
+      }
+    }    .width('calc(100% - 32vp)')
+    .constraintSize({ maxWidth: 560 })
+    .height(Math.min(560, Math.max(420, this.pageViewHeight - 72)))
+    .padding({ left: 18, right: 18, top: 18, bottom: 18 })
   }
+
 
   openLayoutElementSettings(): void {
     this.showReaderActionMenu = false;
@@ -4519,6 +4572,13 @@ struct ReadBookPage {
     this.showReaderActionMenu = false;
     this.txtCharsetDraft = LocalBookService.getTxtCharsetOverride(this.book);
     this.showTxtCharsetDialog = true;
+    this.txtCharsetDialogSession.open(this.getUIContext(), (): void => {
+      this.readerTxtCharsetDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: this.isReaderThemeDark() ? '#99000000' : '#33000000',
+      warnTag: '显示字符编码弹窗失败:'
+    });
   }
 
   async applyTxtCharsetSelection(): Promise<void> {
@@ -4540,106 +4600,86 @@ struct ReadBookPage {
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       const applied = selectedCharset ? this.txtCharsetLabel(selectedCharset) :
         `自动识别（${this.txtCharsetLabel(this.book?.charset || '')}）`;
-      promptAction.showToast({ message: `已使用 ${applied} 重新解析` });
+      HdsFeedback.showToast(`已使用 ${applied} 重新解析`);
     } catch (e) {
       console.error('切换 TXT 字符编码失败:', e);
-      promptAction.showToast({ message: '切换字符编码失败，请尝试其他编码' });
+      HdsFeedback.showToast('切换字符编码失败，请尝试其他编码');
     } finally {
       this.txtCharsetApplying = false;
     }
   }
 
   @Builder
-  readerTxtCharsetDialog() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.isReaderThemeDark() ? '#52000000' : '#26000000')
-        .backdropBlur(ThemeRuntime.glassBlur('overlay', 18))
-        .onClick(() => {
-          if (!this.txtCharsetApplying) this.showTxtCharsetDialog = false;
-        })
-
-      Column({ space: 10 }) {
-        Row() {
-          Column({ space: 3 }) {
-            Text('选择字符编码')
-              .fontSize(20)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.getTextColor())
-            Text(`当前解析：${this.txtCharsetLabel(this.book?.charset || '')}`)
-              .fontSize(12)
-              .fontColor(this.getSubTextColor())
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          ImmersiveBackButton({
-            icon: $r('sys.symbol.xmark'),
-            iconOffsetX: 0,
-            iconColor: this.readerControlIconColor(),
-            darkMode: this.isReaderThemeDark(),
-            buttonSize: 38,
-            containerWidth: 38,
-            containerHeight: 38,
-            startInset: 0,
-            compactLayout: true,
-            accessibilityLabel: '关闭字符编码选择',
-            onBack: () => {
-              if (!this.txtCharsetApplying) this.showTxtCharsetDialog = false;
-            }
-          })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        Scroll() {
-          Column({ space: 4 }) {
-            ForEach(this.txtCharsetOptions(), (option: ReaderTxtCharsetOption) => {
-              this.readerTxtCharsetOption(option)
-            }, (option: ReaderTxtCharsetOption) => option.value || 'auto')
-          }
-          .width('100%')
-        }
-        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-        .width('100%')
-        .height(Math.min(440, Math.max(160, this.pageViewHeight - 190)))
-        .scrollBar(BarState.Auto)
-
-        Row({ space: 12 }) {
-          Button('取消')
-            .layoutWeight(1)
-            .height(42)
+  readerTxtCharsetDialogContent() {
+    Column({ space: 10 }) {
+      Row() {
+        Column({ space: 3 }) {
+          Text('选择字符编码')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
             .fontColor(this.getTextColor())
-            .backgroundColor(this.isReaderThemeDark() ? '#24FFFFFF' : '#10000000')
-            .enabled(!this.txtCharsetApplying)
-            .onClick(() => {
-              this.showTxtCharsetDialog = false;
-            })
-          Button(this.txtCharsetApplying ? '正在重新解析…' : '应用')
-            .layoutWeight(1)
-            .height(42)
-            .fontColor('#FFFFFF')
-            .backgroundColor(this.accentColor())
-            .enabled(!this.txtCharsetApplying)
-            .onClick(() => this.applyTxtCharsetSelection())
+          Text(`当前解析：${this.txtCharsetLabel(this.book?.charset || '')}`)
+            .fontSize(12)
+            .fontColor(this.getSubTextColor())
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        ImmersiveBackButton({
+          icon: $r('sys.symbol.xmark'),
+          iconOffsetX: 0,
+          iconColor: this.readerControlIconColor(),
+          darkMode: this.isReaderThemeDark(),
+          buttonSize: 38,
+          containerWidth: 38,
+          containerHeight: 38,
+          startInset: 0,
+          compactLayout: true,
+          accessibilityLabel: '关闭字符编码选择',
+          onBack: () => {
+            if (!this.txtCharsetApplying) this.showTxtCharsetDialog = false;
+          }
+        })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Scroll() {
+        Column({ space: 4 }) {
+          ForEach(this.txtCharsetOptions(), (option: ReaderTxtCharsetOption) => {
+            this.readerTxtCharsetOption(option)
+          }, (option: ReaderTxtCharsetOption) => option.value || 'auto')
         }
         .width('100%')
       }
-      .width(Math.max(1, Math.min(440, this.pageViewWidth - 32)))
-      .padding({ left: 18, right: 18, top: 16, bottom: 16 })
-      .borderRadius(ThemeRuntime.glassCornerRadius(24, 'overlay'))
-      .backgroundColor(this.readerGlassPanelColor())
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 24))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: this.readerGlassBorderColor() })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: this.readerGlassShadowColor(),
-        offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-      .onClick(() => {
-      })
-    }
-    .width('100%')
-    .height('100%')
+      .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+      .width('100%')
+      .height(Math.min(440, Math.max(160, this.pageViewHeight - 190)))
+      .scrollBar(BarState.Auto)
+
+      Row({ space: 12 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(42)
+          .fontColor(this.getTextColor())
+          .backgroundColor(this.isReaderThemeDark() ? '#24FFFFFF' : '#10000000')
+          .enabled(!this.txtCharsetApplying)
+          .onClick(() => {
+            this.showTxtCharsetDialog = false;
+          })
+        Button(this.txtCharsetApplying ? '正在重新解析…' : '应用')
+          .layoutWeight(1)
+          .height(42)
+          .fontColor('#FFFFFF')
+          .backgroundColor(this.accentColor())
+          .enabled(!this.txtCharsetApplying)
+          .onClick(() => this.applyTxtCharsetSelection())
+      }
+      .width('100%')
+    }    .width('100%')
+    .constraintSize({ maxWidth: 440 })
+    .padding({ left: 18, right: 18, top: 16, bottom: 16 })
   }
+
 
   @Builder
   readerTxtCharsetOption(option: ReaderTxtCharsetOption) {
@@ -4673,6 +4713,13 @@ struct ReadBookPage {
   }
 
   openCurrentReaderReplaceRules(): void {
+    this.prepareReaderReplaceRulesContext();
+    this.returningFromReaderReplaceRules = true;
+    this.hideReaderPanels();
+    router.pushUrl({ url: 'pages/ReaderReplaceRules', params: { previewCurrentChapter: 'true' } });
+  }
+
+  prepareReaderReplaceRulesContext(): void {
     const chapter = this.chapters.length > 0 ?
       this.chapters[this.clampChapterIndex(this.currentChapterIndex)] : null;
     const rawTitle = chapter ? this.cleanChapterTitle(chapter.title || '') : '';
@@ -4686,9 +4733,20 @@ struct ReadBookPage {
     AppStorage.setOrCreate('readerReplacePreviewBookOriginName', this.book?.originName || '');
     AppStorage.setOrCreate('readerReplacePreviewBookOrigin', this.book?.origin || '');
     AppStorage.setOrCreate('readerReplacePreviewBookUrl', this.book?.bookUrl || this.bookUrl);
+  }
+
+  openReaderReplaceRuleWithSelection(selectedText: string): void {
+    // 选中内容常带首尾空白与换行，作为字面匹配规则前先去掉，需要精确空白时可在编辑器里手动改回。
+    const pattern = (selectedText || '').trim();
+    if (!pattern) return;
+    this.prepareReaderReplaceRulesContext();
+    AppStorage.setOrCreate('readerReplaceRulePrefillPattern', pattern);
     this.returningFromReaderReplaceRules = true;
     this.hideReaderPanels();
-    router.pushUrl({ url: 'pages/ReaderReplaceRules', params: { previewCurrentChapter: 'true' } });
+    router.pushUrl({
+      url: 'pages/ReaderReplaceRules',
+      params: { previewCurrentChapter: 'true', prefillReplacePattern: 'true' }
+    });
   }
 
   @Builder
@@ -4802,7 +4860,7 @@ struct ReadBookPage {
       this.readerUseChapterQuickJump
     ).catch((e: Error) => {
       console.error('保存阅读布局元素设置失败:', e);
-      promptAction.showToast({ message: '布局元素设置保存失败' });
+      HdsFeedback.showToast('布局元素设置保存失败');
     });
   }
 
@@ -4839,7 +4897,7 @@ struct ReadBookPage {
     const loginEntryUrl = this.verificationUrl || VerificationSupport.resolveBookSourceLoginUrl(source) ||
       VerificationSupport.pickVerificationUrl(source, source.bookSourceUrl);
     if (!loginEntryUrl || !/^https?:\/\//i.test(loginEntryUrl)) {
-      promptAction.showToast({ message: '未找到可用的网页登录地址，请检查书源登录配置' });
+      HdsFeedback.showToast('未找到可用的网页登录地址，请检查书源登录配置');
       return;
     }
     VerificationSupport.requestVerification(loginEntryUrl, `${source.bookSourceName || '书源'} 登录`, source);
@@ -4959,7 +5017,7 @@ struct ReadBookPage {
   openGlobalTtsCatalog(): void {
     const titles = ReaderTtsFloatingSession.catalogTitles();
     if (titles.length === 0) {
-      promptAction.showToast({ message: '暂未获取到听书目录' });
+      HdsFeedback.showToast('暂未获取到听书目录');
       return;
     }
     this.globalTtsCatalogSource.replace(this.globalTtsCatalogReverseOrder ? titles.slice().reverse() : titles);
@@ -5723,7 +5781,7 @@ struct ReadBookPage {
       this.scheduleReaderComicScrollRestore();
     }
     this.enterReaderImmersive();
-    promptAction.showToast({ message: next ? '已切换为漫画阅读' : '已切换为普通阅读' });
+    HdsFeedback.showToast(next ? '已切换为漫画阅读' : '已切换为普通阅读');
   }
 
   isReaderComicModeActive(): boolean {
@@ -5765,6 +5823,7 @@ struct ReadBookPage {
     if (this.readerComicChapterSwitching) return;
     this.readerComicPanLastOffsetY = 0;
     this.readerComicPanMoved = false;
+    this.readerComicBoundaryProbeNotUntil = 0;
     this.readerComicBoundaryPullOriginY = 0;
     this.resetReaderComicBoundaryFeedback(false);
   }
@@ -5777,6 +5836,13 @@ struct ReadBookPage {
     if (Math.abs(event.offsetY) > 3) this.readerComicPanMoved = true;
     this.readerComicScroller.scrollBy(0, -deltaY);
 
+    // 边界探测需要读取滚动器状态（同步原生调用）；已处于边界拉动状态时保持逐事件更新，
+    // 否则每 24ms 探测一次即可。
+    const now = Date.now();
+    if (this.readerComicBoundaryDirection === 0 && now < this.readerComicBoundaryProbeNotUntil) {
+      return;
+    }
+    this.readerComicBoundaryProbeNotUntil = now + 24;
     const direction = this.comicBoundaryChapterSwipeDirection(event.offsetY);
     if (direction === 0) {
       if (this.readerComicBoundaryDirection !== 0) this.resetReaderComicBoundaryFeedback(true);
@@ -5899,12 +5965,41 @@ struct ReadBookPage {
   }
 
   syncReaderComicPageDataSource(): void {
-    this.readerComicPageDataSource.replace(this.contentPages);
+    const reloaded = this.readerComicPageDataSource.replace(this.contentPages);
     const ratios: number[] = [];
     for (let i = 0; i < this.contentPages.length; i++) {
       ratios.push(this.readerComicImageRatios[i] || 0);
     }
     this.readerComicImageRatios = ratios;
+    this.reanchorContinuousReaderScrollAfterReload(reloaded);
+  }
+
+  /**
+   * onDataReloaded 会重建 LazyForEach 的挂载项，部分系统版本会把 List 打回索引 0，表现为
+   * "阅读中偶发回到本章开头"。发布分页时 currentPageIndex 仍是权威位置，延迟一帧校验并把
+   * List 拉回该页；位置未被破坏时 scrollToIndex 等价于无操作。
+   */
+  reanchorContinuousReaderScrollAfterReload(reloaded: boolean): void {
+    // 只作用于小说滚动模式：漫画模式有自己的章节切换/恢复时序，且本地漫画分页是单次同步发布，
+    // 不会出现阅读中 reload，保持其原有行为以隔离变量。
+    if (!reloaded || !this.isReaderNovelContinuousScrollModeActive() || !this.readerInitialPageReady ||
+      !this.readerProgressRestoreConfirmed || this.pendingRestorePageIndex >= 0 ||
+      this.readerComicScrollRestoring || this.contentPages.length === 0) {
+      return;
+    }
+    const serial = ++this.readerComicReanchorSerial;
+    const chapterIndex = this.currentChapterIndex;
+    const targetIndex = Math.max(0, Math.min(this.currentPageIndex, this.contentPages.length - 1));
+    setTimeout(() => {
+      if (serial !== this.readerComicReanchorSerial || chapterIndex !== this.currentChapterIndex ||
+        !this.readerPageVisible || this.readerComicScrollRestoring || this.pendingRestorePageIndex >= 0) {
+        return;
+      }
+      try {
+        this.readerComicScroller.scrollToIndex(targetIndex, false, ScrollAlign.START);
+      } catch (_) {
+      }
+    }, 48);
   }
 
   getReaderComicImageHeight(index: number): number {
@@ -6085,15 +6180,14 @@ struct ReadBookPage {
   }
 
   pruneContinuousReaderSelectionAreas(): void {
-    const prefix = `reader_vertical_scroll_${this.currentChapterIndex}_`;
     const keepStart = Math.max(0, this.readerContinuousVisibleStart - 1);
     const keepEnd = this.readerContinuousVisibleEnd + 1;
     for (const key of Array.from(this.readerSelectableTextAreas.keys())) {
-      const marker = key.indexOf(prefix);
-      if (marker < 0) continue;
-      const tail = key.substring(marker + prefix.length);
-      const match = tail.match(/^(\d+)/);
-      const pageIndex = match ? Number(match[1]) : -1;
+      // 原生选中键与可见段键都要按窗口清理：懒挂载后原生键只在挂载瞬间登记一次，
+      // 残留的旧几何会把下一次选择窗口锚到过期位置。
+      if (!key.startsWith('reader_continuous_native_') && !key.includes('reader_vertical_scroll_')) continue;
+      const pageIndex = this.continuousSelectionPageIndexForKey(key);
+      if (pageIndex < 0) continue;
       if (pageIndex >= keepStart && pageIndex <= keepEnd) continue;
       this.readerSelectableTextAreas.delete(key);
       this.readerSelectableTextValues.delete(key);
@@ -6181,6 +6275,36 @@ struct ReadBookPage {
 
   isReaderImageOnlyPage(text: string): boolean {
     return LocalBookService.isEpubImageMarker((text || '').trim());
+  }
+
+  /**
+   * 图片 onError 后记录失败页并输出诊断日志：区分网络/本地来源，本地图检查文件是否存在，
+   * 网络图记录 Image 组件给出的错误信息，用于区分"文件缺失"与"加载/解码失败"两类空白原因。
+   */
+  markReaderComicImageBroken(index: number, page: string, error: ImageError): void {
+    if (this.readerComicBrokenPages.includes(index)) return;
+    this.readerComicBrokenPages = [...this.readerComicBrokenPages, index];
+    const payload = LocalBookService.epubImagePathFromMarker(page);
+    const isRemote = /^(?:https?:|data:)/i.test(payload);
+    let exists = false;
+    if (!isRemote && payload) {
+      try {
+        exists = fs.accessSync(payload);
+      } catch (_) {
+        exists = false;
+      }
+    }
+    const errorMessage = error?.message || '';
+    console.error(`[ReaderComic] 图片加载失败 index=${index} 来源=${isRemote ? '网络' : '本地'} ` +
+      `文件存在=${exists} message=${errorMessage} 路径=${payload}`);
+  }
+
+  /** 占位提示点击重试：移出失败集合并重建条目，触发 Image 重新加载。 */
+  retryReaderComicImage(index: number): void {
+    if (!this.readerComicBrokenPages.includes(index)) return;
+    this.readerComicBrokenPages = this.readerComicBrokenPages.filter((broken: number): boolean =>
+      broken !== index);
+    this.readerComicPageDataSource.notifyChanged(index);
   }
 
   getReaderPageHorizontalPadding(text: string, fallback: number): number {
@@ -6905,6 +7029,7 @@ struct ReadBookPage {
     this.readerTextAlign = settings.textAlign;
     this.readerLineHeight = settings.lineHeight;
     this.readerParagraphSpacing = settings.paragraphSpacing;
+    this.keepParagraphIndent = settings.keepParagraphIndent;
     this.readerMarginLeft = settings.marginLeft;
     this.readerMarginRight = settings.marginRight;
     this.readerMarginTop = settings.marginTop;
@@ -7075,7 +7200,7 @@ struct ReadBookPage {
       this.setTocWindowAround(this.currentChapterIndex, ScrollAlign.CENTER);
       this.scrollTocToCurrentChapter(false);
     }
-    promptAction.showToast({ message: '目录已刷新' });
+    HdsFeedback.showToast('目录已刷新');
   }
 
   async loadBookmarks(): Promise<void> {
@@ -7176,7 +7301,7 @@ struct ReadBookPage {
 
   async addCurrentBookmark(): Promise<void> {
     if (!this.book || this.chapters.length === 0) {
-      promptAction.showToast({ message: '当前没有可添加的阅读位置' });
+      HdsFeedback.showToast('当前没有可添加的阅读位置');
       return;
     }
     const pageIndex = Math.max(0, this.currentPageIndex);
@@ -7185,7 +7310,7 @@ struct ReadBookPage {
       await db.initWithContext(getContext(this));
       const existing = await db.getBookmarkAt(this.book.bookUrl, this.currentChapterIndex, pageIndex);
       if (existing) {
-        promptAction.showToast({ message: '当前阅读位置已添加书签' });
+        HdsFeedback.showToast('当前阅读位置已添加书签');
         return;
       }
       const bookmark = new Bookmark();
@@ -7201,10 +7326,10 @@ struct ReadBookPage {
       bookmark.createTime = Date.now();
       bookmark.id = await db.insertBookmark(bookmark);
       await this.loadBookmarks();
-      promptAction.showToast({ message: '书签已添加' });
+      HdsFeedback.showToast('书签已添加');
     } catch (e) {
       console.error('添加书签失败:', e);
-      promptAction.showToast({ message: '添加书签失败' });
+      HdsFeedback.showToast('添加书签失败');
     }
   }
 
@@ -7223,10 +7348,10 @@ struct ReadBookPage {
       if (this.bookmarkMultiSelectMode && this.bookmarks.length === 0) {
         this.cancelBookmarkMultiSelect();
       }
-      promptAction.showToast({ message: '书签已删除' });
+      HdsFeedback.showToast('书签已删除');
     } catch (e) {
       console.error('删除书签失败:', e);
-      promptAction.showToast({ message: '删除书签失败' });
+      HdsFeedback.showToast('删除书签失败');
     }
   }
 
@@ -7278,10 +7403,10 @@ struct ReadBookPage {
       await db.deleteBookmarks(ids);
       this.bookmarks = this.bookmarks.filter((bookmark: Bookmark) => !ids.includes(bookmark.id));
       this.cancelBookmarkMultiSelect();
-      promptAction.showToast({ message: `已删除 ${ids.length} 条书签` });
+      HdsFeedback.showToast(`已删除 ${ids.length} 条书签`);
     } catch (e) {
       console.error('批量删除书签失败:', e);
-      promptAction.showToast({ message: '批量删除书签失败' });
+      HdsFeedback.showToast('批量删除书签失败');
     }
   }
 
@@ -7565,7 +7690,7 @@ struct ReadBookPage {
 
   applyTtsVoice(voice: TtsVoiceOption, restartSpeaking: boolean): void {
     if (!voice.available) {
-      promptAction.showToast({ message: voice.downloadable ? '请到朗读设置下载该音色' : '该系统音色当前不可用' });
+      HdsFeedback.showToast(voice.downloadable ? '请到朗读设置下载该音色' : '该系统音色当前不可用');
       return;
     }
     const shouldResume = restartSpeaking && (this.isTtsSpeaking || this.ttsReader.isSpeaking());
@@ -7699,7 +7824,7 @@ struct ReadBookPage {
 
   applyCustomTtsVoice(voice: HttpTTS, restartSpeaking: boolean): void {
     if (voice.enabled === false) {
-      promptAction.showToast({ message: '该自定义音色已禁用' });
+      HdsFeedback.showToast('该自定义音色已禁用');
       return;
     }
     const shouldResume = restartSpeaking && (this.isTtsSpeaking || this.ttsReader.isSpeaking());
@@ -7804,7 +7929,7 @@ struct ReadBookPage {
 
   applyCloudTtsVoice(voice: TtsVoiceInfo, restartSpeaking: boolean): void {
     if (!AccountSessionStore.isLoggedIn()) {
-      promptAction.showToast({ message: '请先登录华为账号后使用在线音色' });
+      HdsFeedback.showToast('请先登录华为账号后使用在线音色');
       return;
     }
     const shouldResume = restartSpeaking && (this.isTtsSpeaking || this.ttsReader.isSpeaking());
@@ -8002,7 +8127,7 @@ struct ReadBookPage {
     } catch (e) {
       console.warn('目录搜索失败:', e);
       if (requestSerial === this.tocSearchRequestSerial) {
-        promptAction.showToast({ message: '目录搜索失败' });
+        HdsFeedback.showToast('目录搜索失败');
       }
     } finally {
       if (requestSerial === this.tocSearchRequestSerial) {
@@ -8931,6 +9056,7 @@ struct ReadBookPage {
     }
     this.readerParagraphMetricsCache.clear();
     this.readerAdaptiveLineHeightCache.clear();
+    this.readerTextParagraphsCache.clear();
     this.pageTurnPreviewKey = '';
     this.pageTurnPreviewLoadingKey = '';
     this.clearPendingReaderSourceActionBounds();
@@ -9337,455 +9463,16 @@ struct ReadBookPage {
     return Math.round(storedOffset);
   }
 
-  @Builder
-  changeSourceDialog() {
-    Column() {
-      Column() {
-        Row() {
-          Text('选择新书源')
-            .fontSize(18)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.getTextColor())
-            .layoutWeight(1)
 
-          Row({ space: 6 }) {
-            if (this.isChangingSource) {
-              Stack({ alignContent: Alignment.Center }) {
-                LoadingProgress()
-                  .width(24)
-                  .height(24)
-              }
-              .width(40)
-              .height(40)
-              .accessibilityText('正在刷新书源')
-            } else {
-              ImmersiveBackButton({
-                icon: $r('sys.symbol.arrow_clockwise'),
-                iconOffsetX: 0,
-                iconColor: this.readerControlIconColor(),
-                darkMode: this.isReaderThemeDark(),
-                buttonSize: 40,
-                containerWidth: 40,
-                containerHeight: 40,
-                startInset: 0,
-                materialScale: 0.83,
-                compactLayout: true,
-                accessibilityLabel: '刷新书源',
-                onBack: () => {
-                  this.refreshChangeSourceResults();
-                }
-              })
-            }
 
-            ImmersiveBackButton({
-              icon: $r('sys.symbol.xmark'),
-              iconOffsetX: 0,
-              iconColor: this.readerControlIconColor(),
-              darkMode: this.isReaderThemeDark(),
-              buttonSize: 40,
-              containerWidth: 40,
-              containerHeight: 40,
-              startInset: 0,
-              materialScale: 0.83,
-              compactLayout: true,
-              accessibilityLabel: '关闭换源',
-              onBack: () => this.closeChangeSourceDialog()
-            })
-          }
-          .height(40)
-          .alignItems(VerticalAlign.Center)
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
 
-        Text(this.changeSourceStatus || '将使用当前书名进行全词匹配搜索')
-          .fontSize(13)
-          .fontColor(this.getSubTextColor())
-          .width('100%')
-          .margin({ top: 6, bottom: 10 })
 
-        if (this.isChangingSource && this.changeSourceResults.length === 0) {
-          Column() {
-            LoadingProgress()
-              .width(36)
-              .height(36)
-            Text('正在搜索可用书源...')
-              .fontSize(13)
-              .fontColor(this.getSubTextColor())
-              .margin({ top: 8 })
-          }
-          .width('100%')
-          .height(220)
-          .justifyContent(FlexAlign.Center)
-        } else if (this.changeSourceResults.length === 0) {
-          Column() {
-            Text('暂无可切换书源')
-              .fontSize(15)
-              .fontColor(this.getSubTextColor())
-          }
-          .width('100%')
-          .height(220)
-          .justifyContent(FlexAlign.Center)
-        } else {
-           List({ space: 8 }) {
-            ForEach(this.changeSourceResults, (book: SearchBook) => {
-              ListItem() {
-                Row() {
-                  Column({ space: 4 }) {
-                    Text(book.originName || book.origin)
-                      .fontSize(15)
-                      .fontWeight(FontWeight.Bold)
-                      .fontColor(this.getTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-                    Text(`作者：${book.author || '未知'}`)
-                      .fontSize(12)
-                      .fontColor(this.getSubTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(`最新：${book.latestChapterTitle || '书源未提供'}`)
-                      .fontSize(12)
-                      .fontColor(this.getSubTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  }
-                  .layoutWeight(1)
-                  .alignItems(HorizontalAlign.Start)
 
-                  Button('切换')
-                    .width(64)
-                    .height(32)
-                    .fontSize(13)
-                    .borderRadius(16)
-                    .backgroundColor(this.buttonColor())
-                    .fontColor('#FFFFFF')
-                    .enabled(!this.isSwitchingSource)
-                    .onClick(() => {
-                      this.switchToSearchBook(book);
-                    })
-                }
-                .width('100%')
-                .padding(12)
-                .backgroundColor(this.readerSolidPanelColor())
-                .borderRadius(8)
-                .onClick(() => {
-                  this.switchToSearchBook(book);
-                })
-              }
-            }, (book: SearchBook) => `${book.origin}|${book.bookUrl}`)
 
-            if (this.isChangingSource) {
-              ListItem() {
-                Row() {
-                  LoadingProgress()
-                    .width(20)
-                    .height(20)
-                  Text('继续加载中...')
-                    .fontSize(13)
-                    .fontColor(this.getSubTextColor())
-                    .margin({ left: 8 })
-                }
-                .width('100%')
-                .height(42)
-                .justifyContent(FlexAlign.Center)
-              }
-            }
-          }
-          .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-          .width('100%')
-          .height(320)
-        }
-      }
-      .width('90%')
-      .padding(20)
-      .borderRadius(ThemeRuntime.glassCornerRadius(12, 'panel'))
-      .clip(true)
-      .backgroundColor(this.readerGlassPanelColor())
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#80000000')
-    .justifyContent(FlexAlign.Center)
-  }
 
-  async openChangeSourceDialog(): Promise<void> {
-    if (!this.book || !this.book.name) {
-      promptAction.showToast({ message: '当前书籍信息不完整' });
-      return;
-    }
-    this.cancelActiveChangeSourceSearch();
-    const sessionId = ++this.changeSourceSessionId;
-    this.showChangeSourceDialog = true;
-    this.showMenu = false;
-    this.showToc = false;
-    this.showSettings = false;
-    this.changeSourceResults = [];
-    this.changeSourceStatus = '正在读取历史换源结果...';
-    this.isChangingSource = true;
-    this.isSwitchingSource = false;
-    try {
-      const cachedResults = await ChangeSourceResultCache.load(getContext(this), this.book.name, this.book.author);
-      if (!this.isChangeSourceSessionActive(sessionId) || !this.book) {
-        return;
-      }
-      this.changeSourceResults = this.filterChangeSourceResults(
-        cachedResults, this.book.bookUrl, this.book.origin
-      );
-      if (this.changeSourceResults.length > 0) {
-        this.isChangingSource = false;
-        this.changeSourceStatus = `已显示历史结果，共 ${this.changeSourceResults.length} 个；点击刷新可重新搜索`;
-        return;
-      }
-    } catch (e) {
-      console.warn('读取换源历史结果失败:', e);
-    }
-    if (this.isChangeSourceSessionActive(sessionId)) {
-      this.searchChangeSource(sessionId);
-    }
-  }
 
-  refreshChangeSourceResults(): void {
-    if (!this.book || this.isSwitchingSource) {
-      return;
-    }
-    this.cancelActiveChangeSourceSearch();
-    const sessionId = ++this.changeSourceSessionId;
-    this.changeSourceStatus = '正在刷新可用书源...';
-    this.isChangingSource = true;
-    this.searchChangeSource(sessionId);
-  }
 
-  closeChangeSourceDialog(): void {
-    this.changeSourceSessionId++;
-    this.cancelActiveChangeSourceSearch();
-    this.showChangeSourceDialog = false;
-    this.changeSourceResults = [];
-    this.changeSourceStatus = '';
-    this.isChangingSource = false;
-    this.isSwitchingSource = false;
-  }
-
-  async searchChangeSource(sessionId: number): Promise<void> {
-    if (!this.book) {
-      return;
-    }
-    const cacheBookName = this.book.name;
-    this.isChangingSource = true;
-    this.changeSourceStatus = '正在搜索可用书源...';
-    const coordinator = new SearchCoordinator(Math.min(2, SearchExploreSettingsStore.getSearchConcurrency()));
-    this.activeChangeSourceCoordinator = coordinator;
-    try {
-      const currentBookUrl = this.book.bookUrl;
-      const currentOrigin = this.book.origin;
-      const results = await coordinator.search(this.book.name, (progress: SearchProgress) => {
-        if (!this.isChangeSourceSessionActive(sessionId)) {
-          return;
-        }
-        if (progress.finished) {
-          this.changeSourceResults = this.filterChangeSourceResults(progress.results, currentBookUrl, currentOrigin);
-        } else if (progress.deltaResults && progress.deltaResults.length > 0) {
-          this.changeSourceResults = this.filterChangeSourceResults(
-            this.changeSourceResults.concat(progress.deltaResults),
-            currentBookUrl,
-            currentOrigin
-          );
-        }
-        this.changeSourceStatus = progress.status;
-        if (progress.finished) {
-          this.isChangingSource = false;
-        }
-      }, {
-        exactMatch: true,
-        leanResult: true,
-        excludeSourceUrls: [currentOrigin],
-        maxResultsPerSource: 1,
-        maxTotalResults: 60,
-        stopAfterResults: 20,
-        maxCandidatesPerSource: 32
-      });
-      if (!this.isChangeSourceSessionActive(sessionId)) {
-        return;
-      }
-      this.changeSourceResults = this.filterChangeSourceResults(results, currentBookUrl, currentOrigin);
-      this.changeSourceStatus = this.changeSourceResults.length > 0 ?
-        `搜索完成，找到 ${this.changeSourceResults.length} 个可切换书源` : '搜索完成，未找到可切换书源';
-      try {
-        // 缓存完整搜索结果；展示时再排除当前书源，确保切换后仍可换回原书源。
-        await ChangeSourceResultCache.save(getContext(this), cacheBookName, results, this.book?.author || '');
-      } catch (e) {
-        console.warn('保存换源结果缓存失败:', e);
-      }
-    } catch (e) {
-      if (!this.isChangeSourceSessionActive(sessionId)) {
-        return;
-      }
-      console.error('搜索换源失败:', e);
-      this.changeSourceStatus = '搜索换源失败';
-    } finally {
-      if (this.activeChangeSourceCoordinator === coordinator) {
-        this.activeChangeSourceCoordinator = null;
-      }
-      if (this.isChangeSourceSessionActive(sessionId)) {
-        this.isChangingSource = false;
-      }
-    }
-  }
-
-  isChangeSourceSessionActive(sessionId: number): boolean {
-    return this.showChangeSourceDialog && sessionId === this.changeSourceSessionId;
-  }
-
-  cancelActiveChangeSourceSearch(): void {
-    if (this.activeChangeSourceCoordinator) {
-      this.activeChangeSourceCoordinator.cancel();
-      this.activeChangeSourceCoordinator = null;
-    }
-  }
-
-  filterChangeSourceResults(results: SearchBook[], currentBookUrl: string, currentOrigin: string): SearchBook[] {
-    const filtered: SearchBook[] = [];
-    const seen = new Set<string>();
-    for (const result of results) {
-      if (!result.bookUrl || SearchBookShelfHelper.isNavigationResult(result) ||
-        (result.bookUrl === currentBookUrl && result.origin === currentOrigin)) {
-        continue;
-      }
-      const key = `${result.origin || ''}\n${result.bookUrl}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      filtered.push(result);
-    }
-    return filtered;
-  }
-
-  async switchToSearchBook(searchBook: SearchBook): Promise<void> {
-    if (!this.book || this.isSwitchingSource) {
-      return;
-    }
-    this.cancelActiveChangeSourceSearch();
-    this.isChangingSource = false;
-    const sessionId = ++this.changeSourceSessionId;
-    this.isSwitchingSource = true;
-    this.changeSourceStatus = '正在切换书源...';
-    await this.saveReadingProgress();
-    const oldBook = this.book;
-    const oldBookUrl = oldBook.bookUrl;
-    const chapterIndex = this.clampChapterIndex(this.currentChapterIndex);
-    const pageIndex = Math.max(0, this.currentPageIndex);
-    try {
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      const source = searchBook.origin ? await db.getBookSource(searchBook.origin) : null;
-      if (!source) {
-        promptAction.showToast({ message: '书源不存在或已删除' });
-        return;
-      }
-      if (!this.isChangeSourceSessionActive(sessionId)) {
-        return;
-      }
-
-      const nextBook = this.buildBookFromSearchResult(searchBook, oldBook, chapterIndex, pageIndex);
-      const service = new WebBookService();
-      const fullBook = await service.getBookInfo(source, nextBook);
-      if (!this.isChangeSourceSessionActive(sessionId)) {
-        return;
-      }
-      this.preserveSwitchBookState(fullBook, nextBook, oldBook, chapterIndex, pageIndex);
-      const chapters = await service.getChapterList(source, fullBook, 0, false);
-      if (!this.isChangeSourceSessionActive(sessionId)) {
-        return;
-      }
-      if (chapters.length === 0) throw new Error('新书源目录为空，已保留原书源');
-      fullBook.totalChapterNum = chapters.length;
-      if (chapters.length > 0) {
-        const safeIndex = Math.max(0, Math.min(chapterIndex, chapters.length - 1));
-        fullBook.durChapterIndex = safeIndex;
-        fullBook.durChapterTitle = chapters[safeIndex].title;
-        fullBook.latestChapterTitle = chapters[chapters.length - 1].title;
-      }
-
-      await db.commitBookSourceSwitch(oldBookUrl, fullBook, chapters);
-
-      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      this.bookUrl = fullBook.bookUrl;
-      this.book = fullBook;
-      this.closeChangeSourceDialog();
-      promptAction.showToast({ message: `已切换至 ${fullBook.originName || searchBook.originName}` });
-      await this.loadBook();
-      await this.loadBookmarks();
-    } catch (e) {
-      if (!this.isChangeSourceSessionActive(sessionId)) {
-        return;
-      }
-      console.error('切换书源失败:', e);
-      promptAction.showToast({ message: '切换书源失败' });
-    } finally {
-      if (sessionId === this.changeSourceSessionId) {
-        this.isSwitchingSource = false;
-      }
-    }
-  }
-
-  buildBookFromSearchResult(searchBook: SearchBook, oldBook: Book, chapterIndex: number, pageIndex: number): Book {
-    const book = new Book();
-    book.bookUrl = searchBook.bookUrl;
-    book.tocUrl = searchBook.tocUrl;
-    book.origin = searchBook.origin;
-    book.originName = searchBook.originName;
-    book.name = searchBook.name || oldBook.name;
-    book.author = searchBook.author || oldBook.author;
-    book.kind = BookFieldSanitizer.prefer(searchBook.kind, oldBook.kind);
-    book.coverUrl = CoverUrlNormalizer.prefer(searchBook.coverUrl, oldBook.coverUrl);
-    book.customCoverUrl = oldBook.customCoverUrl;
-    book.intro = BookFieldSanitizer.prefer(searchBook.intro, oldBook.intro);
-    book.customIntro = oldBook.customIntro;
-    book.latestChapterTitle = BookFieldSanitizer.prefer(searchBook.latestChapterTitle, oldBook.latestChapterTitle);
-    book.updateTime = oldBook.updateTime;
-    book.wordCount = BookFieldSanitizer.prefer(searchBook.wordCount, oldBook.wordCount);
-    book.variable = searchBook.variable || '';
-    book.group = oldBook.group;
-    book.isPinned = oldBook.isPinned;
-    book.order = oldBook.order;
-    book.originOrder = oldBook.originOrder;
-    book.readConfig = oldBook.readConfig;
-    book.canUpdate = oldBook.canUpdate;
-    book.durChapterIndex = chapterIndex;
-    book.durChapterPos = pageIndex;
-    book.durChapterTitle = oldBook.durChapterTitle;
-    book.durChapterTime = Date.now();
-    // Mark the book as opened as well as read. hasStartedReading() also accepts
-    // durChapterIndex/durChapterPos > 0, but a source switch can legitimately land on
-    // chapter 0 / page 0, which used to leave the book looking never-read on the shelf.
-    book.putVariable('readStarted', '1');
-    book.putVariable('lastReadTime', `${Date.now()}`);
-    return book;
-  }
-
-  preserveSwitchBookState(target: Book, source: Book, oldBook: Book, chapterIndex: number, pageIndex: number): void {
-    target.origin = source.origin;
-    target.originName = source.originName;
-    target.coverUrl = CoverUrlNormalizer.prefer(source.coverUrl, target.coverUrl);
-    target.group = oldBook.group;
-    target.isPinned = oldBook.isPinned;
-    target.order = oldBook.order;
-    target.originOrder = oldBook.originOrder;
-    target.customCoverUrl = oldBook.customCoverUrl;
-    target.customIntro = oldBook.customIntro;
-    target.readConfig = oldBook.readConfig;
-    target.canUpdate = oldBook.canUpdate;
-    target.durChapterIndex = chapterIndex;
-    target.durChapterPos = pageIndex;
-    target.durChapterTitle = oldBook.durChapterTitle;
-    target.durChapterTime = Date.now();
-    target.syncTime = oldBook.syncTime;
-    // See buildBookFromSearchResult(): a chapter-0/page-0 switch must still count as opened.
-    target.putVariable('readStarted', '1');
-    target.putVariable('lastReadTime', `${Date.now()}`);
-  }
 
   committedLocalPageTurnCheckpointPageIndex(): number {
     // During an animated turn the incoming page is already the committed visual destination, while
@@ -10293,7 +9980,7 @@ struct ReadBookPage {
   setTtsSleepTimer(minutes: number): void {
     this.clearTtsSleepTimer();
     if (minutes <= 0) {
-      promptAction.showToast({ message: '已关闭朗读定时' });
+      HdsFeedback.showToast('已关闭朗读定时');
       return;
     }
     this.ttsSleepTimerMinutes = minutes;
@@ -10308,10 +9995,10 @@ struct ReadBookPage {
       if (remaining <= 0) {
         this.clearTtsSleepTimer();
         this.stopTtsReading();
-        promptAction.showToast({ message: '朗读定时结束，已停止朗读' });
+        HdsFeedback.showToast('朗读定时结束，已停止朗读');
       }
     }, 1000);
-    promptAction.showToast({ message: `将在 ${minutes} 分钟后停止朗读` });
+    HdsFeedback.showToast(`将在 ${minutes} 分钟后停止朗读`);
   }
 
   clearTtsSleepTimer(): void {
@@ -10332,7 +10019,7 @@ struct ReadBookPage {
       nextIndex = 0;
     }
     this.applyTtsSpeed(speeds[nextIndex]);
-    promptAction.showToast({ message: `朗读倍速 ${speeds[nextIndex].toFixed(1)}x` });
+    HdsFeedback.showToast(`朗读倍速 ${speeds[nextIndex].toFixed(1)}x`);
   }
 
   shouldShowTtsMediaControls(): boolean {
@@ -10726,6 +10413,7 @@ struct ReadBookPage {
       this.readerGestureTurnAllowance = 0;
       this.readerTouchMoved = false;
       this.suppressReaderTapClick = false;
+      this.readerSelectionDismissArmed = this.hasReaderTextSelection();
       this.slideResetSerial++;
       // An explicitly rendered action owns its exact hit region. Page-turn tap zones only run
       // when no action was hit, so justified line-end comments remain accessible near an edge.
@@ -10863,6 +10551,15 @@ struct ReadBookPage {
 
   commitReaderTapByPoint(x: number, y: number): boolean {
     if (this.isReaderInteractiveActionActive()) {
+      return true;
+    }
+    if (this.hasReaderTextSelection()) {
+      // Same arming rule as consumeSuppressedReaderTapClick: only a press that started on an existing
+      // selection may dismiss it. The release of the press that created the selection ends here
+      // untouched, so holding the long press longer than the 900ms guard still keeps the menu alive.
+      if (this.readerSelectionDismissArmed) {
+        this.scheduleReaderTextSelectionClear();
+      }
       return true;
     }
     if (this.isPageTurnAnimationEnabled() && this.readerEffectivePageTurnMode() !== 0 &&
@@ -11019,9 +10716,27 @@ struct ReadBookPage {
     return Math.abs(offsetX) > this.readerTapSlop || Math.abs(offsetY) > this.readerTapSlop;
   }
 
+  /**
+   * Dismisses a live text selection without performing the action the tap would otherwise trigger.
+   * Every tap path funnels through here before turning a page, opening the menu or firing a tap zone,
+   * so consuming the click here is enough to cancel the selection. Drag events are never touched, which
+   * keeps the native selection handles working.
+   */
   consumeSuppressedReaderTapClick(): boolean {
     if (this.isReaderInteractiveActionActive()) {
       this.suppressReaderTapClick = false;
+      return true;
+    }
+    if (this.hasReaderTextSelection()) {
+      // A stream whose Down began on an existing selection (armed) dismisses it. The release of the
+      // press that created the selection also lands here and must only be swallowed — clearing it
+      // would close the freshly shown menu the moment the finger lifts.
+      if (this.readerSelectionDismissArmed) {
+        this.scheduleReaderTextSelectionClear();
+        // Keep suppressing until the selection actually clears, so a repeated tap cannot fall through
+        // to a page turn while the highlight is still visible.
+        this.suppressReaderTapClick = true;
+      }
       return true;
     }
     if (!this.suppressReaderTapClick) {
@@ -11210,6 +10925,11 @@ struct ReadBookPage {
       this.readerSwitchSettingItem('正文扩展至状态栏', '开启后正文同时延伸到顶部状态栏和底部系统安全区', this.readerExtendToStatusBar,
         (checked: boolean) => {
           this.setReaderExtendToStatusBar(checked);
+        })
+
+      this.readerSwitchSettingItem('保留段首缩进', '章节开头与页首保留原文的全角空格缩进', this.keepParagraphIndent,
+        (checked: boolean) => {
+          this.setKeepParagraphIndent(checked);
         })
 
     }
@@ -12215,7 +11935,7 @@ struct ReadBookPage {
         .fontColor('#FFFFFF')
         .margin({ left: 12 })
         .onClick(() => {
-          this.showTapZoneSettings = true;
+          this.presentTapZoneSettings();
         })
     }
     .width('100%')
@@ -12223,100 +11943,7 @@ struct ReadBookPage {
     .alignItems(VerticalAlign.Center)
   }
 
-  @Builder
-  tapZoneSettingsDialog() {
-    Column() {
-      Column({ space: 14 }) {
-        Row() {
-          Text('点击区域动作')
-            .fontSize(18)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#FFFFFF')
-            .layoutWeight(1)
 
-          Button('×')
-            .fontSize(26)
-            .fontColor('#FFFFFF')
-            .width(48)
-            .height(48)
-            .backgroundColor('#00000000')
-            .padding(0)
-            .onClick(() => {
-              this.showTapZoneSettings = false;
-            })
-        }
-        .width('calc(100% - 40vp)')
-        .height(52)
-        .alignItems(VerticalAlign.Center)
-
-        Column() {
-          ForEach([0, 1, 2], (row: number) => {
-            Row() {
-              ForEach([0, 1, 2], (column: number) => {
-                this.tapZoneCell(row * 3 + column)
-              }, (column: number) => `${row}_${column}`)
-            }
-            .width('100%')
-            .layoutWeight(1)
-            .clip(true)
-          }, (row: number) => `${row}`)
-        }
-        .width('calc(100% - 40vp)')
-        .layoutWeight(1)
-        .border({ width: 1, color: '#33FFFFFF' })
-        .clip(true)
-
-        Row({ space: 12 }) {
-          Button('重置默认')
-            .layoutWeight(1)
-            .height(40)
-            .fontSize(14)
-            .backgroundColor('#33383E')
-            .fontColor('#FFFFFF')
-            .onClick(() => {
-              this.setTapZoneActions('3,3,3,3,1,2,2,2,2');
-            })
-
-          Button('完成')
-            .layoutWeight(1)
-            .height(40)
-            .fontSize(14)
-            .backgroundColor(this.accentColor())
-            .fontColor('#FFFFFF')
-            .onClick(() => {
-              this.showTapZoneSettings = false;
-            })
-        }
-        .width('calc(100% - 40vp)')
-      }
-      .width('100%')
-      .height('100%')
-      .padding({ top: 18, bottom: 22 })
-      .alignItems(HorizontalAlign.Center)
-      .backgroundColor('#D9000000')
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#99000000')
-  }
-
-  @Builder
-  tapZoneCell(index: number) {
-    Text(this.tapActionLabel(this.readerTapZoneActionAt(index)))
-      .fontSize(18)
-      .fontWeight(FontWeight.Medium)
-      .fontColor('#FFFFFF')
-      .textAlign(TextAlign.Center)
-      .width('100%')
-      .height('100%')
-      .layoutWeight(1)
-      .backgroundColor(this.tapZoneCellColor(this.readerTapZoneActionAt(index)))
-      .border({ width: 0.5, color: '#33FFFFFF' })
-      .clip(true)
-      .onClick(() => {
-        this.cycleTapZoneAction(index);
-      })
-  }
 
   @Builder
   readerSelectSettingItem(title: string, description: string, options: SelectOption[], selected: number,
@@ -12845,7 +12472,7 @@ struct ReadBookPage {
   deleteCurrentCustomTheme(): void {
     const data = this.customThemeData();
     if (ReaderCustomThemeHelper.schemesForMode(data, this.appDarkMode).length <= 1) {
-      promptAction.showToast({ message: '至少保留一套自定义背景' });
+      HdsFeedback.showToast('至少保留一套自定义背景');
       return;
     }
     ReaderCustomThemeHelper.removeSelected(data, this.appDarkMode);
@@ -12890,7 +12517,7 @@ struct ReadBookPage {
       this.persistCustomThemeData(data);
     } catch (e) {
       console.error('选择阅读背景图片失败:', e);
-      promptAction.showToast({ message: '选择背景图片失败' });
+      HdsFeedback.showToast('选择背景图片失败');
     }
   }
 
@@ -12953,7 +12580,7 @@ struct ReadBookPage {
         if (!granted) {
           this.readerEyeTurnEnabled = false;
           this.readerEyeTurnStatus = '未获得相机权限';
-          promptAction.showToast({ message: '需要相机权限才能使用眼动翻页' });
+          HdsFeedback.showToast('需要相机权限才能使用眼动翻页');
           this.saveReaderEyeTurnSettings();
           return;
         }
@@ -12970,7 +12597,7 @@ struct ReadBookPage {
         if (serial !== this.readerEyePermissionRequestSerial) return;
         this.readerEyeTurnEnabled = false;
         this.readerEyeTurnStatus = '相机权限请求失败';
-        promptAction.showToast({ message: `眼动翻页启用失败：${error.message}` });
+        HdsFeedback.showToast(`眼动翻页启用失败：${error.message}`);
         this.saveReaderEyeTurnSettings();
       });
   }
@@ -13310,7 +12937,7 @@ struct ReadBookPage {
     if (!this.showReaderEyeCalibration || !this.readerEyeCalibrationCapturing) return;
     if (this.readerEyeCalibrationLandscape !== this.isReaderEyeLandscape()) {
       this.abortReaderEyeCalibrationAttempt('校准过程中屏幕方向发生变化，请重新开始');
-      promptAction.showToast({ message: '校准过程中屏幕方向发生变化，请重新开始' });
+      HdsFeedback.showToast('校准过程中屏幕方向发生变化，请重新开始');
       return;
     }
     const phaseStartedAt = this.readerEyeCalibrationPhaseStartedAt;
@@ -13474,7 +13101,7 @@ struct ReadBookPage {
     this.readerEyeTurnStatus = '眼动翻页已就绪';
     this.configureReaderEyeTurnController();
     this.saveReaderEyeTurnSettings();
-    promptAction.showToast({ message: '眼动翻页校准完成' });
+    HdsFeedback.showToast('眼动翻页校准完成');
   }
 
   private readerEyeCalibrationMedian(values: number[]): number {
@@ -13492,7 +13119,7 @@ struct ReadBookPage {
     this.readerEyeCalibrationTargetY = 0;
     this.readerEyeCalibrationSequenceStartedAt = 0;
     this.readerEyeTurnStatus = message;
-    promptAction.showToast({ message: message });
+    HdsFeedback.showToast(message);
   }
 
   private abortReaderEyeCalibrationAttempt(message: string): void {
@@ -13551,6 +13178,15 @@ struct ReadBookPage {
     this.scheduleReaderExtendLayoutRefresh(readingOffset);
     this.saveReaderInteractionSettings();
     this.saveReadConfig();
+  }
+
+  setKeepParagraphIndent(enabled: boolean): void {
+    if (this.keepParagraphIndent === enabled) return;
+    this.keepParagraphIndent = enabled;
+    // StorageLink 的 @Watch 会触发重排；这里同步持久化，保证下次进入阅读时生效。
+    ReaderSettingsStore.saveKeepParagraphIndent(getContext(this), enabled).catch((e: Error) => {
+      console.warn('保存保留段首缩进设置失败:', e);
+    });
   }
 
   setReaderPreloadEnabled(enabled: boolean): void {
@@ -13680,7 +13316,7 @@ struct ReadBookPage {
             this.isTtsSpeaking = true;
             this.updateTtsFloatingSession();
             await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY);
-            promptAction.showToast({ message: '继续朗读' });
+            HdsFeedback.showToast('继续朗读');
           } else {
             this.isTtsPaused = true;
           }
@@ -13689,7 +13325,7 @@ struct ReadBookPage {
           if (await this.ttsReader.pause()) {
             this.updateTtsFloatingSession();
             await this.updateTtsAvSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PAUSE);
-            promptAction.showToast({ message: '已暂停朗读' });
+            HdsFeedback.showToast('已暂停朗读');
           } else {
             this.isTtsPaused = false;
           }
@@ -13698,7 +13334,7 @@ struct ReadBookPage {
         this.isTtsPaused = this.ttsReader.isPaused();
         this.updateTtsFloatingSession();
         console.warn('切换朗读暂停状态失败:', error);
-        promptAction.showToast({ message: '切换朗读状态失败' });
+        HdsFeedback.showToast('切换朗读状态失败');
       }
       return;
     }
@@ -13739,7 +13375,7 @@ struct ReadBookPage {
     if (!text) {
       this.finishTtsReading();
       if (showToast) {
-        promptAction.showToast({ message: '当前没有可朗读内容' });
+        HdsFeedback.showToast('当前没有可朗读内容');
       }
       return;
     }
@@ -13797,7 +13433,7 @@ struct ReadBookPage {
       }
       const backgroundStarted = await this.startTtsBackgroundRunning();
       if (!backgroundStarted && showToast) {
-        promptAction.showToast({ message: '后台朗读任务启动失败，息屏后可能中断' });
+        HdsFeedback.showToast('后台朗读任务启动失败，息屏后可能中断');
       }
       if (token !== this.ttsReadToken ||
         (manualPageTurnResume && !this.isManualPageTurnTtsResumeCurrent(manualPageTurnResumeSerial))) {
@@ -13835,7 +13471,7 @@ struct ReadBookPage {
             return;
           }
           this.finishTtsReading();
-          promptAction.showToast({ message: message || '系统朗读失败' });
+          HdsFeedback.showToast(message || '系统朗读失败');
         },
         onChunkStart: (chunk: TtsChunk) => {
           if (!this.isCurrentTtsFocusSession(token, focusGeneration,
@@ -13864,7 +13500,7 @@ struct ReadBookPage {
         keepAudioOutputOnFinish: true
       });
       if (showToast && token === this.ttsReadToken) {
-        promptAction.showToast({ message: '开始连续朗读' });
+        HdsFeedback.showToast('开始连续朗读');
       }
     } catch (error) {
       if (token !== this.ttsReadToken ||
@@ -13872,7 +13508,7 @@ struct ReadBookPage {
         return;
       }
       this.finishTtsReading();
-      promptAction.showToast({ message: '当前系统不支持朗读或 TTS 初始化失败' });
+      HdsFeedback.showToast('当前系统不支持朗读或 TTS 初始化失败');
       console.error('启动系统 TTS 失败:', error);
     }
   }
@@ -14089,7 +13725,7 @@ struct ReadBookPage {
       // leaves the reader on the current chapter so the user can retry/resume from the last confirmed chunk.
       this.ttsChapterAdvanceError = '当前章节末尾朗读未确认，朗读已暂停';
       this.finishTtsReading();
-      promptAction.showToast({ message: this.ttsChapterAdvanceError });
+      HdsFeedback.showToast(this.ttsChapterAdvanceError);
       return;
     }
     const advanced = await this.advanceTtsReadingToNextChapter();
@@ -14100,7 +13736,7 @@ struct ReadBookPage {
       const errorMessage = this.ttsChapterAdvanceError;
       this.finishTtsReading();
       if (errorMessage) {
-        promptAction.showToast({ message: errorMessage });
+        HdsFeedback.showToast(errorMessage);
       }
       return;
     }
@@ -14460,7 +14096,7 @@ struct ReadBookPage {
         }
         console.warn(`[TTS] next chapter switch did not reach target: target=${targetChapterIndex},` +
           `actual=${this.currentChapterIndex}`);
-        promptAction.showToast({ message: '下一章加载失败，已保留当前朗读位置' });
+        HdsFeedback.showToast('下一章加载失败，已保留当前朗读位置');
       }
       if (shouldResume) {
         await this.startTtsReadingFromCurrentPosition(false);
@@ -14512,7 +14148,7 @@ struct ReadBookPage {
         }
         console.warn(`[TTS] previous chapter switch did not reach target: target=${targetChapterIndex},` +
           `actual=${this.currentChapterIndex}`);
-        promptAction.showToast({ message: '上一章加载失败，已保留当前朗读位置' });
+        HdsFeedback.showToast('上一章加载失败，已保留当前朗读位置');
       }
       if (shouldResume) {
         await this.startTtsReadingFromCurrentPosition(false);
@@ -14566,7 +14202,7 @@ struct ReadBookPage {
         } else {
           this.syncCurrentPageText();
         }
-        promptAction.showToast({ message: '章节加载失败，已保留当前朗读位置' });
+        HdsFeedback.showToast('章节加载失败，已保留当前朗读位置');
       }
       if (shouldResume) {
         const sourceLength = (this.pagedContentText || this.getPagedSourceText()).length;
@@ -15225,6 +14861,19 @@ struct ReadBookPage {
     return this.isReaderTrimChar(value) || value === '\u3000';
   }
 
+  // "保留段首缩进"开启时分页/分块起点仍要跳过的字符：换行与零宽不可见字符。
+  // 空格类字符（全角空格、普通空格等）在此模式下保留，段首缩进因此不被裁掉。
+  isReaderPageStartTrimChar(value: string): boolean {
+    return value === '\n' || value === '\r' || value === '\uFEFF' ||
+      value === '\u200B' || value === '\u200C' || value === '\u200D' || value === '\u2060';
+  }
+
+  // 分页/分块起点使用的裁剪字符集："保留段首缩进"开启时只跳过换行与零宽字符，
+  // 保留空格类缩进；默认行为维持全量裁剪。
+  trimPageStartChar(value: string): boolean {
+    return this.keepParagraphIndent ? this.isReaderPageStartTrimChar(value) : this.isReaderTrimChar(value);
+  }
+
   trimReaderContentText(text: string): string {
     const source = text || '';
     let start = 0;
@@ -15241,7 +14890,7 @@ struct ReadBookPage {
   pushReaderPage(source: string, rawStart: number, rawEnd: number, pages: string[], starts: number[], ends: number[]): void {
     let pageStart = Math.max(0, Math.min(rawStart, source.length));
     let pageEnd = Math.max(pageStart, Math.min(rawEnd, source.length));
-    while (pageStart < pageEnd && this.isReaderTrimChar(source.charAt(pageStart))) {
+    while (pageStart < pageEnd && this.trimPageStartChar(source.charAt(pageStart))) {
       pageStart++;
     }
     while (pageEnd > pageStart && this.isReaderTrimChar(source.charAt(pageEnd - 1))) {
@@ -15605,6 +15254,8 @@ struct ReadBookPage {
   }
 
   getReaderTextParagraphs(text: string): ReaderTextParagraph[] {
+    const cached = this.readerTextParagraphsCache.get(text);
+    if (cached) return cached;
     const source = (text || '')
       .replace(/\r\n/g, '\n')
       .replace(/\n{3,}/g, '\n\n');
@@ -15649,6 +15300,7 @@ struct ReadBookPage {
         isLast: true,
         key: `paragraph_empty_${this.buildTextSliceKey(source)}`
       });
+      this.cacheReaderTextParagraphs(text, paragraphs);
       return paragraphs;
     }
     const lastIndex = paragraphs.length - 1;
@@ -15656,7 +15308,18 @@ struct ReadBookPage {
       paragraphs[i].isLast = i === lastIndex;
       paragraphs[i].index = i;
     }
+    this.cacheReaderTextParagraphs(text, paragraphs);
     return paragraphs;
+  }
+
+  cacheReaderTextParagraphs(text: string, paragraphs: ReaderTextParagraph[]): void {
+    if (!text) return;
+    this.readerTextParagraphsCache.set(text, paragraphs);
+    while (this.readerTextParagraphsCache.size > 12) {
+      const oldest = this.readerTextParagraphsCache.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.readerTextParagraphsCache.delete(oldest);
+    }
   }
 
   measureReaderTextHeight(text: string, availableWidth: number,
@@ -15722,6 +15385,9 @@ struct ReadBookPage {
 
   calibrateReaderPaginationHeightFromMergedText(paragraphs: ReaderTextParagraph[], chapterIndex: number,
     pageStart: number, documentSource: string, pageLineHeight: number, area: Area): void {
+    // 连续滚动模式没有"页贴视口"的几何，块在屏幕上的位置随滚动任意变化，
+    // 这两类按页面几何推导排版缩放的校准不适用；误触发还会在阅读中整章重排。
+    if (this.isReaderContinuousScrollSurfaceActive()) return;
     const independentParagraphLayout = this.readerParagraphSpacing > 0;
     if ((!independentParagraphLayout && paragraphs.length < 3) || pageStart < 0 || !documentSource) {
       return;
@@ -15782,6 +15448,9 @@ struct ReadBookPage {
 
   scheduleReaderPaginationBottomFitCalibration(paragraphs: ReaderTextParagraph[], chapterIndex: number,
     pageStart: number, area: Area): void {
+    // 页底贴合校准按"块的屏幕底部 vs 视口底部预留线"判断溢出，只在分页模式成立；
+    // 滚动模式里块的屏幕位置由滚动进度决定，该比较必然失真，还会在阅读中触发整章重排。
+    if (this.isReaderContinuousScrollSurfaceActive()) return;
     if (this.readerParagraphSpacing <= 0 || paragraphs.length !== 1 || !paragraphs[0].isLast ||
       chapterIndex !== this.currentChapterIndex || pageStart < 0) return;
     const globalTop = this.parseAreaDimension(area.globalPosition?.y ?? 0);
@@ -17512,6 +17181,10 @@ struct ReadBookPage {
     const paragraphs = this.getReaderTextParagraphs(text);
     const groups: ReaderTextParagraphGroup[] = [];
     let mergeableParagraphs: ReaderTextParagraph[] = [];
+    // 滚动模式把连续的普通段落合并进同一个 Text：该 Text 同时是长按选择的主体，
+    // 跨段选择与显示层共用同一布局（对齐横向 V2 整页选中层的思路）。分块按字符数切分、
+    // 不做高度贴合，合并不影响分页边界。
+    const mergeAcrossParagraphs = this.isReaderNovelContinuousScrollModeActive();
     const flushMergeableParagraphs = (): void => {
       if (mergeableParagraphs.length === 0) return;
       groups.push({
@@ -17534,12 +17207,8 @@ struct ReadBookPage {
           key: `special_${paragraph.key}`
         });
       } else {
-        // Do not put separate novel paragraphs into one justified Text node. ArkUI can treat the newline Span
-        // between them as an ordinary line and stretch its whitespace across the full width, which makes a
-        // div-separated chapter look like one paragraph with unusually long gaps. A one-paragraph group still
-        // keeps inline annotations in the same Text node while ensuring every paragraph gets its own line box.
         mergeableParagraphs.push(paragraph);
-        flushMergeableParagraphs();
+        if (!mergeAcrossParagraphs) flushMergeableParagraphs();
       }
     }
     flushMergeableParagraphs();
@@ -17668,7 +17337,7 @@ struct ReadBookPage {
     .lineBreakStrategy(LineBreakStrategy.GREEDY)
     .copyOption(CopyOptions.LocalDevice)
     .textSelectable(TextSelectableMode.SELECTABLE_FOCUSABLE)
-    .editMenuOptions(this.readerTextEditMenuOptions())
+    .editMenuOptions(this.readerTextEditMenuOptions(() => this.mergedReaderParagraphText(paragraphs)))
     .onCopy(() => this.scheduleReaderTextSelectionClear())
     .width('100%')
     .onAreaChange((_oldValue: Area, newValue: Area) => {
@@ -17802,7 +17471,7 @@ struct ReadBookPage {
       .lineBreakStrategy(LineBreakStrategy.GREEDY)
       .copyOption(CopyOptions.LocalDevice)
       .textSelectable(TextSelectableMode.SELECTABLE_FOCUSABLE)
-      .editMenuOptions(this.readerTextEditMenuOptions())
+      .editMenuOptions(this.readerTextEditMenuOptions(() => paragraph.text))
       .onCopy(() => this.scheduleReaderTextSelectionClear())
       .width('100%')
       .onAreaChange((_oldValue: Area, newValue: Area) => {
@@ -17846,7 +17515,7 @@ struct ReadBookPage {
         .lineBreakStrategy(LineBreakStrategy.GREEDY)
         .copyOption(CopyOptions.LocalDevice)
         .textSelectable(TextSelectableMode.SELECTABLE_FOCUSABLE)
-        .editMenuOptions(this.readerTextEditMenuOptions())
+        .editMenuOptions(this.readerTextEditMenuOptions(() => paragraph.text))
         .onCopy(() => this.scheduleReaderTextSelectionClear())
         .width('100%')
         .onAreaChange((_oldValue: Area, newValue: Area) => {
@@ -17987,7 +17656,7 @@ struct ReadBookPage {
     .lineBreakStrategy(LineBreakStrategy.GREEDY)
     .copyOption(CopyOptions.LocalDevice)
     .textSelectable(TextSelectableMode.SELECTABLE_FOCUSABLE)
-    .editMenuOptions(this.readerTextEditMenuOptions())
+    .editMenuOptions(this.readerTextEditMenuOptions(() => paragraph.text))
     .onCopy(() => this.scheduleReaderTextSelectionClear())
     .width('100%')
     .onAreaChange((_oldValue: Area, newValue: Area) => {
@@ -18374,6 +18043,72 @@ struct ReadBookPage {
     this.suppressReaderTapClick = true;
   }
 
+  /**
+   * A selection can be live in three shapes: the continuous-scroll flag, the V2 native selection host
+   * mounted over the page, and the V2 painted overlay. All three must be treated as "selecting" so a
+   * tap outside the selection dismisses instead of turning the page or opening the menu.
+   */
+  hasReaderTextSelection(): boolean {
+    return this.readerTextSelectionActive ||
+      this.readerV2NativeSelectionFragmentIndex >= 0 ||
+      this.readerV2SelectionDisplayStart >= 0;
+  }
+
+  /**
+   * Dismisses an active selection without running the action the tap would otherwise perform, so a tap
+   * outside the selection cancels it instead of turning the page or opening the reader menu. Handle drags
+   * (movement) are left to the native selection so the range can still be adjusted. Dismissal only arms
+   * for a pointer whose Down began while the selection was already live; the release of the press that
+   * created the selection passes through here on Up and must never clear it.
+   */
+  handleReaderSelectionDismissTouch(event: TouchEvent): boolean {
+    if (!this.hasReaderTextSelection()) {
+      return false;
+    }
+    const point = event.changedTouches && event.changedTouches.length > 0 ? event.changedTouches[0] :
+      (event.touches && event.touches.length > 0 ? event.touches[0] : null);
+    if (!point) {
+      return false;
+    }
+    const windowX = Number(point.windowX);
+    const windowY = Number(point.windowY);
+    const globalX = Number.isFinite(windowX) ? windowX : Number(point.x) + this.readerTapLayerGlobalX;
+    const globalY = Number.isFinite(windowY) ? windowY : Number(point.y) + this.readerTapLayerGlobalY;
+    if (!Number.isFinite(globalX) || !Number.isFinite(globalY)) {
+      return false;
+    }
+    if (event.type === TouchType.Down) {
+      this.readerSelectionDismissDownX = globalX;
+      this.readerSelectionDismissDownY = globalY;
+      this.readerSelectionDismissDownAt = Date.now();
+      this.readerSelectionDismissMoved = false;
+      this.readerSelectionDismissArmed = true;
+      return true;
+    }
+    if (event.type === TouchType.Move) {
+      if (Math.abs(globalX - this.readerSelectionDismissDownX) > this.readerTapSlop ||
+        Math.abs(globalY - this.readerSelectionDismissDownY) > this.readerTapSlop) {
+        this.readerSelectionDismissMoved = true;
+      }
+      return true;
+    }
+    if (event.type === TouchType.Up) {
+      const moved = this.readerSelectionDismissMoved;
+      const armed = this.readerSelectionDismissArmed;
+      const duration = Date.now() - this.readerSelectionDismissDownAt;
+      this.readerSelectionDismissDownX = -1;
+      this.readerSelectionDismissDownY = -1;
+      this.readerSelectionDismissMoved = false;
+      this.readerSelectionDismissArmed = false;
+      if (armed && !moved && duration < 380) {
+        this.scheduleReaderTextSelectionClear();
+      }
+      return true;
+    }
+    this.readerSelectionDismissArmed = false;
+    return true;
+  }
+
   isReaderInteractiveActionActive(): boolean {
     return Date.now() < this.readerInteractiveActionUntil;
   }
@@ -18417,221 +18152,24 @@ struct ReadBookPage {
     this.readerTapLayerGlobalY = Number(area.globalPosition.y);
   }
 
-  readerContinuousSelectableText(text: string): string {
-    const values: string[] = [];
-    for (const paragraph of this.getReaderTextParagraphs(text)) {
-      if (LocalBookService.isEpubImageMarker(paragraph.text)) continue;
-      if (this.hasInlineReaderSourceAction(paragraph.text)) {
-        values.push(`${this.readerInlineSourceActionText(paragraph.text)}` +
-          `${this.readerInlineSourceActionLabel(paragraph.text)}`);
-        continue;
-      }
-      if (ReaderActionMarker.parse(paragraph.text)) continue;
-      values.push(paragraph.text);
-    }
-    return values.join('\n');
-  }
-
-  readerContinuousNativeSelectionKey(text: string, pageIndex: number): string {
-    return `reader_continuous_native_${this.currentChapterIndex}_${pageIndex}_${this.buildTextSliceKey(text)}`;
-  }
-
-  readerContinuousNativeSelectionController(key: string, text: string): TextController {
-    const controller = this.readerSelectableTextController(key);
-    // Keep the exact controller instance passed to this mounted plain Text. The general
-    // controller cache is intentionally bounded and may evict it while the List builds the
-    // rest of a large chapter, after which a lookup would create an unattached controller.
-    this.readerContinuousMountedSelectionControllers.set(key, controller);
-    while (this.readerContinuousMountedSelectionControllers.size > 16) {
-      const oldest = this.readerContinuousMountedSelectionControllers.keys().next().value as string | undefined;
-      if (!oldest) break;
-      this.readerContinuousMountedSelectionControllers.delete(oldest);
-    }
-    const cacheKey = `continuous_${key}`;
-    let styled = this.readerV2SelectionStyledTextCache.get(cacheKey);
-    if (!styled) {
-      const styles: StyleOptions[] = [{
-        start: 0,
-        length: text.length,
-        styledKey: StyledStringKey.FONT,
-        styledValue: new TextStyle({
-          fontSize: LengthMetrics.vp(this.readerFontSize),
-          fontFamily: this.getBodyReaderFontFamily(),
-          fontWeight: 400,
-          fontColor: Color.Transparent
-        })
-      }, {
-        start: 0,
-        length: text.length,
-        styledKey: StyledStringKey.LETTER_SPACING,
-        styledValue: new LetterSpacingStyle(LengthMetrics.vp(this.getReaderAdaptiveLetterSpacing()))
-      }, {
-        start: 0,
-        length: text.length,
-        styledKey: StyledStringKey.PARAGRAPH_STYLE,
-        styledValue: new ParagraphStyle({
-          textAlign: this.readerTextAlignValue(),
-          wordBreak: WordBreak.BREAK_WORD,
-          paragraphSpacing: LengthMetrics.vp(this.readerParagraphSpacing)
-        })
-      }];
-      styled = new MutableStyledString(text, styles);
-      this.readerV2SelectionStyledTextCache.set(cacheKey, styled);
-    }
-    try {
-      controller.setStyledString(styled);
-    } catch (_) {
-    }
-    return controller;
-  }
-
-  @Builder
-  readerContinuousNativeSelectionPage(text: string, pageIndex: number) {
-    Text('', {
-      controller: this.readerContinuousNativeSelectionController(
-        this.readerContinuousNativeSelectionKey(text, pageIndex), this.readerContinuousSelectableText(text))
-    })
-      .lineSpacing(LengthMetrics.vp(this.getReaderPageLineSpacing(
-        this.getReaderAdaptivePageLineHeight(text, this.currentChapterIndex, pageIndex,
-          this.getPageStartOffset(pageIndex), this.pagedContentText))), { onlyBetweenLines: true })
-      .halfLeading(false)
-      .includeFontPadding(false)
-      .textAlign(this.readerTextAlignValue())
-      .wordBreak(WordBreak.BREAK_WORD)
-      .lineBreakStrategy(LineBreakStrategy.GREEDY)
-      .copyOption(CopyOptions.LocalDevice)
-      .textSelectable(TextSelectableMode.SELECTABLE_FOCUSABLE)
-      .editMenuOptions(this.readerTextEditMenuOptions())
-      .onCopy(() => this.scheduleReaderTextSelectionClear())
-      .selectedBackgroundColor(0x663B82F6)
-      .focusable(true)
-      .focusOnTouch(true)
-      .hitTestBehavior(HitTestMode.None)
-      .width('100%')
-      .padding({
-        left: this.getReaderPageHorizontalPadding(text, this.getEffectiveReaderMarginLeft()),
-        right: this.getReaderPageHorizontalPadding(text, this.getEffectiveReaderMarginRight())
-      })
-      .position({ x: 0, y: 0 })
-      .onAreaChange((_oldValue: Area, newValue: Area) => {
-        const key = this.readerContinuousNativeSelectionKey(text, pageIndex);
-        this.rememberReaderSelectableText(key, this.readerContinuousSelectableText(text), newValue,
-          this.readerSelectableTextController(key));
-      })
-      .onTextSelectionChange((selectionStart: number, selectionEnd: number) => {
-        this.setReaderTextSelectionActive(selectionEnd > selectionStart);
-        if (selectionEnd <= selectionStart) return;
-        this.readerTextSelectionUntil = Date.now() + 900;
-        this.suppressReaderTapClick = true;
-      })
-      .id(this.readerContinuousNativeSelectionKey(text, pageIndex))
-  }
-
-  readerContinuousSelectionHighlightRects(_paintVersion: number): ReaderV2HighlightRect[] {
-    if (!this.readerContinuousSelectionOverlayText || this.readerContinuousSelectionStart < 0 ||
-      this.readerContinuousSelectionEnd <= this.readerContinuousSelectionStart) return [];
-    try {
-      const manager = this.readerContinuousSelectionOverlayController.getLayoutManager();
-      if (!manager) return [];
-      const boxes = manager.getRectsForRange({
-        start: this.readerContinuousSelectionStart,
-        end: this.readerContinuousSelectionEnd
-      }, graphicsText.RectWidthStyle.TIGHT, graphicsText.RectHeightStyle.TIGHT);
-      const result: ReaderV2HighlightRect[] = [];
-      // The continuous overlay is positioned from the List item's outer box, while its glyph manager reports the
-      // transparent Text's typographic top. On the device this top is about 0.32em above the visible rich Text.
-      // Correct only the painted blue range; selection handles keep their native coordinates.
-      const baselineCorrectionPx = this.toMeasurePx(Math.max(1, this.readerFontSize * 0.32));
-      for (let index = 0; index < boxes.length; index++) {
-        const rect = boxes[index].rect;
-        const height = Math.max(0, rect.bottom - rect.top);
-        const verticalPadding = Math.max(1, Math.min(3, height * 0.08));
-        if (rect.right <= rect.left || height <= 0) continue;
-        result.push({
-          leftPx: rect.left,
-          topPx: rect.top - verticalPadding + baselineCorrectionPx,
-          widthPx: rect.right - rect.left,
-          heightPx: height + verticalPadding * 2,
-          key: `continuous_selection_${index}_${this.readerContinuousSelectionStart}_` +
-            `${this.readerContinuousSelectionEnd}_${_paintVersion}`
-        });
-      }
-      return result;
-    } catch (_) {
-      return [];
-    }
-  }
-
-  @Builder
-  readerContinuousSelectionHighlightRect(rect: ReaderV2HighlightRect) {
-    Row() {
-    }
-    .width(px2vp(rect.widthPx))
-    .height(px2vp(rect.heightPx))
-    .backgroundColor(0x663B82F6)
-    .position({
-      x: this.readerContinuousSelectionOverlayX + px2vp(rect.leftPx),
-      y: this.readerContinuousSelectionOverlayY + px2vp(rect.topPx)
-    })
-    .zIndex(2)
-    .hitTestBehavior(HitTestMode.None)
-  }
-
-  @Builder
-  readerContinuousSelectionOverlay() {
-    if (this.isReaderNovelContinuousScrollModeActive() && this.readerContinuousSelectionOverlayText) {
-      Text(this.readerContinuousSelectionOverlayText,
-        { controller: this.readerContinuousSelectionOverlayController })
-        .fontSize(this.readerFontSize)
-        .fontFamily(this.getBodyReaderFontFamily())
-        .fontColor(Color.Transparent)
-        .letterSpacing(this.getReaderAdaptiveLetterSpacing())
-        .lineSpacing(LengthMetrics.vp(this.getReaderPageLineSpacing(this.getEffectiveReaderLineHeight())),
-          { onlyBetweenLines: true })
-        .halfLeading(false)
-        .includeFontPadding(false)
-        .textAlign(this.readerTextAlignValue())
-        .wordBreak(WordBreak.BREAK_WORD)
-        .lineBreakStrategy(LineBreakStrategy.GREEDY)
-        .copyOption(CopyOptions.LocalDevice)
-        .textSelectable(TextSelectableMode.SELECTABLE_FOCUSABLE)
-        .editMenuOptions(this.readerTextEditMenuOptions())
-        .onCopy(() => this.scheduleReaderTextSelectionClear())
-        .selectedBackgroundColor(Color.Transparent)
-        .focusable(true)
-        .width(this.readerContinuousSelectionOverlayWidth)
-        .position({
-          x: this.readerContinuousSelectionOverlayX,
-          y: this.readerContinuousSelectionOverlayY
-        })
-        .hitTestBehavior(HitTestMode.None)
-        .zIndex(3)
-        .onTextSelectionChange((selectionStart: number, selectionEnd: number) => {
-          this.setReaderTextSelectionActive(selectionEnd > selectionStart);
-          this.readerContinuousSelectionStart = selectionStart;
-          this.readerContinuousSelectionEnd = selectionEnd;
-          this.readerContinuousSelectionPaintVersion++;
-          if (selectionEnd <= selectionStart) return;
-          this.readerTextSelectionUntil = Date.now() + 900;
-          this.suppressReaderTapClick = true;
-        })
-        .id('reader_continuous_selection_overlay')
-      ForEach(this.readerContinuousSelectionHighlightRects(this.readerContinuousSelectionPaintVersion),
-        (rect: ReaderV2HighlightRect) => {
-        this.readerContinuousSelectionHighlightRect(rect)
-      }, (rect: ReaderV2HighlightRect) => rect.key)
-    }
-  }
 
 
   currentContinuousReaderScrollOffset(): number {
     if (!this.isReaderNovelContinuousScrollModeActive()) return 0;
+    // onAreaChange 在滚动期间随位置变化逐帧触发，可见块的两个 Text 每帧都会记录区域。
+    // currentOffset() 是同步原生查询；同一帧内的回调共享一次读取即可，8ms 窗口内复用。
+    const now = Date.now();
+    if (now - this.readerContinuousScrollOffsetMemoAt < 8) {
+      return this.readerContinuousScrollOffsetMemo;
+    }
     try {
       const offset = Number(this.readerComicScroller.currentOffset().yOffset);
-      return Number.isFinite(offset) ? offset : 0;
+      this.readerContinuousScrollOffsetMemo = Number.isFinite(offset) ? offset : 0;
     } catch (_) {
-      return 0;
+      this.readerContinuousScrollOffsetMemo = 0;
     }
+    this.readerContinuousScrollOffsetMemoAt = now;
+    return this.readerContinuousScrollOffsetMemo;
   }
 
   rememberContinuousReaderPointer(event: TouchEvent): void {
@@ -18647,12 +18185,16 @@ struct ReadBookPage {
     this.readerContinuousPointerGlobalY = globalY;
     this.readerContinuousPointerAt = Date.now();
     if (!this.isReaderNovelContinuousScrollModeActive()) return;
-    if (this.readerTextSelectionActive) {
+    if (this.hasReaderTextSelection()) {
       this.readerContinuousSelectionMoved = true;
       this.cancelContinuousReaderSelectionTimer();
+      // The selection owns this pointer stream: a short tap dismisses it, a drag adjusts the native
+      // range. Neither may reach the List, the chapter-boundary pan or the tap zones.
+      this.handleReaderSelectionDismissTouch(event);
       return;
     }
     if (event.type === TouchType.Down) {
+      this.readerSelectionDismissArmed = false;
       this.cancelContinuousReaderSelectionTimer();
       this.readerContinuousSelectionDownX = globalX;
       this.readerContinuousSelectionDownY = globalY;
@@ -18687,6 +18229,10 @@ struct ReadBookPage {
   }
 
   handleContinuousReaderShortTap(globalX: number, globalY: number): void {
+    if (this.hasReaderTextSelection()) {
+      this.scheduleReaderTextSelectionClear();
+      return;
+    }
     const marker = this.readerSourceActionAtPoint(globalX, globalY);
     if (marker) {
       this.beginReaderInteractiveAction();
@@ -18758,7 +18304,7 @@ struct ReadBookPage {
       return;
     }
     if (!action || !/^https?:\/\//i.test(action.url)) {
-      promptAction.showToast({ message: '书源操作地址无效' });
+      HdsFeedback.showToast('书源操作地址无效');
       return;
     }
     this.readerSourceActionOpenedAt = now;
@@ -18785,7 +18331,7 @@ struct ReadBookPage {
     }).catch((error: Error) => {
       this.readerSourceActionOpenedAt = 0;
       console.error('打开网页失败:', error);
-      promptAction.showToast({ message: `打开失败：${error.message || '路由跳转异常'}` });
+      HdsFeedback.showToast(`打开失败：${error.message || '路由跳转异常'}`);
     });
   }
 
@@ -18847,12 +18393,12 @@ struct ReadBookPage {
   async openReaderSourceScriptAction(source: BookSource, action: ReaderActionData, marker: string): Promise<void> {
     const code = ReaderActionMarker.sourceScript(action.url);
     if (!code || !this.book) {
-      promptAction.showToast({ message: '书源操作无效' });
+      HdsFeedback.showToast('书源操作无效');
       return;
     }
     const runtime = BookSourceStageWebRuntime.get();
     if (!await runtime.waitUntilAvailable(8000)) {
-      promptAction.showToast({ message: '书源脚本运行环境未就绪' });
+      HdsFeedback.showToast('书源脚本运行环境未就绪');
       return;
     }
     const request = new StageWebRuntimeRequest();
@@ -18875,7 +18421,7 @@ struct ReadBookPage {
       const result = await runtime.execute(request);
       const target = (result.requestedUrl || '').trim();
       if (!/^https?:\/\//i.test(target)) {
-        promptAction.showToast({ message: '书源操作未返回有效地址' });
+        HdsFeedback.showToast('书源操作未返回有效地址');
         this.readerSourceActionOpenedAt = 0;
         return;
       }
@@ -18889,10 +18435,7 @@ struct ReadBookPage {
       // truncated by the old extraction regex. The runtime then fails at parse time; point the
       // reader at the chapter refresh instead of a bare script error.
       const staleScript = /SyntaxError|Unexpected|invalid|未终止|脚本执行失败/i.test(message);
-      promptAction.showToast({
-        message: `评论加载失败${message ? `：${message}` : ''}` +
-          (staleScript ? '\n本章正文可能是旧版缓存，请在目录中刷新本章后重试' : '')
-      });
+      HdsFeedback.showToast(`评论加载失败${message ? `：${message}` : ''}` + (staleScript ? '\n本章正文可能是旧版缓存，请在目录中刷新本章后重试' : ''));
     }
   }
 
@@ -18905,7 +18448,7 @@ struct ReadBookPage {
   openReaderCommentPanel(url: string, title: string, marker: string, sourceHtml: string = ''): void {
     const normalizedUrl = (url || '').trim();
     if (!/^https?:\/\//i.test(normalizedUrl)) {
-      promptAction.showToast({ message: '评论地址无效' });
+      HdsFeedback.showToast('评论地址无效');
       return;
     }
     this.readerSourceActionOpenedAt = Date.now();
@@ -19125,7 +18668,7 @@ struct ReadBookPage {
     .lineBreakStrategy(LineBreakStrategy.GREEDY)
     .copyOption(CopyOptions.LocalDevice)
     .textSelectable(TextSelectableMode.SELECTABLE_FOCUSABLE)
-    .editMenuOptions(this.readerTextEditMenuOptions())
+    .editMenuOptions(this.readerTextEditMenuOptions(() => paragraph.text))
     .onCopy(() => this.scheduleReaderTextSelectionClear())
     .width('100%')
     .onAreaChange((_oldValue: Area, newValue: Area) => {
@@ -19173,6 +18716,14 @@ struct ReadBookPage {
     const bottom = top + Number(area.height);
     if (!key || !text || !Number.isFinite(left) || !Number.isFinite(top) ||
       !Number.isFinite(right) || !Number.isFinite(bottom) || right <= left || bottom <= top) return;
+    // 滚动停止后可能收到几何完全相同的重复 onAreaChange；保留原条目即可，
+    // 省掉三次 Map 写入和一次滚动偏移读取。
+    const previousRect = this.readerSelectableTextAreas.get(key);
+    if (previousRect && previousRect.length === 4 && previousRect[0] === left && previousRect[1] === top &&
+      previousRect[2] === right && previousRect[3] === bottom &&
+      this.readerSelectableTextValues.get(key) === text) {
+      return;
+    }
     this.readerSelectableTextAreas.set(key, [left, top, right, bottom]);
     this.readerSelectableTextValues.set(key, text);
     this.readerSelectableTextScrollOffsets.set(key, this.currentContinuousReaderScrollOffset());
@@ -19213,6 +18764,8 @@ struct ReadBookPage {
       this.selectReaderV2TextAtGlobalPoint(globalX, globalY, serial, 0);
       return;
     }
+    // 滚动模式与翻页模式同策略：直接命中最小的可见段落 Text，在其控制器上做原生选择，
+    // 手柄/高亮/取字与显示层共用同一份布局，不存在覆盖层排版的漂移。
     this.selectLegacyReaderTextAtGlobalPoint(globalX, globalY, serial, 0);
   }
 
@@ -19225,7 +18778,6 @@ struct ReadBookPage {
     let selectedKey = '';
     let selectedArea: number[] = [];
     let selectedAreaSize = Number.POSITIVE_INFINITY;
-    let selectedPriority = -1;
     for (const entry of this.readerSelectableTextAreas.entries()) {
       const key = entry[0];
       const area = entry[1];
@@ -19237,12 +18789,10 @@ struct ReadBookPage {
       const adjustedBottom = area[3] - scrollDelta;
       if (globalX >= area[0] && globalX <= area[2] && globalY >= adjustedTop && globalY <= adjustedBottom) {
         const areaSize = (area[2] - area[0]) * (adjustedBottom - adjustedTop);
-        const priority = continuousNovel && key.startsWith('reader_continuous_native_') ? 1 : 0;
-        if (priority > selectedPriority || (priority === selectedPriority && areaSize < selectedAreaSize)) {
+        if (areaSize < selectedAreaSize) {
           selectedKey = key;
           selectedArea = [area[0], adjustedTop, area[2], adjustedBottom];
           selectedAreaSize = areaSize;
-          selectedPriority = priority;
         }
       }
     }
@@ -19253,16 +18803,7 @@ struct ReadBookPage {
       return;
     }
     const text = this.readerSelectableTextValues.get(selectedKey) || '';
-    const localX = globalX - selectedArea[0] -
-      (selectedKey.startsWith('reader_continuous_native_') ? this.getEffectiveReaderMarginLeft() : 0);
-    if (continuousNovel) {
-      if (!this.showContinuousReaderTextSelection(selectedKey, text, selectedArea, globalX, globalY)) {
-        this.retryReaderTextSelection(serial, attempt,
-          (nextAttempt: number): void => this.selectLegacyReaderTextAtGlobalPoint(
-            globalX, globalY, serial, nextAttempt));
-      }
-      return;
-    }
+    const localX = globalX - selectedArea[0];
     if (!this.showReaderTextSelection(selectedKey, text,
       Math.max(0, localX), globalY - selectedArea[1])) {
       this.retryReaderTextSelection(serial, attempt,
@@ -19275,8 +18816,7 @@ struct ReadBookPage {
     const keepStart = Math.max(0, this.readerContinuousVisibleStart - 1);
     const keepEnd = this.readerContinuousVisibleEnd + 1;
     for (let pageIndex = keepStart; pageIndex <= keepEnd; pageIndex++) {
-      if (key.includes(`reader_vertical_scroll_${this.currentChapterIndex}_${pageIndex}`) ||
-        key.startsWith(`reader_continuous_native_${this.currentChapterIndex}_${pageIndex}_`)) return true;
+      if (key.includes(`reader_vertical_scroll_${this.currentChapterIndex}_${pageIndex}`)) return true;
     }
     return false;
   }
@@ -19309,144 +18849,10 @@ struct ReadBookPage {
     return match ? Number(match[0]) : -1;
   }
 
-  continuousNativeSelectionChunk(pageIndex: number, currentScrollOffset: number):
-    ReaderContinuousSelectionChunk | null {
-    if (pageIndex < 0 || pageIndex >= this.contentPages.length) return null;
-    const pageText = this.contentPages[pageIndex] || '';
-    const key = this.readerContinuousNativeSelectionKey(pageText, pageIndex);
-    const area = this.readerSelectableTextAreas.get(key);
-    if (!area || area.length < 4) return null;
-    const registeredScrollOffset = this.readerSelectableTextScrollOffsets.get(key) || 0;
-    const scrollDelta = currentScrollOffset - registeredScrollOffset;
-    return {
-      pageIndex: pageIndex,
-      key: key,
-      text: this.readerContinuousSelectableText(pageText),
-      left: area[0],
-      top: area[1] - scrollDelta,
-      right: area[2],
-      bottom: area[3] - scrollDelta
-    };
-  }
-
-  continuousSelectionWindow(selectedKey: string, fallbackText: string, fallbackArea: number[]):
-    ReaderContinuousSelectionChunk[] {
-    const selectedPageIndex = this.continuousSelectionPageIndexForKey(selectedKey);
-    if (selectedPageIndex < 0) {
-      return [{
-        pageIndex: -1,
-        key: selectedKey,
-        text: fallbackText,
-        left: fallbackArea[0],
-        top: fallbackArea[1],
-        right: fallbackArea[2],
-        bottom: fallbackArea[3]
-      }];
-    }
-    const currentScrollOffset = this.currentContinuousReaderScrollOffset();
-    const chunks: ReaderContinuousSelectionChunk[] = [];
-    const start = Math.max(0, selectedPageIndex - 1);
-    const end = Math.min(this.contentPages.length - 1, selectedPageIndex + 1);
-    for (let pageIndex = start; pageIndex <= end; pageIndex++) {
-      const chunk = this.continuousNativeSelectionChunk(pageIndex, currentScrollOffset);
-      if (chunk) chunks.push(chunk);
-    }
-    const ownsSelectedPage = chunks.some((chunk: ReaderContinuousSelectionChunk): boolean =>
-      chunk.pageIndex === selectedPageIndex);
-    if (ownsSelectedPage) return chunks;
-    return [{
-      pageIndex: selectedPageIndex,
-      key: selectedKey,
-      text: fallbackText,
-      left: fallbackArea[0],
-      top: fallbackArea[1],
-      right: fallbackArea[2],
-      bottom: fallbackArea[3]
-    }];
-  }
-
-  showContinuousReaderTextSelection(selectedKey: string, fallbackText: string, area: number[],
-    globalX: number, globalY: number): boolean {
-    if (!fallbackText || area.length < 4) return false;
-    try {
-      const chunks = this.continuousSelectionWindow(selectedKey, fallbackText, area);
-      if (chunks.length === 0) return false;
-      const first = chunks[0];
-      const firstPageText = first.pageIndex >= 0 ? (this.contentPages[first.pageIndex] || '') : '';
-      const nativeWindow = first.key.startsWith('reader_continuous_native_');
-      const leftPadding = nativeWindow ?
-        this.getReaderPageHorizontalPadding(firstPageText, this.getEffectiveReaderMarginLeft()) : 0;
-      const rightPadding = nativeWindow ?
-        this.getReaderPageHorizontalPadding(firstPageText, this.getEffectiveReaderMarginRight()) : 0;
-      const overlayLeft = first.left + leftPadding;
-      const widthVp = Math.max(1, first.right - first.left - leftPadding - rightPadding);
-      const text = chunks.map((chunk: ReaderContinuousSelectionChunk): string => chunk.text).join('\n');
-      const localX = Math.max(0, globalX - overlayLeft);
-      const localY = Math.max(0, globalY - first.top);
-      let position = ReaderV2Paginator.glyphPositionForPlainText(text,
-        this.readerV2ActiveSnapshot || this.buildReaderV2Snapshot(),
-        this.toMeasurePx(widthVp), vp2px(localX), vp2px(localY));
-      position = Math.max(0, Math.min(text.length - 1, position));
-      while (position < text.length - 1 && /\s/.test(text.charAt(position))) position++;
-      while (position > 0 && /\s/.test(text.charAt(position))) position--;
-      let start = position;
-      let end = Math.min(text.length, position + 1);
-      const wordPattern = /[A-Za-z0-9_]/;
-      if (wordPattern.test(text.charAt(position))) {
-        while (start > 0 && wordPattern.test(text.charAt(start - 1))) start--;
-        while (end < text.length && wordPattern.test(text.charAt(end))) end++;
-      } else {
-        const code = text.charCodeAt(position);
-        if (code >= 0xDC00 && code <= 0xDFFF && start > 0) start--;
-        if (code >= 0xD800 && code <= 0xDBFF && end < text.length) end++;
-      }
-      this.readerContinuousSelectionOverlayX = overlayLeft - this.readerTapLayerGlobalX;
-      this.readerContinuousSelectionOverlayY = first.top - this.readerTapLayerGlobalY;
-      this.readerContinuousSelectionOverlayWidth = widthVp;
-      this.readerContinuousSelectionOverlayText = text;
-      this.readerContinuousSelectionStart = -1;
-      this.readerContinuousSelectionEnd = -1;
-      this.readerContinuousSelectionPaintVersion++;
-      this.readerTextSelectionUntil = Date.now() + 900;
-      this.suppressReaderTapClick = true;
-      setTimeout(() => {
-        try {
-          focusControl.requestFocus('reader_continuous_selection_overlay');
-          const layout = this.readerContinuousSelectionOverlayController.getLayoutManager();
-          if (layout) {
-            position = layout.getGlyphPositionAtCoordinate(vp2px(localX), vp2px(localY)).position;
-            position = Math.max(0, Math.min(text.length - 1, position));
-            while (position < text.length - 1 && /\s/.test(text.charAt(position))) position++;
-            while (position > 0 && /\s/.test(text.charAt(position))) position--;
-            start = position;
-            end = Math.min(text.length, position + 1);
-            if (wordPattern.test(text.charAt(position))) {
-              while (start > 0 && wordPattern.test(text.charAt(start - 1))) start--;
-              while (end < text.length && wordPattern.test(text.charAt(end))) end++;
-            } else {
-              const code = text.charCodeAt(position);
-              if (code >= 0xDC00 && code <= 0xDFFF && start > 0) start--;
-              if (code >= 0xD800 && code <= 0xDBFF && end < text.length) end++;
-            }
-          }
-          this.readerContinuousSelectionOverlayController.setTextSelection(start, end,
-            { menuPolicy: MenuPolicy.SHOW });
-        } catch (_) {
-          this.setReaderTextSelectionActive(false);
-        }
-      }, 80);
-      return true;
-    } catch (error) {
-      console.info('滚动正文选择层尚未就绪，准备重试:', error);
-      return false;
-    }
-  }
-
   showReaderTextSelection(key: string, text: string, localX: number, localY: number): boolean {
     if (!text) return false;
     try {
-      const controller = this.readerContinuousMountedSelectionControllers.get(key) ||
-        this.readerSelectableTextController(key);
+      const controller = this.readerSelectableTextController(key);
       const layout = controller.getLayoutManager();
       // GestureEvent and Area coordinates are reported in vp, while the native text
       // typography queried by LayoutManager uses physical pixels.
@@ -19483,18 +18889,7 @@ struct ReadBookPage {
       this.suppressReaderTapClick = true;
       this.readerTouchActive = false;
       this.readerPanActive = false;
-      if (key.startsWith('reader_continuous_native_')) {
-        focusControl.requestFocus(key);
-        setTimeout(() => {
-          try {
-            controller.setTextSelection(start, end, { menuPolicy: MenuPolicy.SHOW });
-          } catch (_) {
-            this.setReaderTextSelectionActive(false);
-          }
-        }, 80);
-      } else {
-        controller.setTextSelection(start, end, { menuPolicy: MenuPolicy.SHOW });
-      }
+      controller.setTextSelection(start, end, { menuPolicy: MenuPolicy.SHOW });
       return true;
     } catch (error) {
       console.info('正文长按选择布局尚未就绪，准备重试:', error);
@@ -19588,7 +18983,7 @@ struct ReadBookPage {
     .lineBreakStrategy(LineBreakStrategy.GREEDY)
     .copyOption(CopyOptions.LocalDevice)
     .textSelectable(TextSelectableMode.SELECTABLE_FOCUSABLE)
-    .editMenuOptions(this.readerTextEditMenuOptions())
+    .editMenuOptions(this.readerTextEditMenuOptions(() => paragraph.text))
     .onCopy(() => this.scheduleReaderTextSelectionClear())
     .width('100%')
     .padding({
@@ -19841,12 +19236,12 @@ struct ReadBookPage {
 
   submitTocQuickJump(): void {
     if (this.chapters.length === 0) {
-      promptAction.showToast({ message: '暂无可定位的章节' });
+      HdsFeedback.showToast('暂无可定位的章节');
       return;
     }
     const chapterNumber = Number.parseInt(this.tocQuickJumpDraft, 10);
     if (!Number.isFinite(chapterNumber) || chapterNumber < 1 || chapterNumber > this.chapters.length) {
-      promptAction.showToast({ message: `章节序号范围为 1～${this.chapters.length}，请重新输入` });
+      HdsFeedback.showToast(`章节序号范围为 1～${this.chapters.length}，请重新输入`);
       setTimeout(() => {
         focusControl.requestFocus('tocQuickJumpChapterInput');
       }, 50);
@@ -20344,10 +19739,14 @@ struct ReadBookPage {
   }
 
   hasActiveTtsHighlight(text: string): boolean {
+    // 先判断 TTS 焦点态再归一化正文：getReadingRenderText 会做两遍全文正则替换，
+    // 滚动模式下每个新渲染的文本块都会调用到这里，非朗读时必须零成本返回。
+    if (!this.shouldRenderTtsFocus() || !this.ttsDisplayText ||
+      this.ttsHighlightStart < 0 || this.ttsHighlightEnd <= this.ttsHighlightStart) {
+      return false;
+    }
     const displayText = this.getReadingRenderText(text);
-    return this.shouldRenderTtsFocus() && !!this.ttsDisplayText &&
-      this.ttsHighlightStart >= 0 && this.ttsHighlightEnd > this.ttsHighlightStart &&
-      displayText === this.ttsDisplayText;
+    return displayText === this.ttsDisplayText;
   }
 
   getReadingRenderText(text: string): string {
@@ -20685,10 +20084,30 @@ struct ReadBookPage {
     return controller;
   }
 
-  readerTextEditMenuOptions(): EditMenuOptions {
+  readerTextEditMenuOptions(textProvider: () => string): EditMenuOptions {
     return {
-      onCreateMenu: (items: TextMenuItem[]): TextMenuItem[] => items,
-      onMenuItemClick: (_item: TextMenuItem, _range: TextRange): boolean => {
+      onCreateMenu: (items: TextMenuItem[]): TextMenuItem[] => {
+        const replaceItem: TextMenuItem = {
+          id: TextMenuItemId.of(READER_REPLACE_MENU_ITEM_ID),
+          content: '替换'
+        };
+        const copyIndex = items.findIndex((menuItem: TextMenuItem) =>
+          menuItem.id.equals(TextMenuItemId.COPY));
+        if (copyIndex >= 0) {
+          items.splice(copyIndex, 0, replaceItem);
+        } else {
+          items.unshift(replaceItem);
+        }
+        return items;
+      },
+      onMenuItemClick: (item: TextMenuItem, range: TextRange): boolean => {
+        if (item.id.equals(TextMenuItemId.of(READER_REPLACE_MENU_ITEM_ID))) {
+          // range 是选区在当前 Text 节点全文中的下标，textProvider 与各节点登记可选文本时用的是同一份内容。
+          const selectedText = textProvider().substring(range.start ?? 0, range.end ?? 0);
+          this.scheduleReaderTextSelectionClear();
+          this.openReaderReplaceRuleWithSelection(selectedText);
+          return true;
+        }
         // Let Harmony execute Copy/Translate/Share/Search first, then clear the native selection owned by Text.
         // Merely closing the menu leaves the highlight and handles alive until the page is destroyed.
         this.scheduleReaderTextSelectionClear();
@@ -20698,14 +20117,17 @@ struct ReadBookPage {
   }
 
   scheduleReaderTextSelectionClear(): void {
+    if (this.readerTextSelectionClearPending) return;
+    this.readerTextSelectionClearPending = true;
     const serial = ++this.readerTextSelectionSerial;
     setTimeout(() => {
+      // The flag must be released even when a newer selection superseded this clear, otherwise the
+      // early return above would wedge and no later dismissal could ever run.
+      this.readerTextSelectionClearPending = false;
       if (serial !== this.readerTextSelectionSerial) return;
       const controllers: Set<TextController> = new Set<TextController>();
       for (const controller of this.readerSelectableTextControllers.values()) controllers.add(controller);
       for (const controller of this.readerInlineActionTextControllers.values()) controllers.add(controller);
-      for (const controller of this.readerContinuousMountedSelectionControllers.values()) controllers.add(controller);
-      controllers.add(this.readerContinuousSelectionOverlayController);
       for (const controller of controllers) {
         try {
           controller.closeSelectionMenu();
@@ -20715,12 +20137,9 @@ struct ReadBookPage {
       }
       this.clearReaderV2SelectionOverlay();
       this.setReaderTextSelectionActive(false);
-      this.readerContinuousSelectionOverlayText = '';
-      this.readerContinuousSelectionStart = -1;
-      this.readerContinuousSelectionEnd = -1;
-      this.readerContinuousSelectionPaintVersion++;
       this.readerTextSelectionUntil = 0;
       this.suppressReaderTapClick = false;
+      this.readerSelectionDismissArmed = false;
     }, 80);
   }
 
@@ -21291,7 +20710,7 @@ struct ReadBookPage {
         .lineBreakStrategy(LineBreakStrategy.GREEDY)
         .copyOption(CopyOptions.LocalDevice)
         .textSelectable(TextSelectableMode.SELECTABLE_FOCUSABLE)
-        .editMenuOptions(this.readerTextEditMenuOptions())
+        .editMenuOptions(this.readerTextEditMenuOptions(() => page.selectionText))
         .onCopy(() => this.scheduleReaderTextSelectionClear())
         .selectedBackgroundColor(Color.Transparent)
         .width('100%')
@@ -21667,6 +21086,7 @@ struct ReadBookPage {
       `${this.readerRegexFontSize}_${this.readerRegexShadowColor}_${this.themeRevision}_` +
       `${this.themeRegexEmphasisMode()}_${this.themeRegexBubbleStyleId()}_reader_action_layout_v5`;
     return `${this.readerFontSize}_${this.readerLetterSpacing}_${this.readerTextAlign}_${this.readerLineHeight}_${this.readerParagraphSpacing}_` +
+      `${this.keepParagraphIndent}_` +
       `${this.readerMarginLeft}_${this.readerMarginRight}_${this.readerMarginTop}_${this.readerMarginBottom}_` +
       `${this.readerBodyFontMode}_${this.readerBodyFontFamily}_${this.getBodyReaderFontFamily()}_` +
       `${this.readerTitleFontSize}_${this.readerTitleFontMode}_${this.readerTitleFontFamily}_` +
@@ -22094,7 +21514,15 @@ struct ReadBookPage {
     const runBatch = (): void => {
       if (!this.readerPageVisible || serial !== this.adjacentPaginationPreloadSerial ||
         this.currentChapterIndex !== sourceChapterIndex ||
-        this.readerPaginationCache.get(key) !== result) return;
+        this.readerPaginationCache.get(key) !== result) {
+        // Same hygiene as the previous-chapter session: a silently aborted run must not keep the
+        // active-session dedupe claiming this preload is still running.
+        if (serial === this.adjacentPaginationPreloadSerial &&
+          this.adjacentPaginationPreloadActiveSerial === serial) {
+          this.adjacentPaginationPreloadActiveSerial = -1;
+        }
+        return;
+      }
       if (this.isReaderPaginationInteractionBusy()) {
         setTimeout(runBatch, READER_PAGINATION_BUSY_RETRY_DELAY_MS);
         return;
@@ -22185,7 +21613,17 @@ struct ReadBookPage {
     const runBatch = (): void => {
       if (!this.readerPageVisible || serial !== this.previousPaginationPreloadSerial ||
         this.currentChapterIndex !== sourceChapterIndex ||
-        this.readerPaginationCache.get(key) !== result) return;
+        this.readerPaginationCache.get(key) !== result) {
+        // Losing the retained cache entry (LRU eviction, a global pagination-cache clear, a chapter jump)
+        // kills this session. Clear the active-session marker too, otherwise the dedupe in
+        // preloadPreviousChapterPaginationLater keeps treating the dead session as alive and every later
+        // swipe becomes a silent no-op with the user's turn stuck in the queue forever.
+        if (serial === this.previousPaginationPreloadSerial &&
+          this.previousPaginationPreloadActiveSerial === serial) {
+          this.previousPaginationPreloadActiveSerial = -1;
+        }
+        return;
+      }
       if (this.isReaderPaginationInteractionBusy()) {
         setTimeout(runBatch, READER_PAGINATION_BUSY_RETRY_DELAY_MS);
         return;
@@ -22384,10 +21822,8 @@ struct ReadBookPage {
     }
     if (this.currentPageIndex > 0) return true;
     if (this.currentChapterIndex <= 0) return false;
-    if (!this.isPreviousChapterTurnReady()) {
-      this.preloadPreviousChapterPaginationLater(0);
-      return false;
-    }
+    // 跨章前翻与向前跨章、滚动模式同策略：立即提交章节切换。落在真实的最后一页由 loadPrevChapter 的
+    // pendingRestorePageIndex(MAX_SAFE_INTEGER) 机制保证——增量排版补齐尾页后才复位，等待期间翻页提示页覆盖屏幕。
     return true;
   }
 
@@ -22413,6 +21849,43 @@ struct ReadBookPage {
     if (!this.isPageTurning && this.queuedPageTurnDirection < 0 && this.queuedPageTurnCount > 0) {
       this.runQueuedPageTurnLater();
     }
+  }
+
+  // 向前跨章提交后等待增量排版补齐真实的最后一页（pendingRestorePageIndex 复位）。有界等待 + 兜底落页，
+  // 任何情况（网络 hang、排版中断、页面隐藏）下都不会把用户留在提示页上；后台排版完成时会原地补齐边界。
+  async waitForReaderChapterTailSettled(timeoutMs: number = 12000): Promise<void> {
+    if (this.pendingRestorePageIndex < 0 && this.readerTypographyRestoreOffset < 0) return;
+    const startedAtChapterIndex = this.currentChapterIndex;
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (Date.now() < deadline && this.readerPageVisible &&
+      (this.pendingRestorePageIndex >= 0 || this.readerTypographyRestoreOffset >= 0)) {
+      if (this.currentChapterIndex !== startedAtChapterIndex) return;
+      // 加载失败/需要网页验证的提示正文只有一页，不会再排版出尾页，立即落地展示。
+      if (this.content.includes('章节正文加载失败') || this.content.includes('完成网页验证')) break;
+      await this.delay(16);
+    }
+    if (this.pendingRestorePageIndex < 0 && this.readerTypographyRestoreOffset < 0) return;
+    console.warn(`[ReaderTurn] previous-chapter tail not ready (timedOut=${Date.now() >= deadline}), ` +
+      `chapter=${this.currentChapterIndex}, pages=${this.contentPages.length}`);
+    // 兜底：落到当前已知的最后一页。与本地翻页恢复锚点的清理方式保持一致。
+    this.currentPageIndex = Math.max(0, this.contentPages.length - 1);
+    this.pendingRestorePageIndex = -1;
+    this.readerTypographyRestoreOffset = -1;
+    this.readerInitialPageReady = true;
+    this.finishReaderInitialOpening();
+  }
+
+  // 提交跨章前翻后，若提示页仍是通用“正在加载章节内容...”，按内容是否已在本地改为更明确的文案。
+  showReaderTailWaitingLeafIfGeneric(): void {
+    if (this.pageSlideDirection >= 0 || !this.pageTurnIncomingText) return;
+    const targetChapterIndex = this.currentChapterIndex;
+    if (this.pageTurnIncomingChapterIndex !== targetChapterIndex) return;
+    if (this.pageTurnIncomingText !== this.getPageTurnLoadingText(targetChapterIndex)) return;
+    const title = this.getChapterTitle(targetChapterIndex).trim();
+    const waiting = ReadBookEngine.get().getCachedContent(targetChapterIndex) ?
+      '上一章排版中，请稍候...' : '正在加载上一章...';
+    this.setPageTurnIncomingState(this.pageTurnIncomingPageIndex,
+      title ? `${title}\n\n${waiting}` : waiting, true, targetChapterIndex);
   }
 
   ensureCurrentReaderPaginationAhead(requiredPageCount: number): void {
@@ -22456,7 +21929,7 @@ struct ReadBookPage {
     const maximumForwardBreak = Math.round(targetLength * 0.35);
     let cursor = 0;
     while (cursor < source.length) {
-      while (cursor < source.length && this.isReaderTrimChar(source.charAt(cursor))) cursor++;
+      while (cursor < source.length && this.trimPageStartChar(source.charAt(cursor))) cursor++;
       if (cursor >= source.length) break;
       let end = Math.min(source.length, cursor + targetLength);
       if (end < source.length) {
@@ -22550,7 +22023,12 @@ struct ReadBookPage {
       }
       this.scheduleReaderPagedProgressSave();
     } else {
+      // 与向前跨章、滚动模式同策略：立即提交章节切换。提示页（“上一章排版中/加载中”）在等待期间
+      // 覆盖屏幕，尾页排版完成后 pendingRestorePageIndex 复位、自动落在真实的最后一页。
       await this.loadPrevChapter(true);
+      this.showReaderTailWaitingLeafIfGeneric();
+      await this.waitForReaderChapterTailSettled();
+      this.scheduleReaderPagedProgressSave();
     }
   }
 
@@ -22642,22 +22120,6 @@ struct ReadBookPage {
       }
       return;
     }
-    if (direction < 0 && this.currentPageIndex <= 0 && this.currentChapterIndex > 0 &&
-      !this.isPreviousChapterTurnReady()) {
-      // A retained V2 session initially owns only the first spread. Preserve the user's backward turn until
-      // pre-pagination reaches the authoritative tail; otherwise the next fast turn can skip the whole chapter.
-      if (this.queuedPageTurnDirection === direction && this.queuedPageTurnStyle === style) {
-        this.queuedPageTurnCount = Math.min(2, this.queuedPageTurnCount + 1);
-        this.queuedPageTurnVelocity = Math.max(this.queuedPageTurnVelocity, releaseVelocity);
-      } else {
-        this.queuedPageTurnDirection = direction;
-        this.queuedPageTurnStyle = style;
-        this.queuedPageTurnCount = 1;
-        this.queuedPageTurnVelocity = releaseVelocity;
-      }
-      this.preloadPreviousChapterPaginationLater(0);
-      return;
-    }
     if (!this.canTurnPage(direction)) {
       this.queuedPageTurnDirection = 0;
       this.queuedPageTurnStyle = '';
@@ -22667,7 +22129,7 @@ struct ReadBookPage {
       if (direction > 0 && this.chapters.length > 0 &&
         this.currentChapterIndex >= this.chapters.length - 1 &&
         this.getLocalPageTurnTargetPageIndex(1) < 0) {
-        promptAction.showToast({ message: '本书已阅读完成' });
+        HdsFeedback.showToast('本书已阅读完成');
       }
       return;
     }
@@ -22780,11 +22242,6 @@ struct ReadBookPage {
     const releaseVelocity = this.queuedPageTurnVelocity;
     if (direction === 0 || this.queuedPageTurnCount <= 0) return;
     if (this.pendingRestorePageIndex >= 0) return;
-    if (direction < 0 && this.currentPageIndex <= 0 && this.currentChapterIndex > 0 &&
-      !this.isPreviousChapterTurnReady()) {
-      this.preloadPreviousChapterPaginationLater(0);
-      return;
-    }
     const generation = this.queuedPageTurnGeneration;
     this.queuedPageTurnCount--;
     if (this.queuedPageTurnCount <= 0) {
@@ -22833,6 +22290,7 @@ struct ReadBookPage {
       if (this.isCurrentReaderPaginationComplete()) await this.loadNextChapter();
     } else {
       await this.loadPrevChapter(true);
+      await this.waitForReaderChapterTailSettled();
     }
     const targetText = this.getCurrentPageText();
     this.finishPageTurnAnimation(false);
@@ -23904,11 +23362,11 @@ struct ReadBookPage {
     // only this mirrored page is immediately overwritten by the owner's position update.
     if (this.isMirroringActiveTtsForCurrentBook()) {
       if (direction < 0 && !this.globalTtsCanPrevious) {
-        promptAction.showToast({ message: '已经是第一章' });
+        HdsFeedback.showToast('已经是第一章');
         return;
       }
       if (direction > 0 && !this.globalTtsCanNext) {
-        promptAction.showToast({ message: '本书已阅读完成' });
+        HdsFeedback.showToast('本书已阅读完成');
         return;
       }
       if (direction > 0) {
@@ -23920,11 +23378,11 @@ struct ReadBookPage {
     }
     const targetChapterIndex = this.currentChapterIndex + (direction > 0 ? 1 : -1);
     if (targetChapterIndex < 0) {
-      promptAction.showToast({ message: '已经是第一章' });
+      HdsFeedback.showToast('已经是第一章');
       return;
     }
     if (targetChapterIndex >= this.chapters.length) {
-      promptAction.showToast({ message: '本书已阅读完成' });
+      HdsFeedback.showToast('本书已阅读完成');
       return;
     }
 
@@ -23965,7 +23423,7 @@ struct ReadBookPage {
   async loadNextChapter(showLoading: boolean = false, showBoundaryToast: boolean = false): Promise<void> {
     if (this.currentChapterIndex >= this.chapters.length - 1) {
       if (showBoundaryToast) {
-        promptAction.showToast({ message: '本书已阅读完成' });
+        HdsFeedback.showToast('本书已阅读完成');
       }
       return;
     }
@@ -23980,7 +23438,7 @@ struct ReadBookPage {
     showBoundaryToast: boolean = false): Promise<void> {
     if (this.currentChapterIndex <= 0) {
       if (showBoundaryToast) {
-        promptAction.showToast({ message: '已经是第一章' });
+        HdsFeedback.showToast('已经是第一章');
       }
       return;
     }

@@ -1,4 +1,4 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { Book } from '../model/data/Book';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { WebBookService } from '../core/book/WebBookService';
@@ -14,8 +14,12 @@ import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { BookTypeSupport } from '../core/book/BookTypeSupport';
 import { SearchBookShelfHelper } from '../utils/SearchBookShelfHelper';
 import { BookSourceStageRuntimeHost } from '../components/BookSourceStageRuntimeHost';
+import { BookChangeSourceDialog } from '../components/BookChangeSourceDialog';
 import { WebBookFetchRuntimeHost } from '../components/WebBookFetchRuntimeHost';
 import { BookUrlResolver } from '../core/book/BookUrlResolver';
+import { LocalBookService } from '../core/book/LocalBookService';
+import { HdsFeedback } from '../utils/HdsFeedback';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
 
 @Entry
 @Component
@@ -67,6 +71,13 @@ struct SearchBookDetailPage {
   @State promptAddToShelfAfterRead: boolean = false;
   @State pendingAddToShelfBookUrl: string = '';
   @State showAddToShelfOnBackDialog: boolean = false;
+  private addToShelfOnBackDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State showChangeSourcePanel: boolean = false;
+  @State changeSourceTarget: Book | null = null;
+  private authorSearchDialogBuilder: CustomBuilder | undefined = undefined;
+  private authorSearchDialogId: number = -1;
+  private changeSourceDialogBuilder: CustomBuilder | undefined = undefined;
+  private changeSourceDialogId: number = -1;
   @StorageLink('searchExplorePromptAddToShelfOnBack') searchExplorePromptAddToShelfOnBack: boolean = true;
 
   aboutToAppear() {
@@ -144,15 +155,48 @@ struct SearchBookDetailPage {
                   .maxLines(2)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-                Text(this.author || '作者未知')
-                  .fontSize(15)
-                  .fontColor(this.secondaryTextColor())
-                  .margin({ top: 8 })
+                if (this.author) {
+                  Row({ space: 3 }) {
+                    Text(this.author)
+                      .fontSize(15)
+                      .fontColor(this.secondaryTextColor())
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-                Text(this.originName || this.origin)
-                  .fontSize(13)
-                  .fontColor(this.subTextColor())
+                    Text('›')
+                      .fontSize(16)
+                      .fontColor(this.subTextColor())
+                  }
+                  .alignItems(VerticalAlign.Center)
                   .margin({ top: 8 })
+                  .onClick(() => {
+                    this.showAuthorSearchPrompt();
+                  })
+                } else {
+                  Text('作者未知')
+                    .fontSize(15)
+                    .fontColor(this.secondaryTextColor())
+                    .margin({ top: 8 })
+                }
+
+                if (this.originName || this.origin) {
+                  Row({ space: 3 }) {
+                    Text(this.originName || this.origin)
+                      .fontSize(13)
+                      .fontColor(this.subTextColor())
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+                    Text('›')
+                      .fontSize(14)
+                      .fontColor(this.subTextColor())
+                  }
+                  .alignItems(VerticalAlign.Center)
+                  .margin({ top: 8 })
+                  .onClick(() => {
+                    this.showChangeSourcePrompt();
+                  })
+                }
               }
               .layoutWeight(1)
               .alignItems(HorizontalAlign.Start)
@@ -316,8 +360,17 @@ struct SearchBookDetailPage {
 
       this.titleBar()
 
-      if (this.showAddToShelfOnBackDialog) {
-        this.addToShelfOnBackDialog()
+      if (this.showChangeSourcePanel && this.changeSourceTarget) {
+        BookChangeSourceDialog({
+          targetBook: this.changeSourceTarget,
+          onSwitched: (switched: Book): void => {
+            this.applySwitchedSource(switched);
+          },
+          onClosed: (): void => {
+            this.showChangeSourcePanel = false;
+            this.changeSourceTarget = null;
+          }
+        })
       }
       BookSourceStageRuntimeHost()
     }
@@ -402,7 +455,7 @@ struct SearchBookDetailPage {
 
   async addToShelf(): Promise<boolean> {
     if (!this.bookUrl) {
-      promptAction.showToast({ message: '书籍地址为空' });
+      HdsFeedback.showToast('书籍地址为空');
       return false;
     }
 
@@ -503,11 +556,11 @@ struct SearchBookDetailPage {
       this.pendingAddToShelfBookUrl = '';
       this.isSaving = false;
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      promptAction.showToast({ message: '已加入书架' });
+      HdsFeedback.showToast('已加入书架');
       return true;
     } catch (e) {
       console.error('加入书架失败:', e);
-      promptAction.showToast({ message: '加入书架失败' });
+      HdsFeedback.showToast('加入书架失败');
       return false;
     } finally {
       this.isSaving = false;
@@ -601,6 +654,100 @@ struct SearchBookDetailPage {
     router.back();
   }
 
+  showAuthorSearchPrompt(): void {
+    if (!this.author.trim()) return;
+    // 与“点数使用说明”相同的系统自定义对话框：表面材质由系统提供，API 26+ 即沉浸光感效果。
+    this.authorSearchDialogBuilder = (): void => {
+      this.authorSearchDialogContent();
+    };
+    this.getUIContext().getPromptAction().openCustomDialog({
+      builder: this.authorSearchDialogBuilder,
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000'
+    }).then((dialogId: number) => {
+      this.authorSearchDialogId = dialogId;
+    }).catch((error: Error) => {
+      console.warn('显示作者检索确认失败:', error);
+    });
+  }
+
+  closeAuthorSearchDialog(): void {
+    if (this.authorSearchDialogId >= 0) {
+      this.getUIContext().getPromptAction().closeCustomDialog(this.authorSearchDialogId);
+      this.authorSearchDialogId = -1;
+    }
+  }
+
+  confirmAuthorSearch(): void {
+    this.closeAuthorSearchDialog();
+    const author = this.author.trim();
+    if (!author) return;
+    const nonce = AppStorage.get<number>('globalSearchPendingNonce') || 0;
+    AppStorage.setOrCreate('globalSearchPendingKeyword', author);
+    AppStorage.setOrCreate('globalSearchPendingNonce', nonce + 1);
+    // 详情页可能叠在聚合结果页之上，直接回退到主页再切搜索Tab，保证发起搜索的页面可见。
+    router.back({ url: 'pages/Index' });
+  }
+
+  showChangeSourcePrompt(): void {
+    if (!this.bookUrl || !this.origin) {
+      HdsFeedback.showToast('书籍信息不完整，暂时无法换源');
+      return;
+    }
+    if (LocalBookService.isLocalBook(this.detailTargetBook())) {
+      HdsFeedback.showToast('本地书籍无需换源');
+      return;
+    }
+    this.changeSourceDialogBuilder = (): void => {
+      this.changeSourceConfirmDialogContent();
+    };
+    this.getUIContext().getPromptAction().openCustomDialog({
+      builder: this.changeSourceDialogBuilder,
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000'
+    }).then((dialogId: number) => {
+      this.changeSourceDialogId = dialogId;
+    }).catch((error: Error) => {
+      console.warn('显示换源确认失败:', error);
+    });
+  }
+
+  closeChangeSourceDialog(): void {
+    if (this.changeSourceDialogId >= 0) {
+      this.getUIContext().getPromptAction().closeCustomDialog(this.changeSourceDialogId);
+      this.changeSourceDialogId = -1;
+    }
+  }
+
+  detailTargetBook(): Book {
+    const resolved = this.resolvedBookInfo;
+    if (resolved) return resolved;
+    return this.buildCurrentBook();
+  }
+
+  confirmChangeSource(): void {
+    this.closeChangeSourceDialog();
+    // 打开面板前固化目标书籍，避免面板打开期间详情信息加载完成导致目标被替换。
+    this.changeSourceTarget = this.detailTargetBook();
+    this.showChangeSourcePanel = true;
+  }
+
+  applySwitchedSource(switched: Book): void {
+    const previousBookUrl = this.bookUrl;
+    // 旧书源解析缓存全部作废，后续加入书架/阅读都会按新书源重新拉取。
+    this.resolvedBookInfo = null;
+    this.bookInfoPromise = null;
+    this.hasLoadedBookInfo = false;
+    this.syncStateFromBook(switched);
+    if (this.pendingAddToShelfBookUrl && this.pendingAddToShelfBookUrl === previousBookUrl) {
+      this.pendingAddToShelfBookUrl = switched.bookUrl;
+    }
+    this.totalChapterNum = switched.totalChapterNum > 0 ? switched.totalChapterNum : 0;
+    this.checkShelf();
+  }
+
   shouldPromptAddToShelfOnBack(): boolean {
     return this.promptAddToShelfOnBackFromResult && this.searchExplorePromptAddToShelfOnBack &&
       this.promptAddToShelfAfterRead && !this.isSaving && !this.showAddToShelfOnBackDialog &&
@@ -608,11 +755,26 @@ struct SearchBookDetailPage {
   }
 
   showAddToShelfOnBackPrompt(): void {
+    if (this.showAddToShelfOnBackDialog) return;
     this.showAddToShelfOnBackDialog = true;
+    // 蒙层点击原本走“不加入”清理流程而非普通关闭，因此禁用 autoCancel，仅由按钮触发。
+    this.addToShelfOnBackDialogSession.open(this.getUIContext(),
+      (): void => {
+        this.addToShelfOnBackDialogContent();
+      }, {
+        autoCancel: false,
+        maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+        warnTag: '显示加入书架确认失败:'
+      });
+  }
+
+  closeAddToShelfOnBackDialog(): void {
+    this.showAddToShelfOnBackDialog = false;
+    this.addToShelfOnBackDialogSession.close(this.getUIContext());
   }
 
   dismissAddToShelfOnBackPrompt(): void {
-    this.showAddToShelfOnBackDialog = false;
+    this.closeAddToShelfOnBackDialog();
     this.removePendingReadBook().finally(() => {
       router.back();
     });
@@ -654,19 +816,19 @@ struct SearchBookDetailPage {
         this.promptAddToShelfAfterRead = false;
         this.pendingAddToShelfBookUrl = '';
         AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-        promptAction.showToast({ message: '已加入书架' });
+        HdsFeedback.showToast('已加入书架');
         return true;
       }
     } catch (e) {
       console.error('加入书架失败:', e);
-      promptAction.showToast({ message: '加入书架失败' });
+      HdsFeedback.showToast('加入书架失败');
       return false;
     }
     return await this.addToShelf();
   }
 
   async confirmAddToShelfOnBack(): Promise<void> {
-    this.showAddToShelfOnBackDialog = false;
+    this.closeAddToShelfOnBackDialog();
     const ok = await this.keepPendingReadBookInShelf();
     if (ok) {
       router.back();
@@ -675,7 +837,7 @@ struct SearchBookDetailPage {
 
   async prepareBookForReading(): Promise<boolean> {
     if (!this.bookUrl) {
-      promptAction.showToast({ message: '书籍地址为空' });
+      HdsFeedback.showToast('书籍地址为空');
       return false;
     }
 
@@ -746,7 +908,7 @@ struct SearchBookDetailPage {
       return true;
     } catch (e) {
       console.error('准备阅读失败:', e);
-      promptAction.showToast({ message: '打开阅读失败' });
+      HdsFeedback.showToast('打开阅读失败');
       return false;
     } finally {
       this.isSaving = false;
@@ -838,59 +1000,126 @@ struct SearchBookDetailPage {
   }
 
   @Builder
-  addToShelfOnBackDialog() {
-    Column() {
-      Column() {
-        Text('加入书架')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 12 })
-
-        Text(`是否将《${this.name || '这本书'}》加入书架？`)
-          .fontSize(15)
-          .fontColor(this.secondaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 20 })
-
-        Row() {
-          Button('不加入')
-            .width('45%')
-            .height(44)
-            .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.dismissAddToShelfOnBackPrompt();
-            })
-
-          Button('加入书架')
-            .width('45%')
-            .height(44)
-            .backgroundColor(this.buttonColor())
-            .onClick(() => {
-              this.confirmAddToShelfOnBack();
-            })
-        }
+  addToShelfOnBackDialogContent() {
+    Column({ space: 12 }) {
+      Text('加入书架')
+        .fontSize(17)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
-        .justifyContent(FlexAlign.SpaceBetween)
+
+      Text(`是否将《${this.name || '这本书'}》加入书架？`)
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+
+      Row({ space: 10 }) {
+        Button('不加入')
+          .layoutWeight(1)
+          .height(42)
+          .fontSize(15)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.dismissAddToShelfOnBackPrompt();
+          })
+
+        Button('加入书架')
+          .layoutWeight(1)
+          .height(42)
+          .fontSize(15)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.confirmAddToShelfOnBack();
+          })
       }
-      .width('85%')
-      .padding(24)
-      .backgroundColor(this.cardColor())
-      .borderRadius(12)
+      .width('100%')
+      .margin({ top: 4 })
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#80000000')
-    .justifyContent(FlexAlign.Center)
-    .onClick(() => {
-      if (!this.isSaving) {
-        this.dismissAddToShelfOnBackPrompt();
+    .padding(24)
+  }
+
+  @Builder
+  authorSearchDialogContent() {
+    Column({ space: 12 }) {
+      Text('作者检索')
+        .fontSize(17)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+
+      Text(`是否以作者“${this.author}”为关键词发起搜索？`)
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(42)
+          .fontSize(15)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.closeAuthorSearchDialog();
+          })
+
+        Button('搜索')
+          .layoutWeight(1)
+          .height(42)
+          .fontSize(15)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.confirmAuthorSearch();
+          })
       }
-    })
+      .width('100%')
+      .margin({ top: 4 })
+    }
+    .padding(24)
+  }
+
+  @Builder
+  changeSourceConfirmDialogContent() {
+    Column({ space: 12 }) {
+      Text('换源')
+        .fontSize(17)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+
+      Text(`是否为《${this.name || '这本书'}》搜索可切换的书源？`)
+        .fontSize(14)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(42)
+          .fontSize(15)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.closeChangeSourceDialog();
+          })
+
+        Button('换源')
+          .layoutWeight(1)
+          .height(42)
+          .fontSize(15)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.confirmChangeSource();
+          })
+      }
+      .width('100%')
+      .margin({ top: 4 })
+    }
+    .padding(24)
   }
 
   async findShelfBookByKey(bookKey: string, includePending: boolean = false): Promise<Book | null> {
@@ -945,7 +1174,7 @@ struct SearchBookDetailPage {
 
   openChapterList(): void {
     if (!this.bookUrl || !this.origin) {
-      promptAction.showToast({ message: '书籍信息不完整，暂时无法查看目录' });
+      HdsFeedback.showToast('书籍信息不完整，暂时无法查看目录');
       return;
     }
     router.pushUrl({

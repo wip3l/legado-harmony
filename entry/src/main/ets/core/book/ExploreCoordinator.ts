@@ -11,6 +11,7 @@ import { BookSourceDataUrlSupport } from './BookSourceDataUrlSupport';
 import { BookUrlResolver } from './BookUrlResolver';
 import { BookSourceScriptRunner } from './BookSourceScriptRunner';
 import { BookSourceMetadataSupport } from './BookSourceMetadataSupport';
+import { BookTypeSupport } from './BookTypeSupport';
 import { BookSourceRuntimeRouter, SourceRuntimeStage } from './BookSourceRuntimeRouter';
 import { BookSourceStageWebRuntime, StageWebRuntimeRequest } from './BookSourceStageWebRuntime';
 import { BookSourceStageRuleSupport } from './BookSourceStageRuleSupport';
@@ -67,9 +68,44 @@ export class ExploreCoordinator {
   private noticeMessage: string = '';
   private platformSelectors: Record<string, ExplorePlatformSelector> = {};
   private filterSelectors: Record<string, ExplorePlatformSelector[]> = {};
+  // Menu scripts run 2-8 network requests each through the serial script runtime. The explore
+  // tab re-derives entries on every tab switch and source switch, so cache the parsed menu per
+  // source + platform + variable state; the cache only skips the script, not content loading.
+  private menuCache: Record<string, { entries: ExploreEntry[]; cachedAt: number }> = {};
+  private menuCacheRevision: number = 0;
 
   getNoticeMessage(): string {
     return this.noticeMessage;
+  }
+
+  /** Drops cached explore menus (source saved, filter mutated, manual refresh). */
+  clearExploreMenuCache(): void {
+    this.menuCache = {};
+    this.menuCacheRevision++;
+  }
+
+  private menuCacheKey(source: BookSource, platform: string): string {
+    return `${source.bookSourceUrl}|${platform || ''}|r${this.menuCacheRevision}` +
+      `|v${this.stringHash(source.variable || '')}|e${this.stringHash(source.exploreUrl || '')}`;
+  }
+
+  private stringHash(value: string): string {
+    let hash = 5381;
+    for (let index = 0; index < value.length; index++) {
+      hash = ((hash << 5) + hash + value.charCodeAt(index)) | 0;
+    }
+    return `${hash >>> 0}`;
+  }
+
+  private storeMenuCache(key: string, entries: ExploreEntry[]): void {
+    const keys = Object.keys(this.menuCache);
+    // Small LRU cap: each entry list is a few hundred bytes.
+    while (keys.length >= 24) {
+      const oldest = keys.shift();
+      if (!oldest) break;
+      delete this.menuCache[oldest];
+    }
+    this.menuCache[key] = { entries: entries, cachedAt: Date.now() };
   }
 
   async getExploreSources(): Promise<ExploreSourceOption[]> {
@@ -228,6 +264,10 @@ export class ExploreCoordinator {
         console.warn('[ExploreCoordinator] unified field errors:', source.bookSourceName,
           fieldBatch.errors.join('; '));
       }
+      // Sources declare a page's media type from their own bookUrl scripts (source.put('type',…)
+      // per explore category). Honor that decision so audio/comic categories open in the right
+      // reader mode instead of defaulting to text until some later rule happens to set it.
+      const runtimeMediaType = this.readSourceRuntimeMediaType(source);
       const parsingSlice = CooperativeScheduler.createTimeSlice();
 
       for (let itemIndex = 0; itemIndex < parseItems.length; itemIndex++) {
@@ -298,6 +338,7 @@ export class ExploreCoordinator {
           ir.getContext().toPersistentJson();
         book.origin = source.bookSourceUrl;
         BookSourceMetadataSupport.applySearchBook(source, book, [book.bookUrl]);
+        if (!Number(book.type) && runtimeMediaType) book.type = runtimeMediaType;
         this.sanitizeExploreBook(book);
 
         if (book.name && book.bookUrl && !books.some(b => b.bookUrl === book.bookUrl && b.origin === book.origin)) {
@@ -390,6 +431,26 @@ export class ExploreCoordinator {
   }
 
   /** Resolve URL constants declared by a source's jsLib without executing unrelated library code. */
+  /**
+   * The runtime state a source script wrote for the current page (type=audio/comic/novel/…)
+   * survives in the source's persisted login-info bucket; the batch evaluator above has already
+   * run the bookUrl script that produced it.
+   */
+  private readSourceRuntimeMediaType(source: BookSource): number {
+    try {
+      const loginInfo = JSON.parse(source.loginInfo || '{}') as Record<string, Object>;
+      let runtime = loginInfo['__legadoHarmonyRuntime'];
+      if (typeof runtime === 'string') runtime = JSON.parse(runtime) as Object;
+      const state = runtime && typeof runtime === 'object' && !Array.isArray(runtime) ?
+        (runtime as Record<string, Object>)['source'] : null;
+      const value = state && typeof state === 'object' && !Array.isArray(state) ?
+        String((state as Record<string, Object>)['type'] || '') : '';
+      return BookTypeSupport.typeFromTab(value);
+    } catch (_) {
+      return 0;
+    }
+  }
+
   private applySimpleSourceUrlConstants(url: string, jsLib: string): string {
     if (!url.includes('{{') || !jsLib) return url;
     const constants: Record<string, string> = {};
@@ -490,11 +551,17 @@ export class ExploreCoordinator {
     if (!raw) return entries;
 
     if (raw.startsWith('@js:') || raw.startsWith('js:') || /^<js>[\s\S]*<\/js>$/i.test(raw)) {
+      const menuKey = this.menuCacheKey(source, platform);
+      const cached = this.menuCache[menuKey];
+      if (cached && Date.now() - cached.cachedAt < 5 * 60 * 1000) {
+        return cached.entries.slice();
+      }
       await this.applyExplorePlatform(source, platform);
       const scriptItems = await this.evaluateExploreScript(raw, source, debugContext);
       if (scriptItems.length > 0) {
         this.captureExploreSelectors(source, scriptItems);
         this.appendExploreItems(entries, scriptItems, source);
+        this.storeMenuCache(menuKey, entries);
         return entries;
       }
       const embeddedItems = this.parseEmbeddedExploreDsl(raw);
@@ -790,6 +857,9 @@ export class ExploreCoordinator {
       }
       console.info('[ExploreCoordinator] native explore filter switched:', source.bookSourceName,
         selector.parameter, selection);
+      // The selector script usually persisted new state into the source variable; drop cached
+      // menus so the next parseExploreUrl re-runs the script with the updated state.
+      this.clearExploreMenuCache();
       return true;
     } catch (error) {
       console.warn('[ExploreCoordinator] native explore filter switch failed:', source.bookSourceName,

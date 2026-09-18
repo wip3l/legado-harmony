@@ -19,9 +19,12 @@ function applyReaderRulesInTask(text: string, rulesJson: string, scopeText: stri
   // source buttons) baked into the content text. They are not book prose, and cleaning rules
   // such as `\[.*?\]` or "strip non-CJK" must never destroy them, so every rule is applied per
   // plain-text segment and the markers are reattached verbatim afterwards.
-  const hasMarkers = (text || '').indexOf('[[LEGADO_READER_ACTION') >= 0;
+  // EPUB image markers carry percent-encoded absolute paths (local books) or image URLs (online
+  // comics) — the same exemption applies: a rule matching inside an encoded payload corrupts the
+  // path (e.g. "base" -> "ba色") and every comic page then fails to load.
+  const hasMarkers = (text || '').indexOf('[[LEGADO_') >= 0;
   const segments: string[] = hasMarkers ?
-    (text || '').split(/(\[\[LEGADO_READER_ACTION(?:_V[23])?:[\s\S]*?\]\])/g) : [text || ''];
+    (text || '').split(/(\[\[LEGADO_(?:READER_ACTION(?:_V[23])?|EPUB_IMAGE):[\s\S]*?\]\])/g) : [text || ''];
   const target = (scopeText || '').toLowerCase();
   for (let index = 0; index < rules.length; index++) {
     const rule = rules[index];

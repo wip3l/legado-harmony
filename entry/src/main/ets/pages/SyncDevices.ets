@@ -6,6 +6,8 @@ import { CloudSyncStateStore } from '../account/CloudSyncStateStore';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { syncSystemBars } from '../utils/SystemBars';
+import { HdsFeedback } from '../utils/HdsFeedback';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
 
 @Entry
 @Component
@@ -18,7 +20,8 @@ struct SyncDevicesPage {
   @State currentDeviceId: string = '';
   @State loading: boolean = true;
   @State errorMessage: string = '';
-  @State showRenameDialog: boolean = false;
+  private renameDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onSystemDialogFlagChanged') showRenameDialog: boolean = false;
   @State renameDeviceId: string = '';
   @State renameDeviceName: string = '';
   @State renaming: boolean = false;
@@ -126,9 +129,6 @@ struct SyncDevicesPage {
 
       this.titleBar()
 
-      if (this.showRenameDialog) {
-        this.renameDialog()
-      }
     }
     .width('100%')
     .height('100%')
@@ -229,7 +229,7 @@ struct SyncDevicesPage {
   openRename(device: CloudSyncDevice): void {
     this.renameDeviceId = device.deviceId;
     this.renameDeviceName = device.deviceName || 'HarmonyOS 设备';
-    this.showRenameDialog = true;
+    this.openRenameDialog();
   }
 
   async saveRename(): Promise<void> {
@@ -242,70 +242,73 @@ struct SyncDevicesPage {
       await AccountCommerceApi.renameSyncDevice(
         this.renameDeviceId, name, AccountSessionStore.token());
       this.showRenameDialog = false;
-      promptAction.showToast({ message: '设备名称已更新' });
+      HdsFeedback.showToast('设备名称已更新');
       await this.loadDevices();
     } catch (e) {
-      promptAction.showToast({
-        message: e instanceof Error ? `改名失败：${e.message}` : '设备改名失败'
-      });
+      HdsFeedback.showToast(e instanceof Error ? `改名失败：${e.message}` : '设备改名失败');
     } finally {
       this.renaming = false;
     }
   }
 
-  @Builder
-  renameDialog() {
-    Column() {
-      Column({ space: 16 }) {
-        Text('修改设备名称')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-        TextInput({ placeholder: '输入设备名称', text: this.renameDeviceName })
-          .width('100%')
-          .height(42)
-          .fontColor(this.primaryTextColor())
-          .placeholderColor(this.subTextColor())
-          .backgroundColor(this.softColor())
-          .borderRadius(10)
-          .maxLength(80)
-          .onChange((value: string) => {
-            this.renameDeviceName = value;
-          })
-        Row({ space: 12 }) {
-          Button('取消', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor(this.cardColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.showRenameDialog = false;
-            })
-          Button(this.renaming ? '保存中' : '保存', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(10)
-            .backgroundColor(this.accentColor())
-            .fontColor('#FFFFFF')
-            .enabled(!!this.renameDeviceName.trim() && !this.renaming)
-            .onClick(() => this.saveRename())
-        }
-        .width('100%')
-      }
-      .width('calc(100% - 48vp)')
-      .constraintSize({ maxWidth: 360 })
-      .padding(20)
-      .borderRadius(18)
-      .backgroundColor(this.cardColor())
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor(this.appDarkMode ? '#76000000' : '#52000000')
-    .backdropBlur(ThemeRuntime.topBarBlur())
+
+  onSystemDialogFlagChanged(): void {
+    if (!this.showRenameDialog) this.renameDialogSession.close(this.getUIContext());
   }
+
+  openRenameDialog(): void {
+    this.showRenameDialog = true;
+    this.renameDialogSession.open(this.getUIContext(), (): void => {
+      this.renameDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示设备重命名弹窗失败:'
+    });
+  }
+
+  @Builder
+  renameDialogContent() {
+    Column({ space: 16 }) {
+      Text('修改设备名称')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+      TextInput({ placeholder: '输入设备名称', text: this.renameDeviceName })
+        .width('100%')
+        .height(42)
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.subTextColor())
+        .backgroundColor(this.softColor())
+        .borderRadius(10)
+        .maxLength(80)
+        .onChange((value: string) => {
+          this.renameDeviceName = value;
+        })
+      Row({ space: 12 }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor(this.cardColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.showRenameDialog = false;
+          })
+        Button(this.renaming ? '保存中' : '保存', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor(this.accentColor())
+          .fontColor('#FFFFFF')
+          .enabled(!!this.renameDeviceName.trim() && !this.renaming)
+          .onClick(() => this.saveRename())
+      }
+      .width('100%')
+    }    .constraintSize({ maxWidth: 360 })
+    .padding(20)
+  }
+
 
   async confirmRevoke(device: CloudSyncDevice): Promise<void> {
     const result = await promptAction.showDialog({
@@ -321,12 +324,10 @@ struct SyncDevicesPage {
     }
     try {
       await AccountCommerceApi.revokeSyncDevice(device.deviceId, AccountSessionStore.token());
-      promptAction.showToast({ message: '设备已移除' });
+      HdsFeedback.showToast('设备已移除');
       await this.loadDevices();
     } catch (e) {
-      promptAction.showToast({
-        message: e instanceof Error ? `移除失败：${e.message}` : '移除设备失败'
-      });
+      HdsFeedback.showToast(e instanceof Error ? `移除失败：${e.message}` : '移除设备失败');
     }
   }
 

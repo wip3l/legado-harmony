@@ -46,6 +46,34 @@ export class QuickJsScriptRuntime {
       output.error = 'not-pure-expression';
       return output;
     }
+    return QuickJsScriptRuntime.evaluateBoundExpression(code, variables, timeoutMs, output);
+  }
+
+  /**
+   * Evaluate the residue a textual rule shim left behind (literal values plus plain JavaScript
+   * operators/methods such as `String(x).replace(/…/,'')`). The strict pure-expression gate would
+   * reject these on regex literals (`--`) or comparison operators, so screen only shapes the
+   * sandbox cannot honor; unbindable host identifiers simply fail evaluation and the caller falls
+   * back to its legacy behavior.
+   */
+  static evaluateResidualExpression(expression: string,
+    variables: Record<string, Object>, timeoutMs: number = 150): QuickJsExpressionResult {
+    const output = new QuickJsExpressionResult();
+    const code = QuickJsScriptRuntime.normalizeExpression(expression);
+    if (!code || code.length > QuickJsScriptRuntime.MAX_SCRIPT_LENGTH) {
+      output.error = 'not-residual';
+      return output;
+    }
+    if (/[;{}]/.test(code) ||
+      /\b(?:java|cookie|cache|chapter)\s*\.\s*[A-Za-z_$]|\b(?:eval|Function|import|while|for|return|await|yield|throw|new)\b/.test(code)) {
+      output.error = 'not-residual';
+      return output;
+    }
+    return QuickJsScriptRuntime.evaluateBoundExpression(code, variables, timeoutMs, output);
+  }
+
+  private static evaluateBoundExpression(code: string, variables: Record<string, Object>,
+    timeoutMs: number, output: QuickJsExpressionResult): QuickJsExpressionResult {
     const keys = Object.keys(variables);
     if (keys.length > QuickJsScriptRuntime.MAX_BINDING_COUNT) {
       output.error = 'too-many-bindings';
@@ -67,6 +95,13 @@ export class QuickJsScriptRuntime {
       return output;
     }
 
+    return QuickJsScriptRuntime.evaluateInContext(code, variables, declarations, timeoutMs, output,
+      'book-source-pure-expression.js');
+  }
+
+  private static evaluateInContext(code: string, variables: Record<string, Object>,
+    declarations: string[], timeoutMs: number, output: QuickJsExpressionResult,
+    scriptName: string): QuickJsExpressionResult {
     const options = new JSRuntimeOptions();
     options.memoryLimitBytes = 16 * 1024 * 1024;
     options.stackLimitBytes = 512 * 1024;
@@ -75,7 +110,7 @@ export class QuickJsScriptRuntime {
       context.setObject(variables, '__legadoBindings');
       const wrapped = `(function(){const __bindings=globalThis.__legadoBindings;` +
         `${declarations.join(';')};return (${code});})()`;
-      const result = context.evaluateBounded(wrapped, 'book-source-pure-expression.js',
+      const result = context.evaluateBounded(wrapped, scriptName,
         Math.max(10, Math.min(250, timeoutMs)), 8);
       QuickJsScriptRuntime.copyResult(result, output);
     } catch (error) {

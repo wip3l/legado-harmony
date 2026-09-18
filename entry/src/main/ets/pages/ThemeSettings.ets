@@ -30,6 +30,7 @@ import { StartupCoverTextStore } from '../utils/StartupCoverTextStore';
 import deviceInfo from '@ohos.deviceInfo';
 import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 const STORE_COVER_MIN_HEIGHT = 170;
 const STORE_COVER_MAX_HEIGHT = 340;
@@ -329,7 +330,7 @@ struct ThemeSettingsPage {
     if (customScheme) {
       const unavailableStartupTheme = this.unavailableCustomStartupTheme(customScheme.settings);
       if (unavailableStartupTheme) {
-        promptAction.showToast({ message: `启动封面主题「${unavailableStartupTheme}」尚未获取或已过期` });
+        HdsFeedback.showToast(`启动封面主题「${unavailableStartupTheme}」尚未获取或已过期`);
         return;
       }
     }
@@ -389,13 +390,10 @@ struct ThemeSettingsPage {
       await this.applyThemeFontWhenAvailable();
       this.refreshRecentReadCard();
       this.syncBars();
-      promptAction.showToast({
-        message: choice.applyLayout ? `已应用「${theme.name}」主题` :
-          `已应用「${theme.name}」主题，排版保持不变`
-      });
+      HdsFeedback.showToast(choice.applyLayout ? `已应用「${theme.name}」主题` : `已应用「${theme.name}」主题，排版保持不变`);
     } catch (e) {
       console.error('应用主题失败:', e);
-      promptAction.showToast({ message: '应用主题失败，请稍后重试' });
+      HdsFeedback.showToast('应用主题失败，请稍后重试');
     } finally {
       this.applyingThemeId = '';
     }
@@ -448,7 +446,7 @@ struct ThemeSettingsPage {
     }
     const offer = this.themeOffer(themeId);
     if (this.themeCatalogLoaded && !offer) {
-      promptAction.showToast({ message: '该主题暂未上架' });
+      HdsFeedback.showToast('该主题暂未上架');
       return false;
     }
     const pricePoints = offer?.pricePoints || AccountCommerceConfig.THEME_PRICE_POINTS;
@@ -481,13 +479,13 @@ struct ThemeSettingsPage {
     }
     try {
       await HuaweiAccountService.redeemTheme(getContext(this), themeId, pricePoints, validDays);
-      promptAction.showToast({ message: `已获取「${theme.name}」，有效期 ${validDays} 天` });
+      HdsFeedback.showToast(`已获取「${theme.name}」，有效期 ${validDays} 天`);
       return true;
     } catch (e) {
       const error = e as AccountApiError;
       if (error.errorCode === 'THEME_OFFER_CHANGED') {
         await this.refreshThemeCatalog();
-        promptAction.showToast({ message: '主题价格或有效期已更新，请重新确认' });
+        HdsFeedback.showToast('主题价格或有效期已更新，请重新确认');
       } else if (error.errorCode === 'INSUFFICIENT_POINTS') {
         const recharge = await promptAction.showDialog({
           title: '点数不足',
@@ -501,7 +499,7 @@ struct ThemeSettingsPage {
           router.pushUrl({ url: 'pages/AccountCenter' });
         }
       } else {
-        promptAction.showToast({ message: error.message || '获取主题失败，请稍后重试' });
+        HdsFeedback.showToast(error.message || '获取主题失败，请稍后重试');
       }
       return false;
     }
@@ -524,10 +522,10 @@ struct ThemeSettingsPage {
       AppThemeSettingsStore.applyToStorage(settings);
       await AppThemeSettingsStore.save(getContext(this), settings);
       this.themeBookCoverEnabled = enabled;
-      promptAction.showToast({ message: enabled ? '已启用主题封面与书籍边框' : '已恢复图书原封面' });
+      HdsFeedback.showToast(enabled ? '已启用主题封面与书籍边框' : '已恢复图书原封面');
     } catch (e) {
       console.error('保存主题封面设置失败:', e);
-      promptAction.showToast({ message: '保存主题封面设置失败' });
+      HdsFeedback.showToast('保存主题封面设置失败');
     }
   }
 
@@ -1031,14 +1029,14 @@ struct ThemeSettingsPage {
       const settings = await AppThemeSettingsStore.load(getContext(this));
       const added = await CustomThemeSchemeStore.add(getContext(this), settings);
       if (!added) {
-        promptAction.showToast({ message: '最多只能创建 5 套自定义主题' });
+        HdsFeedback.showToast('最多只能创建 5 套自定义主题');
         return;
       }
       await this.refreshCustomSchemes();
-      promptAction.showToast({ message: `已添加「${added.name}」` });
+      HdsFeedback.showToast(`已添加「${added.name}」`);
     } catch (e) {
       console.error('添加自定义主题方案失败:', e);
-      promptAction.showToast({ message: '添加方案失败，请稍后重试' });
+      HdsFeedback.showToast('添加方案失败，请稍后重试');
     }
   }
 
@@ -1447,10 +1445,10 @@ struct ThemeSettingsPage {
       await StartupCoverTextStore.update(getContext(this), this.startupTextThemeId,
         this.startupTextTitle, this.startupTextSubtitle);
       this.closeStartupTextDialog();
-      promptAction.showToast({ message: '启动文案已更新' });
+      HdsFeedback.showToast('启动文案已更新');
     } catch (e) {
       console.error('保存启动文案失败:', e);
-      promptAction.showToast({ message: '保存启动文案失败，请重试' });
+      HdsFeedback.showToast('保存启动文案失败，请重试');
     }
   }
 
@@ -1504,22 +1502,22 @@ struct ThemeSettingsPage {
       const settings = await AppThemeSettingsStore.load(getContext(this));
       const renamed = await CustomThemeSchemeStore.rename(getContext(this), settings, scheme.id, name);
       if (!renamed) {
-        promptAction.showToast({ message: '名称为空、重复或方案不存在' });
+        HdsFeedback.showToast('名称为空、重复或方案不存在');
         return;
       }
       this.closeRenameCustomThemeDialog();
       await this.refreshCustomSchemes();
-      promptAction.showToast({ message: '自定义主题已重命名' });
+      HdsFeedback.showToast('自定义主题已重命名');
     } catch (e) {
       console.error('重命名自定义主题失败:', e);
-      promptAction.showToast({ message: '重命名失败，请稍后重试' });
+      HdsFeedback.showToast('重命名失败，请稍后重试');
     }
   }
 
   requestDeleteCustomTheme(schemeId: string): void {
     if (this.customSchemes.length <= 1) {
       this.closeCustomThemeActions();
-      promptAction.showToast({ message: '至少需要保留一套自定义主题' });
+      HdsFeedback.showToast('至少需要保留一套自定义主题');
       return;
     }
     this.actionCustomSchemeId = schemeId;
@@ -1546,7 +1544,7 @@ struct ThemeSettingsPage {
     if (!scheme) return;
     if (this.customSchemes.length <= 1) {
       this.closeCustomThemeSwipeActions();
-      promptAction.showToast({ message: '至少需要保留一套自定义主题' });
+      HdsFeedback.showToast('至少需要保留一套自定义主题');
       return;
     }
     try {
@@ -1559,15 +1557,15 @@ struct ThemeSettingsPage {
       const settings = await AppThemeSettingsStore.load(getContext(this));
       const deleted = await CustomThemeSchemeStore.delete(getContext(this), settings, schemeId);
       if (!deleted) {
-        promptAction.showToast({ message: '删除失败，至少需要保留一套方案' });
+        HdsFeedback.showToast('删除失败，至少需要保留一套方案');
         return;
       }
       this.actionCustomSchemeId = '';
       await this.refreshCustomSchemes();
-      promptAction.showToast({ message: `已删除「${scheme.name}」` });
+      HdsFeedback.showToast(`已删除「${scheme.name}」`);
     } catch (e) {
       console.error('删除自定义主题失败:', e);
-      promptAction.showToast({ message: '删除失败，请稍后重试' });
+      HdsFeedback.showToast('删除失败，请稍后重试');
     }
   }
 
@@ -1868,10 +1866,10 @@ struct ThemeSettingsPage {
       this.themeBookCoverEnabled = !!theme.book.coverAssetId;
       this.focusedThemeId = theme.id;
       this.syncBars();
-      promptAction.showToast({ message: `「${theme.name}」已开始试用，5分钟后自动恢复` });
+      HdsFeedback.showToast(`「${theme.name}」已开始试用，5分钟后自动恢复`);
     } catch (e) {
       console.error('启动主题试用失败:', e);
-      promptAction.showToast({ message: '主题试用启动失败，请稍后重试' });
+      HdsFeedback.showToast('主题试用启动失败，请稍后重试');
     } finally {
       this.applyingThemeId = '';
     }

@@ -1,14 +1,14 @@
 # Legado Harmony 书源开发指南
 
-> 适用版本：`3.9.907`（2026-09-17）。本文以当前工作区代码为准；规则能力、字段消费方式和限制可能随版本继续调整。
+> 适用版本：`3.10.908`（2026-09-19）。本文以当前工作区代码为准；规则能力、字段消费方式和限制可能随版本继续调整。
 
 本文面向为开源轻页编写、迁移和调试书源的开发者，描述项目当前代码中**已经实现并实际调用**的规则能力。
 
 | 项目 | 信息 |
 | --- | --- |
 | 适用项目 | `legado-harmony` |
-| 适用版本 | `3.9.907`（以 `AppScope/app.json5` 为准） |
-| 最后核对 | 2026-09-17 |
+| 适用版本 | `3.10.908`（以 `AppScope/app.json5` 为准） |
+| 最后核对 | 2026-09-19 |
 | 文档性质 | 当前实现参考，不是 Android「阅读」全部规则的等价清单 |
 
 > [!IMPORTANT]
@@ -504,7 +504,7 @@ $.items[?(@.name =~ /小说/i)]
 - 正则比较 `=~ /pattern/i`；
 - 属性是否存在判断。
 
-`@.field` 会按当前 JSON 对象的 `$.field` 处理。JSON 内容中还允许 `.field` 或简单裸字段 `field`，但推荐显式写 `$.field`，可读性和可移植性更好。`@json:路径` 可以强制按 JSONPath 解析。
+`@.field` 会按当前 JSON 对象的 `$.field` 处理。JSON 内容中还允许 `.field` 或简单裸字段 `field`，缺少 `$`/`@.` 前缀的 JSONPath（例如 `data.list[*]`）会按根相对的 `$.data.list[*]` 求值，不再返回空值；但推荐显式写 `$.field`，可读性和可移植性更好。`@json:路径` 可以强制按 JSONPath 解析。
 
 ### CSS 选择器
 
@@ -733,7 +733,7 @@ $.data<js>result.items</js>$.books[*]
 
 这类组合规则会先做能力判断。普通表达式继续在每个列表元素自己的 `AnalyzeRule` 上下文中执行，以保留既有的当前元素、变量读写和尾部处理顺序；只有使用箭头函数、模板字符串插值、`try`、数组高阶函数、`Set/Map`、解构或超大脚本等完整 JavaScript 语义时，才会批量路由到分阶段 ArkWeb。不要因为规则中出现 `<js>` 就假定它一定由 ArkWeb 执行。
 
-复杂组合规则在 ArkWeb 执行失败时，如果能力分析确认脚本没有网络请求、Cookie 修改或持久化写入等可观察副作用，会回退到逐元素兼容解析，不会把该字段直接当成空值。包含副作用的脚本不会再交给第二个引擎重试，以免重复请求或重复修改状态。
+复杂组合规则在 ArkWeb 执行失败时，如果能力分析确认脚本没有网络请求、Cookie 修改或持久化写入等可观察副作用，会回退到逐元素兼容解析，不会把该字段直接当成空值。包含副作用的脚本不会再交给第二个引擎重试，以免重复请求或重复修改状态。此外，`<js>处理</js>` 内嵌后处理脚本如果调用了 `source.put/get`、`cookie.*` 或 `cache.*` 这类对象状态方法，也会直接路由到 ArkWeb，避免在轻量解释器上静默失效；`<js>` 块可以单独作为开头（没有前置基础规则），此时脚本中的 `result` 是原始元素本身，与 Android 阅读的按类型分发写法一致。
 
 当前不是“所有代码统一交给一个 JavaScript 引擎”，而是按职责分层：
 
@@ -772,7 +772,7 @@ QuickJS 不能直接替代 JSONPath/CSS/XPath：选择器需要解析 HTML/JSON 
 - `java.timeFormat`；
 - `java.getCookie`、`cookie.getCookie/setCookie/removeCookie`；
 - `java.randomUUID()`、`java.androidId()`；
-- `java.put/get`、`source.get/put/getVariable/setVariable`、`book.getVariable/putVariable`；
+- `java.put/get`、`source.get/put/getVariable/setVariable`、`source.key`（与 Android 端 `source.key` 属性一致，取书源地址）、`book.getVariable/putVariable`；轻量引擎处理完 `java.*` 调用后，剩余的字符串链、三元和正则字面量表达式会交给 QuickJS 兜底求值，修复字面 `\n` 被展开、时间戳显示为 1970 之类的问题；
 - `baseUrl` 会随当前规则解析地址注入；分阶段 ArkWeb 还提供带 `get/put/save` 的临时 `infoMap`；
 - `source.getLoginInfo/getLoginInfoMap/putLoginInfo`、`source.getLoginHeader` 和 `cache.get/put/delete`；
 - `android.util.Base64`、`java.util.Base64`、`URLEncoder/URLDecoder`、`System.currentTimeMillis` 等常见 Java/Android 别名；
@@ -786,6 +786,8 @@ ArkWeb 提供真实 ECMAScript 语义，但**不等于完整 Android、Rhino、N
 阶段脚本还提供 `java.getElement(规则)` 与 `java.setContent(值)`：`getElement` 按完整规则语法收集元素（内部按 `@html` 取外层 HTML），返回轻量元素对象，支持 `attr(name)`、`hasAttr(name)`、`text()`、`ownText()`、`html()` 和 `toString()`，可用于元素级脚本处理；`setContent` 会替换当前上下文内容，后续 `$.` 路径与规则按新内容求值。`java.ajax` 返回的 `responseObject.headers()` 现在返回真实响应头（`get(name)` 大小写不敏感、`names()` 列出全部名称），不再是恒空对象；登录与调试动作中的 `java.refreshExplore()` 会真正刷新该源发现页，`java.showBrowser(url)` 只传 URL 不传 HTML 时，应用直接打开该地址而不是渲染空白文档。
 
 能力路由会分析 `java`、`source`、`cache` 和 `cookie` 方法，并在登录动作失败时提示缺少的桥接方法。复杂源仍应逐阶段实机验证；书源中的私有函数、接口和凭据始终属于该书源配置，不会成为应用内置 API。
+
+分阶段运行时自带稳定性保护：隐藏 ArkWeb 宿主失联时会自动探测并重建（自愈看门狗 + 挂载轮询兜底），等待期内不再直接失败；同一请求规格的重复次数与不同请求的总数分开限额，多分类、多分页源不容易触发“网络请求次数过多”，但同地址死循环仍会被拦截；网络层报告 `statusCode === 0`（无连接、超时等）时，桥接会把人性化错误作为 `{code:599}` 响应交给脚本继续重放，书源脚本里的 `try/catch` 可以自行吸收可选接口的失败，而不会中断整个阶段；搜索/发现菜单/URL 阶段的单请求超时约为 15 秒。登录面板保存的书源变量、登录密钥和登录信息以数据库为准，立即对下一次阶段执行生效。
 
 ### 编码 `data:` 地址与显式请求
 
@@ -836,6 +838,8 @@ ArkWeb 提供真实 ECMAScript 语义，但**不等于完整 Android、Rhino、N
 搜索/发现通用卡片显示书名、作者、状态/分类标签、字数、最新章节、更新时间、来源和封面。详情页会再次请求 `ruleBookInfo`，用详情结果补全列表缺失字段。如果 `.author@text` 同时命中“作者、字数、阅读量”等多个同 class 节点，解析器会用换行连接它们，卡片看起来像是在显示三个独立字段，实际它们都属于 `author`。语义正确的书源应尽量分别提取作者和字数；若为兼容现有卡片而有意把多行元数据放进 `author`，必须先把 `renderCount(...)` 一类脚本文本转换为最终可读值，并接受作者聚合、书籍匹配和入架元数据可能受到影响的代价。
 
 当 `ruleExplore` 为 `null`、空数组、空对象或缺少必要字段时，会自动回退到 `ruleSearch`。`exploreUrl` 以 `@js:` / `js:` 开头时会按能力路由执行，结果应为分类对象数组的 JSON 字符串；简单表达式可由轻量引擎处理，完整脚本或带 `jsLib` 函数的模板可进入分阶段 ArkWeb。阶段脚本返回 `/api/...` 等相对地址时会以 `bookSourceUrl` 补全后再请求。两条路径都有代码、输出、操作或响应大小限制。
+
+发现菜单脚本的结果会按“书源 + 平台/分类 + 变量”缓存约 5 分钟，切换分类或书源时不再重复执行菜单脚本，筛选动作（写变量/执行脚本）会立即清除该源缓存。发现脚本可以通过 `source.put('type', …)` 为分类声明媒体类型，取值为 `audio`（或 `听书`/`有声`）、`comic`（或 `漫画`）、`novel`/`text`（或 `小说`），书籍会按声明进入对应阅读模式，无需依赖标签推断。
 
 ### 详情规则 `ruleBookInfo`
 
@@ -1247,6 +1251,7 @@ https://img.example/page.jpg,{"headers":{"Referer":"https://example.com/"}}
 | 详情能开但无目录 | `tocUrl` 是否在 `init` 后的上下文解析；是否错误拼到详情页目录；相对地址基准是否正确。 |
 | 目录链接包含 `?name=...`，正文地址少了 `read.php` | 这是查询相对链接；应以章节列表响应的最终 URL 为基准。当前版本会保留文档路径；规则不要把完整 URL 再套 `encodeURIComponent`，只对参数值编码。 |
 | 目录有标题但章节被丢弃 | `chapterUrl` 为空或仍含未解析的模板/JSONPath。 |
+| 目录为空但不知道哪一步失败 | 当前版本会把具体原因显示在目录加载失败提示中：HTTP 状态或空响应、JSON 接口的错误信息、字段规则执行错误，或全部章节被丢弃；按提示修复对应环节。 |
 | 正文多个段落被合并、行间出现很长空白 | 检查正文规则是否提取了 HTML 块而丢失段落边界。当前版本会把 `</p>`、`</div>` 转成段落分隔，并按独立段落渲染；不要在规则中把整段 HTML 先压成单行或插入大量普通空格。 |
 | 正式目录规则失败但阅读页仍有目录 | 首次打开可能正在使用临时通用 HTML 目录；查看 `[WS] 通用目录兜底` 日志或“正式目录规则未匹配”提示。修好 `chapterList`，不要把临时结果当作书源有效。 |
 | 目录末尾章节出现在最前面或重复 | 页面可能先渲染“最新章节”再渲染完整目录；优先让 `chapterList` 精确限制在完整目录容器，通用兜底只在正式规则 0 匹配时生效。 |
@@ -1259,6 +1264,7 @@ https://img.example/page.jpg,{"headers":{"Referer":"https://example.com/"}}
 | `@js:` 动态请求头没有生效 | 确认脚本返回 JSON 对象或 JSON 字符串；动态头只发送到书源自己的主机，第三方图片/内容域不会收到；URL 选项的 `headers` 覆盖同名项，运行时不可用时回退静态解析。 |
 | 正文脚本拿到的是 JSON 明文且解码失败 | 章节地址为 `data:` 且尾部选项声明了 `type` 时，脚本输入是十六进制字节串，需要先 `java.hexDecodeToString(result)`；未声明 `type` 时依靠规则内调用 `java.hexDecodeToString(result)` 等字节串函数识别。 |
 | `text.下一页@href` 没有继续翻页 | 检查链接的“下一页”是否为 `<a>` 自身直接文本；若文字包在子元素中，改用稳定 CSS 或 `:contains()`。还要确认下一页不是 JavaScript 点击事件。 |
+| 书源脚本提示“网络请求次数过多” | 同一请求规格的重复次数与不同请求总数分开限额：重复请求同一地址按阶段预算（最多 12 次）拦截，不同地址上限至少 16 次；若在多分类/多分页场景出现，检查脚本是否在循环里重复请求同一地址且没有命中响应缓存。 |
 | 有下一页规则但正文仍不完整 | `nextContentUrl` 只能跟随真实分页链接；若服务端 HTML 已截断而完整正文位于页面脚本状态/渲染 DOM，改用显式 `webView: true` / `webJs` 返回完整内容。 |
 | 正文显示 `JSON.parse(undefined)` | 检查脚本变量是否由 `data:` 负载、`java.ajax` 或上一条规则提供；不要假定不存在的字段会自动变成 `{}`。 |
 | 朗读一直念星号、井号或与号 | 当前版本会过滤只由常见装饰符组成的整行，也会静音正文中的长重复装饰符号（URL 中的 `://` 会保留）；若符号与推广文字混在同一行，仍可使用 `replaceRegex` 精确清理该站文本。 |

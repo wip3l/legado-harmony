@@ -1,5 +1,4 @@
 import { router, window, uiMaterial } from '@kit.ArkUI';
-import { promptAction } from '@kit.ArkUI';
 import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { notificationManager } from '@kit.NotificationKit';
@@ -45,8 +44,9 @@ import { ReaderTtsPlayerPanel } from '../components/ReaderTtsPlayerPanel';
 import { TtsCatalogSheet, CatalogTitleDataSource } from '../components/TtsCatalogSheet';
 import { BookTypeSupport } from '../core/book/BookTypeSupport';
 import { WebBookService } from '../core/book/WebBookService';
-import { ChangeSourceResultCache } from '../utils/ChangeSourceResultCache';
+import { BookChangeSourceDialog } from '../components/BookChangeSourceDialog';
 import { BookFieldSanitizer } from '../utils/BookFieldSanitizer';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 import { ReaderOpenTrace } from '../utils/ReaderOpenTrace';
 import { FullTextCacheCancelCoordinator, FullTextCacheCancelSignal } from '../utils/FullTextCacheCancelCoordinator';
@@ -75,6 +75,10 @@ interface ShelfFullTextCacheTask {
   notificationFailureHintShown: boolean;
   engine: ReadBookEngine | null;
   stoppingNotificationTask: Promise<void> | null;
+  /** Chapter indexes to cache, in order. Empty means the whole book. */
+  chapterIndexes: number[];
+  /** Shown in the notification title: 全文 or 章节. */
+  scopeLabel: string;
 }
 
 
@@ -100,6 +104,7 @@ struct Index {
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('launchShortcutNonce') @Watch('onLaunchShortcutChanged') launchShortcutNonce: number = 0;
   @StorageLink('singleSourceSearchNonce') @Watch('onSingleSourceSearchRequested') singleSourceSearchNonce: number = 0;
+  @StorageLink('globalSearchPendingNonce') @Watch('onGlobalSearchRequested') globalSearchPendingNonce: number = 0;
   @StorageLink('bookSourceExploreRefreshNonce') @Watch('onBookSourceExploreRefreshRequested')
   bookSourceExploreRefreshNonce: number = 0;
   @StorageLink('cloudSyncDataChangeRevision') @Watch('onCloudSyncDataChanged')
@@ -231,6 +236,16 @@ struct Index {
     this.syncHomeSystemBars();
   }
 
+  onGlobalSearchRequested(): void {
+    const keyword = AppStorage.get<string>('globalSearchPendingKeyword') || '';
+    if (!keyword.trim()) {
+      return;
+    }
+    this.bookshelfMultiSelectActive = false;
+    this.currentIndex = 2;
+    this.syncHomeSystemBars();
+  }
+
   onBookSourceExploreRefreshRequested(): void {
     if (this.bookSourceExploreRefreshNonce <= 0) return;
     this.bookshelfMultiSelectActive = false;
@@ -300,7 +315,7 @@ struct Index {
   openGlobalTtsCatalog(): void {
     const titles = ReaderTtsFloatingSession.catalogTitles();
     if (titles.length === 0) {
-      promptAction.showToast({ message: '暂未获取到听书目录' });
+      HdsFeedback.showToast('暂未获取到听书目录');
       return;
     }
     this.globalTtsCatalogSource.replace(this.globalTtsCatalogReverseOrder ? titles.slice().reverse() : titles);
@@ -1026,6 +1041,14 @@ struct BookshelfPage {
   @State selectedBookUrls: string[] = [];
   @State showBookGroupPicker: boolean = false;
   @State groupPickerSingleBookUrl: string = '';
+  private addBookGroupDialogSession: SystemDialogSession = new SystemDialogSession();
+  private renameBookGroupDialogSession: SystemDialogSession = new SystemDialogSession();
+  private deleteBookGroupDialogSession: SystemDialogSession = new SystemDialogSession();
+  private batchDeleteDialogSession: SystemDialogSession = new SystemDialogSession();
+  private deleteBookDialogSession: SystemDialogSession = new SystemDialogSession();
+  private editBookInfoDialogSession: SystemDialogSession = new SystemDialogSession();
+  private tagDialogSession: SystemDialogSession = new SystemDialogSession();
+  private customCoverDialogSession: SystemDialogSession = new SystemDialogSession();
   @State showAddBookGroupDialog: boolean = false;
   @State newBookGroupName: string = '';
   @State showBookGroupActionMenu: boolean = false;
@@ -1042,8 +1065,10 @@ struct BookshelfPage {
   @State editingBookName: string = '';
   @State editingBookAuthor: string = '';
   @State showTagDialog: boolean = false;
-  @State showCacheDialog: boolean = false;
-  @State showChapterCacheDialog: boolean = false;
+  private cacheDialogSession: SystemDialogSession = new SystemDialogSession();
+  private chapterCacheDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onBookshelfSystemDialogFlagChanged') showCacheDialog: boolean = false;
+  @State @Watch('onBookshelfSystemDialogFlagChanged') showChapterCacheDialog: boolean = false;
   @State showNetworkCoverDialog: boolean = false;
   @State networkCoverTargetBook: Book | null = null;
   @State networkCoverCandidates: SearchBook[] = [];
@@ -1054,11 +1079,7 @@ struct BookshelfPage {
   @State pendingDeleteBook: Book | null = null;
   @State pendingActionBook: Book | null = null;
   @State showShelfChangeSourceDialog: boolean = false;
-  @State shelfChangeSourceTarget: Book | null = null;
-  @State shelfChangeSourceResults: SearchBook[] = [];
-  @State shelfChangeSourceStatus: string = '';
-  @State shelfChangeSourceSearching: boolean = false;
-  @State shelfChangeSourceSwitching: boolean = false;
+  private shelfChangeSourceTarget: Book | null = null;
   @State contextMenuX: number = 16;
   @State contextMenuY: number = 96;
   @State contextViewportWidth: number = 360;
@@ -1068,7 +1089,6 @@ struct BookshelfPage {
   @State cacheChapters: BookChapter[] = [];
   @State cacheStatus: string = '';
   @State cacheRangeDraft: string = '';
-  @State cacheRangeCaching: boolean = false;
   @State isCaching: boolean = false;
   @State activeFullTextCacheBookUrls: string[] = [];
   @State isCacheTocLoading: boolean = false;
@@ -1121,10 +1141,7 @@ struct BookshelfPage {
   private cacheTocLoadPromise: Promise<boolean> | null = null;
   private cacheDialogOpenedAt: number = 0;
   private fullTextCacheTasks: Map<string, ShelfFullTextCacheTask> = new Map();
-  private activeCacheBookUrl: string = '';
   private shelfRefreshRunning: boolean = false;
-  private shelfChangeSourceSessionId: number = 0;
-  private activeShelfChangeSourceCoordinator: SearchCoordinator | null = null;
   private fullTextCacheTaskId: number = 0;
   private fullTextCacheCancelRequested: boolean = false;
   private fullTextCacheCancelSeenNonce: number = 0;
@@ -1168,7 +1185,6 @@ struct BookshelfPage {
     this.shelfComponentActive = false;
     this.cancelShelfBookOpening();
     this.cancelNetworkCoverSearch();
-    this.cancelShelfChangeSourceSearch();
     this.clearShelfScopeTransition();
     this.shelfCoverCacheRevision++;
     this.localBookIntroMigrationGeneration++;
@@ -1328,18 +1344,18 @@ struct BookshelfPage {
       this.deleteBookCoverCache(book);
       LocalBookService.deleteLocalBookFiles(getContext(this), book);
       await db.deleteBook(book.bookUrl, 'bookshelf_user_delete');
-      promptAction.showToast({ message: `已删除《${book.name}》` });
+      HdsFeedback.showToast(`已删除《${book.name}》`);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       await this.loadBooks();
     } catch (e) {
       console.error('删除书籍失败:', e);
-      promptAction.showToast({ message: '删除失败' });
+      HdsFeedback.showToast('删除失败');
     }
   }
 
   showDeleteConfirm(book: Book) {
     this.pendingDeleteBook = book;
-    this.showDeleteDialog = true;
+    this.openDeleteBookDialog();
   }
 
   showBookActions(book: Book, event?: GestureEvent): void {
@@ -1358,10 +1374,10 @@ struct BookshelfPage {
       this.allBooks = this.allBooks.map((item: Book) => item.bookUrl === book.bookUrl ? book : item);
       this.applyShelfScope();
       this.reloadShelfDataSources(true);
-      promptAction.showToast({ message: nextPinned ? `已置顶《${book.name}》` : `已取消置顶《${book.name}》` });
+      HdsFeedback.showToast(nextPinned ? `已置顶《${book.name}》` : `已取消置顶《${book.name}》`);
     } catch (e) {
       console.error('更新书籍置顶状态失败:', e);
-      promptAction.showToast({ message: nextPinned ? '置顶失败' : '取消置顶失败' });
+      HdsFeedback.showToast(nextPinned ? '置顶失败' : '取消置顶失败');
     }
   }
 
@@ -1450,390 +1466,19 @@ struct BookshelfPage {
     });
   }
 
-  async openShelfChangeSource(book: Book): Promise<void> {
+  openShelfChangeSource(book: Book): void {
     if (!book.name.trim() || LocalBookService.isLocalBook(book)) {
-      promptAction.showToast({ message: '当前书籍不支持换源' });
+      HdsFeedback.showToast('当前书籍不支持换源');
       return;
     }
-    this.cancelShelfChangeSourceSearch();
-    const sessionId = ++this.shelfChangeSourceSessionId;
     this.shelfChangeSourceTarget = book;
-    this.shelfChangeSourceResults = [];
-    this.shelfChangeSourceStatus = '正在读取历史换源结果...';
-    this.shelfChangeSourceSearching = true;
-    this.shelfChangeSourceSwitching = false;
     this.showShelfChangeSourceDialog = true;
-    try {
-      const cached = await ChangeSourceResultCache.load(getContext(this), book.name, book.author);
-      if (!this.isShelfChangeSourceSessionActive(sessionId)) return;
-      this.shelfChangeSourceResults = this.filterShelfChangeSourceResults(cached, book.bookUrl, book.origin);
-      if (this.shelfChangeSourceResults.length > 0) {
-        this.shelfChangeSourceSearching = false;
-        this.shelfChangeSourceStatus = `已显示历史结果，共 ${this.shelfChangeSourceResults.length} 个；点击刷新可重新搜索`;
-        return;
-      }
-    } catch (e) {
-      console.warn('读取书架换源历史失败:', e);
-    }
-    if (this.isShelfChangeSourceSessionActive(sessionId)) {
-      this.searchShelfChangeSource(sessionId);
-    }
-  }
-
-  refreshShelfChangeSource(): void {
-    if (!this.shelfChangeSourceTarget || this.shelfChangeSourceSwitching) return;
-    this.cancelShelfChangeSourceSearch();
-    const sessionId = ++this.shelfChangeSourceSessionId;
-    this.shelfChangeSourceSearching = true;
-    this.shelfChangeSourceStatus = '正在刷新可用书源...';
-    this.searchShelfChangeSource(sessionId);
-  }
-
-  closeShelfChangeSource(): void {
-    this.shelfChangeSourceSessionId++;
-    this.cancelShelfChangeSourceSearch();
-    this.showShelfChangeSourceDialog = false;
-    this.shelfChangeSourceTarget = null;
-    this.shelfChangeSourceResults = [];
-    this.shelfChangeSourceStatus = '';
-    this.shelfChangeSourceSearching = false;
-    this.shelfChangeSourceSwitching = false;
-  }
-
-  async searchShelfChangeSource(sessionId: number): Promise<void> {
-    const target = this.shelfChangeSourceTarget;
-    if (!target) return;
-    const cacheBookName = target.name;
-    const coordinator = new SearchCoordinator(Math.min(2, SearchExploreSettingsStore.getSearchConcurrency()));
-    this.activeShelfChangeSourceCoordinator = coordinator;
-    this.shelfChangeSourceSearching = true;
-    this.shelfChangeSourceStatus = '正在搜索可用书源...';
-    try {
-      const results = await coordinator.search(target.name, (progress: SearchProgress) => {
-        if (!this.isShelfChangeSourceSessionActive(sessionId)) return;
-        if (progress.finished) {
-          this.shelfChangeSourceResults = this.filterShelfChangeSourceResults(
-            progress.results, target.bookUrl, target.origin);
-        } else if (progress.deltaResults && progress.deltaResults.length > 0) {
-          this.shelfChangeSourceResults = this.filterShelfChangeSourceResults(
-            this.shelfChangeSourceResults.concat(progress.deltaResults), target.bookUrl, target.origin);
-        }
-        this.shelfChangeSourceStatus = progress.status;
-        if (progress.finished) this.shelfChangeSourceSearching = false;
-      }, {
-        exactMatch: true,
-        leanResult: true,
-        excludeSourceUrls: [target.origin],
-        maxResultsPerSource: 1,
-        maxTotalResults: 60,
-        stopAfterResults: 20,
-        maxCandidatesPerSource: 32
-      });
-      if (!this.isShelfChangeSourceSessionActive(sessionId)) return;
-      this.shelfChangeSourceResults = this.filterShelfChangeSourceResults(results, target.bookUrl, target.origin);
-      this.shelfChangeSourceStatus = this.shelfChangeSourceResults.length > 0 ?
-        `搜索完成，找到 ${this.shelfChangeSourceResults.length} 个可切换书源` : '搜索完成，未找到可切换书源';
-      try {
-        await ChangeSourceResultCache.save(getContext(this), cacheBookName, results, target.author);
-      } catch (e) {
-        console.warn('保存书架换源结果失败:', e);
-      }
-    } catch (e) {
-      if (!this.isShelfChangeSourceSessionActive(sessionId)) return;
-      console.error('书架搜索换源失败:', e);
-      this.shelfChangeSourceStatus = '搜索换源失败';
-    } finally {
-      if (this.activeShelfChangeSourceCoordinator === coordinator) {
-        this.activeShelfChangeSourceCoordinator = null;
-      }
-      if (this.isShelfChangeSourceSessionActive(sessionId)) {
-        this.shelfChangeSourceSearching = false;
-      }
-    }
-  }
-
-  isShelfChangeSourceSessionActive(sessionId: number): boolean {
-    return this.showShelfChangeSourceDialog && sessionId === this.shelfChangeSourceSessionId;
-  }
-
-  cancelShelfChangeSourceSearch(): void {
-    if (this.activeShelfChangeSourceCoordinator) {
-      this.activeShelfChangeSourceCoordinator.cancel();
-      this.activeShelfChangeSourceCoordinator = null;
-    }
-  }
-
-  filterShelfChangeSourceResults(results: SearchBook[], currentBookUrl: string, currentOrigin: string): SearchBook[] {
-    const filtered: SearchBook[] = [];
-    const seen = new Set<string>();
-    for (const result of results) {
-      if (!result.bookUrl || SearchBookShelfHelper.isNavigationResult(result) ||
-        (result.bookUrl === currentBookUrl && result.origin === currentOrigin)) continue;
-      const key = `${result.origin || ''}\n${result.bookUrl}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      filtered.push(result);
-    }
-    return filtered;
-  }
-
-  async switchShelfBookSource(searchBook: SearchBook): Promise<void> {
-    const target = this.shelfChangeSourceTarget;
-    if (!target || this.shelfChangeSourceSwitching) return;
-    this.cancelShelfChangeSourceSearch();
-    this.shelfChangeSourceSearching = false;
-    const sessionId = ++this.shelfChangeSourceSessionId;
-    this.shelfChangeSourceSwitching = true;
-    this.shelfChangeSourceStatus = '正在切换书源...';
-    const oldBookUrl = target.bookUrl;
-    try {
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      const oldBook = await db.getBook(oldBookUrl) || target;
-      const source = searchBook.origin ? await db.getBookSource(searchBook.origin) : null;
-      if (!source) {
-        promptAction.showToast({ message: '书源不存在或已删除' });
-        return;
-      }
-      if (!this.isShelfChangeSourceSessionActive(sessionId)) return;
-
-      const nextBook = this.buildShelfSourceBook(searchBook, oldBook);
-      const service = new WebBookService();
-      const fullBook = await service.getBookInfo(source, nextBook);
-      if (!this.isShelfChangeSourceSessionActive(sessionId)) return;
-      this.preserveShelfSourceBookState(fullBook, nextBook, oldBook);
-      const chapters = await service.getChapterList(source, fullBook, 0, false);
-      if (!this.isShelfChangeSourceSessionActive(sessionId)) return;
-      if (chapters.length === 0) throw new Error('新书源目录为空，已保留原书源');
-      fullBook.totalChapterNum = chapters.length;
-      if (chapters.length > 0) {
-        const safeIndex = Math.max(0, Math.min(oldBook.durChapterIndex, chapters.length - 1));
-        fullBook.durChapterIndex = safeIndex;
-        fullBook.durChapterTitle = chapters[safeIndex].title;
-        fullBook.latestChapterTitle = chapters[chapters.length - 1].title;
-      }
-
-      await db.commitBookSourceSwitch(oldBookUrl, fullBook, chapters);
-
-      this.closeShelfChangeSource();
-      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      await this.loadBooks();
-      promptAction.showToast({ message: `已切换至 ${fullBook.originName || searchBook.originName}` });
-    } catch (e) {
-      if (!this.isShelfChangeSourceSessionActive(sessionId)) return;
-      console.error('书架切换书源失败:', e);
-      promptAction.showToast({ message: '切换书源失败' });
-    } finally {
-      if (sessionId === this.shelfChangeSourceSessionId) {
-        this.shelfChangeSourceSwitching = false;
-      }
-    }
-  }
-
-  buildShelfSourceBook(searchBook: SearchBook, oldBook: Book): Book {
-    const book = new Book();
-    book.bookUrl = searchBook.bookUrl;
-    book.tocUrl = searchBook.tocUrl;
-    book.origin = searchBook.origin;
-    book.originName = searchBook.originName;
-    book.name = searchBook.name || oldBook.name;
-    book.author = searchBook.author || oldBook.author;
-    book.kind = BookFieldSanitizer.prefer(searchBook.kind, oldBook.kind);
-    book.status = BookFieldSanitizer.prefer(searchBook.status, oldBook.status);
-    book.coverUrl = CoverUrlNormalizer.prefer(searchBook.coverUrl, oldBook.coverUrl);
-    book.customCoverUrl = oldBook.customCoverUrl;
-    book.intro = BookFieldSanitizer.prefer(searchBook.intro, oldBook.intro);
-    book.customIntro = oldBook.customIntro;
-    book.latestChapterTitle = BookFieldSanitizer.prefer(searchBook.latestChapterTitle, oldBook.latestChapterTitle);
-    book.updateTime = BookFieldSanitizer.prefer(searchBook.updateTime, oldBook.updateTime);
-    book.wordCount = BookFieldSanitizer.prefer(searchBook.wordCount, oldBook.wordCount);
-    book.variable = searchBook.variable || '';
-    book.group = oldBook.group;
-    book.isPinned = oldBook.isPinned;
-    book.order = oldBook.order;
-    book.originOrder = oldBook.originOrder;
-    book.readConfig = oldBook.readConfig;
-    book.canUpdate = oldBook.canUpdate;
-    book.type = oldBook.type;
-    book.durChapterIndex = oldBook.durChapterIndex;
-    book.durChapterPos = oldBook.durChapterPos;
-    book.durChapterTitle = oldBook.durChapterTitle;
-    book.durChapterTime = oldBook.durChapterTime;
-    return book;
-  }
-
-  preserveShelfSourceBookState(target: Book, source: Book, oldBook: Book): void {
-    target.origin = source.origin;
-    target.originName = source.originName;
-    target.coverUrl = CoverUrlNormalizer.prefer(source.coverUrl, target.coverUrl);
-    target.group = oldBook.group;
-    target.isPinned = oldBook.isPinned;
-    target.order = oldBook.order;
-    target.originOrder = oldBook.originOrder;
-    target.customCoverUrl = oldBook.customCoverUrl;
-    target.customIntro = oldBook.customIntro;
-    target.readConfig = oldBook.readConfig;
-    target.canUpdate = oldBook.canUpdate;
-    target.durChapterIndex = oldBook.durChapterIndex;
-    target.durChapterPos = oldBook.durChapterPos;
-    target.durChapterTitle = oldBook.durChapterTitle;
-    target.durChapterTime = oldBook.durChapterTime;
-    target.syncTime = oldBook.syncTime;
-  }
-
-  @Builder
-  shelfChangeSourceDialog() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .onClick(() => {
-          if (!this.shelfChangeSourceSwitching) this.closeShelfChangeSource();
-        })
-
-      Column() {
-        Row() {
-          Column({ space: 3 }) {
-            Text('换源')
-              .fontSize(19)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-            Text(`《${this.shelfChangeSourceTarget?.name || ''}》`)
-              .fontSize(12)
-              .fontColor(this.subTextColor())
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-
-          if (this.shelfChangeSourceSearching) {
-            LoadingProgress()
-              .width(26)
-              .height(26)
-              .margin({ right: 14 })
-          } else {
-            SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-              .fontSize(21)
-              .fontColor([this.primaryTextColor()])
-              .width(40)
-              .height(40)
-              .margin({ right: 4 })
-              .onClick(() => this.refreshShelfChangeSource())
-          }
-          SymbolGlyph($r('sys.symbol.xmark'))
-            .fontSize(20)
-            .fontColor([this.primaryTextColor()])
-            .width(40)
-            .height(40)
-            .onClick(() => {
-              if (!this.shelfChangeSourceSwitching) this.closeShelfChangeSource();
-            })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        Text(this.shelfChangeSourceStatus || '将使用当前书名进行全词匹配搜索')
-          .fontSize(13)
-          .fontColor(this.subTextColor())
-          .width('100%')
-          .margin({ top: 8, bottom: 10 })
-
-        if (this.shelfChangeSourceSearching && this.shelfChangeSourceResults.length === 0) {
-          Column({ space: 10 }) {
-            LoadingProgress().width(36).height(36)
-            Text('正在搜索可用书源...')
-              .fontSize(13)
-              .fontColor(this.subTextColor())
-          }
-          .width('100%')
-          .height(260)
-          .justifyContent(FlexAlign.Center)
-        } else if (this.shelfChangeSourceResults.length === 0) {
-          Text('暂无可切换书源')
-            .fontSize(15)
-            .fontColor(this.subTextColor())
-            .width('100%')
-            .height(260)
-            .textAlign(TextAlign.Center)
-        } else {
-          List({ space: 8 }) {
-            ForEach(this.shelfChangeSourceResults, (book: SearchBook) => {
-              ListItem() {
-                Row() {
-                  Column({ space: 4 }) {
-                    Text(book.originName || book.origin)
-                      .fontSize(15)
-                      .fontWeight(FontWeight.Bold)
-                      .fontColor(this.primaryTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(`作者：${book.author || '未知'}`)
-                      .fontSize(12)
-                      .fontColor(this.subTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(`最新：${book.latestChapterTitle || '书源未提供'}`)
-                      .fontSize(12)
-                      .fontColor(this.subTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  }
-                  .layoutWeight(1)
-                  .alignItems(HorizontalAlign.Start)
-
-                  Button(this.shelfChangeSourceSwitching ? '切换中' : '切换')
-                    .width(68)
-                    .height(32)
-                    .fontSize(13)
-                    .borderRadius(16)
-                    .backgroundColor(this.buttonColor())
-                    .fontColor('#FFFFFF')
-                    .enabled(!this.shelfChangeSourceSwitching)
-                    .onClick(() => this.switchShelfBookSource(book))
-                }
-                .width('100%')
-                .padding(12)
-                .backgroundColor(this.inputColor())
-                .borderRadius(10)
-              }
-            }, (book: SearchBook) => `${book.origin}|${book.bookUrl}`)
-
-            if (this.shelfChangeSourceSearching) {
-              ListItem() {
-                Row({ space: 8 }) {
-                  LoadingProgress().width(20).height(20)
-                  Text('继续加载中...').fontSize(13).fontColor(this.subTextColor())
-                }
-                .width('100%')
-                .height(42)
-                .justifyContent(FlexAlign.Center)
-              }
-            }
-          }
-          .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-          .width('100%')
-          .height(340)
-        }
-      }
-      .width('90%')
-      .padding(20)
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .clip(true)
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-    }
-    .width('100%')
-    .height('100%')
   }
 
   async openNetworkCoverPicker(book: Book): Promise<void> {
     const keyword = (book.name || '').trim();
     if (!keyword) {
-      promptAction.showToast({ message: '书名为空，无法搜索封面' });
+      HdsFeedback.showToast('书名为空，无法搜索封面');
       return;
     }
     this.cancelNetworkCoverSearch();
@@ -1900,7 +1545,7 @@ struct BookshelfPage {
       const db = AppDatabase.getInstance();
       const current = await db.getBook(target.bookUrl);
       if (!current) {
-        promptAction.showToast({ message: '书籍已不在书架中' });
+        HdsFeedback.showToast('书籍已不在书架中');
         this.closeNetworkCoverPicker();
         return;
       }
@@ -1909,10 +1554,10 @@ struct BookshelfPage {
       this.applyShelfBookCoverState(current);
       this.closeNetworkCoverPicker();
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      promptAction.showToast({ message: '网络封面已启用' });
+      HdsFeedback.showToast('网络封面已启用');
     } catch (e) {
       console.error('应用网络封面失败:', e);
-      promptAction.showToast({ message: '应用网络封面失败' });
+      HdsFeedback.showToast('应用网络封面失败');
     }
   }
 
@@ -1922,17 +1567,17 @@ struct BookshelfPage {
       const db = AppDatabase.getInstance();
       const current = await db.getBook(book.bookUrl);
       if (!current) {
-        promptAction.showToast({ message: '书籍已不在书架中' });
+        HdsFeedback.showToast('书籍已不在书架中');
         return;
       }
       current.customCoverUrl = '';
       await db.updateBook(current);
       this.applyShelfBookCoverState(current);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      promptAction.showToast({ message: '已恢复默认封面' });
+      HdsFeedback.showToast('已恢复默认封面');
     } catch (e) {
       console.error('恢复默认封面失败:', e);
-      promptAction.showToast({ message: '恢复默认封面失败' });
+      HdsFeedback.showToast('恢复默认封面失败');
     }
   }
 
@@ -1966,7 +1611,7 @@ struct BookshelfPage {
     if (!this.networkCoverTargetBook) return;
     this.customNetworkCoverUrl = this.networkCoverTargetBook.customCoverUrl || '';
     this.showNetworkCoverDialog = false;
-    this.showCustomNetworkCoverDialog = true;
+    this.openCustomCoverDialog();
   }
 
   async applyCustomNetworkCover(): Promise<void> {
@@ -1974,14 +1619,14 @@ struct BookshelfPage {
     const coverUrl = (this.customNetworkCoverUrl || '').trim();
     if (!target) return;
     if (!/^https?:\/\/[^\s]+$/i.test(coverUrl)) {
-      promptAction.showToast({ message: '请输入有效的 http 或 https 图片链接' });
+      HdsFeedback.showToast('请输入有效的 http 或 https 图片链接');
       return;
     }
     try {
       const db = AppDatabase.getInstance();
       const current = await db.getBook(target.bookUrl);
       if (!current) {
-        promptAction.showToast({ message: '书籍已不在书架中' });
+        HdsFeedback.showToast('书籍已不在书架中');
         this.closeNetworkCoverPicker();
         return;
       }
@@ -1990,17 +1635,17 @@ struct BookshelfPage {
       this.applyShelfBookCoverState(current);
       this.closeNetworkCoverPicker();
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      promptAction.showToast({ message: '自定义封面已启用' });
+      HdsFeedback.showToast('自定义封面已启用');
     } catch (e) {
       console.error('应用自定义封面失败:', e);
-      promptAction.showToast({ message: '应用自定义封面失败' });
+      HdsFeedback.showToast('应用自定义封面失败');
     }
   }
 
   closeNetworkCoverPicker(): void {
     this.cancelNetworkCoverSearch();
     this.showNetworkCoverDialog = false;
-    this.showCustomNetworkCoverDialog = false;
+    this.closeCustomCoverDialog();
     this.networkCoverTargetBook = null;
     this.networkCoverCandidates = [];
     this.networkCoverStatus = '';
@@ -2552,7 +2197,7 @@ struct BookshelfPage {
                     this.editingBookName = this.pendingActionBook.name;
                     this.editingBookAuthor = this.pendingActionBook.author;
                     this.showActionDialog = false;
-                    this.showEditBookInfoDialog = true;
+                    this.openEditBookInfoDialog();
                   }
                 })
             }
@@ -2571,7 +2216,7 @@ struct BookshelfPage {
                 this.tagInput = '';
               }
               this.showActionDialog = false;
-              this.showTagDialog = true;
+              this.openTagDialog();
             })
             this.contextActionItem($r('sys.symbol.checkmark_circle'), '多选', this.primaryTextColor(), () => {
               if (this.pendingActionBook) {
@@ -2605,7 +2250,17 @@ struct BookshelfPage {
       }
 
       if (this.showShelfChangeSourceDialog && this.shelfChangeSourceTarget) {
-        this.shelfChangeSourceDialog()
+        BookChangeSourceDialog({
+          targetBook: this.shelfChangeSourceTarget,
+          onSwitched: (switched: Book): void => {
+            AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+            this.loadBooks();
+          },
+          onClosed: (): void => {
+            this.showShelfChangeSourceDialog = false;
+            this.shelfChangeSourceTarget = null;
+          }
+        })
       }
 
       if (this.showNetworkCoverDialog && this.networkCoverTargetBook) {
@@ -2756,513 +2411,10 @@ struct BookshelfPage {
         .backgroundColor('#66000000')
       }
 
-      if (this.showCustomNetworkCoverDialog && this.networkCoverTargetBook) {
-        Column() {
-          Column({ space: 16 }) {
-            Text('使用自定义链接')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .width('100%')
-            Text(`《${this.networkCoverTargetBook.name}》`)
-              .fontSize(13)
-              .fontColor(this.secondaryTextColor())
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%')
-            TextInput({ placeholder: '请输入图片 URL', text: this.customNetworkCoverUrl })
-              .type(InputType.Normal)
-              .width('100%')
-              .height(44)
-              .fontColor(this.primaryTextColor())
-              .placeholderColor(this.subTextColor())
-              .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'popover'))
-              .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-              .border({ width: ThemeRuntime.glassBorderWidth('popover'),
-                color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'popover') })
-              .borderRadius(12)
-              .onChange((value: string) => {
-                this.customNetworkCoverUrl = value;
-              })
-            Text('仅支持 http 或 https 图片链接，图片是否可用由网络资源决定。')
-              .fontSize(12)
-              .fontColor(this.subTextColor())
-              .width('100%')
-            Row({ space: 12 }) {
-              Button('取消', { type: ButtonType.Normal })
-                .layoutWeight(1)
-                .height(42)
-                .borderRadius(10)
-                .backgroundColor(this.glassCardColor())
-                .fontColor(this.primaryTextColor())
-                .onClick(() => {
-                  this.showCustomNetworkCoverDialog = false;
-                  this.showNetworkCoverDialog = true;
-                })
-              Button('设为封面', { type: ButtonType.Normal })
-                .layoutWeight(1)
-                .height(42)
-                .borderRadius(10)
-                .backgroundColor(this.buttonColor())
-                .fontColor('#FFFFFF')
-                .enabled(/^https?:\/\/[^\s]+$/i.test(this.customNetworkCoverUrl.trim()))
-                .onClick(() => this.applyCustomNetworkCover())
-            }
-            .width('100%')
-          }
-          .width('92%')
-          .padding({ left: 16, right: 16, top: 20, bottom: Math.max(this.navBarHeight, 12) + 12 })
-          .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-          .borderRadius(ThemeRuntime.glassCornerRadius(22, 'panel'))
-          .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-          .border({ width: ThemeRuntime.glassBorderWidth('panel'),
-            color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
 
-        }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-        .backgroundColor('#66000000')
-      }
 
-      if (this.showEditBookInfoDialog && this.pendingActionBook) {
-        Column() {
-          Column() {
-            Text('编辑书籍信息')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 18 })
 
-            Text('书名')
-              .fontSize(13)
-              .fontColor(this.secondaryTextColor())
-              .width('100%')
-              .margin({ bottom: 6 })
 
-            TextInput({ placeholder: '请输入书名', text: this.editingBookName })
-              .width('100%')
-              .height(44)
-              .fontColor(this.primaryTextColor())
-              .placeholderColor(this.subTextColor())
-              .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'popover'))
-              .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-              .border({ width: ThemeRuntime.glassBorderWidth('popover'),
-                color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'popover') })
-              .borderRadius(12)
-              .onChange((value: string) => {
-                this.editingBookName = value;
-              })
-
-            Text('作者')
-              .fontSize(13)
-              .fontColor(this.secondaryTextColor())
-              .width('100%')
-              .margin({ top: 14, bottom: 6 })
-
-            TextInput({ placeholder: '请输入作者（可留空）', text: this.editingBookAuthor })
-              .width('100%')
-              .height(44)
-              .fontColor(this.primaryTextColor())
-              .placeholderColor(this.subTextColor())
-              .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'popover'))
-              .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-              .border({ width: ThemeRuntime.glassBorderWidth('popover'),
-                color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'popover') })
-              .borderRadius(12)
-              .onChange((value: string) => {
-                this.editingBookAuthor = value;
-              })
-
-            Row() {
-              Button('取消')
-                .width('45%')
-                .height(44)
-                .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'popover'))
-                .fontColor(this.primaryTextColor())
-                .onClick(() => this.closeEditBookInfoDialog())
-
-              Button('保存')
-                .width('45%')
-                .height(44)
-                .enabled(!!this.editingBookName.trim())
-                .opacity(this.editingBookName.trim() ? 1 : 0.45)
-                .onClick(() => this.saveLocalBookInfo())
-            }
-            .width('100%')
-            .justifyContent(FlexAlign.SpaceBetween)
-            .margin({ top: 22 })
-          }
-          .width('85%')
-          .padding(20)
-          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-          .border({ width: ThemeRuntime.glassBorderWidth('overlay'),
-            color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'),
-            color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'),
-            offsetX: ThemeRuntime.glassShadowOffsetX('overlay'),
-            offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .justifyContent(FlexAlign.Center)
-      }
-
-      if (this.showCacheDialog && this.cacheTargetBook) {
-        Column() {
-          Blank()
-            .layoutWeight(1)
-            .onClick(() => {
-              if (!this.isCacheTargetBookCaching() && !this.cacheRangeCaching) {
-                this.closeCacheDialog();
-              }
-            })
-
-          Column() {
-            Text(`缓存《${this.cacheTargetBook.name}》`)
-              .fontSize(17)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 8 })
-
-            if (this.cacheStatus) {
-              Text(this.cacheStatus)
-                .fontSize(13)
-                .fontColor(this.subTextColor())
-                .width('100%')
-                .textAlign(TextAlign.Center)
-                .margin({ bottom: 8 })
-            }
-
-            this.actionItem(this.isCacheTargetBookCaching() ? '正在缓存...' : '缓存全文', this.primaryTextColor(), () => {
-              this.cacheWholeBook();
-            })
-            this.actionItem('缓存指定章节', this.primaryTextColor(), () => {
-              if (!this.isCacheTargetBookCaching()) {
-                this.showCacheDialog = false;
-                this.showChapterCacheDialog = true;
-                if (this.cacheTargetBook) {
-                  this.loadCacheChapters(this.cacheTargetBook);
-                }
-              }
-            })
-            this.actionItem('清除已缓存章节', '#E53935', () => {
-              this.clearCachedChapters();
-            })
-
-            Button('取消')
-              .width('100%')
-              .height(44)
-              .margin({ top: 10 })
-              .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
-              .fontColor(this.primaryTextColor())
-              .onClick(() => {
-                this.closeCacheDialog(false);
-              })
-          }
-          .width('100%')
-          .padding({ left: 18, right: 18, top: 18, bottom: 18 })
-          .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-          .borderRadius(ThemeRuntime.glassCornerRadius(18, 'panel'))
-          .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-          .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-          .margin({ bottom: this.actionSheetBottomMargin() })
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#66000000')
-      }
-
-      if (this.showChapterCacheDialog && this.cacheTargetBook) {
-        Column() {
-          Blank()
-            .layoutWeight(1)
-            .onClick(() => {
-              if (!this.isCacheTargetBookCaching()) {
-                this.closeCacheDialog();
-              }
-            })
-
-          Column() {
-            Row() {
-              Text('选择章节缓存')
-                .fontSize(18)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.primaryTextColor())
-                .layoutWeight(1)
-              Button('关闭')
-                .height(34)
-                .fontSize(13)
-                .borderRadius(17)
-                .onClick(() => {
-                  if (!this.isCacheTargetBookCaching() && !this.cacheRangeCaching) {
-                    this.closeCacheDialog();
-                  }
-                })
-            }
-            .width('100%')
-            .height(46)
-
-            if (this.cacheStatus) {
-              Text(this.cacheStatus)
-                .fontSize(13)
-                .fontColor(this.subTextColor())
-                .width('100%')
-                .margin({ bottom: 8 })
-            }
-
-            Row({ space: 8 }) {
-              TextInput({ placeholder: '章节范围，如 1-10', text: this.cacheRangeDraft })
-                .type(InputType.Normal)
-                .fontSize(14)
-                .fontColor(this.primaryTextColor())
-                .placeholderColor(this.subTextColor())
-                .layoutWeight(1)
-                .height(42)
-                .padding({ left: 10, right: 10 })
-                .backgroundColor(this.appDarkMode ? '#1FFFFFFF' : '#0D000000')
-                .borderRadius(10)
-                .enabled(!this.isCacheTargetBookCaching() && !this.cacheRangeCaching)
-                .onChange((value: string) => {
-                  this.cacheRangeDraft = value;
-                })
-              Button(this.cacheRangeCaching ? '缓存中…' : '缓存范围')
-                .width(96)
-                .height(42)
-                .fontSize(13)
-                .fontColor('#FFFFFF')
-                .backgroundColor(this.buttonColor())
-                .enabled(!this.isCacheTargetBookCaching() && !this.cacheRangeCaching)
-                .onClick(() => this.cacheChapterRange())
-            }
-            .width('100%')
-            Text('支持 1-10、1,3,5-8 等格式')
-              .fontSize(11)
-              .fontColor(this.subTextColor())
-              .width('100%')
-              .margin({ top: 4, bottom: 6 })
-
-            List({ space: 2 }) {
-              ForEach(this.cacheChapters, (chapter: BookChapter, index: number) => {
-                ListItem() {
-                  Row({ space: 8 }) {
-                    Text(chapter.title)
-                      .fontSize(15)
-                      .fontColor(chapter.cacheDate > 0 ? this.cachedChapterTextColor() : this.primaryTextColor())
-                      .maxLines(2)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                      .layoutWeight(1)
-                    if (chapter.cacheDate > 0) {
-                      Text('已缓存')
-                        .fontSize(11)
-                        .fontColor(this.appDarkMode ? '#7CC7A0' : '#1F8F55')
-                        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-                        .backgroundColor(this.appDarkMode ? '#24382F' : '#E6F4EC')
-                        .borderRadius(4)
-                    }
-                  }
-                  .width('100%')
-                  .padding({ left: 2, right: 2, top: 12, bottom: 12 })
-                  .onClick(() => {
-                    if (!this.isCacheTargetBookCaching()) {
-                      this.cacheSingleChapter(index);
-                    }
-                  })
-                }
-              })
-            }
-            .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-            .width('100%')
-            .height(420)
-          }
-          .width('100%')
-          .padding({ left: 18, right: 18, top: 18, bottom: 18 })
-          .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-          .borderRadius(ThemeRuntime.glassCornerRadius(18, 'panel'))
-          .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-          .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-          .margin({ bottom: this.actionSheetBottomMargin() })
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#66000000')
-      }
-
-      if (this.showTagDialog && this.pendingActionBook) {
-        Column() {
-          Column() {
-            Text('自定义标签')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 14 })
-
-            Scroll() {
-              Flex({ wrap: FlexWrap.Wrap }) {
-                ForEach(this.editingTags, (tag: string, index: number) => {
-                  Row() {
-                    Text(tag)
-                      .fontSize(13)
-                      .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
-                    Text('×')
-                      .fontSize(14)
-                      .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
-                      .margin({ left: 6 })
-                  }
-                  .padding({ left: 10, right: 8, top: 5, bottom: 5 })
-                  .backgroundColor(BookDisplayHelper.getTagBackgroundColor(index, this.appDarkMode))
-                  .borderRadius(14)
-                  .margin({ right: 8, bottom: 8 })
-                  .onClick(() => {
-                    this.removeEditingTag(tag);
-                  })
-                })
-              }
-              .width('100%')
-            }
-            .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-            .scrollable(ScrollDirection.Vertical)
-            .scrollBar(BarState.Auto)
-            .width('100%')
-            .constraintSize({ minHeight: 40, maxHeight: 220 })
-            .margin({ bottom: 12 })
-
-            Row() {
-              TextInput({ placeholder: '输入标签', text: this.tagInput })
-                .height(40)
-                .layoutWeight(1)
-                .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'popover'))
-      .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-                .border({ width: ThemeRuntime.glassBorderWidth('popover'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'popover') })
-                .fontColor(this.primaryTextColor())
-                .placeholderColor(this.subTextColor())
-                .borderRadius(12)
-                .onChange((value: string) => {
-                  this.tagInput = value;
-                })
-
-              Button('添加')
-                .height(40)
-                .margin({ left: 8 })
-                .onClick(() => {
-                  this.addEditingTag();
-                })
-            }
-            .width('100%')
-            .margin({ bottom: 18 })
-
-            Row() {
-              Button('取消')
-                .width('45%')
-                .height(44)
-                .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'popover'))
-      .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-                .border({ width: ThemeRuntime.glassBorderWidth('popover'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'popover') })
-                .fontColor(this.primaryTextColor())
-                .onClick(() => {
-                  this.showTagDialog = false;
-                  this.pendingActionBook = null;
-                })
-
-              Button('保存')
-                .width('45%')
-                .height(44)
-                .onClick(() => {
-                  this.saveCustomTags();
-                })
-            }
-            .width('100%')
-            .justifyContent(FlexAlign.SpaceBetween)
-          }
-          .width('85%')
-          .padding(18)
-          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#00000000')
-        .justifyContent(FlexAlign.Center)
-      }
-
-      // 删除确认弹窗
-      if (this.showDeleteDialog && this.pendingDeleteBook) {
-        Column() {
-          Column() {
-            Text('确认删除')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 12 })
-
-            Text(`确定要将《${this.pendingDeleteBook.name}》从书架移除吗？`)
-              .fontSize(15)
-              .fontColor(this.secondaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 20 })
-
-            Row() {
-              Button('取消')
-                .width('45%')
-                .height(44)
-                .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
-                .fontColor(this.primaryTextColor())
-                .onClick(() => {
-                  this.showDeleteDialog = false;
-                  this.pendingDeleteBook = null;
-                })
-
-              Button('删除')
-                .width('45%')
-                .height(44)
-                .backgroundColor('#E53935')
-                .onClick(() => {
-                  if (this.pendingDeleteBook) {
-                    const book = this.pendingDeleteBook;
-                    this.showDeleteDialog = false;
-                    this.pendingDeleteBook = null;
-                    this.deleteBook(book);
-                  }
-                })
-            }
-            .width('100%')
-            .justifyContent(FlexAlign.SpaceBetween)
-          }
-          .width('85%')
-          .padding(24)
-          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .justifyContent(FlexAlign.Center)
-        .onClick(() => {
-          this.showDeleteDialog = false;
-          this.pendingDeleteBook = null;
-        })
-      }
 
       if (this.isBookMultiSelect) {
         this.bookMultiSelectBar()
@@ -3270,20 +2422,8 @@ struct BookshelfPage {
       if (this.showBookGroupPicker) {
         this.bookGroupPickerDialog()
       }
-      if (this.showAddBookGroupDialog) {
-        this.addBookGroupDialog()
-      }
       if (this.showBookGroupActionMenu && this.pendingBookGroup) {
         this.bookGroupActionMenu()
-      }
-      if (this.showRenameBookGroupDialog && this.pendingBookGroup) {
-        this.renameBookGroupDialog()
-      }
-      if (this.showDeleteBookGroupDialog && this.pendingDeleteBookGroup) {
-        this.deleteBookGroupDialog()
-      }
-      if (this.showBatchDeleteDialog) {
-        this.batchDeleteBooksDialog()
       }
       if (this.openingBook) {
         this.shelfBookOpeningOverlay(this.openingBook)
@@ -3331,8 +2471,7 @@ struct BookshelfPage {
           .backgroundColor(this.glassCardColor())
           .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
           .onClick(() => {
-            this.newBookGroupName = '';
-            this.showAddBookGroupDialog = true;
+            this.openAddBookGroupDialog();
           })
       }
       .padding({ left: 16, right: 16, bottom: 8 })
@@ -3408,7 +2547,7 @@ struct BookshelfPage {
         .fontColor('#FFFFFF')
         .enabled(this.selectedBookUrls.length > 0)
         .onClick(() => {
-          if (this.selectedBookUrls.length > 0) this.showBatchDeleteDialog = true;
+          if (this.selectedBookUrls.length > 0) this.openBatchDeleteDialog();
         })
       Button('分组', { type: ButtonType.Normal })
         .layoutWeight(1)
@@ -3492,32 +2631,40 @@ struct BookshelfPage {
   }
 
   @Builder
-  addBookGroupDialog() {
-    Column() {
-      Column({ space: 16 }) {
-        Text('新增书籍分组').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
-        TextInput({ placeholder: '输入分组名称', text: this.newBookGroupName })
-          .width('100%').height(42).backgroundColor(this.inputColor()).fontColor(this.primaryTextColor())
-          .borderRadius(10).onChange((value: string) => this.newBookGroupName = value)
-        Row({ space: 12 }) {
-          Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
-            .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
-            .onClick(() => this.showAddBookGroupDialog = false)
-          Button('新增', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
-            .backgroundColor(this.buttonColor()).fontColor('#FFFFFF').enabled(!!this.newBookGroupName.trim())
-            .onClick(() => this.addShelfBookGroup())
-        }.width('100%')
-      }
-      .width('85%').padding(22)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-    .backgroundColor('#80000000')
+  addBookGroupDialogContent() {
+    Column({ space: 16 }) {
+      Text('新增书籍分组').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
+      TextInput({ placeholder: '输入分组名称', text: this.newBookGroupName })
+        .width('100%').height(42).backgroundColor(this.inputColor()).fontColor(this.primaryTextColor())
+        .borderRadius(10).onChange((value: string) => this.newBookGroupName = value)
+      Row({ space: 12 }) {
+        Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+          .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
+          .onClick(() => this.closeAddBookGroupDialog())
+        Button('新增', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+          .backgroundColor(this.buttonColor()).fontColor('#FFFFFF').enabled(!!this.newBookGroupName.trim())
+          .onClick(() => this.addShelfBookGroup())
+      }.width('100%')
+    }    .padding(22)
   }
+
+  openAddBookGroupDialog(): void {
+    this.newBookGroupName = '';
+    this.showAddBookGroupDialog = true;
+    this.addBookGroupDialogSession.open(this.getUIContext(), (): void => {
+      this.addBookGroupDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示新增分组弹窗失败:'
+    });
+  }
+
+  closeAddBookGroupDialog(): void {
+    this.showAddBookGroupDialog = false;
+    this.addBookGroupDialogSession.close(this.getUIContext());
+  }
+
 
   @Builder
   bookGroupActionMenu() {
@@ -3531,12 +2678,12 @@ struct BookshelfPage {
         this.contextActionItem($r('sys.symbol.square_and_pencil'), '重命名', this.primaryTextColor(), () => {
             this.renameBookGroupName = this.pendingBookGroup?.groupName || '';
             this.showBookGroupActionMenu = false;
-            this.showRenameBookGroupDialog = true;
+            this.openRenameBookGroupDialog();
           })
         this.contextActionItem($r('sys.symbol.trash'), '删除', '#E53935', () => {
             this.pendingDeleteBookGroup = this.pendingBookGroup;
             this.showBookGroupActionMenu = false;
-            this.showDeleteBookGroupDialog = true;
+            this.openDeleteBookGroupDialog();
           })
       }
       .width(148).padding({ top: 6, bottom: 6 })
@@ -3550,84 +2697,409 @@ struct BookshelfPage {
   }
 
   @Builder
-  renameBookGroupDialog() {
-    Column() {
-      Column({ space: 16 }) {
-        Text('重命名分组').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
-        TextInput({ placeholder: '输入分组名称', text: this.renameBookGroupName })
-          .width('100%').height(42).backgroundColor(this.inputColor()).fontColor(this.primaryTextColor())
-          .borderRadius(10).onChange((value: string) => this.renameBookGroupName = value)
-        Row({ space: 12 }) {
-          Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
-            .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
-            .onClick(() => this.closeRenameBookGroupDialog())
-          Button('保存', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
-            .backgroundColor(this.buttonColor()).fontColor('#FFFFFF').enabled(!!this.renameBookGroupName.trim())
-            .onClick(() => this.renameShelfBookGroup())
-        }.width('100%')
-      }
-      .width('85%').padding(22)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-    }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-    .backgroundColor('#80000000')
+  renameBookGroupDialogContent() {
+    Column({ space: 16 }) {
+      Text('重命名分组').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
+      TextInput({ placeholder: '输入分组名称', text: this.renameBookGroupName })
+        .width('100%').height(42).backgroundColor(this.inputColor()).fontColor(this.primaryTextColor())
+        .borderRadius(10).onChange((value: string) => this.renameBookGroupName = value)
+      Row({ space: 12 }) {
+        Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+          .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
+          .onClick(() => this.closeRenameBookGroupDialog())
+        Button('保存', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+          .backgroundColor(this.buttonColor()).fontColor('#FFFFFF').enabled(!!this.renameBookGroupName.trim())
+          .onClick(() => this.renameShelfBookGroup())
+      }.width('100%')
+    }    .padding(22)
+  }
+
+  openRenameBookGroupDialog(): void {
+    this.showRenameBookGroupDialog = true;
+    this.renameBookGroupDialogSession.open(this.getUIContext(), (): void => {
+      this.renameBookGroupDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示重命名分组弹窗失败:'
+    });
+  }
+
+
+  @Builder
+  deleteBookGroupDialogContent() {
+    Column({ space: 16 }) {
+      Text('删除分组').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
+      Text(`删除“${this.pendingDeleteBookGroup?.groupName || ''}”后，分组内书籍将移到未分组。`)
+        .fontSize(14).fontColor(this.secondaryTextColor()).textAlign(TextAlign.Center)
+      Row({ space: 12 }) {
+        Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+          .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
+          .onClick(() => this.closeDeleteBookGroupDialog())
+        Button('删除', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+          .backgroundColor('#E53935').fontColor('#FFFFFF').onClick(() => this.deleteShelfBookGroup())
+      }.width('100%')
+    }    .padding(22)
+  }
+
+  openDeleteBookGroupDialog(): void {
+    this.showDeleteBookGroupDialog = true;
+    this.deleteBookGroupDialogSession.open(this.getUIContext(), (): void => {
+      this.deleteBookGroupDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示删除分组弹窗失败:'
+    });
+  }
+
+
+  @Builder
+  batchDeleteBooksDialogContent() {
+    Column({ space: 16 }) {
+      Text('批量删除').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
+      Text(`确定从书架移除选中的 ${this.selectedBookUrls.length} 本书吗？`)
+        .fontSize(14).fontColor(this.secondaryTextColor()).textAlign(TextAlign.Center)
+      Row({ space: 12 }) {
+        Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+          .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
+          .onClick(() => this.closeBatchDeleteDialog())
+        Button('删除', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
+          .backgroundColor('#E53935').fontColor('#FFFFFF').onClick(() => this.deleteSelectedBooks())
+      }.width('100%')
+    }    .padding(22)
+  }
+
+  openBatchDeleteDialog(): void {
+    this.showBatchDeleteDialog = true;
+    this.batchDeleteDialogSession.open(this.getUIContext(), (): void => {
+      this.batchDeleteBooksDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示批量删除弹窗失败:'
+    });
+  }
+
+  closeBatchDeleteDialog(): void {
+    this.showBatchDeleteDialog = false;
+    this.batchDeleteDialogSession.close(this.getUIContext());
   }
 
   @Builder
-  deleteBookGroupDialog() {
+  deleteBookDialogContent() {
     Column() {
-      Column({ space: 16 }) {
-        Text('删除分组').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
-        Text(`删除“${this.pendingDeleteBookGroup?.groupName || ''}”后，分组内书籍将移到未分组。`)
-          .fontSize(14).fontColor(this.secondaryTextColor()).textAlign(TextAlign.Center)
-        Row({ space: 12 }) {
-          Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
-            .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
-            .onClick(() => this.closeDeleteBookGroupDialog())
-          Button('删除', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
-            .backgroundColor('#E53935').fontColor('#FFFFFF').onClick(() => this.deleteShelfBookGroup())
-        }.width('100%')
+      Text('确认删除')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 12 })
+
+      Text(`确定要将《${this.pendingDeleteBook?.name || ''}》从书架移除吗？`)
+        .fontSize(15)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 20 })
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.closeDeleteBookDialog())
+
+        Button('删除')
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor('#E53935')
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            if (this.pendingDeleteBook) {
+              const book = this.pendingDeleteBook;
+              this.closeDeleteBookDialog();
+              this.pendingDeleteBook = null;
+              this.deleteBook(book);
+            }
+          })
       }
-      .width('85%').padding(22)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+      .width('100%')
     }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-    .backgroundColor('#80000000')
+    .padding(24)
+  }
+
+  openDeleteBookDialog(): void {
+    this.showDeleteDialog = true;
+    this.deleteBookDialogSession.open(this.getUIContext(), (): void => {
+      this.deleteBookDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示删除确认弹窗失败:'
+    });
+  }
+
+  closeDeleteBookDialog(): void {
+    this.showDeleteDialog = false;
+    this.deleteBookDialogSession.close(this.getUIContext());
   }
 
   @Builder
-  batchDeleteBooksDialog() {
+  editBookInfoDialogContent() {
     Column() {
-      Column({ space: 16 }) {
-        Text('批量删除').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.primaryTextColor())
-        Text(`确定从书架移除选中的 ${this.selectedBookUrls.length} 本书吗？`)
-          .fontSize(14).fontColor(this.secondaryTextColor()).textAlign(TextAlign.Center)
-        Row({ space: 12 }) {
-          Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
-            .backgroundColor(this.glassCardColor()).fontColor(this.primaryTextColor())
-            .onClick(() => this.showBatchDeleteDialog = false)
-          Button('删除', { type: ButtonType.Normal }).layoutWeight(1).height(42).borderRadius(10)
-            .backgroundColor('#E53935').fontColor('#FFFFFF').onClick(() => this.deleteSelectedBooks())
-        }.width('100%')
+      Text('编辑书籍信息')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 18 })
+
+      Text('书名')
+        .fontSize(13)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+        .margin({ bottom: 6 })
+
+      TextInput({ placeholder: '请输入书名', text: this.editingBookName })
+        .width('100%')
+        .height(44)
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.subTextColor())
+        .backgroundColor(this.inputColor())
+        .borderRadius(12)
+        .onChange((value: string) => {
+          this.editingBookName = value;
+        })
+
+      Text('作者')
+        .fontSize(13)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+        .margin({ top: 14, bottom: 6 })
+
+      TextInput({ placeholder: '请输入作者（可留空）', text: this.editingBookAuthor })
+        .width('100%')
+        .height(44)
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.subTextColor())
+        .backgroundColor(this.inputColor())
+        .borderRadius(12)
+        .onChange((value: string) => {
+          this.editingBookAuthor = value;
+        })
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.closeEditBookInfoDialog())
+
+        Button('保存')
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .enabled(!!this.editingBookName.trim())
+          .opacity(this.editingBookName.trim() ? 1 : 0.45)
+          .onClick(() => this.saveLocalBookInfo())
       }
-      .width('85%').padding(22)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+      .width('100%')
+      .margin({ top: 22 })
     }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-    .backgroundColor('#80000000')
+    .padding(20)
   }
+
+  openEditBookInfoDialog(): void {
+    this.showEditBookInfoDialog = true;
+    this.editBookInfoDialogSession.open(this.getUIContext(), (): void => {
+      this.editBookInfoDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示编辑书籍信息弹窗失败:'
+    });
+  }
+
+  @Builder
+  tagDialogContent() {
+    Column() {
+      Text('自定义标签')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 14 })
+
+      Scroll() {
+        Flex({ wrap: FlexWrap.Wrap }) {
+          ForEach(this.editingTags, (tag: string, index: number) => {
+            Row() {
+              Text(tag)
+                .fontSize(13)
+                .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
+              Text('×')
+                .fontSize(14)
+                .fontColor(BookDisplayHelper.getTagTextColor(index, this.appDarkMode))
+                .margin({ left: 6 })
+            }
+            .padding({ left: 10, right: 8, top: 5, bottom: 5 })
+            .backgroundColor(BookDisplayHelper.getTagBackgroundColor(index, this.appDarkMode))
+            .borderRadius(14)
+            .margin({ right: 8, bottom: 8 })
+            .onClick(() => {
+              this.removeEditingTag(tag);
+            })
+          })
+        }
+        .width('100%')
+      }
+      .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+      .scrollable(ScrollDirection.Vertical)
+      .scrollBar(BarState.Auto)
+      .width('100%')
+      .constraintSize({ minHeight: 40, maxHeight: 220 })
+      .margin({ bottom: 12 })
+
+      Row() {
+        TextInput({ placeholder: '输入标签', text: this.tagInput })
+          .height(40)
+          .layoutWeight(1)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .placeholderColor(this.subTextColor())
+          .borderRadius(12)
+          .onChange((value: string) => {
+            this.tagInput = value;
+          })
+
+        Button('添加')
+          .height(40)
+          .margin({ left: 8 })
+          .onClick(() => {
+            this.addEditingTag();
+          })
+      }
+      .width('100%')
+      .margin({ bottom: 18 })
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.closeTagDialog();
+          })
+
+        Button('保存')
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.saveCustomTags();
+          })
+      }
+      .width('100%')
+    }
+    .padding(18)
+  }
+
+  openTagDialog(): void {
+    this.showTagDialog = true;
+    this.tagDialogSession.open(this.getUIContext(), (): void => {
+      this.tagDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示自定义标签弹窗失败:'
+    });
+  }
+
+  closeTagDialog(): void {
+    this.showTagDialog = false;
+    this.pendingActionBook = null;
+    this.tagDialogSession.close(this.getUIContext());
+  }
+
+  @Builder
+  customCoverDialogContent() {
+    Column({ space: 16 }) {
+      Text('使用自定义链接')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+      Text(`《${this.networkCoverTargetBook?.name || ''}》`)
+        .fontSize(13)
+        .fontColor(this.secondaryTextColor())
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+      TextInput({ placeholder: '请输入图片 URL', text: this.customNetworkCoverUrl })
+        .type(InputType.Normal)
+        .width('100%')
+        .height(44)
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.subTextColor())
+        .backgroundColor(this.inputColor())
+        .borderRadius(12)
+        .onChange((value: string) => {
+          this.customNetworkCoverUrl = value;
+        })
+      Text('仅支持 http 或 https 图片链接，图片是否可用由网络资源决定。')
+        .fontSize(12)
+        .fontColor(this.subTextColor())
+        .width('100%')
+      Row({ space: 12 }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.closeCustomCoverDialog();
+            this.showNetworkCoverDialog = true;
+          })
+        Button('设为封面', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(10)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .enabled(/^https?:\/\/[^\s]+$/i.test(this.customNetworkCoverUrl.trim()))
+          .onClick(() => this.applyCustomNetworkCover())
+      }
+      .width('100%')
+    }
+    .padding(20)
+  }
+
+  openCustomCoverDialog(): void {
+    this.showCustomNetworkCoverDialog = true;
+    // 取消按钮需回退到封面选择面板，蒙层关闭无对应流程，禁用 autoCancel。
+    this.customCoverDialogSession.open(this.getUIContext(), (): void => {
+      this.customCoverDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示自定义封面弹窗失败:'
+    });
+  }
+
+  closeCustomCoverDialog(): void {
+    this.showCustomNetworkCoverDialog = false;
+    this.customCoverDialogSession.close(this.getUIContext());
+  }
+
 
   selectShelfGroup(groupId: number): void {
     if (this.activeShelfGroupId === groupId) {
@@ -3698,7 +3170,7 @@ struct BookshelfPage {
     this.selectedBookUrls = [];
     this.showBookGroupPicker = false;
     this.groupPickerSingleBookUrl = '';
-    this.showBatchDeleteDialog = false;
+    this.closeBatchDeleteDialog();
   }
 
   closeBookGroupPicker(): void {
@@ -3743,10 +3215,10 @@ struct BookshelfPage {
     const db = AppDatabase.getInstance();
     const group = await db.addBookGroup(name);
     if (!group) {
-      promptAction.showToast({ message: '分组名称已存在' });
+      HdsFeedback.showToast('分组名称已存在');
       return;
     }
-    this.showAddBookGroupDialog = false;
+    this.closeAddBookGroupDialog();
     this.newBookGroupName = '';
     this.shelfGroups = await db.getCustomBookGroups();
     this.selectShelfGroup(group.groupId);
@@ -3759,6 +3231,7 @@ struct BookshelfPage {
 
   closeRenameBookGroupDialog(): void {
     this.showRenameBookGroupDialog = false;
+    this.renameBookGroupDialogSession.close(this.getUIContext());
     this.renameBookGroupName = '';
     this.pendingBookGroup = null;
   }
@@ -3769,16 +3242,17 @@ struct BookshelfPage {
     if (!group || !name) return;
     const renamed = await AppDatabase.getInstance().renameBookGroup(group.groupId, name);
     if (!renamed) {
-      promptAction.showToast({ message: '分组名称已存在' });
+      HdsFeedback.showToast('分组名称已存在');
       return;
     }
     this.closeRenameBookGroupDialog();
     await this.loadBooks();
-    promptAction.showToast({ message: '分组已重命名' });
+    HdsFeedback.showToast('分组已重命名');
   }
 
   closeDeleteBookGroupDialog(): void {
     this.showDeleteBookGroupDialog = false;
+    this.deleteBookGroupDialogSession.close(this.getUIContext());
     this.pendingDeleteBookGroup = null;
     this.pendingBookGroup = null;
   }
@@ -3791,7 +3265,7 @@ struct BookshelfPage {
     if (this.activeShelfGroupId === group.groupId) this.activeShelfGroupId = -1;
     this.closeDeleteBookGroupDialog();
     await this.loadBooks();
-    promptAction.showToast({ message: '分组已删除，书籍已移到未分组' });
+    HdsFeedback.showToast('分组已删除，书籍已移到未分组');
   }
 
   async assignSelectedBooksToGroup(groupId: number): Promise<void> {
@@ -3809,9 +3283,7 @@ struct BookshelfPage {
     await this.loadBooks();
     const groupName = groupId === 0 ? '未分组' :
       (this.shelfGroups.find((group: BookGroup) => group.groupId === groupId)?.groupName || '指定分组');
-    promptAction.showToast({
-      message: count === 1 ? `已移动到“${groupName}”` : `已将 ${count} 本书移动到“${groupName}”`
-    });
+    HdsFeedback.showToast(count === 1 ? `已移动到“${groupName}”` : `已将 ${count} 本书移动到“${groupName}”`);
   }
 
   async deleteSelectedBooks(): Promise<void> {
@@ -3826,7 +3298,7 @@ struct BookshelfPage {
     this.exitBookMultiSelect();
     AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     await this.loadBooks();
-    promptAction.showToast({ message: `已删除 ${targets.length} 本书` });
+    HdsFeedback.showToast(`已删除 ${targets.length} 本书`);
   }
 
 
@@ -5325,6 +4797,169 @@ struct BookshelfPage {
       .onClick(action)
   }
 
+
+  onBookshelfSystemDialogFlagChanged(): void {
+    if (!this.showCacheDialog) this.cacheDialogSession.close(this.getUIContext());
+    if (!this.showChapterCacheDialog) this.chapterCacheDialogSession.close(this.getUIContext());
+  }
+
+  @Builder
+  cacheDialogContent() {
+    Column() {
+      Text(`缓存《${this.cacheTargetBook?.name || '当前书籍'}》`)
+        .fontSize(17)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: 8 })
+
+      if (this.cacheStatus) {
+        Text(this.cacheStatus)
+          .fontSize(13)
+          .fontColor(this.subTextColor())
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .margin({ bottom: 8 })
+      }
+
+      this.actionItem(this.isCacheTargetBookCaching() ? '正在缓存...' : '缓存全文', this.primaryTextColor(), () => {
+        this.cacheWholeBook();
+      })
+      this.actionItem('缓存指定章节', this.primaryTextColor(), () => {
+        this.showCacheDialog = false;
+        this.showChapterCacheDialog = true;
+        if (this.cacheTargetBook) {
+          this.loadCacheChapters(this.cacheTargetBook);
+        }
+        this.chapterCacheDialogSession.open(this.getUIContext(), (): void => {
+          this.chapterCacheDialogContent();
+        }, {
+          autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+          warnTag: '显示章节缓存弹窗失败:'
+        });
+      })
+      this.actionItem('清除已缓存章节', '#E53935', () => {
+        this.clearCachedChapters();
+      })
+
+      Button('取消')
+        .width('100%')
+        .height(44)
+        .margin({ top: 10 })
+        .backgroundColor(this.appDarkMode ? '#24272D' : '#F5F5F5')
+        .fontColor(this.primaryTextColor())
+        .onClick(() => {
+          this.closeCacheDialog();
+        })
+    }
+    .padding({ left: 18, right: 18, top: 18, bottom: 18 })
+  }
+
+  @Builder
+  chapterCacheDialogContent() {
+    Column() {
+      Row() {
+        Text('选择章节缓存')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.primaryTextColor())
+          .layoutWeight(1)
+        ImmersiveBackButton({
+          icon: $r('sys.symbol.xmark'),
+          iconOffsetX: 0,
+          iconColor: this.primaryTextColor(),
+          darkMode: this.appDarkMode,
+          buttonSize: 40,
+          containerWidth: 40,
+          containerHeight: 40,
+          startInset: 0,
+          materialScale: 0.83,
+          compactLayout: true,
+          accessibilityLabel: '关闭',
+          onBack: () => this.closeCacheDialog()
+        })
+      }
+      .width('100%')
+      .height(46)
+      .alignItems(VerticalAlign.Center)
+
+      if (this.cacheStatus) {
+        Text(this.cacheStatus)
+          .fontSize(13)
+          .fontColor(this.subTextColor())
+          .width('100%')
+          .margin({ bottom: 8 })
+      }
+
+      Row({ space: 8 }) {
+        TextInput({ placeholder: '章节范围，如 1-10', text: this.cacheRangeDraft })
+          .type(InputType.Normal)
+          .fontSize(14)
+          .fontColor(this.primaryTextColor())
+          .placeholderColor(this.subTextColor())
+          .layoutWeight(1)
+          .height(42)
+          .padding({ left: 10, right: 10 })
+          .backgroundColor(this.appDarkMode ? '#1FFFFFFF' : '#0D000000')
+          .borderRadius(10)
+          .enabled(!this.isCacheTocLoading)
+          .onChange((value: string) => {
+            this.cacheRangeDraft = value;
+          })
+        Button('缓存范围')
+          .width(96)
+          .height(42)
+          .fontSize(13)
+          .fontColor('#FFFFFF')
+          .backgroundColor(this.buttonColor())
+          .enabled(this.cacheChapters.length > 0)
+          .onClick(() => this.cacheChapterRange())
+      }
+      .width('100%')
+      Text('支持 1-10、1,3,5-8 等格式')
+        .fontSize(11)
+        .fontColor(this.subTextColor())
+        .width('100%')
+        .margin({ top: 4, bottom: 6 })
+
+      List({ space: 2 }) {
+        ForEach(this.cacheChapters, (chapter: BookChapter, index: number) => {
+          ListItem() {
+            Row({ space: 8 }) {
+              Text(chapter.title)
+                .fontSize(15)
+                .fontColor(chapter.cacheDate > 0 ? this.cachedChapterTextColor() : this.primaryTextColor())
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+              if (chapter.cacheDate > 0) {
+                Text('已缓存')
+                  .fontSize(11)
+                  .fontColor(this.appDarkMode ? '#7CC7A0' : '#1F8F55')
+                  .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                  .backgroundColor(this.appDarkMode ? '#24382F' : '#E6F4EC')
+                  .borderRadius(4)
+              }
+            }
+            .width('100%')
+            .padding({ left: 2, right: 2, top: 12, bottom: 12 })
+            .onClick(() => {
+              this.cacheSingleChapter(index);
+            })
+          }
+        })
+      }
+      .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+      .width('100%')
+      .height(380)
+    }
+    .padding({ left: 18, right: 18, top: 18, bottom: 18 })
+  }
+
   @Builder
   contextActionItem(icon: Resource, label: string, color: string, action: () => void) {
     Row({ space: 10 }) {
@@ -5381,13 +5016,13 @@ struct BookshelfPage {
       .map(tag => `!${tag}`);
     book.customTag = BookDisplayHelper.joinTags([...customTags, ...hiddenTags]);
     await this.updateShelfBook(book);
-    this.showTagDialog = false;
-    this.pendingActionBook = null;
-    promptAction.showToast({ message: '标签已保存' });
+    this.closeTagDialog();
+    HdsFeedback.showToast('标签已保存');
   }
 
   closeEditBookInfoDialog(): void {
     this.showEditBookInfoDialog = false;
+    this.editBookInfoDialogSession.close(this.getUIContext());
     this.editingBookName = '';
     this.editingBookAuthor = '';
     this.pendingActionBook = null;
@@ -5402,7 +5037,7 @@ struct BookshelfPage {
       return;
     }
     if (!name) {
-      promptAction.showToast({ message: '书名不能为空' });
+      HdsFeedback.showToast('书名不能为空');
       return;
     }
     try {
@@ -5410,7 +5045,7 @@ struct BookshelfPage {
       await db.initWithContext(getContext(this));
       const book = await db.getBook(target.bookUrl);
       if (!book || !LocalBookService.isLocalBook(book)) {
-        promptAction.showToast({ message: '书籍已不在书架中' });
+        HdsFeedback.showToast('书籍已不在书架中');
         this.closeEditBookInfoDialog();
         return;
       }
@@ -5425,17 +5060,15 @@ struct BookshelfPage {
       this.applyShelfScope();
       this.closeEditBookInfoDialog();
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-      promptAction.showToast({ message: '书籍信息已保存' });
+      HdsFeedback.showToast('书籍信息已保存');
     } catch (e) {
       console.error('保存本地书籍信息失败:', e);
-      promptAction.showToast({ message: '保存失败' });
+      HdsFeedback.showToast('保存失败');
     }
   }
 
   private showCacheFeedback(message: string): void {
-    if (!HdsFeedback.show(this.getUIContext(), message)) {
-      HdsFeedback.showToast(message);
-    }
+    HdsFeedback.showToast(message);
   }
 
   async openCacheDialog(book: Book): Promise<void> {
@@ -5445,9 +5078,16 @@ struct BookshelfPage {
     this.cacheRangeDraft = '';
     this.cacheDialogOpenedAt = Date.now();
     this.showCacheDialog = true;
-    if (!this.isBookCaching(book)) {
-      this.loadCacheChapters(book);
-    }
+    this.cacheDialogSession.open(this.getUIContext(), (): void => {
+      this.cacheDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示缓存弹窗失败:'
+    });
+    // The catalog is loaded even while a background task runs so the panel can show which chapters
+    // are already cached; the task uses its own engine, so this cannot disturb it.
+    this.loadCacheChapters(book);
   }
 
   applyShelfScope(): void {
@@ -5604,8 +5244,11 @@ struct BookshelfPage {
     }
   }
 
-  closeCacheDialog(resetCaching: boolean = true): void {
-    if (this.cacheRangeCaching) return;
+  /**
+   * Closing the panel never stops a running cache task. Range and single-chapter caching now run as
+   * background tasks, so the panel is only a launcher and can always be dismissed.
+   */
+  closeCacheDialog(): void {
     this.showCacheDialog = false;
     this.showChapterCacheDialog = false;
     this.cacheTargetBook = null;
@@ -5665,7 +5308,7 @@ struct BookshelfPage {
       }
     });
     if (stopped) {
-      promptAction.showToast({ message: '正在停止缓存…' });
+      HdsFeedback.showToast('正在停止缓存…');
     }
   }
 
@@ -5723,6 +5366,11 @@ struct BookshelfPage {
       }
       const chapters = [...engine.chapters];
       this.cacheChapters = chapters;
+      // A running background task owns the status line; its per-chapter progress is more useful
+      // than the catalog summary, and the list already marks every cached chapter.
+      if (this.isBookCaching(book)) {
+        return chapters.length > 0;
+      }
       if (chapters.length > 0) {
         const cachedCount = this.countCachedChapters(chapters);
         this.cacheStatus = `${cachedCount}章已缓存 ${chapters.length - cachedCount}章待缓存`;
@@ -5732,9 +5380,10 @@ struct BookshelfPage {
       return chapters.length > 0;
     } catch (e) {
       console.error('加载缓存目录失败:', e);
-      if (token === this.cacheTocLoadToken && this.cacheTargetBook?.bookUrl === book.bookUrl) {
+      if (token === this.cacheTocLoadToken && this.cacheTargetBook?.bookUrl === book.bookUrl &&
+        !this.isBookCaching(book)) {
         this.cacheStatus = '目录加载失败，请稍后重试';
-        promptAction.showToast({ message: '目录加载失败' });
+        HdsFeedback.showToast('目录加载失败');
       }
       return false;
     }
@@ -5749,7 +5398,7 @@ struct BookshelfPage {
     }
     const book = this.cacheTargetBook;
     if (!book.origin || book.origin === 'local') {
-      promptAction.showToast({ message: '本地书籍无需缓存' });
+      HdsFeedback.showToast('本地书籍无需缓存');
       return;
     }
     this.closeCacheDialog();
@@ -5772,7 +5421,7 @@ struct BookshelfPage {
 
   async runShelfFullTextCache(book: Book, task: ShelfFullTextCacheTask): Promise<void> {
     this.registerShelfFullTextCacheTask(task);
-    this.setFullTextCacheStatus(task, '全文缓存后台进行中');
+    this.setFullTextCacheStatus(task, `${task.scopeLabel}缓存后台进行中`);
     try {
       await this.startShelfFullTextCacheBackgroundRunning(book);
       await this.refreshFullTextCacheCover(book, task);
@@ -5786,7 +5435,7 @@ struct BookshelfPage {
       const engine = ReadBookEngine.createBackgroundWorker();
       task.engine = engine;
       if (this.shouldCancelShelfFullTextCache(task)) {
-        this.setFullTextCacheStatus(task, '全文缓存已取消');
+        this.setFullTextCacheStatus(task, '缓存已取消');
         if (task.stoppingNotificationTask) await task.stoppingNotificationTask;
         await this.publishShelfFullTextCacheNotification(task, '缓存已停止',
           this.shelfFullTextCacheProgressText(task), false);
@@ -5798,25 +5447,37 @@ struct BookshelfPage {
         return;
       }
       if (this.shouldCancelShelfFullTextCache(task)) {
-        this.setFullTextCacheStatus(task, '全文缓存已取消');
+        this.setFullTextCacheStatus(task, '缓存已取消');
         if (task.stoppingNotificationTask) await task.stoppingNotificationTask;
         await this.publishShelfFullTextCacheNotification(task, '缓存已停止',
           this.shelfFullTextCacheProgressText(task), false);
         return;
       }
       const total = engine.chapters.length;
-      task.total = total;
-      task.done = this.countCachedChapters(engine.chapters);
       if (total === 0) {
+        task.total = 0;
+        task.done = 0;
         this.setFullTextCacheStatus(task, '暂无可缓存章节');
         await this.publishShelfFullTextCacheNotification(task, '暂无可缓存章节',
+          this.shelfFullTextCacheProgressText(task), false);
+        return;
+      }
+      // A scoped task caches only the requested chapters but still reports progress against that
+      // subset, so the notification percentage matches what the user asked for.
+      const targets = this.shelfFullTextCacheTargetIndexes(task, total);
+      task.total = targets.length;
+      task.done = this.countCachedChaptersIn(engine.chapters, targets);
+      if (targets.length === 0) {
+        this.setFullTextCacheStatus(task, '所选章节均已缓存');
+        await this.publishShelfFullTextCacheNotification(task, '所选章节均已缓存',
           this.shelfFullTextCacheProgressText(task), false);
         return;
       }
 
       await this.publishShelfFullTextCacheProgress(task, true);
 
-      for (let i = 0; i < total; i++) {
+      for (let position = 0; position < targets.length; position++) {
+        const i = targets[position];
         if (!this.isShelfFullTextCacheTaskActive(task) || this.shouldCancelShelfFullTextCache(task)) {
           break;
         }
@@ -5824,14 +5485,15 @@ struct BookshelfPage {
         if (!chapter || chapter.cacheDate > 0) {
           continue;
         }
-        this.setFullTextCacheStatus(task, `正在缓存 ${i + 1}/${total}`);
+        this.setFullTextCacheStatus(task, `正在缓存 ${position + 1}/${targets.length}`);
         try {
           if (await engine.cacheChapter(i, (): boolean => this.shouldCancelShelfFullTextCache(task))) {
-            task.done = this.countCachedChapters(engine.chapters);
+            task.done = this.countCachedChaptersIn(engine.chapters, targets);
           }
         } catch (e) {
           if (!this.shouldCancelShelfFullTextCache(task)) console.error('缓存章节失败:', i, e);
         }
+        this.syncCacheDialogChapterState(task, engine.chapters);
         if (this.shouldCancelShelfFullTextCache(task)) break;
         await this.publishShelfFullTextCacheProgress(task, false);
         await this.sleep(0);
@@ -5842,34 +5504,96 @@ struct BookshelfPage {
       }
       const canceled = this.shouldCancelShelfFullTextCache(task);
       await engine.syncChapterCacheDates();
-      task.done = this.countCachedChapters(engine.chapters);
-      this.setFullTextCacheStatus(task, canceled ? '全文缓存已取消' : `缓存完成：${task.done}/${total}`);
+      task.done = this.countCachedChaptersIn(engine.chapters, targets);
+      this.setFullTextCacheStatus(task, canceled ? '缓存已取消' : `缓存完成：${task.done}/${task.total}`);
+      this.syncCacheDialogChapterState(task, engine.chapters);
+      this.finishCacheDialogSummary(task);
       if (canceled && task.stoppingNotificationTask) await task.stoppingNotificationTask;
       await this.publishShelfFullTextCacheNotification(
         task,
-        canceled ? '缓存已停止' : '全文缓存完成',
+        canceled ? '缓存已停止' : `${task.scopeLabel}缓存完成`,
         this.shelfFullTextCacheProgressText(task),
         false
       );
-      this.showCacheFeedback(canceled ? '缓存已停止' : `缓存完成 ${task.done}/${total}`);
+      this.showCacheFeedback(canceled ? '缓存已停止' : `缓存完成 ${task.done}/${task.total}`);
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     } catch (error) {
       if (!task.cancelRequested) {
-        const message = error instanceof Error ? error.message : '全文缓存任务执行失败';
+        const message = error instanceof Error ? error.message : '缓存任务执行失败';
         throw new Error(message);
       }
       if (task.stoppingNotificationTask) await task.stoppingNotificationTask;
-      this.setFullTextCacheStatus(task, '全文缓存已取消');
+      this.setFullTextCacheStatus(task, '缓存已取消');
       await this.publishShelfFullTextCacheNotification(task, '缓存已停止',
         this.shelfFullTextCacheProgressText(task), false);
-      promptAction.showToast({ message: '缓存已停止' });
+      HdsFeedback.showToast('缓存已停止');
     } finally {
       this.finishShelfFullTextCacheTask(task);
       await this.stopShelfFullTextCacheBackgroundRunning();
     }
   }
 
-  createShelfFullTextCacheTask(book: Book, taskId: number): ShelfFullTextCacheTask {
+  /**
+   * Whole-book tasks cache every chapter; scoped tasks cache only the requested indexes and skip
+   * out-of-range entries that no longer exist after a catalog refresh.
+   */
+  shelfFullTextCacheTargetIndexes(task: ShelfFullTextCacheTask, total: number): number[] {
+    if (task.chapterIndexes.length === 0) {
+      const all: number[] = [];
+      for (let i = 0; i < total; i++) all.push(i);
+      return all;
+    }
+    const result: number[] = [];
+    for (const index of task.chapterIndexes) {
+      if (index >= 0 && index < total) result.push(index);
+    }
+    return result;
+  }
+
+  countCachedChaptersIn(chapters: BookChapter[], indexes: number[]): number {
+    let count = 0;
+    for (const index of indexes) {
+      const chapter = chapters[index];
+      if (chapter && chapter.cacheDate > 0) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Mirrors the background task's progress into an open chapter panel. The task owns a separate
+   * engine, so its chapter objects are not the ones the panel renders.
+   */
+  syncCacheDialogChapterState(task: ShelfFullTextCacheTask, taskChapters: BookChapter[]): void {
+    if (!this.showChapterCacheDialog || this.cacheTargetBook?.bookUrl !== task.bookUrl ||
+      this.cacheChapters.length === 0) {
+      return;
+    }
+    let changed = false;
+    for (const chapter of this.cacheChapters) {
+      const taskChapter = taskChapters[chapter.index];
+      if (!taskChapter || taskChapter.cacheDate <= 0 || chapter.cacheDate > 0) continue;
+      chapter.cacheDate = taskChapter.cacheDate;
+      changed = true;
+    }
+    if (changed) {
+      this.cacheChapters = [...this.cacheChapters];
+    }
+  }
+
+  /** Hands the status line back to the catalog summary once the background task has finished. */
+  finishCacheDialogSummary(task: ShelfFullTextCacheTask): void {
+    if (!this.showChapterCacheDialog || this.cacheTargetBook?.bookUrl !== task.bookUrl ||
+      this.cacheChapters.length === 0) {
+      return;
+    }
+    const cachedCount = this.countCachedChapters(this.cacheChapters);
+    this.cacheStatus = `${cachedCount}章已缓存 ${this.cacheChapters.length - cachedCount}章待缓存`;
+  }
+
+  createShelfFullTextCacheTask(book: Book, taskId: number, chapterIndexes: number[] = [],
+    scopeLabel: string = '全文'): ShelfFullTextCacheTask {
     const bookUrl = book.bookUrl || '';
     return {
       taskId: taskId,
@@ -5887,7 +5611,9 @@ struct BookshelfPage {
       coverPixelMap: null,
       notificationFailureHintShown: false,
       engine: null,
-      stoppingNotificationTask: null
+      stoppingNotificationTask: null,
+      chapterIndexes: chapterIndexes,
+      scopeLabel: scopeLabel
     };
   }
 
@@ -5949,7 +5675,7 @@ struct BookshelfPage {
       this.shelfFullTextCacheProgressText(task), true).catch((error: Error) => {
       console.warn('更新正在停止缓存通知失败:', error);
     });
-    if (showHint) promptAction.showToast({ message: '正在停止缓存…' });
+    if (showHint) HdsFeedback.showToast('正在停止缓存…');
   }
 
   shouldCancelShelfFullTextCache(task: ShelfFullTextCacheTask): boolean {
@@ -6007,7 +5733,7 @@ struct BookshelfPage {
   }
 
   shelfFullTextCacheNotificationTitle(task: ShelfFullTextCacheTask): string {
-    return `缓存全文：${task.bookName || '书籍'}`;
+    return `缓存${task.scopeLabel}：${task.bookName || '书籍'}`;
   }
 
   shelfFullTextCacheDisplayText(text: string, additionalText: string, ongoing: boolean): string {
@@ -6217,12 +5943,12 @@ struct BookshelfPage {
           await notificationManager.requestEnableNotification(getContext(this) as common.UIAbilityContext);
         } catch (error) {
           console.warn('请求通知权限失败:', error);
-          promptAction.showToast({ message: '通知权限未开启，缓存仍会继续' });
+          HdsFeedback.showToast('通知权限未开启，缓存仍会继续');
           return false;
         }
       }
       if (!await notificationManager.isNotificationEnabled()) {
-        promptAction.showToast({ message: '通知权限未开启，缓存仍会继续' });
+        HdsFeedback.showToast('通知权限未开启，缓存仍会继续');
         return false;
       }
       if (!this.fullTextCacheNotificationSlotReady) {
@@ -6249,7 +5975,7 @@ struct BookshelfPage {
       this.fullTextCacheNotificationFailureHintShown = true;
     }
     console.warn('书架缓存通知不可用:', error);
-    promptAction.showToast({ message: this.shelfFullTextCacheNotificationFailureMessage(error) });
+    HdsFeedback.showToast(this.shelfFullTextCacheNotificationFailureMessage(error));
   }
 
   shelfFullTextCacheNotificationFailureMessage(error: Object): string {
@@ -6414,98 +6140,54 @@ struct BookshelfPage {
     return Array.from(result).sort((left: number, right: number) => left - right);
   }
 
+  /**
+   * Range and single-chapter caching both run as background tasks. They used to await every chapter
+   * on the UI thread, which blocked the panel and made it unclosable for the whole download.
+   */
   async cacheChapterRange(): Promise<void> {
     const total = this.cacheChapters.length;
     const indexes = this.parseChapterRange(this.cacheRangeDraft, total);
     if (indexes.length === 0) {
-      promptAction.showToast({ message: `请输入有效章节范围（1-${total}）` });
+      HdsFeedback.showToast(`请输入有效章节范围（1-${total}）`);
       return;
     }
-    if (!this.cacheTargetBook || this.isCacheTargetBookCaching() || this.cacheRangeCaching || this.isCaching) {
-      return;
-    }
-    if (this.cacheTargetBook.origin === 'local') {
-      promptAction.showToast({ message: '本地书籍无需缓存' });
-      return;
-    }
-    this.cacheRangeCaching = true;
-    let successCount = 0;
-    let failedCount = 0;
-    try {
-      const targetBook = this.cacheTargetBook;
-      const engine = ReadBookEngine.createBackgroundWorker();
-      await engine.openBook(targetBook);
-      await engine.syncChapterCacheDates();
-      for (const index of indexes) {
-        const chapter = engine.chapters[index];
-        if (!chapter || chapter.cacheDate > 0) continue;
-        this.cacheStatus = `正在缓存第 ${index + 1} 章...`;
-        let cached = false;
-        for (let attempt = 0; attempt < 2 && !cached; attempt++) {
-          try {
-            cached = await engine.cacheChapter(index);
-          } catch (error) {
-            if (attempt === 1) console.warn(`缓存第 ${index + 1} 章失败:`, error);
-          }
-          if (!cached && attempt === 0) await this.sleep(300);
-        }
-        if (cached) successCount++;
-        else failedCount++;
-        await this.sleep(0);
-      }
-      await engine.syncChapterCacheDates();
-      this.cacheChapters = [...engine.chapters];
-      this.cacheStatus = failedCount > 0 ?
-        `缓存完成：${successCount}章成功，${failedCount}章失败` :
-        (successCount > 0 ? `已缓存 ${successCount} 章` : '所选章节均已缓存');
-      this.showCacheFeedback(failedCount > 0 ? `缓存完成，${failedCount} 章失败` : `已缓存 ${successCount} 章`);
-      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-    } catch (error) {
-      console.error('缓存指定章节范围失败:', error);
-      this.cacheStatus = '章节缓存失败';
-      promptAction.showToast({ message: '章节缓存失败' });
-    } finally {
-      this.cacheRangeCaching = false;
-    }
+    await this.startScopedShelfCache(indexes, '章节');
   }
 
   async cacheSingleChapter(index: number): Promise<void> {
-    if (!this.cacheTargetBook || this.isCacheTargetBookCaching() || this.cacheRangeCaching) {
+    await this.startScopedShelfCache([index], '章节');
+  }
+
+  async startScopedShelfCache(indexes: number[], scopeLabel: string): Promise<void> {
+    const book = this.cacheTargetBook;
+    if (!book || indexes.length === 0) {
       return;
     }
-    if (this.isCaching) {
-      promptAction.showToast({ message: '其他书籍正在缓存，请稍后再试' });
+    if (this.isBookCaching(book)) {
+      this.showCacheFeedback('该书正在后台缓存，请稍候');
       return;
     }
-    if (this.cacheTargetBook.origin === 'local') {
-      promptAction.showToast({ message: '本地书籍无需缓存' });
+    if (!book.origin || book.origin === 'local') {
+      HdsFeedback.showToast('本地书籍无需缓存');
       return;
     }
-    this.activeCacheBookUrl = this.cacheTargetBook.bookUrl || '';
-    this.isCaching = true;
-    try {
-      const targetBook = this.cacheTargetBook;
-      const engine = ReadBookEngine.createBackgroundWorker();
-      await engine.openBook(targetBook);
-      if (engine.book?.bookUrl !== targetBook.bookUrl) throw new Error('缓存书籍会话已失效');
-      const chapter = this.cacheChapters[index];
-      this.cacheStatus = chapter ? `正在缓存：${chapter.title}` : '正在缓存章节...';
-      const ok = await engine.cacheChapter(index);
-      await engine.syncChapterCacheDates();
-      this.cacheChapters = [...engine.chapters];
-      this.cacheStatus = ok ? '章节已缓存' : '章节缓存失败';
-      this.showCacheFeedback(ok ? '章节已缓存' : '章节缓存失败');
-      AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-    } catch (e) {
-      console.error('缓存指定章节失败:', e);
-      this.cacheStatus = '章节缓存失败';
-      this.showCacheFeedback('章节缓存失败');
-    } finally {
-      if (this.activeCacheBookUrl === (this.cacheTargetBook?.bookUrl || '')) {
-        this.activeCacheBookUrl = '';
-      }
-      this.isCaching = false;
-    }
+    // The panel stays open so progress and the "已缓存" marks stay visible; closing it is the
+    // user's choice and never interrupts the task.
+    this.showCacheFeedback(`已转入后台缓存 ${indexes.length} 章，可在通知栏取消`);
+    const task = this.createShelfFullTextCacheTask(book, ++this.fullTextCacheTaskId, indexes, scopeLabel);
+    this.runShelfFullTextCache(book, task).catch((error: Error) => {
+      console.error('书架指定章节缓存任务失败:', error);
+      this.setFullTextCacheStatus(task, '缓存失败');
+      this.showCacheFeedback('缓存失败');
+      this.publishShelfFullTextCacheNotification(task, '缓存失败',
+        this.shelfFullTextCacheProgressText(task), false).catch((e: Error) => {
+        console.warn('更新书架缓存失败通知失败:', e);
+      });
+      this.finishShelfFullTextCacheTask(task);
+      this.stopShelfFullTextCacheBackgroundRunning().catch((e: Error) => {
+        console.warn('停止书架缓存后台任务失败:', e);
+      });
+    });
   }
 
   async clearCachedChapters(): Promise<void> {
@@ -6513,12 +6195,12 @@ struct BookshelfPage {
       return;
     }
     if (this.isCacheTargetBookCaching()) {
-      promptAction.showToast({ message: '缓存进行中，稍后再清除' });
+      HdsFeedback.showToast('缓存进行中，稍后再清除');
       return;
     }
     const book = this.cacheTargetBook;
     if (!book.bookUrl) {
-      promptAction.showToast({ message: '书籍地址为空' });
+      HdsFeedback.showToast('书籍地址为空');
       return;
     }
     try {
@@ -6567,7 +6249,7 @@ struct BookshelfPage {
     const refreshStartedAt = Date.now();
     if (!silent) {
       this.isShelfRefreshing = true;
-      promptAction.showToast({ message: '正在刷新书架...' });
+      HdsFeedback.showToast('正在刷新书架...');
     }
     let attempted = 0;
     let skippedFinished = 0;
@@ -6626,14 +6308,14 @@ struct BookshelfPage {
           const message = failed > 0 ?
             `书架刷新完成：${updated}本有更新，${failed}本失败${skippedText}` :
             `书架刷新完成：${updated}本有更新${skippedText}`;
-          promptAction.showToast({ message });
+          HdsFeedback.showToast(message);
         }
         AppStorage.setOrCreate('shelfUpdateTime', Date.now());
       }
     } catch (e) {
       taskFailed = true;
       console.error('刷新书架失败:', e);
-      if (!silent) promptAction.showToast({ message: '书架刷新失败' });
+      if (!silent) HdsFeedback.showToast('书架刷新失败');
     } finally {
       this.shelfRefreshRunning = false;
       this.isShelfRefreshing = false;
@@ -6641,7 +6323,7 @@ struct BookshelfPage {
       this.shelfRefreshPrompt = '下拉刷新书架';
       if (!silent && !taskFailed && attempted === 0) {
         const message = skippedFinished > 0 ? `没有可刷新的连载书籍，已跳过${skippedFinished}本完结` : '没有可刷新的网络书籍';
-        promptAction.showToast({ message });
+        HdsFeedback.showToast(message);
       }
     }
   }
@@ -6652,11 +6334,11 @@ struct BookshelfPage {
     this.shelfRefreshPrompt = '正在刷新本地书籍...';
     try {
       await this.loadBooks();
-      promptAction.showToast({ message: '本地书架已刷新' });
+      HdsFeedback.showToast('本地书架已刷新');
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     } catch (e) {
       console.error('刷新本地书籍失败:', e);
-      promptAction.showToast({ message: '本地书架刷新失败' });
+      HdsFeedback.showToast('本地书架刷新失败');
     } finally {
       this.shelfRefreshRunning = false;
       this.isShelfRefreshing = false;
@@ -6711,7 +6393,7 @@ struct BookshelfPage {
       AppStorage.setOrCreate('shelfUpdateTime', Date.now());
     } catch (e) {
       console.error('更新书籍失败:', e);
-      promptAction.showToast({ message: '保存失败' });
+      HdsFeedback.showToast('保存失败');
     }
   }
 
@@ -6943,7 +6625,7 @@ struct BookshelfPage {
     BookshelfDisplaySettingsStore.applyToStorage(settings);
     BookshelfDisplaySettingsStore.save(getContext(this), settings).catch((e: Error) => {
       console.warn('保存书架布局失败:', e);
-      promptAction.showToast({ message: '布局保存失败' });
+      HdsFeedback.showToast('布局保存失败');
     });
   }
 
@@ -7598,6 +7280,7 @@ struct ExplorePage {
   @State showExploreSourcePicker: boolean = false;
   @State showExploreSourceActionMenu: boolean = false;
   @State actionExploreSourceUrl: string = '';
+  private exploreSourceVariableDialogSession: SystemDialogSession = new SystemDialogSession();
   @State showExploreSourceVariableDialog: boolean = false;
   @State exploreSourceVariableUrl: string = '';
   @State exploreSourceVariableName: string = '';
@@ -7690,6 +7373,7 @@ struct ExplorePage {
     const sourceUrl = AppStorage.get<string>('bookSourceExploreRefreshSourceUrl') || '';
     if (sourceUrl) this.selectedSourceUrl = sourceUrl;
     this.exploreContentLoadedAt = 0;
+    this.coordinator.clearExploreMenuCache();
     if (this.isActive && !this.isLoading) {
       this.loadEntries('', true);
     }
@@ -7797,6 +7481,7 @@ struct ExplorePage {
       if (forceRefresh) {
         // A manual refresh must not leave a failed request able to resurrect stale discovery
         // results on the next normal load. Clear the source cache before requesting new data.
+        this.coordinator.clearExploreMenuCache();
         await ExploreResultCache.clearSource(getContext(this), entry.sourceUrl);
       }
       if (!forceRefresh) {
@@ -8235,7 +7920,6 @@ struct ExplorePage {
         Column()
           .width('100%')
           .height('100%')
-          .position({ x: 0, y: this.compactExploreFilterPanelTop() })
           .backgroundColor(this.appDarkMode ? '#4D000000' : '#26000000')
           .zIndex(7)
           .onClick(() => {
@@ -8249,9 +7933,6 @@ struct ExplorePage {
         this.exploreSourceActionMenu()
       }
 
-      if (this.showExploreSourceVariableDialog) {
-        this.exploreSourceVariableDialog()
-      }
     }
     .width('100%')
     .height('100%')
@@ -8463,94 +8144,83 @@ struct ExplorePage {
   }
 
   @Builder
-  exploreSourceVariableDialog() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column()
+  exploreSourceVariableDialogContent() {
+    Column({ space: 12 }) {
+      Text('编辑源变量')
+        .fontSize(19)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .onClick(() => {
-          if (!this.savingExploreSourceVariable) this.closeExploreSourceVariableEditor();
-        })
+        .textAlign(TextAlign.Center)
 
-      Column({ space: 12 }) {
-        Text('编辑源变量')
-          .fontSize(19)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
+      Text(this.exploreSourceVariableName || this.exploreSourceVariableUrl)
+        .fontSize(13)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .textAlign(TextAlign.Center)
 
-        Text(this.exploreSourceVariableName || this.exploreSourceVariableUrl)
-          .fontSize(13)
+      if (this.exploreSourceVariableComment) {
+        Text(this.exploreSourceVariableComment)
+          .fontSize(12)
+          .lineHeight(18)
           .fontColor(this.secondaryTextColor())
           .width('100%')
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .textAlign(TextAlign.Center)
-
-        if (this.exploreSourceVariableComment) {
-          Text(this.exploreSourceVariableComment)
-            .fontSize(12)
-            .lineHeight(18)
-            .fontColor(this.secondaryTextColor())
-            .width('100%')
-            .padding(10)
-            .borderRadius(8)
-            .backgroundColor(this.inputColor())
-        }
-
-        TextArea({
-          text: this.exploreSourceVariableValue,
-          placeholder: this.exploreSourceVariableComment || '请输入书源变量'
-        })
-          .width('100%')
-          .height(180)
-          .fontSize(14)
-          .fontColor(this.primaryTextColor())
-          .placeholderColor(this.secondaryTextColor())
+          .padding(10)
+          .borderRadius(8)
           .backgroundColor(this.inputColor())
-          .borderRadius(10)
-          .padding(12)
-          .enabled(!this.savingExploreSourceVariable)
-          .onChange((value: string) => {
-            this.exploreSourceVariableValue = value;
-          })
-
-        Row({ space: 10 }) {
-          Button('取消')
-            .layoutWeight(1)
-            .height(40)
-            .fontColor(this.primaryTextColor())
-            .backgroundColor(this.inputColor())
-            .enabled(!this.savingExploreSourceVariable)
-            .onClick(() => this.closeExploreSourceVariableEditor())
-          Button(this.savingExploreSourceVariable ? '保存中…' : '保存')
-            .layoutWeight(1)
-            .height(40)
-            .fontColor('#FFFFFF')
-            .backgroundColor(this.buttonColor())
-            .enabled(!this.savingExploreSourceVariable)
-            .onClick(() => this.saveExploreSourceVariable())
-        }
-        .width('100%')
       }
-      .width('calc(100% - 40vp)')
-      .constraintSize({ maxWidth: 520 })
-      .padding(18)
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'panel'))
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'),
-        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-    }
-    .width('100%')
-    .height('100%')
-    .zIndex(13)
+
+      TextArea({
+        text: this.exploreSourceVariableValue,
+        placeholder: this.exploreSourceVariableComment || '请输入书源变量'
+      })
+        .width('100%')
+        .height(180)
+        .fontSize(14)
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.secondaryTextColor())
+        .backgroundColor(this.inputColor())
+        .borderRadius(10)
+        .padding(12)
+        .enabled(!this.savingExploreSourceVariable)
+        .onChange((value: string) => {
+          this.exploreSourceVariableValue = value;
+        })
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(40)
+          .fontColor(this.primaryTextColor())
+          .backgroundColor(this.inputColor())
+          .enabled(!this.savingExploreSourceVariable)
+          .onClick(() => this.closeExploreSourceVariableEditor())
+        Button(this.savingExploreSourceVariable ? '保存中…' : '保存')
+          .layoutWeight(1)
+          .height(40)
+          .fontColor('#FFFFFF')
+          .backgroundColor(this.buttonColor())
+          .enabled(!this.savingExploreSourceVariable)
+          .onClick(() => this.saveExploreSourceVariable())
+      }
+      .width('100%')
+    }    .padding(18)
   }
+
+  openExploreSourceVariableDialog(): void {
+    this.showExploreSourceVariableDialog = true;
+    // 保存中禁止蒙层关闭，避免丢入输入。
+    this.exploreSourceVariableDialogSession.open(this.getUIContext(), (): void => {
+      this.exploreSourceVariableDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示编辑源变量弹窗失败:'
+    });
+  }
+
 
   @Builder
   exploreSourceGroupBar() {
@@ -8600,7 +8270,7 @@ struct ExplorePage {
       this.markSearchBookInShelf(change.shelfKey || change.requestKey);
     } catch (e) {
       console.error('加入书架失败:', e);
-      promptAction.showToast({ message: '加入书架失败' });
+      HdsFeedback.showToast('加入书架失败');
     } finally {
       this.unmarkSearchBookJoining(searchKey);
     }
@@ -8616,7 +8286,7 @@ struct ExplorePage {
     const shelfBook = await SearchBookShelfHelper.findShelfBookByKey(
       SearchBookShelfHelper.keyOf(searchBook), true);
     if (!shelfBook?.bookUrl) {
-      promptAction.showToast({ message: '书籍准备失败，请稍后重试' });
+      HdsFeedback.showToast('书籍准备失败，请稍后重试');
       return;
     }
     router.pushUrl({ url: 'pages/ReadBook', params: { bookUrl: shelfBook.bookUrl } });
@@ -8696,23 +8366,24 @@ struct ExplorePage {
       await db.initWithContext(getContext(this));
       const source = await db.getBookSource(sourceUrl);
       if (!source) {
-        promptAction.showToast({ message: '书源不存在' });
+        HdsFeedback.showToast('书源不存在');
         return;
       }
       this.exploreSourceVariableUrl = source.bookSourceUrl;
       this.exploreSourceVariableName = source.bookSourceName || source.bookSourceUrl;
       this.exploreSourceVariableValue = source.variable || '';
       this.exploreSourceVariableComment = (source.variableComment || '').trim();
-      this.showExploreSourceVariableDialog = true;
+      this.openExploreSourceVariableDialog();
     } catch (error) {
       console.error('读取书源变量失败:', error);
-      promptAction.showToast({ message: '读取书源变量失败' });
+      HdsFeedback.showToast('读取书源变量失败');
     }
   }
 
   closeExploreSourceVariableEditor(): void {
     if (this.savingExploreSourceVariable) return;
     this.showExploreSourceVariableDialog = false;
+    this.exploreSourceVariableDialogSession.close(this.getUIContext());
     this.exploreSourceVariableUrl = '';
     this.exploreSourceVariableName = '';
     this.exploreSourceVariableValue = '';
@@ -8730,14 +8401,14 @@ struct ExplorePage {
       await ExploreResultCache.clearSource(getContext(this), sourceUrl);
       this.savingExploreSourceVariable = false;
       this.closeExploreSourceVariableEditor();
-      promptAction.showToast({ message: '源变量已保存' });
+      HdsFeedback.showToast('源变量已保存');
       if (this.isActive && !this.isLoading && this.selectedSourceUrl === sourceUrl) {
         await this.loadEntries('', true);
       }
     } catch (error) {
       this.savingExploreSourceVariable = false;
       console.error('保存书源变量失败:', error);
-      promptAction.showToast({ message: '保存源变量失败' });
+      HdsFeedback.showToast('保存源变量失败');
     }
   }
 
@@ -9079,7 +8750,7 @@ struct ExplorePage {
       this.shelfBookKeys = SearchBookShelfHelper.withoutKey(this.shelfBookKeys, change.requestKey);
     } catch (e) {
       console.error('移出书架失败:', e);
-      promptAction.showToast({ message: '移出书架失败' });
+      HdsFeedback.showToast('移出书架失败');
     }
   }
 
@@ -9139,7 +8810,7 @@ struct ExplorePage {
   openVerification(): void {
     const url = this.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
     if (!url) {
-      promptAction.showToast({ message: '暂无需要验证的网页' });
+      HdsFeedback.showToast('暂无需要验证的网页');
       return;
     }
     router.pushUrl({
@@ -9560,6 +9231,7 @@ struct SearchPage {
     SearchExploreSettingsStore.LEGACY_SOURCE_SELECTION;
   @StorageLink('singleSourceSearchUrl') singleSourceSearchUrl: string = '';
   @StorageLink('singleSourceSearchName') singleSourceSearchName: string = '';
+  @StorageLink('globalSearchPendingNonce') @Watch('onGlobalSearchPendingNonceChanged') globalSearchPendingNonce: number = 0;
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
   private coordinator: SearchCoordinator | null = null;
@@ -9583,7 +9255,27 @@ struct SearchPage {
     if (this.isActive) {
       this.initPage();
       this.refreshSearchShelfStatus();
+      this.consumePendingGlobalSearch();
     }
+  }
+
+  onGlobalSearchPendingNonceChanged(): void {
+    this.consumePendingGlobalSearch();
+  }
+
+  // 外部页面（书籍详情等）通过 AppStorage 请求全局搜索：nonce 先到时页面可能尚未切换为
+  // 激活态，因此这里与 onActiveChanged 双入口消费，后到的一方负责填词并发起搜索。
+  consumePendingGlobalSearch(): void {
+    if (!this.isActive) return;
+    const keyword = (AppStorage.get<string>('globalSearchPendingKeyword') || '').trim();
+    if (!keyword) return;
+    AppStorage.setOrCreate('globalSearchPendingKeyword', '');
+    if (this.singleSourceSearchUrl) {
+      // 全局检索必须退出单书源搜索模式，否则会被限定在旧书源内。
+      this.clearSingleSourceSearch();
+    }
+    this.keyword = keyword;
+    this.submitKeywordSearch();
   }
 
   async initPage() {
@@ -10074,6 +9766,8 @@ struct SearchPage {
       if (this.showSearchSourcePicker) {
         this.searchSourcePickerDialog()
       }
+
+
     }
     .width('100%')
     .height('100%')
@@ -10232,181 +9926,173 @@ struct SearchPage {
         })
 
       Column() {
-        Row() {
-          Column({ space: 3 }) {
-            Text('搜索范围')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-            Text(`已选 ${this.pendingSelectedSourceUrls().length} / ${this.searchableSources.length} 个书源`)
-              .fontSize(12)
-              .fontColor(this.subTextColor())
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          Text('完成')
-            .fontSize(14)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.buttonColor())
-            .height(36)
-            .padding({ left: 16, right: 4 })
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.applySearchSourceSelection();
-            })
-        }
-        .width('100%')
-        .height(44)
-        .alignItems(VerticalAlign.Center)
-
-        TextInput({ placeholder: '搜索书源或分组', text: this.searchSourcePickerQuery })
-          .width('100%')
-          .height(40)
-          .fontSize(14)
-          .fontColor(this.primaryTextColor())
-          .placeholderColor(this.subTextColor())
-          .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode,
-            ThemeRuntime.inputColor(this.appDarkMode), 'button'))
-          .backdropBlur(ThemeRuntime.glassBlur('button', 12))
-          .border({ width: ThemeRuntime.glassBorderWidth('button'),
-            color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'button') })
-          .borderRadius(20)
-          .padding({ left: 14, right: 14 })
-          .onChange((value: string) => {
-            this.searchSourcePickerQuery = value;
-          })
-
-        Row() {
-          this.searchSourceSelectionIndicator(this.searchableSourceUrls())
-          Column({ space: 2 }) {
-            Text('全部书源')
-              .fontSize(15)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.primaryTextColor())
-            Text(`已启用且支持搜索的 ${this.searchableSources.length} 个书源`)
-              .fontSize(12)
-              .fontColor(this.subTextColor())
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          Text(this.pendingSourceSelectionState(this.searchableSourceUrls()) === 2 ? '取消全选' : '全选')
+      Row() {
+        Column({ space: 3 }) {
+          Text('搜索范围')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
+          Text(`已选 ${this.pendingSelectedSourceUrls().length} / ${this.searchableSources.length} 个书源`)
             .fontSize(12)
-            .fontColor(this.buttonColor())
+            .fontColor(this.subTextColor())
         }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Text('完成')
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.buttonColor())
+          .height(36)
+          .padding({ left: 16, right: 4 })
+          .textAlign(TextAlign.Center)
+          .onClick(() => {
+            this.applySearchSourceSelection();
+          })
+      }
+      .width('100%')
+      .height(44)
+      .alignItems(VerticalAlign.Center)
+
+      TextInput({ placeholder: '搜索书源或分组', text: this.searchSourcePickerQuery })
         .width('100%')
-        .constraintSize({ minHeight: 56 })
-        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-        .margin({ top: 10, bottom: 8 })
-        .borderRadius(ThemeRuntime.glassCornerRadius(12, 'button'))
-        .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'button'))
+        .height(40)
+        .fontSize(14)
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.subTextColor())
+        .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode,
+          ThemeRuntime.inputColor(this.appDarkMode), 'button'))
         .backdropBlur(ThemeRuntime.glassBlur('button', 12))
         .border({ width: ThemeRuntime.glassBorderWidth('button'),
           color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'button') })
-        .alignItems(VerticalAlign.Center)
-        .onClick(() => this.togglePendingAllSources())
+        .borderRadius(20)
+        .padding({ left: 14, right: 14 })
+        .onChange((value: string) => {
+          this.searchSourcePickerQuery = value;
+        })
 
-        List({ space: 8 }) {
-          ForEach(this.filteredSearchSourceGroups(), (group: string) => {
-            ListItem() {
-              Column() {
+      Row() {
+        Toggle({ type: ToggleType.Checkbox, isOn: this.pendingSourceSelectionState(this.searchableSourceUrls()) === 2 })
+          .selectedColor(this.buttonColor())
+          .hitTestBehavior(HitTestMode.None)
+        Column({ space: 2 }) {
+          Text('全部书源')
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.primaryTextColor())
+          Text(`已启用且支持搜索的 ${this.searchableSources.length} 个书源`)
+            .fontSize(12)
+            .fontColor(this.subTextColor())
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Text(this.pendingSourceSelectionState(this.searchableSourceUrls()) === 2 ? '取消全选' : '全选')
+          .fontSize(12)
+          .fontColor(this.buttonColor())
+      }
+      .width('100%')
+      .constraintSize({ minHeight: 56 })
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .margin({ top: 10, bottom: 8 })
+      .alignItems(VerticalAlign.Center)
+      .onClick(() => this.togglePendingAllSources())
+
+      List({ space: 8 }) {
+        ForEach(this.filteredSearchSourceGroups(), (group: string) => {
+          ListItem() {
+            Column() {
+              Row() {
                 Row() {
-                  Row() {
-                    this.searchSourceSelectionIndicator(this.searchSourcesInGroup(group)
-                      .map((source: BookSource): string => source.bookSourceUrl))
-                  }
+                  Toggle({ type: ToggleType.Checkbox, isOn: this.pendingSourceSelectionState(this.searchSourcesInGroup(group)
+                    .map((source: BookSource): string => source.bookSourceUrl)) === 2 })
+                    .selectedColor(this.buttonColor())
+                    .hitTestBehavior(HitTestMode.None)
+                }
+                .height(48)
+                .padding({ left: 12, right: 10 })
+                .onClick(() => this.togglePendingSourceGroup(group))
+
+                Column({ space: 2 }) {
+                  Text(group)
+                    .fontSize(15)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor(this.primaryTextColor())
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(`${this.searchSourcesInGroup(group).filter((source: BookSource): boolean =>
+                    this.pendingSelectedSourceUrls().includes(source.bookSourceUrl)).length} / ` +
+                    `${this.searchSourcesInGroup(group).length} 个书源`)
+                    .fontSize(12)
+                    .fontColor(this.subTextColor())
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+
+                SymbolGlyph(this.isSearchSourceGroupExpanded(group) ?
+                  $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
+                  .fontSize(16)
+                  .fontColor([this.subTextColor()])
+                  .width(44)
                   .height(48)
-                  .padding({ left: 12, right: 10 })
-                  .onClick(() => this.togglePendingSourceGroup(group))
-
-                  Column({ space: 2 }) {
-                    Text(group)
-                      .fontSize(15)
-                      .fontWeight(FontWeight.Medium)
-                      .fontColor(this.primaryTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(`${this.searchSourcesInGroup(group).filter((source: BookSource): boolean =>
-                      this.pendingSelectedSourceUrls().includes(source.bookSourceUrl)).length} / ` +
-                      `${this.searchSourcesInGroup(group).length} 个书源`)
-                      .fontSize(12)
-                      .fontColor(this.subTextColor())
-                  }
-                  .layoutWeight(1)
-                  .alignItems(HorizontalAlign.Start)
-
-                  SymbolGlyph(this.isSearchSourceGroupExpanded(group) ?
-                    $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
-                    .fontSize(16)
-                    .fontColor([this.subTextColor()])
-                    .width(44)
-                    .height(48)
-                    .onClick(() => this.toggleSearchSourceGroupExpanded(group))
-                }
-                .width('100%')
-                .alignItems(VerticalAlign.Center)
-
-                if (this.isSearchSourceGroupExpanded(group)) {
-                  Divider()
-                    .color(this.glassBorderColor())
-                    .margin({ left: 44, right: 12 })
-
-                  ForEach(this.searchSourcesInGroup(group, !!this.searchSourcePickerQuery.trim()),
-                    (source: BookSource) => {
-                    Row() {
-                      this.searchSourceSelectionIndicator([source.bookSourceUrl])
-                      Text(source.bookSourceName || source.bookSourceUrl)
-                        .fontSize(14)
-                        .fontColor(this.secondaryTextColor())
-                        .maxLines(1)
-                        .textOverflow({ overflow: TextOverflow.Ellipsis })
-                        .layoutWeight(1)
-                        .margin({ left: 10 })
-                    }
-                    .width('100%')
-                    .height(44)
-                    .padding({ left: 30, right: 14 })
-                    .alignItems(VerticalAlign.Center)
-                    .onClick(() => this.togglePendingSource(source))
-                  }, (source: BookSource) => source.bookSourceUrl)
-                }
+                  .onClick(() => this.toggleSearchSourceGroupExpanded(group))
               }
               .width('100%')
-              .borderRadius(ThemeRuntime.glassCornerRadius(12, 'button'))
-              .clip(true)
-              .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'button'))
-              .backdropBlur(ThemeRuntime.glassBlur('button', 12))
-              .border({ width: ThemeRuntime.glassBorderWidth('button'),
-                color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'button') })
-            }
-          }, (group: string) => group)
+              .alignItems(VerticalAlign.Center)
 
-          if (this.filteredSearchSourceGroups().length === 0) {
-            ListItem() {
-              Text('没有匹配的书源')
-                .fontSize(14)
-                .fontColor(this.subTextColor())
-                .width('100%')
-                .height(96)
-                .textAlign(TextAlign.Center)
+              if (this.isSearchSourceGroupExpanded(group)) {
+                Divider()
+                  .color(this.glassBorderColor())
+                  .margin({ left: 44, right: 12 })
+
+                ForEach(this.searchSourcesInGroup(group, !!this.searchSourcePickerQuery.trim()),
+                  (source: BookSource) => {
+                  Row() {
+                    Toggle({ type: ToggleType.Checkbox, isOn: this.pendingSourceSelectionState([source.bookSourceUrl]) === 2 })
+                      .selectedColor(this.buttonColor())
+                      .hitTestBehavior(HitTestMode.None)
+                    Text(source.bookSourceName || source.bookSourceUrl)
+                      .fontSize(14)
+                      .fontColor(this.secondaryTextColor())
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .layoutWeight(1)
+                      .margin({ left: 10 })
+                  }
+                  .width('100%')
+                  .height(44)
+                  .padding({ left: 30, right: 14 })
+                  .alignItems(VerticalAlign.Center)
+                  .onClick(() => this.togglePendingSource(source))
+                }, (source: BookSource) => source.bookSourceUrl)
+              }
             }
+            .width('100%')
+          }
+        }, (group: string) => group)
+
+        if (this.filteredSearchSourceGroups().length === 0) {
+          ListItem() {
+            Text('没有匹配的书源')
+              .fontSize(14)
+              .fontColor(this.subTextColor())
+              .width('100%')
+              .height(96)
+              .textAlign(TextAlign.Center)
           }
         }
-        .width('100%')
-        .layoutWeight(1)
-        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
       }
+      .width('100%')
+      .layoutWeight(1)
+      .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+    }
       .width(Math.min(520, Math.max(280, this.searchViewportWidth - 32)))
-      .height('78%')
+      .height('66%')
       .padding(18)
       .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
       .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
       .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
       .border({ width: ThemeRuntime.glassBorderWidth('overlay'),
         color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'),
-        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('overlay'),
-        offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
       .onClick(() => {
       })
     }
@@ -10415,32 +10101,8 @@ struct SearchPage {
     .zIndex(20)
   }
 
-  @Builder
-  searchSourceSelectionIndicator(sourceUrls: string[]) {
-    Stack({ alignContent: Alignment.Center }) {
-      Toggle({ type: ToggleType.Checkbox, isOn: this.pendingSourceSelectionState(sourceUrls) > 0 })
-        .selectedColor(this.buttonColor())
-        .hitTestBehavior(HitTestMode.None)
 
-      if (this.pendingSourceSelectionState(sourceUrls) === 1) {
-        Stack({ alignContent: Alignment.Center }) {
-          Row()
-            .width(7)
-            .height(2)
-            .borderRadius(1)
-            .backgroundColor('#FFFFFF')
-        }
-        .width(12)
-        .height(12)
-        .borderRadius(6)
-        .backgroundColor(this.buttonColor())
-        .hitTestBehavior(HitTestMode.None)
-      }
-    }
-    .width(28)
-    .height(28)
-    .hitTestBehavior(HitTestMode.None)
-  }
+
 
   searchFromHistory(keyword: string): void {
     this.keyword = keyword;
@@ -10458,7 +10120,7 @@ struct SearchPage {
     try {
       await AppDatabase.getInstance().deleteSearchKeyword(keyword);
       this.searchHistory = this.searchHistory.filter((item: string) => item !== keyword);
-      promptAction.showToast({ message: '已删除该条搜索记录' });
+      HdsFeedback.showToast('已删除该条搜索记录');
       if (this.searchHistory.length === 0) {
         this.searchHistoryEditing = false;
         this.searchHistoryExpanded = false;
@@ -10466,7 +10128,7 @@ struct SearchPage {
       }
     } catch (e) {
       console.error('删除搜索历史失败:', e);
-      promptAction.showToast({ message: '删除失败' });
+      HdsFeedback.showToast('删除失败');
     }
   }
 
@@ -10479,7 +10141,7 @@ struct SearchPage {
       this.showSearchHistoryDropdown = false;
     } catch (e) {
       console.error('清空搜索历史失败:', e);
-      promptAction.showToast({ message: '清空失败' });
+      HdsFeedback.showToast('清空失败');
     }
   }
 
@@ -10502,7 +10164,7 @@ struct SearchPage {
   async doSearch() {
     const keyword = this.keyword.trim();
     if (!keyword) {
-      promptAction.showToast({ message: '请输入搜索关键词' });
+      HdsFeedback.showToast('请输入搜索关键词');
       return;
     }
 
@@ -10515,7 +10177,7 @@ struct SearchPage {
       if (this.singleSourceSearchUrl) {
         const targetSource = await db.getBookSource(this.singleSourceSearchUrl);
         if (!targetSource) {
-          promptAction.showToast({ message: '指定书源不存在或已被删除' });
+          HdsFeedback.showToast('指定书源不存在或已被删除');
           this.clearSingleSourceSearch();
           return;
         }
@@ -10523,7 +10185,7 @@ struct SearchPage {
       } else {
         await this.loadSearchableSources(db);
         if (this.isNoSearchSourcesSelected() || this.effectiveSelectedSourceUrls().length === 0) {
-          promptAction.showToast({ message: '请先在搜索范围中选择书源' });
+          HdsFeedback.showToast('请先在搜索范围中选择书源');
           return;
         }
         if (!this.isAllSearchSourcesSelected()) {
@@ -10714,7 +10376,7 @@ struct SearchPage {
       this.markSearchBookInShelf(change.shelfKey || change.requestKey);
     } catch (e) {
       console.error('加入书架失败:', e);
-      promptAction.showToast({ message: '加入书架失败' });
+      HdsFeedback.showToast('加入书架失败');
     } finally {
       this.unmarkSearchBookJoining(searchKey);
     }
@@ -10730,7 +10392,7 @@ struct SearchPage {
     const shelfBook = await SearchBookShelfHelper.findShelfBookByKey(
       SearchBookShelfHelper.keyOf(searchBook), true);
     if (!shelfBook?.bookUrl) {
-      promptAction.showToast({ message: '书籍准备失败，请稍后重试' });
+      HdsFeedback.showToast('书籍准备失败，请稍后重试');
       return;
     }
     router.pushUrl({ url: 'pages/ReadBook', params: { bookUrl: shelfBook.bookUrl } });
@@ -10743,7 +10405,7 @@ struct SearchPage {
       this.shelfBookKeys = SearchBookShelfHelper.withoutKey(this.shelfBookKeys, change.requestKey);
     } catch (e) {
       console.error('移出书架失败:', e);
-      promptAction.showToast({ message: '移出书架失败' });
+      HdsFeedback.showToast('移出书架失败');
     }
   }
 
@@ -10970,7 +10632,7 @@ struct SearchPage {
   openVerification(): void {
     const url = this.verificationUrl || AppStorage.get<string>('pendingVerificationUrl') || '';
     if (!url) {
-      promptAction.showToast({ message: '暂无需要验证的网页' });
+      HdsFeedback.showToast('暂无需要验证的网页');
       return;
     }
     router.pushUrl({

@@ -1,4 +1,4 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
@@ -8,6 +8,7 @@ import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
 import fileUri from '@ohos.file.fileuri';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -229,13 +230,13 @@ struct CustomFontManagerPage {
       next.push(item);
       this.saveCustomFonts(next);
       if (this.registerCustomFont(item)) {
-        promptAction.showToast({ message: '已上传字体，可返回阅读设置选择' });
+        HdsFeedback.showToast('已上传字体，可返回阅读设置选择');
       } else {
-        promptAction.showToast({ message: '字体已保存，但注册失败' });
+        HdsFeedback.showToast('字体已保存，但注册失败');
       }
     } catch (e) {
       console.error('上传字体失败:', e);
-      promptAction.showToast({ message: '上传字体失败' });
+      HdsFeedback.showToast('上传字体失败');
     }
   }
 
@@ -259,7 +260,7 @@ struct CustomFontManagerPage {
     } catch (e) {
       console.warn('删除字体文件失败:', e);
     }
-    promptAction.showToast({ message: '已删除字体' });
+    HdsFeedback.showToast('已删除字体');
   }
 
   registerCustomFonts(): void {

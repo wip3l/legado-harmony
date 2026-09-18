@@ -28,6 +28,7 @@ export class AnalyzeUrl {
   private source: BookSource | null;
   private client: HttpClient;
   private runtimeSourceHeaders: Record<string, string>;
+  private noTimeoutRetry: boolean = false;
 
   constructor(source: BookSource | null, client: HttpClient,
     runtimeSourceHeaders: Record<string, string> = {}) {
@@ -35,6 +36,12 @@ export class AnalyzeUrl {
     this.client = client;
     this.runtimeSourceHeaders = runtimeSourceHeaders;
     this.config = this.emptyConfig('');
+  }
+
+  /** Marks bridge-issued requests to skip the doubled-timeout idempotent retry. */
+  setNoTimeoutRetry(value: boolean): AnalyzeUrl {
+    this.noTimeoutRetry = value;
+    return this;
   }
 
   parse(urlTemplate: string): UrlConfig {
@@ -437,7 +444,8 @@ export class AnalyzeUrl {
       charset: this.config.charset,
       useCookieJar: this.source ? this.source.enabledCookieJar !== false : true,
       useWebView: this.config.useWebView,
-      webJs: this.config.webJs || undefined
+      webJs: this.config.webJs || undefined,
+      noTimeoutRetry: this.noTimeoutRetry || undefined
     };
     if (this.config.rawBody && this.config.body) {
       const charset = this.normalizeCharset(this.config.charset || 'utf-8');

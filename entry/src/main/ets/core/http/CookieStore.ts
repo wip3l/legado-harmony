@@ -2,6 +2,8 @@ import { webview } from '@kit.ArkWeb';
 import { util } from '@kit.ArkTS';
 
 export class CookieStore {
+  private static readonly TOMBSTONE_VALUE = '__removed__';
+
   static getCookie(url: string): string {
     if (!url) return '';
     for (const target of this.targetUrls(url)) {
@@ -63,9 +65,33 @@ export class CookieStore {
     const current = this.getCookie(url);
     const names = name ? [name] : current.split(';').map(item => item.trim().split('=')[0]).filter(item => item.length > 0);
     for (const cookieName of names) {
-      this.setCookies(url, `${cookieName}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/`);
+      // ArkWeb refuses to store expired cookies ("if the cookie has expired, it will not be
+      // stored"), so the classic Max-Age=0 write is a silent no-op and the cookie survives.
+      // Verify after each step and escalate: first an empty-value tombstone (server sees an
+      // anonymous session), then a placeholder value that is filtered out on every read.
+      this.writeCookieVariants(url, `${cookieName}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/`);
+      if (this.getCookieValue(url, cookieName)) {
+        this.writeCookieVariants(url, `${cookieName}=; Max-Age=31536000; Path=/`);
+      }
+      if (this.getCookieValue(url, cookieName)) {
+        this.writeCookieVariants(url, `${cookieName}=${this.TOMBSTONE_VALUE}; Max-Age=31536000; Path=/`);
+      }
     }
     this.saveAsync();
+  }
+
+  private static writeCookieVariants(url: string, value: string): void {
+    for (const target of this.targetUrls(url)) {
+      try {
+        webview.WebCookieManager.configCookieSync(target, value, false, true);
+        continue;
+      } catch (_) {
+      }
+      try {
+        webview.WebCookieManager.configCookieSync(target, value);
+      } catch (_) {
+      }
+    }
   }
 
   static clearAll(): void {
@@ -193,6 +219,8 @@ export class CookieStore {
       if (separator <= 0) continue;
       const value = pair.substring(separator + 1).trim();
       if (this.isExpiredJwt(value)) continue;
+      // Tombstones written by removeCookie() when ArkWeb would not drop the cookie outright.
+      if (value === this.TOMBSTONE_VALUE) continue;
       valid.push(pair);
     }
     return valid.join('; ');

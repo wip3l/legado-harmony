@@ -18,6 +18,7 @@ import { HuaweiAccountService } from '../account/HuaweiAccountService';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { syncSystemBars } from '../utils/SystemBars';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 @Entry
 @Component
@@ -146,19 +147,19 @@ struct AccountCenterPage {
       return;
     }
     if (!AccountCommerceConfig.isServerConfigured()) {
-      promptAction.showToast({ message: '请先配置账号服务端地址' });
+      HdsFeedback.showToast('请先配置账号服务端地址');
       return;
     }
     this.loading = true;
     try {
       await HuaweiAccountService.login(this.context);
-      promptAction.showToast({ message: '登录成功，账号点数和主题权益已同步' });
+      HdsFeedback.showToast('登录成功，账号点数和主题权益已同步');
       await this.loadIapProducts();
       await this.recoverUnfinishedPurchases();
     } catch (e) {
       const error = e as BusinessError;
       if (error.code !== 1001502005) {
-        promptAction.showToast({ message: this.errorMessage(e, '华为账号登录失败') });
+        HdsFeedback.showToast(this.errorMessage(e, '华为账号登录失败'));
       }
     } finally {
       this.loading = false;
@@ -172,9 +173,9 @@ struct AccountCenterPage {
     this.loading = true;
     try {
       await HuaweiAccountService.refresh(this.context);
-      promptAction.showToast({ message: '账号数据已同步' });
+      HdsFeedback.showToast('账号数据已同步');
     } catch (e) {
-      promptAction.showToast({ message: this.errorMessage(e, '同步失败') });
+      HdsFeedback.showToast(this.errorMessage(e, '同步失败'));
     } finally {
       this.loading = false;
     }
@@ -194,7 +195,7 @@ struct AccountCenterPage {
     }
     await HuaweiAccountService.logout(this.context);
     this.editingProfile = false;
-    promptAction.showToast({ message: '已退出登录' });
+    HdsFeedback.showToast('已退出登录');
   }
 
   beginEditProfile(): void {
@@ -246,7 +247,7 @@ struct AccountCenterPage {
       this.croppingAvatar = true;
     } catch (e) {
       console.error('选择账号头像失败:', e);
-      promptAction.showToast({ message: '头像读取失败，请换一张图片重试' });
+      HdsFeedback.showToast('头像读取失败，请换一张图片重试');
     } finally {
       if (source) {
         try {
@@ -339,10 +340,10 @@ struct AccountCenterPage {
       this.removeProfileAvatar = false;
       this.croppingAvatar = false;
       this.cropSourceUri = '';
-      promptAction.showToast({ message: '头像裁剪完成' });
+      HdsFeedback.showToast('头像裁剪完成');
     } catch (e) {
       console.error('裁剪账号头像失败:', e);
-      promptAction.showToast({ message: '头像裁剪失败，请换一张图片重试' });
+      HdsFeedback.showToast('头像裁剪失败，请换一张图片重试');
     } finally {
       if (pixelMap) {
         try {
@@ -425,7 +426,7 @@ struct AccountCenterPage {
     }
     const displayName = this.profileNameInput.trim();
     if (!displayName || displayName.length > 30) {
-      promptAction.showToast({ message: '昵称应为 1 至 30 个字符' });
+      HdsFeedback.showToast('昵称应为 1 至 30 个字符');
       return;
     }
     this.savingProfile = true;
@@ -435,9 +436,9 @@ struct AccountCenterPage {
       this.editingProfile = false;
       this.profileAvatarBase64 = '';
       this.releaseProfileAvatarPreview();
-      promptAction.showToast({ message: '个人资料已保存，并会随账号跨设备同步' });
+      HdsFeedback.showToast('个人资料已保存，并会随账号跨设备同步');
     } catch (e) {
-      promptAction.showToast({ message: this.errorMessage(e, '个人资料保存失败') });
+      HdsFeedback.showToast(this.errorMessage(e, '个人资料保存失败'));
     } finally {
       this.savingProfile = false;
     }
@@ -484,7 +485,7 @@ struct AccountCenterPage {
       return;
     }
     if (!this.accountLoggedIn) {
-      promptAction.showToast({ message: '请先登录华为账号' });
+      HdsFeedback.showToast('请先登录华为账号');
       return;
     }
     this.purchasingProductId = product.productId;
@@ -500,7 +501,7 @@ struct AccountCenterPage {
         error.code === iap.IAPErrorCode.SYSTEM_ERROR) {
         await this.recoverUnfinishedPurchases();
       } else {
-        promptAction.showToast({ message: this.errorMessage(e, '支付未完成') });
+        HdsFeedback.showToast(this.errorMessage(e, '支付未完成'));
       }
     } finally {
       this.purchasingProductId = '';
@@ -535,7 +536,7 @@ struct AccountCenterPage {
     if (showResult) {
       const debtMessage = result.debtOffsetPoints > 0 ?
         `，其中 ${result.debtOffsetPoints} 点用于抵扣退款欠款` : '';
-      promptAction.showToast({ message: `充值成功，已到账 ${result.creditedPoints} 点${debtMessage}` });
+      HdsFeedback.showToast(`充值成功，已到账 ${result.creditedPoints} 点${debtMessage}`);
     }
   }
 

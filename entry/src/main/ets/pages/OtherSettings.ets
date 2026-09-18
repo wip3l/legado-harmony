@@ -1,10 +1,11 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import pasteboard from '@ohos.pasteboard';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { lanReaderServer } from '../core/lan/LanReaderServer';
+import { HdsFeedback } from '../utils/HdsFeedback';
 
 @Entry
 @Component
@@ -239,12 +240,12 @@ struct OtherSettingsPage {
   async saveLanReaderPassword(): Promise<void> {
     const password = this.lanReaderPasswordDraft.trim();
     if (password.length > 64) {
-      promptAction.showToast({ message: '密码最多 64 个字符' });
+      HdsFeedback.showToast('密码最多 64 个字符');
       return;
     }
     lanReaderServer.setPassword(password);
     this.lanReaderPasswordDraft = password;
-    promptAction.showToast({ message: password ? '访问密码已设置' : '已取消访问密码' });
+    HdsFeedback.showToast(password ? '访问密码已设置' : '已取消访问密码');
   }
 
   @Builder
@@ -277,10 +278,10 @@ struct OtherSettingsPage {
     try {
       const board = pasteboard.getSystemPasteboard();
       await board.setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, address));
-      promptAction.showToast({ message: '访问地址已复制' });
+      HdsFeedback.showToast('访问地址已复制');
     } catch (error) {
       console.error('复制浏览器看书地址失败', error);
-      promptAction.showToast({ message: '复制失败，请长按地址复制' });
+      HdsFeedback.showToast('复制失败，请长按地址复制');
     }
   }
 

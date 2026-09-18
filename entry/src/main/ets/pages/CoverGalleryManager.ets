@@ -1,4 +1,4 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
@@ -10,6 +10,8 @@ import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { CoverGalleryStore, CoverGallerySnapshot } from '../utils/CoverGalleryStore';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+import { HdsFeedback } from '../utils/HdsFeedback';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
 
 class CoverGalleryExportResult {
   zipPath: string = '';
@@ -35,9 +37,12 @@ struct CoverGalleryManagerPage {
   @State selectedAlbumId: string = '';
   @State newAlbumName: string = '';
   @State renameAlbumName: string = '';
-  @State showCreateAlbumDialog: boolean = false;
-  @State showDeleteAlbumConfirm: boolean = false;
-  @State showImageManager: boolean = false;
+  private createAlbumDialogSession: SystemDialogSession = new SystemDialogSession();
+  private deleteAlbumDialogSession: SystemDialogSession = new SystemDialogSession();
+  private imageManagerDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('onSystemDialogFlagChanged') showCreateAlbumDialog: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showDeleteAlbumConfirm: boolean = false;
+  @State @Watch('onSystemDialogFlagChanged') showImageManager: boolean = false;
   @State selectedImages: string[] = [];
   @State albumCount: number = 0;
   @State totalCoverSize: number = 0;
@@ -80,17 +85,8 @@ struct CoverGalleryManagerPage {
 
       this.titleBar()
 
-      if (this.showDeleteAlbumConfirm) {
-        this.deleteAlbumConfirmDialog()
-      }
 
-      if (this.showCreateAlbumDialog) {
-        this.createAlbumDialog()
-      }
 
-      if (this.showImageManager) {
-        this.imageManagerDialog()
-      }
     }
     .width('100%')
     .height('100%')
@@ -179,7 +175,7 @@ struct CoverGalleryManagerPage {
   createAlbum(): void {
     const name = this.newAlbumName.trim();
     if (!name) {
-      promptAction.showToast({ message: '图集名称不能为空' });
+      HdsFeedback.showToast('图集名称不能为空');
       return;
     }
     const album = CoverGallerySettings.createAlbum(name);
@@ -188,13 +184,13 @@ struct CoverGalleryManagerPage {
     this.newAlbumName = '';
     this.showCreateAlbumDialog = false;
     this.hideKeyboard();
-    promptAction.showToast({ message: '已新建图集' });
+    HdsFeedback.showToast('已新建图集');
   }
 
   renameSelectedAlbum(): void {
     const name = this.renameAlbumName.trim();
     if (!name) {
-      promptAction.showToast({ message: '请输入图集名称' });
+      HdsFeedback.showToast('请输入图集名称');
       return;
     }
     const next = this.albums.map((album: CoverAlbum) => {
@@ -209,14 +205,14 @@ struct CoverGalleryManagerPage {
     });
     this.saveAlbums(next, this.selectedAlbumId);
     this.hideKeyboard();
-    promptAction.showToast({ message: '已重命名图集' });
+    HdsFeedback.showToast('已重命名图集');
   }
 
   requestDeleteSelectedAlbum(): void {
     if (!this.selectedAlbumId) {
       return;
     }
-    this.showDeleteAlbumConfirm = true;
+    this.openDeleteAlbumConfirm();
   }
 
   deleteSelectedAlbum(): void {
@@ -240,7 +236,7 @@ struct CoverGalleryManagerPage {
     } else {
       this.refreshAlbumStats(this.albums, this.selectedAlbumId);
     }
-    promptAction.showToast({ message: '已删除图集' });
+    HdsFeedback.showToast('已删除图集');
   }
 
   openImageManager(): void {
@@ -248,7 +244,7 @@ struct CoverGalleryManagerPage {
       return;
     }
     this.selectedImages = [];
-    this.showImageManager = true;
+    this.openImageManagerDialog();
   }
 
   closeImageManager(): void {
@@ -283,7 +279,7 @@ struct CoverGalleryManagerPage {
       return;
     }
     if (this.selectedImages.length === 0) {
-      promptAction.showToast({ message: '请先选择图片' });
+      HdsFeedback.showToast('请先选择图片');
       return;
     }
     const deleteSet = new Set<string>(this.selectedImages);
@@ -300,13 +296,13 @@ struct CoverGalleryManagerPage {
     const count = this.selectedImages.length;
     this.saveAlbums(next, album.id);
     this.selectedImages = [];
-    promptAction.showToast({ message: `已删除 ${count} 张图片` });
+    HdsFeedback.showToast(`已删除 ${count} 张图片`);
   }
 
   async pickAlbumImages(): Promise<void> {
     const album = this.getSelectedAlbum();
     if (!album) {
-      promptAction.showToast({ message: '请先选择或新建图集' });
+      HdsFeedback.showToast('请先选择或新建图集');
       return;
     }
     try {
@@ -318,17 +314,17 @@ struct CoverGalleryManagerPage {
         return;
       }
       await this.addCoversToAlbum(album.id, result.photoUris);
-      promptAction.showToast({ message: `已导入 ${result.photoUris.length} 张图片` });
+      HdsFeedback.showToast(`已导入 ${result.photoUris.length} 张图片`);
     } catch (e) {
       console.error('导入图集图片失败:', e);
-      promptAction.showToast({ message: '导入图片失败' });
+      HdsFeedback.showToast('导入图片失败');
     }
   }
 
   async pickAlbumZip(): Promise<void> {
     const album = this.getSelectedAlbum();
     if (!album) {
-      promptAction.showToast({ message: '请先选择或新建图集' });
+      HdsFeedback.showToast('请先选择或新建图集');
       return;
     }
     try {
@@ -341,25 +337,25 @@ struct CoverGalleryManagerPage {
       }
       const imagePaths = await this.extractImagesFromZip(result[0]);
       if (imagePaths.length === 0) {
-        promptAction.showToast({ message: '压缩包中未找到图片' });
+        HdsFeedback.showToast('压缩包中未找到图片');
         return;
       }
       await this.addCoversToAlbum(album.id, imagePaths);
-      promptAction.showToast({ message: `已从压缩包导入 ${imagePaths.length} 张图片` });
+      HdsFeedback.showToast(`已从压缩包导入 ${imagePaths.length} 张图片`);
     } catch (e) {
       console.error('导入图集压缩包失败:', e);
-      promptAction.showToast({ message: '读取压缩包失败' });
+      HdsFeedback.showToast('读取压缩包失败');
     }
   }
 
   async exportSelectedAlbumZip(): Promise<void> {
     const album = this.getSelectedAlbum();
     if (!album) {
-      promptAction.showToast({ message: '请先选择或新建图集' });
+      HdsFeedback.showToast('请先选择或新建图集');
       return;
     }
     if (album.covers.length === 0) {
-      promptAction.showToast({ message: '当前图集还没有图片' });
+      HdsFeedback.showToast('当前图集还没有图片');
       return;
     }
     try {
@@ -370,13 +366,13 @@ struct CoverGalleryManagerPage {
       if (!result || result.length === 0) {
         return;
       }
-      promptAction.showToast({ message: '正在导出图集...' });
+      HdsFeedback.showToast('正在导出图集...');
       const exportResult = await this.createAlbumZip(album);
       await fs.copy(fileUri.getUriFromPath(exportResult.zipPath), result[0]);
-      promptAction.showToast({ message: `已导出 ${exportResult.imageCount} 张图片` });
+      HdsFeedback.showToast(`已导出 ${exportResult.imageCount} 张图片`);
     } catch (e) {
       console.error('导出图集压缩包失败:', e);
-      promptAction.showToast({ message: '导出 ZIP 失败' });
+      HdsFeedback.showToast('导出 ZIP 失败');
     }
   }
 
@@ -693,7 +689,7 @@ struct CoverGalleryManagerPage {
         .fontColor('#FFFFFF')
         .onClick(() => {
           this.newAlbumName = '';
-          this.showCreateAlbumDialog = true;
+          this.openCreateAlbumDialog();
         })
 
       Blank()
@@ -869,180 +865,195 @@ struct CoverGalleryManagerPage {
     }
   }
 
-  @Builder
-  createAlbumDialog() {
-    Column() {
-      Column({ space: 14 }) {
-        Text('新建图集')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
 
-        TextInput({ placeholder: '输入图集名称', text: this.newAlbumName })
-          .height(44)
-          .fontColor(this.primaryTextColor())
-          .placeholderColor(this.subTextColor())
+  onSystemDialogFlagChanged(): void {
+    if (!this.showCreateAlbumDialog) this.createAlbumDialogSession.close(this.getUIContext());
+    if (!this.showDeleteAlbumConfirm) this.deleteAlbumDialogSession.close(this.getUIContext());
+    if (!this.showImageManager) this.imageManagerDialogSession.close(this.getUIContext());
+  }
+
+  openCreateAlbumDialog(): void {
+    this.showCreateAlbumDialog = true;
+    this.createAlbumDialogSession.open(this.getUIContext(), (): void => {
+      this.createAlbumDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示新建图集弹窗失败:'
+    });
+  }
+
+  openDeleteAlbumConfirm(): void {
+    this.showDeleteAlbumConfirm = true;
+    this.deleteAlbumDialogSession.open(this.getUIContext(), (): void => {
+      this.deleteAlbumConfirmDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示删除图集弹窗失败:'
+    });
+  }
+
+  openImageManagerDialog(): void {
+    this.showImageManager = true;
+    this.imageManagerDialogSession.open(this.getUIContext(), (): void => {
+      this.imageManagerDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: this.appDarkMode ? '#99000000' : '#33000000',
+      warnTag: '显示图片管理弹窗失败:'
+    });
+  }
+
+  @Builder
+  createAlbumDialogContent() {
+    Column({ space: 14 }) {
+      Text('新建图集')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+
+      TextInput({ placeholder: '输入图集名称', text: this.newAlbumName })
+        .height(44)
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.subTextColor())
+        .backgroundColor(this.inputColor())
+        .borderRadius(8)
+        .onChange((value: string) => {
+          this.newAlbumName = value;
+        })
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .height(42)
+          .layoutWeight(1)
           .backgroundColor(this.inputColor())
-          .borderRadius(8)
-          .onChange((value: string) => {
-            this.newAlbumName = value;
-          })
-
-        Row({ space: 10 }) {
-          Button('取消')
-            .height(42)
-            .layoutWeight(1)
-            .backgroundColor(this.inputColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.newAlbumName = '';
-              this.showCreateAlbumDialog = false;
-              this.hideKeyboard();
-            })
-          Button('新建')
-            .height(42)
-            .layoutWeight(1)
-            .backgroundColor(this.buttonColor())
-            .fontColor('#FFFFFF')
-            .onClick(() => {
-              this.createAlbum();
-            })
-        }
-        .width('100%')
-      }
-      .width('84%')
-      .padding(20)
-      .borderRadius(12)
-      .backgroundColor(this.cardColor())
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .backgroundColor('#80000000')
-  }
-
-  @Builder
-  deleteAlbumConfirmDialog() {
-    Column() {
-      Column({ space: 14 }) {
-        Text('删除图集')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
           .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-
-        Text(`确定删除《${this.selectedAlbumName()}》吗？`)
-          .fontSize(14)
-          .fontColor(this.subTextColor())
-          .lineHeight(22)
-          .width('100%')
-          .textAlign(TextAlign.Center)
-
-        Row({ space: 10 }) {
-          Button('取消')
-            .height(42)
-            .layoutWeight(1)
-            .backgroundColor(this.inputColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.showDeleteAlbumConfirm = false;
-            })
-          Button('删除')
-            .height(42)
-            .layoutWeight(1)
-            .backgroundColor('#E53935')
-            .fontColor('#FFFFFF')
-            .onClick(() => {
-              this.deleteSelectedAlbum();
-            })
-        }
-        .width('100%')
+          .onClick(() => {
+            this.newAlbumName = '';
+            this.showCreateAlbumDialog = false;
+            this.hideKeyboard();
+          })
+        Button('新建')
+          .height(42)
+          .layoutWeight(1)
+          .backgroundColor(this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.createAlbum();
+          })
       }
-      .width('84%')
-      .padding(20)
-      .borderRadius(12)
-      .backgroundColor(this.cardColor())
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .backgroundColor('#80000000')
+      .width('100%')
+    }    .padding(20)
   }
+
 
   @Builder
-  imageManagerDialog() {
-    Column() {
-      Column({ space: 12 }) {
-        Row() {
-          Column() {
-            Text('管理图片')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-            Text(`${this.selectedAlbumCoverSize} 张图片，已选 ${this.selectedImages.length} 张`)
-              .fontSize(12)
-              .fontColor(this.subTextColor())
-              .margin({ top: 4 })
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
+  deleteAlbumConfirmDialogContent() {
+    Column({ space: 14 }) {
+      Text('删除图集')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
 
-          Button('关闭')
-            .height(34)
-            .fontSize(13)
-            .backgroundColor(this.inputColor())
+      Text(`确定删除《${this.selectedAlbumName()}》吗？`)
+        .fontSize(14)
+        .fontColor(this.subTextColor())
+        .lineHeight(22)
+        .width('100%')
+        .textAlign(TextAlign.Center)
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .height(42)
+          .layoutWeight(1)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.showDeleteAlbumConfirm = false;
+          })
+        Button('删除')
+          .height(42)
+          .layoutWeight(1)
+          .backgroundColor('#E53935')
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.deleteSelectedAlbum();
+          })
+      }
+      .width('100%')
+    }    .padding(20)
+  }
+
+
+  @Builder
+  imageManagerDialogContent() {
+    Column({ space: 12 }) {
+      Row() {
+        Column() {
+          Text('管理图片')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
             .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.closeImageManager();
-            })
+          Text(`${this.selectedAlbumCoverSize} 张图片，已选 ${this.selectedImages.length} 张`)
+            .fontSize(12)
+            .fontColor(this.subTextColor())
+            .margin({ top: 4 })
         }
-        .width('100%')
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
 
-        Row({ space: 8 }) {
-          this.imageManageButton('全选', this.buttonColor(), () => this.selectAllImages())
-          this.imageManageButton('取消选择', '#60656F', () => this.clearImageSelection())
-          this.imageManageButton('删除所选', '#E53935', () => this.deleteSelectedImages())
-        }
-        .width('100%')
+        Button('关闭')
+          .height(34)
+          .fontSize(13)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.closeImageManager();
+          })
+      }
+      .width('100%')
 
-        if (this.getSelectedAlbumCovers().length > 0) {
-          Scroll() {
-            Flex({ wrap: FlexWrap.Wrap }) {
-              ForEach(this.getSelectedAlbumCovers(), (cover: string) => {
-                this.imageEditItem(cover)
-              }, (cover: string) => cover)
-            }
-            .width('100%')
-          }
-          .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-          .layoutWeight(1)
-          .scrollable(ScrollDirection.Vertical)
-          .scrollBar(BarState.Auto)
-        } else {
-          Column() {
-            Text('当前图集还没有图片。')
-              .fontSize(14)
-              .fontColor(this.subTextColor())
+      Row({ space: 8 }) {
+        this.imageManageButton('全选', this.buttonColor(), () => this.selectAllImages())
+        this.imageManageButton('取消选择', '#60656F', () => this.clearImageSelection())
+        this.imageManageButton('删除所选', '#E53935', () => this.deleteSelectedImages())
+      }
+      .width('100%')
+
+      if (this.getSelectedAlbumCovers().length > 0) {
+        Scroll() {
+          Flex({ wrap: FlexWrap.Wrap }) {
+            ForEach(this.getSelectedAlbumCovers(), (cover: string) => {
+              this.imageEditItem(cover)
+            }, (cover: string) => cover)
           }
           .width('100%')
-          .height(180)
-          .justifyContent(FlexAlign.Center)
         }
+        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+        .layoutWeight(1)
+        .scrollable(ScrollDirection.Vertical)
+        .scrollBar(BarState.Auto)
+      } else {
+        Column() {
+          Text('当前图集还没有图片。')
+            .fontSize(14)
+            .fontColor(this.subTextColor())
+        }
+        .width('100%')
+        .height(180)
+        .justifyContent(FlexAlign.Center)
       }
-      .width('92%')
-      .height('78%')
-      .padding(16)
-      .borderRadius(12)
-      .backgroundColor(this.cardColor())
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .backgroundColor('#80000000')
+    }    .width('100%')
+    .constraintSize({ maxWidth: 520 })
+    .height(520)
+    .padding(16)
   }
+
 
   @Builder
   imageManageButton(title: string, color: string, action: () => void) {
