@@ -3594,19 +3594,16 @@ struct ReadBookPage {
             .fontColor(this.tocPanelTab === 0 ? this.getTextColor() : this.getSubTextColor())
             .textAlign(TextAlign.Center)
             .layoutWeight(1)
-            .height(42)
-            .borderRadius(21)
+            .height(40)
+            .borderRadius(20)
             .backgroundColor(this.tocPanelTab === 0 ? this.readerSolidPanelColor() : Color.Transparent)
-            .shadow({ radius: this.tocPanelTab === 0 ? 8 : 0,
-              color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 2 })
+            .shadow({ radius: this.tocPanelTab === 0 ? 6 : 0,
+              color: this.tocPanelTab === 0 ? this.readerGlassShadowColor() : Color.Transparent,
+              offsetX: 0, offsetY: 2 })
             .onClick(() => {
               this.tocPanelTab = 0;
               this.cancelBookmarkMultiSelect();
               this.scrollTocToCurrentChapter(false);
-            })
-            .border({
-              width: this.tocPanelTab === 0 ? 0 : 1,
-              color: this.isReaderThemeDark() ? '#24FFFFFF' : '#0D000000'
             })
           Text('书签')
             .fontSize(15)
@@ -3614,25 +3611,22 @@ struct ReadBookPage {
             .fontColor(this.tocPanelTab === 1 ? this.getTextColor() : this.getSubTextColor())
             .textAlign(TextAlign.Center)
             .layoutWeight(1)
-            .height(42)
-            .borderRadius(21)
+            .height(40)
+            .borderRadius(20)
             .backgroundColor(this.tocPanelTab === 1 ? this.readerSolidPanelColor() : Color.Transparent)
-            .shadow({ radius: this.tocPanelTab === 1 ? 8 : 0,
-              color: this.readerGlassShadowColor(), offsetX: 0, offsetY: 2 })
-            .border({
-              width: this.tocPanelTab === 1 ? 0 : 1,
-              color: this.isReaderThemeDark() ? '#24FFFFFF' : '#0D000000'
-            })
+            .shadow({ radius: this.tocPanelTab === 1 ? 6 : 0,
+              color: this.tocPanelTab === 1 ? this.readerGlassShadowColor() : Color.Transparent,
+              offsetX: 0, offsetY: 2 })
             .onClick(() => {
               this.tocPanelTab = 1;
               this.loadBookmarks();
             })
         }
         .width('calc(100% - 40vp)')
-        .height(46)
+        .height(44)
         .padding(2)
-        .borderRadius(23)
-        .backgroundColor(this.isReaderThemeDark() ? '#1FFFFFFF' : '#0D000000')
+        .borderRadius(22)
+        .backgroundColor(this.isReaderThemeDark() ? '#20FFFFFF' : '#12000000')
         .margin({ left: 20, right: 20 })
 
         if (this.tocPanelTab === 0) {
@@ -23997,4 +23991,3 @@ struct ReadBookPage {
     this.saveReadingProgress();
   }
 }
-
