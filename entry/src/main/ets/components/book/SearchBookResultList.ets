@@ -3,8 +3,8 @@ import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { BookDisplayHelper } from '../../utils/BookDisplayHelper';
 import { CoverGallerySettings } from '../../utils/CoverGallerySettings';
 import { SearchBookShelfHelper } from '../../utils/SearchBookShelfHelper';
-import deviceInfo from '@ohos.deviceInfo';
 import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
+import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 
 export type SearchBookAction = (book: SearchBook) => void;
@@ -134,7 +134,7 @@ export struct SearchBookResultList {
   }
 
   private supportsHdsListItem(): boolean {
-    return deviceInfo.sdkApiVersion >= 26;
+    return ImmersiveMaterialRuntime.supportsHdsListItem();
   }
 
   @Builder

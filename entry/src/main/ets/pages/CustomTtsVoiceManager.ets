@@ -11,8 +11,8 @@ import { TtsSettings, TtsSettingsStore } from '../utils/TtsSettingsStore';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
 import { FormDraftStore } from '../utils/FormDraftStore';
-import deviceInfo from '@ohos.deviceInfo';
 import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 
 class VoiceEditFormDraft {
@@ -137,7 +137,7 @@ struct CustomTtsVoiceManagerPage {
         } else {
           List({ space: 8, scroller: this.voiceListScroller }) {
             ForEach(this.filteredVoices(), (voice: HttpTTS) => {
-              if (deviceInfo.sdkApiVersion >= 26) {
+              if (ImmersiveMaterialRuntime.supportsHdsListItem()) {
                 HdsListItem({
                   customItemBuilder: () => {
                     this.voiceListItem(voice)

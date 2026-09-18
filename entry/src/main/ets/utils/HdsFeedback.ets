@@ -1,5 +1,4 @@
 import { UIContext, promptAction, uiMaterial } from '@kit.ArkUI';
-import deviceInfo from '@ohos.deviceInfo';
 import { ImmersiveMaterialRuntime } from './ImmersiveMaterialRuntime';
 import {
   HdsSnackBar,
@@ -12,7 +11,7 @@ import {
 /** Shows API 26+ immersive-light feedback and lets callers retain their Toast fallback. */
 export class HdsFeedback {
   static show(uiContext: UIContext | null, message: string): boolean {
-    if (uiContext === null || deviceInfo.sdkApiVersion < 26) return false;
+    if (uiContext === null || !ImmersiveMaterialRuntime.supportsHdsSnackBar()) return false;
     try {
       const snackBar: HdsSnackBar = new HdsSnackBar(uiContext);
       const icon: SnackBarIconOptions = {};
@@ -29,10 +28,17 @@ export class HdsFeedback {
     }
   }
 
+  /** Prefer the HDS banner and always retain a visible fallback. */
+  static showMessage(uiContext: UIContext | null, message: string): void {
+    if (!HdsFeedback.show(uiContext, message)) {
+      HdsFeedback.showToast(message);
+    }
+  }
+
   /** Uses the API 26 system-material Toast when supported, otherwise the legacy Toast. */
   static showToast(message: string): void {
     try {
-      if (deviceInfo.sdkApiVersion >= 26 && uiMaterial.isImmersiveMaterialSupported()) {
+      if (ImmersiveMaterialRuntime.supportsHds() && uiMaterial.isImmersiveMaterialSupported()) {
         const material: uiMaterial.ImmersiveMaterial = new uiMaterial.ImmersiveMaterial({
           style: ImmersiveMaterialRuntime.materialStyle(),
           applyShadow: true,

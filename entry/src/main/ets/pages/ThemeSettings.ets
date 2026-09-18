@@ -27,8 +27,8 @@ import {
 } from '../model/reader/ReaderRegexFontRule';
 import fs from '@ohos.file.fs';
 import { StartupCoverTextStore } from '../utils/StartupCoverTextStore';
-import deviceInfo from '@ohos.deviceInfo';
 import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 
 const STORE_COVER_MIN_HEIGHT = 170;
@@ -161,7 +161,7 @@ struct ThemeSettingsPage {
           this.customThemeSectionTitle()
         }
         ForEach(this.customSchemes, (scheme: CustomThemeScheme) => {
-          if (deviceInfo.sdkApiVersion >= 26) {
+          if (ImmersiveMaterialRuntime.supportsHdsListItem()) {
             HdsListItem({
               customItemBuilder: () => {
                 this.themeCard(this.customTheme(scheme), scheme.id)

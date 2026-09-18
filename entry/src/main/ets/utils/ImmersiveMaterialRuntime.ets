@@ -32,6 +32,20 @@ export class ImmersiveMaterialRuntime {
   }
 
   /**
+   * HDS list containers are used for swipe actions. Keep their gate in the
+   * same runtime capability helper as the other HDS controls so pages do not
+   * each make a subtly different SDK-only decision.
+   */
+  static supportsHdsListItem(): boolean {
+    return deviceInfo.sdkApiVersion >= 26;
+  }
+
+  /** HDS SnackBar is exposed from API 26 and still needs a UI context. */
+  static supportsHdsSnackBar(): boolean {
+    return deviceInfo.sdkApiVersion >= 26;
+  }
+
+  /**
    * HDS system material (used by HdsTabs floating bars) is available from
    * HarmonyOS 6/API 23. This is intentionally separate from supportsHds(),
    * which checks the API 26 ArkUI uiMaterial namespace used by menus/buttons.

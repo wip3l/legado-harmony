@@ -5400,9 +5400,7 @@ struct BookshelfPage {
   }
 
   private showCacheFeedback(message: string): void {
-    if (!HdsFeedback.show(this.getUIContext(), message)) {
-      HdsFeedback.showToast(message);
-    }
+    HdsFeedback.showMessage(this.getUIContext(), message);
   }
 
   async openCacheDialog(book: Book): Promise<void> {

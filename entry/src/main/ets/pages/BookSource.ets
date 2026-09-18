@@ -18,7 +18,6 @@ import { CookieStore } from '../core/http/CookieStore';
 import { TlsTrustStore } from '../core/http/TlsTrustStore';
 import { BookSourceGroupStore } from '../utils/BookSourceGroupStore';
 import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
-import deviceInfo from '@ohos.deviceInfo';
 import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
@@ -437,7 +436,7 @@ struct BookSourcePage {
             }
 
             LazyForEach(this.currentSourceListDataSource(), (source: BookSource) => {
-              if (deviceInfo.sdkApiVersion >= 26) {
+              if (ImmersiveMaterialRuntime.supportsHdsListItem()) {
                 HdsListItem({
                   customItemBuilder: () => {
                     this.sourceSwipeCard(source)
@@ -445,7 +444,7 @@ struct BookSourcePage {
                   swipeActionOptions: this.sourceSwipeActions(source)
                 })
               }
-              if (deviceInfo.sdkApiVersion < 26) {
+              if (!ImmersiveMaterialRuntime.supportsHdsListItem()) {
               ListItem() {
                 Row() {
                   if (this.selectionMode) {

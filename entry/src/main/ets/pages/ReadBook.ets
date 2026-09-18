@@ -10,7 +10,6 @@ import fs from '@ohos.file.fs';
 import fileUri from '@ohos.file.fileuri';
 import graphicsText from '@ohos.graphics.text';
 import { LengthMetrics } from '@ohos.arkui.node';
-import deviceInfo from '@ohos.deviceInfo';
 import display from '@ohos.display';
 import Animator, { AnimatorResult } from '@ohos.animator';
 import { HdsTabs, HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
@@ -4022,7 +4021,7 @@ struct ReadBookPage {
     } else {
       List({ space: 0, scroller: this.bookmarkScroller }) {
         ForEach(this.bookmarks, (bookmark: Bookmark) => {
-          if (deviceInfo.sdkApiVersion >= 26) {
+          if (ImmersiveMaterialRuntime.supportsHdsListItem()) {
             // API 26+ uses one left-swipe action panel. Keep multi-select and
             // delete together instead of exposing multi-select on right swipe.
             HdsListItem({

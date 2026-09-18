@@ -6,8 +6,8 @@ import { ReaderReplaceRule, ReaderReplaceRuleCheck, ReaderReplaceRuleStore } fro
 import { syncSystemBars } from '../utils/SystemBars';
 import { ResponsiveManagerListLayout } from '../utils/ResponsiveManagerListLayout';
 import { FormDraftStore } from '../utils/FormDraftStore';
-import deviceInfo from '@ohos.deviceInfo';
 import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import picker from '@ohos.file.picker';
 import fs from '@ohos.file.fs';
@@ -594,7 +594,7 @@ struct ReaderReplaceRulesPage {
       } else {
         List({ space: 10, scroller: this.ruleListScroller }) {
           ForEach(this.filteredRules(), (rule: ReaderReplaceRule) => {
-            if (deviceInfo.sdkApiVersion >= 26) {
+            if (ImmersiveMaterialRuntime.supportsHdsListItem()) {
               HdsListItem({
                 customItemBuilder: () => {
                   this.ruleCard(rule)
