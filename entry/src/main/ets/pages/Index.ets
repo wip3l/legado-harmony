@@ -84,6 +84,8 @@ struct Index {
   private stageRuntimeController: webview.WebviewController = new webview.WebviewController();
   @State stageRuntimeMounted: boolean = true;
   private stageRuntimeResetScheduled: boolean = false;
+  private stageRuntimeDisappearing: boolean = false;
+  private stageRuntimeAttachRetryId: number = -1;
   private shortcutRoutingActive: boolean = false;
   private cloudSyncDebounceTimer: number = -1;
   @State currentIndex: number = 0;
@@ -130,6 +132,8 @@ struct Index {
 
   aboutToAppear() {
     this.shortcutRoutingActive = true;
+    this.stageRuntimeDisappearing = false;
+    this.scheduleStageRuntimeAttachFallback(0);
     BookSourceStageWebRuntime.get().setResetHandler((): void => this.resetStageRuntimeHost(),
       this.stageRuntimeController);
     hilog.info(0x0000, 'testTag', 'StartupTrace Index aboutToAppear %{public}d', Date.now());
@@ -168,13 +172,43 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.stageRuntimeDisappearing = true;
+    if (this.stageRuntimeAttachRetryId >= 0) clearTimeout(this.stageRuntimeAttachRetryId);
+    this.stageRuntimeAttachRetryId = -1;
     BookSourceStageWebRuntime.get().clearResetHandler(this.stageRuntimeController);
     BookSourceStageWebRuntime.get().detach(this.stageRuntimeController);
+  }
+
+  private adoptStageRuntimeController(): void {
+    if (this.stageRuntimeDisappearing) return;
+    if (this.stageRuntimeAttachRetryId >= 0) clearTimeout(this.stageRuntimeAttachRetryId);
+    this.stageRuntimeAttachRetryId = -1;
+    BookSourceStageWebRuntime.get().attach(this.stageRuntimeController);
+    BookSourceStageWebRuntime.get().setResetHandler((): void => this.resetStageRuntimeHost(),
+      this.stageRuntimeController);
+  }
+
+  private scheduleStageRuntimeAttachFallback(attempt: number): void {
+    if (this.stageRuntimeDisappearing) return;
+    this.stageRuntimeAttachRetryId = setTimeout((): void => {
+      if (this.stageRuntimeDisappearing) return;
+      try {
+        // A successful getWebId proves the controller is associated with a Web component. On
+        // some routed/hidden Web nodes ArkWeb omits onControllerAttached — including nodes
+        // rebuilt by resetStageRuntimeHost() — so treat this poll as the authoritative attach path.
+        this.stageRuntimeController.getWebId();
+        this.adoptStageRuntimeController();
+        return;
+      } catch (_) {}
+      if (attempt < 100) this.scheduleStageRuntimeAttachFallback(attempt + 1);
+    }, attempt === 0 ? 0 : 100);
   }
 
   resetStageRuntimeHost(): void {
     if (this.stageRuntimeResetScheduled) return;
     this.stageRuntimeResetScheduled = true;
+    if (this.stageRuntimeAttachRetryId >= 0) clearTimeout(this.stageRuntimeAttachRetryId);
+    this.stageRuntimeAttachRetryId = -1;
     const previous = this.stageRuntimeController;
     BookSourceStageWebRuntime.get().detach(previous);
     this.stageRuntimeMounted = false;
@@ -183,6 +217,7 @@ struct Index {
       this.stageRuntimeController = new webview.WebviewController();
       this.stageRuntimeMounted = true;
       this.stageRuntimeResetScheduled = false;
+      this.scheduleStageRuntimeAttachFallback(0);
     }, 50);
   }
 
@@ -442,9 +477,7 @@ struct Index {
           .domStorageAccess(true)
           .mixedMode(MixedMode.All)
           .onControllerAttached(() => {
-            BookSourceStageWebRuntime.get().attach(this.stageRuntimeController);
-            BookSourceStageWebRuntime.get().setResetHandler((): void => this.resetStageRuntimeHost(),
-              this.stageRuntimeController);
+            this.adoptStageRuntimeController();
           })
           .onPageBegin(() => {
             BookSourceStageWebRuntime.get().setReady(false, this.stageRuntimeController);

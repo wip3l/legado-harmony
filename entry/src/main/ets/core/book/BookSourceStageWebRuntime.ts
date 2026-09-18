@@ -123,6 +123,15 @@ export class BookSourceStageWebRuntime {
   // hidden host frequently prevents a sequence of large user-supplied libraries from growing
   // those allocations until HarmonyOS reports a foreground THREAD_BLOCK freeze.
   private static readonly RECYCLE_TASK_INTERVAL: number = 3;
+  // A wait that stays unsuccessful past this point is treated as a stuck host (missing
+  // lifecycle callback or an unfinished reset) instead of a normal attach race.
+  private static readonly RECOVERY_GRACE_MS: number = 1500;
+  private static readonly RECOVERY_INTERVAL_MS: number = 3000;
+  private static readonly RECOVERY_REBUILD_WAIT_MS: number = 6000;
+  private static readonly PROBE_TIMEOUT_MS: number = 2500;
+  private static readonly PROBE_NONE: number = 0;
+  private static readonly PROBE_ADOPTED: number = 1;
+  private static readonly PROBE_DEAD: number = 2;
   private static instance: BookSourceStageWebRuntime | null = null;
   private controller: webview.WebviewController | null = null;
   private controllers: webview.WebviewController[] = [];
@@ -140,6 +149,8 @@ export class BookSourceStageWebRuntime {
   private resetHandlerController: webview.WebviewController | null = null;
   private resetRequested: boolean = false;
   private completedTaskCount: number = 0;
+  private lastRecoveryAttemptAt: number = 0;
+  private probeBusy: boolean = false;
 
   static get(): BookSourceStageWebRuntime {
     if (!BookSourceStageWebRuntime.instance) {
@@ -167,6 +178,7 @@ export class BookSourceStageWebRuntime {
     this.ready = this.readyControllers.has(controller);
     this.resetRequested = false;
     this.completedTaskCount = 0;
+    console.info('[StageWebRuntime] attach, ' + this.describeState());
   }
 
   setReady(ready: boolean, controller: webview.WebviewController | null = null): void {
@@ -174,17 +186,29 @@ export class BookSourceStageWebRuntime {
     if (!target) return;
     if (ready) this.readyControllers.add(target);
     else this.readyControllers.delete(target);
-    if (this.controller !== target) return;
-    this.ready = ready;
+    if (this.controller === target) this.ready = ready;
+    // Drain queued tasks even when the recovered controller is not `this.controller`:
+    // executeTask dispatches through findReadyController(), not this field.
     if (ready) this.startNext();
   }
 
-  async waitUntilAvailable(timeoutMs: number = 3000): Promise<boolean> {
+  async waitUntilAvailable(timeoutMs: number = 5000): Promise<boolean> {
     if (this.isAvailable()) return true;
     const startedAt = Date.now();
-    while (Date.now() - startedAt < Math.max(100, timeoutMs)) {
+    let deadline = startedAt + Math.max(100, timeoutMs);
+    while (Date.now() < deadline) {
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
       if (this.isAvailable()) return true;
+      // Past the grace window a plain race is unlikely; recover a stuck host instead of
+      // failing into the permanent "not ready" notice (see recoverAvailability).
+      if (Date.now() - startedAt >= BookSourceStageWebRuntime.RECOVERY_GRACE_MS &&
+        Date.now() - this.lastRecoveryAttemptAt >= BookSourceStageWebRuntime.RECOVERY_INTERVAL_MS) {
+        this.lastRecoveryAttemptAt = Date.now();
+        const rebuildRequested = await this.recoverAvailability();
+        if (rebuildRequested) {
+          deadline = Math.max(deadline, Date.now() + BookSourceStageWebRuntime.RECOVERY_REBUILD_WAIT_MS);
+        }
+      }
     }
     return this.isAvailable();
   }
@@ -192,6 +216,7 @@ export class BookSourceStageWebRuntime {
   detach(controller: webview.WebviewController): void {
     this.controllers = this.controllers.filter((item: webview.WebviewController): boolean => item !== controller);
     this.readyControllers.delete(controller);
+    console.info('[StageWebRuntime] detach, ' + this.describeState());
     if (this.controller !== controller) return;
     this.controller = this.controllers.length > 0 ? this.controllers[this.controllers.length - 1] : null;
     this.ready = !!this.controller && this.readyControllers.has(this.controller);
@@ -253,8 +278,104 @@ export class BookSourceStageWebRuntime {
     if (ownerId) this.cancelledOwners.delete(ownerId);
   }
 
+  private scheduleIdleRecovery(): void {
+    const now = Date.now();
+    if (now - this.lastRecoveryAttemptAt < BookSourceStageWebRuntime.RECOVERY_INTERVAL_MS) return;
+    this.lastRecoveryAttemptAt = now;
+    this.recoverAvailability().catch((): void => {});
+  }
+
+  /**
+   * A hidden ArkWeb host can become permanently unavailable in two ways that no lifecycle
+   * callback ever fixes by itself: a rebuild whose onControllerAttached never fires leaves no
+   * controller and a reset request nothing can complete, and a suspended renderer never
+   * reaches onPageEnd. Probe attached controllers and force the host page to rebuild its Web
+   * node. Returns true when a rebuild was requested and the caller should extend its wait.
+   */
+  private async recoverAvailability(): Promise<boolean> {
+    if (this.isAvailable()) return false;
+    const probeOutcome = await this.probeNotReadyControllers();
+    if (probeOutcome === BookSourceStageWebRuntime.PROBE_ADOPTED) return false;
+    const stuckReset = this.resetRequested;
+    const deadRenderer = probeOutcome === BookSourceStageWebRuntime.PROBE_DEAD;
+    // A host that is merely still attaching (cold start: no controller, no pending reset) must
+    // not be remounted here, that would only prolong startup.
+    if (stuckReset || deadRenderer) {
+      this.forceHostRebuild();
+      return true;
+    }
+    return false;
+  }
+
+  /** Outcome of probing attached-but-not-ready controllers: none attached, adopted, or dead. */
+  private async probeNotReadyControllers(): Promise<number> {
+    if (this.probeBusy) return BookSourceStageWebRuntime.PROBE_NONE;
+    const candidates = this.controllers.filter((item: webview.WebviewController): boolean =>
+      !this.readyControllers.has(item));
+    if (candidates.length === 0) return BookSourceStageWebRuntime.PROBE_NONE;
+    this.probeBusy = true;
+    try {
+      for (const controller of candidates) {
+        const alive = await this.probeController(controller);
+        if (this.controllers.indexOf(controller) < 0) continue; // detached while probing
+        if (alive) {
+          // Readiness only means "the JS context answers runJavaScript"; a resolved probe is
+          // sufficient even when onPageEnd was missed.
+          console.info('[StageWebRuntime] controller recovered by probe, ' + this.describeState());
+          this.setReady(true, controller);
+          return BookSourceStageWebRuntime.PROBE_ADOPTED;
+        }
+      }
+      return BookSourceStageWebRuntime.PROBE_DEAD;
+    } finally {
+      this.probeBusy = false;
+    }
+  }
+
+  private probeController(controller: webview.WebviewController): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      let timer = -1;
+      const finish = (value: boolean): void => {
+        if (settled) return;
+        settled = true;
+        if (timer >= 0) clearTimeout(timer);
+        resolve(value);
+      };
+      timer = setTimeout((): void => finish(false), BookSourceStageWebRuntime.PROBE_TIMEOUT_MS);
+      controller.runJavaScript('1')
+        .then((): void => finish(true))
+        .catch((): void => finish(false));
+    });
+  }
+
+  /** Re-invoke the host page's reset handler. Each host guards re-entry itself. */
+  private forceHostRebuild(): void {
+    const handler = this.resetHandler;
+    if (!handler) {
+      console.warn('[StageWebRuntime] recovery impossible, no reset handler, ' + this.describeState());
+      return;
+    }
+    this.resetRequested = true;
+    console.warn('[StageWebRuntime] forced host rebuild, ' + this.describeState());
+    handler();
+  }
+
+  private describeState(): string {
+    return `hosts=${this.controllers.length} ready=${this.readyControllers.size}` +
+      ` reset=${this.resetRequested} running=${this.running}` +
+      ` queued=${this.tasks.length} done=${this.completedTaskCount}`;
+  }
+
   private startNext(): void {
-    if (this.running || !this.findReadyController() || this.tasks.length === 0) return;
+    if (this.running) return;
+    if (!this.findReadyController()) {
+      // Queued tasks with no usable controller would otherwise wait forever: nothing calls
+      // setReady() once lifecycle callbacks have been missed. Nudge the recovery path.
+      if (this.tasks.length > 0) this.scheduleIdleRecovery();
+      return;
+    }
+    if (this.tasks.length === 0) return;
     const task = this.tasks.shift();
     if (!task) return;
     this.queuedBytes = Math.max(0, this.queuedBytes - task.estimatedBytes);
@@ -618,7 +739,10 @@ export class BookSourceStageWebRuntime {
       const available = await this.waitUntilAvailable(5000);
       if (available) controller = this.findReadyController();
     }
-    if (!controller) throw new Error('书源脚本运行环境未就绪');
+    if (!controller) {
+      console.warn('[StageWebRuntime] unavailable after wait, ' + this.describeState());
+      throw new Error('书源脚本运行环境未就绪');
+    }
     return this.runJavaScriptOnController(controller, script);
   }
 
@@ -658,6 +782,7 @@ export class BookSourceStageWebRuntime {
 
   /** A timed-out renderer must not receive the next queued script. Rebuild the hidden Web host first. */
   private quarantineController(controller: webview.WebviewController, reason: string): void {
+    console.warn('[StageWebRuntime] quarantine: ' + reason + ', ' + this.describeState());
     this.readyControllers.delete(controller);
     this.controllers = this.controllers.filter((item: webview.WebviewController): boolean => item !== controller);
     if (this.controller === controller) {

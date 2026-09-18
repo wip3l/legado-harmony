@@ -225,7 +225,7 @@ export class RuleExecutionService {
     token.throwIfCancelled();
     const runtime = BookSourceStageWebRuntime.get();
     if (!runtime.isAvailable()) {
-      const available = await runtime.waitUntilAvailable(5000);
+      const available = await runtime.waitUntilAvailable(8000);
       if (!available) throw new Error('完整脚本运行环境未就绪');
     }
     const runtimeRequest = new StageWebRuntimeRequest();
@@ -295,7 +295,7 @@ export class RuleExecutionService {
 
     const runtime = BookSourceStageWebRuntime.get();
     if (!runtime.isAvailable()) {
-      const available = await runtime.waitUntilAvailable(5000);
+      const available = await runtime.waitUntilAvailable(8000);
       if (!available) throw new Error('完整脚本运行环境未就绪');
     }
     const runtimeRequest = new StageWebRuntimeRequest();

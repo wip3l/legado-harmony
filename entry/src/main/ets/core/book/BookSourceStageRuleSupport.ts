@@ -22,7 +22,7 @@ export class BookSourceStageRuleSupport {
     const decision = BookSourceRuntimeRouter.decide(stage, `${source.jsLib || ''}\n${embedded.code}`);
     const runtime = BookSourceStageWebRuntime.get();
     if (decision.runtime !== 'arkweb') return null;
-    if (!runtime.isAvailable() && !await runtime.waitUntilAvailable(5000)) return null;
+    if (!runtime.isAvailable() && !await runtime.waitUntilAvailable(8000)) return null;
 
     if (embedded.trailingRule) {
       const request = new StageWebRuntimeRequest();

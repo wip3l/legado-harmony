@@ -18851,7 +18851,7 @@ struct ReadBookPage {
       return;
     }
     const runtime = BookSourceStageWebRuntime.get();
-    if (!await runtime.waitUntilAvailable(5000)) {
+    if (!await runtime.waitUntilAvailable(8000)) {
       promptAction.showToast({ message: '书源脚本运行环境未就绪' });
       return;
     }

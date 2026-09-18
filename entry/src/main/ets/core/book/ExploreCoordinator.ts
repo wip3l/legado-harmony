@@ -558,7 +558,7 @@ export class ExploreCoordinator {
     // ArkWeb host is still between controller-attached and page-end.  Treat that as a
     // normal startup window instead of turning a transient race into a permanent empty
     // result.  Keep this in line with the response-script path below.
-    if (!runtime.isAvailable()) await runtime.waitUntilAvailable(5000);
+    if (!runtime.isAvailable()) await runtime.waitUntilAvailable(8000);
     if (runtime.isAvailable()) {
       const request = new StageWebRuntimeRequest();
       request.applyStageBudget(SourceRuntimeStage.EXPLORE);
@@ -757,7 +757,7 @@ export class ExploreCoordinator {
     const index = selector.labels.indexOf(selection);
     if (index < 0) return false;
     const runtime = BookSourceStageWebRuntime.get();
-    if (!runtime.isAvailable() && !await runtime.waitUntilAvailable(5000)) return false;
+    if (!runtime.isAvailable() && !await runtime.waitUntilAvailable(8000)) return false;
     const request = new StageWebRuntimeRequest();
     request.applyStageBudget(SourceRuntimeStage.EXPLORE);
     request.source = source;
@@ -911,7 +911,7 @@ export class ExploreCoordinator {
     const isFullJsUrl = /^\s*@?js:/i.test(url || '') || /^\s*<js>[\s\S]*<\/js>\s*$/i.test(url || '');
     const requiresStageRuntime = isFullJsUrl || (url.includes('{{') && decision.runtime === 'arkweb');
     const runtime = BookSourceStageWebRuntime.get();
-    if (requiresStageRuntime && !runtime.isAvailable()) await runtime.waitUntilAvailable(5000);
+    if (requiresStageRuntime && !runtime.isAvailable()) await runtime.waitUntilAvailable(8000);
     if (requiresStageRuntime && runtime.isAvailable()) {
       const request = new StageWebRuntimeRequest();
       request.applyStageBudget(SourceRuntimeStage.EXPLORE);
@@ -976,7 +976,7 @@ export class ExploreCoordinator {
   private async executeResponseBodyScript(source: BookSource, code: string, body: string,
     baseUrl: string, page: number, debugContext: BookSourceDebugContext | null = null): Promise<string> {
     const runtime = BookSourceStageWebRuntime.get();
-    if (!runtime.isAvailable()) await runtime.waitUntilAvailable(5000);
+    if (!runtime.isAvailable()) await runtime.waitUntilAvailable(8000);
     if (!runtime.isAvailable()) {
       this.noticeMessage = '发现响应脚本运行环境未就绪';
       return '';

@@ -1056,7 +1056,7 @@ export class SearchCoordinator {
     if (!isFullJsUrl && decision.runtime !== 'arkweb') return '';
     const runtime = BookSourceStageWebRuntime.get();
     if (!runtime.isAvailable()) {
-      const available = await runtime.waitUntilAvailable(5000);
+      const available = await runtime.waitUntilAvailable(8000);
       if (!available) return '';
     }
     const request = new StageWebRuntimeRequest();
