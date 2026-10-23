@@ -9691,7 +9691,11 @@ struct ReadBookPage {
       },
       onSleepTimerChange: (minutes: number): void => this.setTtsSleepTimer(minutes),
       onToggleReading: (): void => {
-        this.toggleTtsReading();
+        if (this.isTtsSpeaking || this.ttsReader.isSpeaking()) {
+          this.stopTtsReading();
+        } else {
+          this.toggleTtsReading();
+        }
       }
     })
   }
