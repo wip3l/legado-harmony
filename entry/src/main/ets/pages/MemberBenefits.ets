@@ -6,6 +6,7 @@ import { AccountSessionStore } from '../account/AccountSessionStore';
 import { MembershipIcons } from '../account/MembershipIcons';
 import { MembershipCommerceService } from '../account/MembershipCommerceService';
 import { MembershipGiftRules } from '../account/MembershipGiftRules';
+import { CustomThemeQuota } from '../account/CustomThemeQuota';
 import { MembershipSnapshot } from '../account/MembershipModels';
 import { CloudFileClient } from '../account/CloudFileClient';
 import { CloudFileSummary } from '../account/CloudFileModels';
@@ -388,6 +389,13 @@ struct MemberBenefitsPage {
       this.benefitRow($r('sys.symbol.textformat'), '漫画繁→简', '漫画阅读 → 画面设置中按书开启', true, undefined)
       this.benefitRow($r('sys.symbol.arrow_2_circlepath'), '超大书源同步', this.largeSourceSyncText(), true, undefined)
       this.benefitRow($r('sys.symbol.star'), '功能尝鲜', '新功能优先试用', true, undefined)
+      this.benefitRow($r('sys.symbol.paintpalette'), '自定义主题方案',
+        `最多 ${CustomThemeQuota.forSku(this.membershipSku)} 套 · 已生效`, true, () => {
+          router.pushUrl({ url: 'pages/ThemeSettings' });
+        })
+      this.benefitRow($r('sys.symbol.share'), '主题分享 Beta', '长按自定义方案分享，或在主题页导入主题包', true, () => {
+        router.pushUrl({ url: 'pages/ThemeSettings' });
+      })
       this.benefitRow($r('sys.symbol.paintpalette'), '高级主题自定义', '即将推出', true, undefined)
       if (this.membershipSku === 'LIFETIME' || this.isSuperMember()) {
         this.benefitRow($r('sys.symbol.person'), '动态头像', '支持 GIF / WebP 动图，可在会员与账号页编辑头像', true, undefined)

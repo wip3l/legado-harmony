@@ -95,6 +95,12 @@ struct StartupPage {
       await router.pushUrl({ url: 'pages/BookSource' });
       return;
     }
+    if (AppStorage.get<string>('pendingThemeImportUri')) {
+      // 主题页打开时读取待导入的主题包。
+      await router.replaceUrl({ url: 'pages/Index' });
+      await router.pushUrl({ url: 'pages/ThemeSettings' });
+      return;
+    }
     if (!RecentReadShortcut.isPending()) {
       await this.replaceToIndex();
       return;

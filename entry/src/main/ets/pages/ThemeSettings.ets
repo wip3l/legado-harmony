@@ -24,6 +24,7 @@ import { AccountApiError, ThemeCatalogItem, ThemeCatalogResponse,
   ThemeEntitlement } from '../account/AccountCommerceModels';
 import { AccountCommerceApi } from '../account/AccountCommerceApi';
 import { AccountSessionStore } from '../account/AccountSessionStore';
+import { CustomThemeQuota } from '../account/CustomThemeQuota';
 import { MembershipCommerceService } from '../account/MembershipCommerceService';
 import { HuaweiAccountService } from '../account/HuaweiAccountService';
 import {
@@ -42,6 +43,14 @@ import { AdaptiveSwitch } from '../components/AdaptiveSwitch';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { PageScaffold } from '../components/common/PageScaffold';
+import { themeAuthorLine, ThemeExportDialog, ThemeImportDialog } from '../components/theme/ThemeShareDialogs';
+import {
+  ThemeExportOptions,
+  ThemeExportPlan,
+  ThemeExportResult,
+  ThemeImportPreview,
+  ThemePackageService
+} from '../theme/share/ThemePackageService';
 
 const STORE_COVER_MIN_HEIGHT = 170;
 const STORE_COVER_MAX_HEIGHT = 340;
@@ -151,7 +160,8 @@ struct ThemeSettingsPage {
   @StorageLink('readerDarkThemeIndex') readerDarkThemeIndex: number = 0;
   @StorageLink('accountLoggedIn') accountLoggedIn: boolean = false;
   @StorageLink('accountPoints') accountPoints: number = 0;
-  @StorageLink('accountEntitlementsRevision') accountEntitlementsRevision: number = 0;
+  @StorageLink('accountEntitlementsRevision') @Watch('refreshCustomSchemeLimit')
+  accountEntitlementsRevision: number = 0;
   @StorageLink('themeTrialThemeId') trialThemeId: string = '';
   @StorageLink('themeTrialEndsAt') trialEndsAt: number = 0;
   @StorageLink('activeCustomThemeSchemeId') activeCustomSchemeId: string = '';
@@ -166,6 +176,15 @@ struct ThemeSettingsPage {
   @State applyingThemeId: string = '';
   @State focusedThemeId: string = '';
   @State customSchemes: CustomThemeScheme[] = [];
+  @State customSchemeLimit: number = CustomThemeQuota.current();
+  @State addingCustomScheme: boolean = false;
+  @State showThemeExportDialog: boolean = false;
+  @State exportPlan: ThemeExportPlan = new ThemeExportPlan();
+  @State showThemeImportDialog: boolean = false;
+  @State importPreview: ThemeImportPreview = new ThemeImportPreview();
+  @State preparingThemeImport: boolean = false;
+  // 外部“用本应用打开”.qytheme 文件时由 EntryAbility 写入。
+  @StorageLink('pendingThemeImportNonce') @Watch('onPendingThemeImport') pendingThemeImportNonce: number = 0;
   @State showCustomThemeActionMenu: boolean = false;
   @State showRenameCustomThemeDialog: boolean = false;
   @State showDeleteCustomThemeDialog: boolean = false;
@@ -214,9 +233,17 @@ struct ThemeSettingsPage {
     if (params?.themeId === ThemeIds.OBSIDIAN_ARCHIVE) {
       this.openThemePager([new ThemeListEntry(BuiltinThemeRegistry.findById(params.themeId))], 0);
     }
+    this.onPendingThemeImport();
+  }
+
+  aboutToDisappear(): void {
+    if (this.showThemeImportDialog) {
+      ThemePackageService.discardImport(this.importPreview);
+    }
   }
 
   onPageShow(): void {
+    this.refreshCustomSchemeLimit();
     ThemeTrialManager.stopIfExpired();
     AppIconManager.syncCurrentIcon(getContext(this)).catch((error: Error) => {
       console.warn('同步桌面图标失败:', error);
@@ -229,7 +256,138 @@ struct ThemeSettingsPage {
     this.refreshCustomSchemes();
   }
 
+  refreshCustomSchemeLimit(): void {
+    this.customSchemeLimit = CustomThemeQuota.current();
+  }
+
+  customSchemeAuthor(customSchemeId: string): string {
+    if (!customSchemeId) return '';
+    const scheme = CustomThemeSchemeStore.find(this.customSchemes, customSchemeId);
+    return scheme ? scheme.author : '';
+  }
+
+  /** 主题分享 Beta 导出和导入都只对会员开放。 */
+  async ensureThemeShareAccess(): Promise<boolean> {
+    // 从外部打开主题包冷启动时，账号可能还没读完。
+    await AccountSessionStore.load(getContext(this));
+    if (ThemePackageService.isAvailable()) {
+      return true;
+    }
+    const result = await promptAction.showDialog({
+      title: '主题分享 Beta · 会员专享',
+      message: '开通任一档会员后，可以把自定义主题导出为 .qytheme 主题包分享给好友，也可以导入别人分享的主题包。',
+      buttons: [
+        { text: '取消', color: this.subTextColor() },
+        { text: '了解会员', color: this.accentColor() }
+      ]
+    });
+    if (result.index === 1) {
+      router.pushUrl({ url: 'pages/AccountCenter' });
+    }
+    return false;
+  }
+
+  async requestThemeExport(schemeId: string): Promise<void> {
+    const scheme = CustomThemeSchemeStore.find(this.customSchemes, schemeId);
+    if (!scheme || !(await this.ensureThemeShareAccess())) return;
+    try {
+      this.exportPlan = await ThemePackageService.planExport(getContext(this), scheme);
+      this.showThemeExportDialog = true;
+    } catch (e) {
+      console.error('读取待导出主题失败:', e);
+      HdsFeedback.showToast('读取主题失败，请稍后重试');
+    }
+  }
+
+  async runThemeExport(options: ThemeExportOptions, share: boolean): Promise<void> {
+    const scheme = CustomThemeSchemeStore.find(this.customSchemes, this.exportPlan.schemeId);
+    if (!scheme) return;
+    let result: ThemeExportResult | null = null;
+    try {
+      result = await ThemePackageService.buildPackage(getContext(this), scheme, options);
+      if (share) {
+        await ThemePackageService.share(getContext(this) as common.UIAbilityContext, result);
+        this.showThemeExportDialog = false;
+        // 分享面板异步读取文件，临时文件交给系统清理临时目录时一并删除。
+        result = null;
+      } else if (await ThemePackageService.saveToFile(getContext(this), result)) {
+        this.showThemeExportDialog = false;
+        HdsFeedback.showToast(`已导出「${result.fileName}」`);
+      }
+    } catch (e) {
+      console.error('导出主题包失败:', e);
+      HdsFeedback.showToast((e as Error).message || '导出失败，请稍后重试');
+    } finally {
+      ThemePackageService.discardExport(result);
+    }
+  }
+
+  onPendingThemeImport(): void {
+    const uri = AppStorage.get<string>('pendingThemeImportUri') || '';
+    if (!uri) return;
+    AppStorage.setOrCreate('pendingThemeImportUri', '');
+    this.requestThemeImport(uri);
+  }
+
+  async requestThemeImport(sourceUri: string): Promise<void> {
+    if (this.preparingThemeImport || this.showThemeImportDialog) return;
+    if (!(await this.ensureThemeShareAccess())) return;
+    this.preparingThemeImport = true;
+    try {
+      const uri = sourceUri || await ThemePackageService.pickPackage(getContext(this));
+      if (!uri) return;
+      this.importPreview = await ThemePackageService.prepareImport(getContext(this), uri);
+      this.refreshCustomSchemeLimit();
+      await this.refreshCustomSchemes();
+      this.showThemeImportDialog = true;
+    } catch (e) {
+      console.error('读取主题包失败:', e);
+      HdsFeedback.showToast((e as Error).message || '无法读取这个主题包');
+    } finally {
+      this.preparingThemeImport = false;
+    }
+  }
+
+  closeThemeImport(): void {
+    ThemePackageService.discardImport(this.importPreview);
+    this.importPreview = new ThemeImportPreview();
+    this.showThemeImportDialog = false;
+  }
+
+  async runThemeImport(replaceSchemeId: string): Promise<void> {
+    try {
+      const result = await ThemePackageService.commitImport(getContext(this), this.getUIContext(),
+        this.importPreview, replaceSchemeId);
+      this.importPreview = new ThemeImportPreview();
+      this.showThemeImportDialog = false;
+      await this.refreshCustomSchemes();
+      let notice = `已导入「${result.scheme.name}」`;
+      if (result.addedRules > 0) notice += `，追加 ${result.addedRules} 条强调规则`;
+      if (result.missingFonts.length > 0) notice += `，${result.missingFonts.length} 款字体改用全局字体`;
+      HdsFeedback.showToast(notice);
+      const index = this.myThemeEntries().findIndex((entry: ThemeListEntry): boolean =>
+        entry.customSchemeId === result.scheme.id);
+      if (index >= 0) {
+        this.openThemePager(this.myThemeEntries(), index);
+      }
+    } catch (e) {
+      console.error('导入主题包失败:', e);
+      HdsFeedback.showToast((e as Error).message || '导入失败，请稍后重试');
+      // 写入失败时临时文件已清理，需要重新选择文件。
+      this.importPreview = new ThemeImportPreview();
+      this.showThemeImportDialog = false;
+    }
+  }
+
   onBackPress(): boolean {
+    if (this.showThemeExportDialog) {
+      this.showThemeExportDialog = false;
+      return true;
+    }
+    if (this.showThemeImportDialog) {
+      this.closeThemeImport();
+      return true;
+    }
     if (this.showThemeStore) {
       this.closeThemeStore();
       return true;
@@ -264,6 +422,27 @@ struct ThemeSettingsPage {
       }
       if (this.showThemeApplyDialog) {
         this.themeApplyDialog()
+      }
+      if (this.showThemeExportDialog) {
+        ThemeExportDialog({
+          darkMode: this.appDarkMode,
+          plan: this.exportPlan,
+          onClose: () => {
+            this.showThemeExportDialog = false;
+          },
+          onExport: (options: ThemeExportOptions, share: boolean): Promise<void> => this.runThemeExport(options, share)
+        })
+      }
+      if (this.showThemeImportDialog) {
+        ThemeImportDialog({
+          darkMode: this.appDarkMode,
+          preview: this.importPreview,
+          schemes: this.customSchemes,
+          limit: this.customSchemeLimit,
+          activeSchemeId: this.appThemeId === ThemeIds.CUSTOM ? this.activeCustomSchemeId : '',
+          onClose: () => this.closeThemeImport(),
+          onImport: (replaceSchemeId: string): Promise<void> => this.runThemeImport(replaceSchemeId)
+        })
       }
     }
     .width('100%')
@@ -459,6 +638,8 @@ struct ThemeSettingsPage {
       if (!choice) {
         return;
       }
+      // 应用前记下当前档案：自定义方案之间切换时主题 ID 都是 custom，靠方案 ID 区分各自的排版。
+      const previousProfileId = ReaderSettingsStore.activeProfileId();
       let settings: AppThemeSettings = AppThemeSettingsStore.activateTheme(themeId, previous);
       if (customScheme) {
         settings = AppThemeSettingsStore.applyCustomSnapshot(settings, customScheme.settings);
@@ -474,8 +655,8 @@ struct ThemeSettingsPage {
       }
       this.appThemeId = settings.themeId;
       this.themeBookCoverEnabled = settings.themeBookCoverEnabled;
-      const readerSettings = await ReaderSettingsStore.switchThemeProfile(
-        getContext(this), previous.themeId, settings.themeId);
+      const readerSettings = await ReaderSettingsStore.switchThemeProfile(getContext(this), previousProfileId,
+        ReaderSettingsStore.profileIdFor(settings.themeId, customScheme ? customScheme.id : ''));
       if (choice.applyLayout) {
         const layout = theme.readerLayout;
         await ReaderSettingsStore.saveLayoutSettings(getContext(this), layout.fontSize, layout.lineHeight,
@@ -521,6 +702,11 @@ struct ThemeSettingsPage {
       `段距 ${theme.readerLayout.paragraphSpacing} · 边距 ${theme.readerLayout.marginLeft}/${theme.readerLayout.marginRight}`;
     this.applyDialogHasCover = this.themeHasBookCover(theme);
     this.applyDialogApplyLayout = previous.themeApplyLayoutEnabled;
+    if (theme.id === ThemeIds.CUSTOM) {
+      // 自定义方案默认开启主题排版；用户可手动关闭以沿用方案自己保存的排版。
+      this.applyDialogLayoutHint = `关闭时使用方案自己的排版；打开则重置为预设（${this.applyDialogLayoutHint}）`;
+      this.applyDialogApplyLayout = true;
+    }
     // 主题带封面时默认勾选“应用主题封面”，不再沿用上次的选择。
     this.applyDialogApplyCover = this.applyDialogHasCover;
     this.applyDialogApplyIcon = true;
@@ -981,6 +1167,15 @@ struct ThemeSettingsPage {
 
       this.storeNavInfoRow(theme)
       this.storeThemeActions(theme, customSchemeId)
+      if (this.customSchemeAuthor(customSchemeId)) {
+        Text(themeAuthorLine(this.customSchemeAuthor(customSchemeId)))
+          .fontSize(AppFontSize.CAPTION)
+          .fontColor(this.activeVariant(theme).colors.subTextColor)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .textAlign(TextAlign.End)
+          .width('100%')
+      }
     }
     .width('100%')
     .padding(AppSpacing.LG)
@@ -1502,9 +1697,22 @@ struct ThemeSettingsPage {
         .fontSize(AppFontSize.BODY)
         .fontColor(this.subTextColor())
         .layoutWeight(1)
-      Text(`方案 ${this.customSchemes.length}/${CustomThemeSchemeStore.MAX_SCHEMES}`)
+      Text(`方案 ${this.customSchemes.length}/${this.customSchemeLimit}`)
         .fontSize(AppFontSize.CAPTION)
         .fontColor(this.subTextColor())
+      Row({ space: AppSpacing.XXS }) {
+        SymbolGlyph($r('sys.symbol.square_and_arrow_down'))
+          .fontSize(14)
+          .fontColor([this.accentColor()])
+        Text(this.preparingThemeImport ? '读取中' : '导入')
+          .fontSize(AppFontSize.CAPTION)
+          .fontColor(this.accentColor())
+      }
+      .padding({ left: AppSpacing.SM, right: AppSpacing.SM, top: AppSpacing.XXS, bottom: AppSpacing.XXS })
+      .borderRadius(12)
+      .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
+      .accessibilityText('导入主题包')
+      .onClick(() => this.requestThemeImport(''))
     }
     .width('100%')
     .padding({ left: AppSpacing.XXS, right: AppSpacing.XXS, top: AppSpacing.SM, bottom: 0 })
@@ -1609,7 +1817,8 @@ struct ThemeSettingsPage {
         .maxLines(1)
         .width('100%')
       Text(this.canAddCustomScheme() ?
-        `还可添加 ${CustomThemeSchemeStore.MAX_SCHEMES - this.customSchemes.length} 套` : '已达上限')
+        `还可添加 ${this.customSchemeLimit - this.customSchemes.length} 套` :
+        (this.addingCustomScheme ? '正在添加' : '已达上限'))
         .fontSize(AppFontSize.MICRO)
         .fontColor(this.subTextColor())
         .maxLines(1)
@@ -1628,7 +1837,7 @@ struct ThemeSettingsPage {
   }
 
   canAddCustomScheme(): boolean {
-    return this.customSchemes.length < CustomThemeSchemeStore.MAX_SCHEMES;
+    return !this.addingCustomScheme && this.customSchemes.length < this.customSchemeLimit;
   }
 
   myThemeThumbStatus(theme: ThemePack, customSchemeId: string): string {
@@ -1668,11 +1877,14 @@ struct ThemeSettingsPage {
   }
 
   async addCustomScheme(): Promise<void> {
+    if (this.addingCustomScheme) return;
+    this.addingCustomScheme = true;
     try {
       const settings = await AppThemeSettingsStore.load(getContext(this));
       const added = await CustomThemeSchemeStore.add(getContext(this), settings);
       if (!added) {
-        HdsFeedback.showToast('最多只能创建 5 套自定义主题');
+        this.refreshCustomSchemeLimit();
+        HdsFeedback.showToast(`当前权益最多可创建 ${this.customSchemeLimit} 套自定义主题，已有方案保留`);
         return;
       }
       await this.refreshCustomSchemes();
@@ -1680,6 +1892,8 @@ struct ThemeSettingsPage {
     } catch (e) {
       console.error('添加自定义主题方案失败:', e);
       HdsFeedback.showToast('添加方案失败，请稍后重试');
+    } finally {
+      this.addingCustomScheme = false;
     }
   }
 
@@ -1708,6 +1922,11 @@ struct ThemeSettingsPage {
           this.showCustomThemeActionMenu = false;
           this.showRenameCustomThemeDialog = true;
         })
+        this.contextActionItem($r('sys.symbol.share'), '分享主题包', this.primaryTextColor(), () => {
+          const schemeId = this.actionCustomSchemeId;
+          this.closeCustomThemeActions();
+          this.requestThemeExport(schemeId);
+        })
         this.contextActionItem($r('sys.symbol.trash'), '删除', ThemeRuntime.dangerColor(this.appDarkMode), () => {
           this.showCustomThemeActionMenu = false;
           this.requestDeleteCustomTheme(this.actionCustomSchemeId);
@@ -1730,7 +1949,7 @@ struct ThemeSettingsPage {
       })
       .position({
         x: this.contextMenuLeft(148),
-        y: this.contextMenuTop(150)
+        y: this.contextMenuTop(196)
       })
     }
     .width('100%')
@@ -2195,6 +2414,7 @@ struct ThemeSettingsPage {
       }
       this.actionCustomSchemeId = '';
       await this.refreshCustomSchemes();
+      await ThemePackageService.cleanupImportedFiles(getContext(this));
       HdsFeedback.showToast(`已删除「${scheme.name}」`);
     } catch (e) {
       console.error('删除自定义主题失败:', e);

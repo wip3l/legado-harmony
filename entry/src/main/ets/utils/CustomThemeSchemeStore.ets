@@ -3,16 +3,19 @@ import preferences from '@ohos.data.preferences';
 import { ThemeIds } from '../theme/ThemeModels';
 import { AppThemeSettings, AppThemeSettingsStore } from './AppThemeSettingsStore';
 import { CloudSyncChangeTracker } from '../account/CloudSyncChangeTracker';
+import { CustomThemeQuota } from '../account/CustomThemeQuota';
+import { ReaderSettingsStore } from './ReaderSettingsStore';
 
 export class CustomThemeScheme {
   id: string = '';
   name: string = '';
   revision: number = 1;
   settings: AppThemeSettings = new AppThemeSettings();
+  // 从主题包导入且作者选择署名时才有值，只用于展示，不代表认证身份。
+  author: string = '';
 }
 
 export class CustomThemeSchemeStore {
-  static readonly MAX_SCHEMES: number = 5;
   static readonly STORAGE_ACTIVE_SCHEME_ID: string = 'activeCustomThemeSchemeId';
   static readonly STORAGE_ACTIVE_SCHEME_REVISION: string = 'activeCustomThemeSchemeRevision';
   static readonly STORAGE_REVISION: string = 'customThemeSchemesRevision';
@@ -72,7 +75,8 @@ export class CustomThemeSchemeStore {
           scheme.id,
           scheme.name || schemes[index].name,
           scheme.settings,
-          schemes[index].revision + 1
+          schemes[index].revision + 1,
+          schemes[index].author
         );
         replaced = true;
         break;
@@ -89,11 +93,12 @@ export class CustomThemeSchemeStore {
     legacySettings: AppThemeSettings
   ): Promise<CustomThemeScheme | null> {
     const schemes = await CustomThemeSchemeStore.load(context, legacySettings);
-    if (schemes.length >= CustomThemeSchemeStore.MAX_SCHEMES) {
+    const limit = CustomThemeQuota.current();
+    if (schemes.length >= limit) {
       return null;
     }
     let sequence = 1;
-    while (sequence <= CustomThemeSchemeStore.MAX_SCHEMES) {
+    while (sequence <= limit) {
       let used = false;
       for (const scheme of schemes) {
         if (scheme.name === `自定义主题 ${sequence}`) {
@@ -139,7 +144,8 @@ export class CustomThemeSchemeStore {
           schemes[index].id,
           normalizedName,
           schemes[index].settings,
-          schemes[index].revision
+          schemes[index].revision,
+          schemes[index].author
         );
         renamed = true;
         break;
@@ -182,7 +188,57 @@ export class CustomThemeSchemeStore {
     const revision = (AppStorage.get<number>(CustomThemeSchemeStore.STORAGE_REVISION) || 0) + 1;
     AppStorage.setOrCreate(CustomThemeSchemeStore.STORAGE_REVISION, revision);
     CloudSyncChangeTracker.markPreferenceChanged();
+    await ReaderSettingsStore.deleteProfile(context, ReaderSettingsStore.profileIdFor(ThemeIds.CUSTOM, schemeId));
     return true;
+  }
+
+  /**
+   * 导入主题包得到的方案。新增占用当前权益额度；replaceSchemeId 非空时原位替换那一套（保留其 ID，
+   * 正在使用的状态和阅读档案跟着换）。名称与其他方案重复时加序号。
+   */
+  static async addImported(
+    context: Context,
+    legacySettings: AppThemeSettings,
+    name: string,
+    settings: AppThemeSettings,
+    author: string,
+    replaceSchemeId: string
+  ): Promise<CustomThemeScheme | null> {
+    const schemes = await CustomThemeSchemeStore.load(context, legacySettings);
+    const replaceIndex = replaceSchemeId ?
+      schemes.findIndex((item: CustomThemeScheme): boolean => item.id === replaceSchemeId) : -1;
+    if (replaceSchemeId && replaceIndex < 0) return null;
+    if (replaceIndex < 0 && schemes.length >= CustomThemeQuota.current()) return null;
+    const others = schemes.filter((item: CustomThemeScheme): boolean => item.id !== replaceSchemeId);
+    const baseName = (name || '').trim() || '导入的主题';
+    let uniqueName = baseName;
+    for (let sequence = 2; others.some((item: CustomThemeScheme): boolean => item.name === uniqueName); sequence++) {
+      uniqueName = `${baseName} (${sequence})`;
+    }
+    const scheme = CustomThemeSchemeStore.createScheme(
+      replaceIndex >= 0 ? schemes[replaceIndex].id : `custom_${Date.now()}_import`,
+      uniqueName,
+      settings,
+      replaceIndex >= 0 ? schemes[replaceIndex].revision + 1 : 1,
+      author
+    );
+    if (replaceIndex >= 0) {
+      schemes[replaceIndex] = scheme;
+    } else {
+      schemes.push(scheme);
+    }
+    await CustomThemeSchemeStore.persistSchemes(context, schemes);
+    return CustomThemeSchemeStore.cloneScheme(scheme);
+  }
+
+  /** 冷启动时先恢复正在使用的方案 ID，阅读设置才能读到这套方案自己的排版。 */
+  static async restoreActiveSchemeId(context: Context): Promise<void> {
+    const store = await preferences.getPreferences(context, CustomThemeSchemeStore.STORE_NAME);
+    const value = await store.get(CustomThemeSchemeStore.KEY_ACTIVE_SCHEME_ID, '');
+    if (typeof value === 'string' && value &&
+      !AppStorage.get<string>(CustomThemeSchemeStore.STORAGE_ACTIVE_SCHEME_ID)) {
+      AppStorage.setOrCreate(CustomThemeSchemeStore.STORAGE_ACTIVE_SCHEME_ID, value);
+    }
   }
 
   static async setActiveScheme(context: Context, scheme: CustomThemeScheme): Promise<void> {
@@ -220,7 +276,7 @@ export class CustomThemeSchemeStore {
     const localSchemes = await CustomThemeSchemeStore.load(context, legacySettings);
     const schemes: CustomThemeScheme[] = [];
     for (const item of source || []) {
-      if (!item || !item.id || schemes.length >= CustomThemeSchemeStore.MAX_SCHEMES) {
+      if (!item || !item.id) {
         continue;
       }
       const incomingSettings = AppThemeSettingsStore.cloneSettings(item.settings || new AppThemeSettings());
@@ -236,7 +292,8 @@ export class CustomThemeSchemeStore {
         item.id,
         item.name || `自定义主题 ${schemes.length + 1}`,
         incomingSettings,
-        item.revision || 1
+        item.revision || 1,
+        item.author || ''
       ));
     }
     if (schemes.length === 0) {
@@ -263,13 +320,15 @@ export class CustomThemeSchemeStore {
     id: string,
     name: string,
     settings: AppThemeSettings,
-    revision: number
+    revision: number,
+    author: string = ''
   ): CustomThemeScheme {
     const scheme = new CustomThemeScheme();
     scheme.id = id;
     scheme.name = name;
     scheme.revision = Math.max(1, Math.floor(revision || 1));
     scheme.settings = CustomThemeSchemeStore.normalizeSettings(settings);
+    scheme.author = typeof author === 'string' ? author : '';
     return scheme;
   }
 
@@ -298,14 +357,15 @@ export class CustomThemeSchemeStore {
       }
       const schemes: CustomThemeScheme[] = [];
       for (const item of parsed) {
-        if (!item || !item.id || schemes.length >= CustomThemeSchemeStore.MAX_SCHEMES) {
+        if (!item || !item.id) {
           continue;
         }
         schemes.push(CustomThemeSchemeStore.createScheme(
           item.id,
           item.name || `自定义主题 ${schemes.length + 1}`,
           item.settings || new AppThemeSettings(),
-          item.revision || 1
+          item.revision || 1,
+          item.author || ''
         ));
       }
       return schemes;
@@ -323,6 +383,7 @@ export class CustomThemeSchemeStore {
   }
 
   private static cloneScheme(source: CustomThemeScheme): CustomThemeScheme {
-    return CustomThemeSchemeStore.createScheme(source.id, source.name, source.settings, source.revision);
+    return CustomThemeSchemeStore.createScheme(source.id, source.name, source.settings, source.revision,
+      source.author);
   }
 }

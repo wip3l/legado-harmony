@@ -1,0 +1,12 @@
+{
+  "UniformDataTypeDeclarations": [
+    {
+      "TypeId": "io.legado.read.qytheme",
+      "BelongingToTypes": ["general.zip"],
+      "FilenameExtensions": [".qytheme"],
+      "MIMETypes": ["application/vnd.legado.qytheme"],
+      "Description": "Custom theme package",
+      "ReferenceURL": ""
+    }
+  ]
+}

@@ -166,6 +166,7 @@ export class ReaderSettingsStore {
   static readonly KEY_REGEX_FONT_RULES_RAW: string = 'readerRegexFontRulesRaw';
   private static readonly STORE_NAME: string = 'reader_settings';
   private static readonly THEME_PROFILE_PREFIX: string = 'readerThemeProfileV1_';
+  private static readonly LEGACY_CUSTOM_PROFILE_ID: string = 'custom';
   private static cachedSettings: ReaderSettings | null = null;
   private static cachedThemeId: string = '';
   private static readerFontStyleSaveQueue: Promise<void> = Promise.resolve();
@@ -1144,9 +1145,58 @@ export class ReaderSettingsStore {
   }
 
   private static activeThemeId(): string {
+    return ReaderSettingsStore.profileIdFor(AppStorage.get<string>('appThemeId') || 'classic-blue',
+      AppStorage.get<string>('activeCustomThemeSchemeId') || '');
+  }
+
+  /** 当前生效的阅读设置档案 ID：内置主题按主题 ID，自定义主题按方案各一份。 */
+  static activeProfileId(): string {
+    return ReaderSettingsStore.activeThemeId();
+  }
+
+  /** 自定义主题的每套方案各自保存完整排版（含页眉页脚、缩进、强调规则），互不影响。 */
+  static profileIdFor(themeId: string, customSchemeId: string): string {
+    const normalized = ReaderSettingsStore.normalizeThemeProfileId(themeId);
+    const schemeId = (customSchemeId || '').trim();
+    if (normalized !== ReaderSettingsStore.LEGACY_CUSTOM_PROFILE_ID || !schemeId) return normalized;
     return ReaderSettingsStore.normalizeThemeProfileId(
-      AppStorage.get<string>('appThemeId') || 'classic-blue'
-    );
+      `${ReaderSettingsStore.LEGACY_CUSTOM_PROFILE_ID}__${schemeId}`);
+  }
+
+  /** 读取某个档案；不在使用中的档案读存储，都没有时以当前设置为准。用于导出不在使用中的方案。 */
+  static async loadProfile(context: Context, profileId: string): Promise<ReaderSettings> {
+    const id = ReaderSettingsStore.normalizeThemeProfileId(profileId);
+    if (id === ReaderSettingsStore.activeThemeId()) {
+      return await ReaderSettingsStore.load(context);
+    }
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    const profile = await ReaderSettingsStore.loadThemeProfile(store, id);
+    if (profile) {
+      await ReaderSettingsStore.readGlobalFontSettings(store, profile);
+      ReaderSettingsStore.normalizeGlobalFontMode(profile);
+      return profile;
+    }
+    return await ReaderSettingsStore.load(context);
+  }
+
+  /** 为尚未使用过的档案写入完整设置，例如导入的主题方案。 */
+  static async writeProfile(context: Context, profileId: string, settings: ReaderSettings): Promise<void> {
+    const id = ReaderSettingsStore.normalizeThemeProfileId(profileId);
+    if (id === ReaderSettingsStore.activeThemeId()) {
+      throw new Error('不能覆盖正在使用的阅读设置档案');
+    }
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    await store.put(ReaderSettingsStore.themeProfileKey(id), JSON.stringify(ReaderSettingsStore.clone(settings)));
+    await store.flush();
+    CloudSyncChangeTracker.markPreferenceChanged();
+  }
+
+  static async deleteProfile(context: Context, profileId: string): Promise<void> {
+    const id = ReaderSettingsStore.normalizeThemeProfileId(profileId);
+    if (id === ReaderSettingsStore.activeThemeId() || id === ReaderSettingsStore.LEGACY_CUSTOM_PROFILE_ID) return;
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    await store.delete(ReaderSettingsStore.themeProfileKey(id));
+    await store.flush();
   }
 
   private static normalizeThemeProfileId(themeId: string): string {
@@ -1176,6 +1226,11 @@ export class ReaderSettingsStore {
     themeId: string): Promise<ReaderSettings | null> {
     const raw = await store.get(ReaderSettingsStore.themeProfileKey(themeId), '');
     if (typeof raw !== 'string' || !raw.trim()) {
+      // 方案独立排版之前，所有自定义方案共用 custom 档案；方案第一次使用时从它复制一份。
+      const normalized = ReaderSettingsStore.normalizeThemeProfileId(themeId);
+      if (normalized.startsWith(`${ReaderSettingsStore.LEGACY_CUSTOM_PROFILE_ID}__`)) {
+        return await ReaderSettingsStore.loadThemeProfile(store, ReaderSettingsStore.LEGACY_CUSTOM_PROFILE_ID);
+      }
       return null;
     }
     try {

@@ -7,6 +7,7 @@ import { BookshelfDisplaySettingsStore } from '../utils/BookshelfDisplaySettings
 import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore';
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
+import { CustomThemeSchemeStore } from '../utils/CustomThemeSchemeStore';
 import { GlassSettingsStore } from '../utils/GlassSettingsStore';
 import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { AppIconSettingsStore } from '../utils/AppIconSettingsStore';
@@ -253,7 +254,12 @@ export default class EntryAbility extends UIAbility {
     // Reader preferences and custom font registration are not needed to paint Index/Startup, so the first
     // content does not wait for them. They do wait for the theme: reader settings are kept per theme, and
     // loading before appThemeId is restored would read the default theme's copy (including its global font).
+    // 自定义主题每套方案各有一份阅读设置，读取前先恢复正在使用的方案。
     this.readerBootstrapPromise = appThemePromise.then(() => {
+      return CustomThemeSchemeStore.restoreActiveSchemeId(this.context).catch((e: Error) => {
+        hilog.warn(0x0000, 'testTag', 'Restore custom theme scheme failed: %{public}s', JSON.stringify(e));
+      });
+    }).then(() => {
       return ReaderSettingsStore.load(this.context);
     }).then((settings) => {
       ReaderSettingsStore.applyToStorage(settings);
@@ -388,6 +394,7 @@ export default class EntryAbility extends UIAbility {
     const launchTarget = this.handleLaunchWant(want);
     if (launchTarget && this.mainWindowStage) {
       const targetUrl = launchTarget === 'bookSource' ? 'pages/BookSource' :
+        launchTarget === 'themeImport' ? 'pages/ThemeSettings' :
         (launchTarget === 'audioBook' ? 'pages/AudioBook' : 'pages/Startup');
       this.mainWindowStage.getMainWindow().then((mainWindow: window.Window) => {
         const appRouter = mainWindow.getUIContext().getRouter();
@@ -506,6 +513,12 @@ export default class EntryAbility extends UIAbility {
     const externalUri = this.externalFileUri(want);
     const externalName = this.externalFileNameHint(want, externalUri);
     const externalFormat = externalUri ? this.externalFileFormat(want, externalUri, externalName) : '';
+    if (externalUri && externalFormat === 'qytheme') {
+      AppStorage.setOrCreate('pendingThemeImportUri', externalUri);
+      const nonce = AppStorage.get<number>('pendingThemeImportNonce') || 0;
+      AppStorage.setOrCreate('pendingThemeImportNonce', nonce + 1);
+      return 'themeImport';
+    }
     if (externalUri && externalFormat === 'json') {
       AppStorage.setOrCreate('pendingBookSourceImportUri', externalUri);
       const nonce = AppStorage.get<number>('pendingBookSourceImportNonce') || 0;
@@ -553,6 +566,7 @@ export default class EntryAbility extends UIAbility {
     const extension = this.isSupportedExternalExtension(uriExtension) ? uriExtension : nameExtension;
     if (this.isSupportedExternalExtension(extension)) return extension;
     const type = (want.type || '').toLowerCase();
+    if (type === 'io.legado.read.qytheme') return 'qytheme';
     if (type === 'application/json' || type === 'text/json' || type === 'application/x-json' ||
       type === 'general.json') return 'json';
     if (type === 'general.epub' || type === 'application/epub+zip' ||
@@ -689,7 +703,8 @@ export default class EntryAbility extends UIAbility {
   }
 
   private isSupportedExternalExtension(extension: string): boolean {
-    return extension === 'json' || extension === 'txt' || extension === 'epub' || extension === 'mobi';
+    return extension === 'json' || extension === 'txt' || extension === 'epub' || extension === 'mobi' ||
+      extension === 'qytheme';
   }
 
   private externalFileName(uriOrName: string): string {

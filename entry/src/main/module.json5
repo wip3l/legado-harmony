@@ -131,6 +131,11 @@
                 "scheme": "file",
                 "type": "application/x-mobipocket-ebook",
                 "linkFeature": "FileOpen"
+              },
+              {
+                "scheme": "file",
+                "type": "io.legado.read.qytheme",
+                "linkFeature": "FileOpen"
               }
             ]
           }
