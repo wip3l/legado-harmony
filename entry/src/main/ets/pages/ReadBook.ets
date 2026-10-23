@@ -119,6 +119,10 @@ import {
   ReaderComicSettings,
   ReaderComicSettingsStore
 } from '../core/reader/ReaderComicSettings';
+import {
+  ReaderComicSuperResolution,
+  ReaderComicSuperResolutionAccess
+} from '../core/reader/ReaderComicSuperResolution';
 import { ReaderCustomFontItem, ReaderCustomFontData } from '../core/reader/ReaderSettingsModels';
 import {
   PageTurnPreview,
@@ -274,6 +278,8 @@ struct ReadBookPage {
   @State statusBarSafeHeight: number = 0;
   @StorageProp('statusBarHeight') @Watch('onStoredStatusBarHeightChanged') storedStatusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
+  /** 会员档位变化（登录、开通、到期）时刷新漫画超分的可用状态。 */
+  @StorageProp('accountMembershipSku') readerMembershipSku: string = '';
   // 加密的书源封面解密完成后递增，朗读面板等处的封面重新取到本地文件地址。
   @StorageProp('sourceCoverRevision') sourceCoverRevision: number = 0;
   @State isTtsSpeaking: boolean = false;
@@ -2071,6 +2077,7 @@ struct ReadBookPage {
         pageGap: this.readerComicSettings.pageGap,
         fitScreen: this.readerComicSettings.fit === ReaderComicFit.SCREEN,
         doubleTapZoom: this.readerComicSettings.doubleTapZoom,
+        superResolution: this.isReaderComicSuperResolutionActive(),
         interactive: this.isReaderComicInteractionEnabled(),
         panDistance: this.readerTapSlop,
         transitionY: this.readerComicChapterTransitionY,
@@ -2137,6 +2144,7 @@ struct ReadBookPage {
         dualPage: this.isReaderComicDualPageActive(),
         rightToLeft: this.isReaderComicRightToLeft(),
         doubleTapZoom: this.readerComicSettings.doubleTapZoom,
+        superResolution: this.isReaderComicSuperResolutionActive(),
         surfaceColor: this.readerComicSurfaceColor(),
         textColor: this.readerComicSurfaceTextColor(),
         hintColor: this.readerComicSurfaceHintColor(),
@@ -2573,6 +2581,17 @@ struct ReadBookPage {
     });
   }
 
+  readerComicSuperResolutionAccess(): string {
+    // 读取会员档位只为让档位变化时界面重算；是否有效以账号快照按服务端时间推算为准。
+    const sku = this.readerMembershipSku;
+    return sku !== undefined ? ReaderComicSuperResolution.access() : ReaderComicSuperResolutionAccess.MEMBER_REQUIRED;
+  }
+
+  isReaderComicSuperResolutionActive(): boolean {
+    return this.readerComicSettings.superResolution &&
+      this.readerComicSuperResolutionAccess() === ReaderComicSuperResolutionAccess.READY;
+  }
+
   updateReaderComicSettings(mutate: (settings: ReaderComicSettings) => void): void {
     const next = this.readerComicSettings.copy();
     mutate(next);
@@ -2636,6 +2655,8 @@ struct ReadBookPage {
       preloadCount: this.readerComicSettings.preloadCount,
       infoBar: this.readerComicSettings.infoBar,
       doubleTapZoom: this.readerComicSettings.doubleTapZoom,
+      superResolution: this.readerComicSettings.superResolution,
+      superResolutionAccess: this.readerComicSuperResolutionAccess(),
       themeBackground: this.getBackgroundColor(),
       colors: this.readerComicPanelColors(),
       onBackgroundChange: (value: string): void => {
@@ -2667,6 +2688,15 @@ struct ReadBookPage {
         this.updateReaderComicSettings((settings: ReaderComicSettings): void => {
           settings.doubleTapZoom = checked;
         });
+      },
+      onSuperResolutionChange: (checked: boolean): void => {
+        this.updateReaderComicSettings((settings: ReaderComicSettings): void => {
+          settings.superResolution = checked;
+        });
+      },
+      onOpenMembership: (): void => {
+        this.hideReaderPanels();
+        router.pushUrl({ url: 'pages/AccountCenter' });
       }
     })
   }

@@ -7,6 +7,7 @@ import {
   ReaderComicMode,
   ReaderComicOption
 } from '../../core/reader/ReaderComicSettings';
+import { ReaderComicSuperResolutionAccess } from '../../core/reader/ReaderComicSuperResolution';
 import { ReaderSettingActionRow, ReaderSettingSelectRow, ReaderSettingSwitchRow } from './ReaderSettingRows';
 
 /** 阅读主题下的设置面板配色，由阅读页传入。 */
@@ -219,6 +220,10 @@ export struct ReaderComicDisplaySettingsPanel {
   @Prop preloadCount: number = 5;
   @Prop infoBar: boolean = true;
   @Prop doubleTapZoom: boolean = true;
+  /** 「漫画超分」开关的保存值。 */
+  @Prop superResolution: boolean = false;
+  /** ReaderComicSuperResolutionAccess 的取值。 */
+  @Prop superResolutionAccess: string = ReaderComicSuperResolutionAccess.UNSUPPORTED;
   /** 「跟随主题」色块显示的阅读主题底色。 */
   @Prop themeBackground: string = '#FFFFFF';
   @Prop colors: ReaderComicPanelColors = new ReaderComicPanelColors();
@@ -228,6 +233,42 @@ export struct ReaderComicDisplaySettingsPanel {
   onPreloadCountChange: (value: number) => void = () => {};
   onInfoBarChange: (checked: boolean) => void = () => {};
   onDoubleTapZoomChange: (checked: boolean) => void = () => {};
+  onSuperResolutionChange: (checked: boolean) => void = () => {};
+  onOpenMembership: () => void = () => {};
+
+  @Builder
+  superResolutionRow() {
+    if (this.superResolutionAccess === ReaderComicSuperResolutionAccess.READY) {
+      ReaderSettingSwitchRow({
+        title: '漫画超分',
+        description: '会员专享 · 用本机 AI 把低清图片放大变清晰，处理好后自动替换；只处理正在看的图，会多耗一些电',
+        checked: this.superResolution,
+        textColor: this.colors.textColor,
+        subTextColor: this.colors.subTextColor,
+        onChange: (checked: boolean): void => this.onSuperResolutionChange(checked)
+      })
+    } else if (this.superResolutionAccess === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED) {
+      ReaderSettingActionRow({
+        title: '漫画超分',
+        description: this.superResolution ? '会员已到期，续费后自动恢复' :
+          '会员专享 · 用本机 AI 把低清图片放大变清晰',
+        actionText: '开通会员',
+        textColor: this.colors.textColor,
+        subTextColor: this.colors.subTextColor,
+        buttonColor: this.colors.buttonColor,
+        buttonTextColor: this.colors.buttonTextColor,
+        onAction: (): void => this.onOpenMembership()
+      })
+    } else {
+      ReaderSettingActionRow({
+        title: '漫画超分',
+        description: '会员专享 · 当前系统不支持，需要 API 26 及以上且支持图片超分的设备',
+        actionText: '',
+        textColor: this.colors.textColor,
+        subTextColor: this.colors.subTextColor
+      })
+    }
+  }
 
   build() {
     Column({ space: 18 }) {
@@ -271,6 +312,8 @@ export struct ReaderComicDisplaySettingsPanel {
         colors: this.colors,
         onSelect: (value: string): void => this.onPreloadCountChange(Number(value) || 0)
       })
+
+      this.superResolutionRow()
 
       ReaderSettingSwitchRow({
         title: '双击缩放',

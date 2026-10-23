@@ -4,6 +4,7 @@ import image from '@ohos.multimedia.image';
 import { LocalBookService } from '../../core/book/LocalBookService';
 import { ReaderImageMarker } from '../../core/book/ReaderImageMarker';
 import { ReaderContinuousDataSource, ReaderScrollItem } from '../../core/reader/ReaderDataSources';
+import { ReaderComicSuperResolution } from '../../core/reader/ReaderComicSuperResolution';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
 
@@ -148,6 +149,8 @@ export struct ReaderComicImageItem {
   @Prop hintColor: string = '#99FFFFFF';
   /** 失败图片登记重试入口用的键；为空时失败提示自身响应点击。 */
   @Prop retryKey: string = '';
+  /** 在屏幕上时用端侧超分替换低清原图（会员功能，调用方已判断权限）。 */
+  @Prop @Watch('onSuperResolutionChanged') superResolution: boolean = false;
   retryRegistry: ReaderComicRetryRegistry | null = null;
   /** 服务器拒绝了这张图（多为签名地址过期）。 */
   onDenied: () => void = () => {};
@@ -159,6 +162,15 @@ export struct ReaderComicImageItem {
   @State private denied: boolean = false;
   /** 正文获取时这张图已下载/解密失败：只显示原因，不再加载。 */
   @State private failure: string = '';
+  /** 超分结果地址；叠在原图上，解码完成后淡入，原图留在下面兜底。 */
+  @State private enhancedUri: string = '';
+  @State private enhancedShown: boolean = false;
+  /** 刚换成超分图时在角上短暂提示一下。 */
+  @State private enhancedBadge: boolean = false;
+  private visible: boolean = false;
+  /** 每次重置加一，旧任务的结果作废。 */
+  private enhanceTicket: number = 0;
+  private enhanceAttempted: boolean = false;
   private source: string = '';
   private registeredRetryKey: string = '';
   private readonly retryHandler: () => void = (): void => this.retry();
@@ -174,6 +186,8 @@ export struct ReaderComicImageItem {
   }
 
   aboutToDisappear(): void {
+    this.visible = false;
+    this.enhanceTicket++;
     this.unregisterRetry();
     if (this.registeredReloadKey && this.retryRegistry) {
       this.retryRegistry.unregisterReload(this.registeredReloadKey, this.reloadHandler);
@@ -189,8 +203,52 @@ export struct ReaderComicImageItem {
     this.broken = false;
     this.denied = false;
     this.loaded = false;
+    this.resetEnhancement();
     this.unregisterRetry();
     this.loadToken++;
+  }
+
+  onSuperResolutionChanged(): void {
+    this.resetEnhancement();
+    this.maybeEnhance();
+  }
+
+  private resetEnhancement(): void {
+    this.enhanceTicket++;
+    this.enhanceAttempted = false;
+    this.enhancedUri = '';
+    this.enhancedShown = false;
+    this.enhancedBadge = false;
+  }
+
+  private showEnhancedBadge(): void {
+    if (this.enhancedShown) return;
+    this.enhancedShown = true;
+    this.enhancedBadge = true;
+    const ticket = this.enhanceTicket;
+    setTimeout(() => {
+      if (ticket === this.enhanceTicket) this.enhancedBadge = false;
+    }, 1600);
+  }
+
+  /** 原图显示出来、比例已知且在屏幕上时排队超分，每张图只试一次。 */
+  private maybeEnhance(): void {
+    if (!this.superResolution || !this.visible || !this.loaded || this.broken || this.failure ||
+      this.enhanceAttempted || this.ratio <= 0 || !this.source) return;
+    this.enhanceAttempted = true;
+    const ticket = ++this.enhanceTicket;
+    const source = this.source;
+    const active = (): boolean => this.visible && this.superResolution && ticket === this.enhanceTicket;
+    ReaderComicSuperResolution.enhance(source, vp2px(this.displayWidth()), active).then((uri: string): void => {
+      if (uri && ticket === this.enhanceTicket && this.superResolution) this.enhancedUri = uri;
+    }).catch((_: Error): void => {
+    });
+  }
+
+  /** 图片实际显示宽度（vp）。 */
+  private displayWidth(): number {
+    if (!this.boxed()) return this.imageWidth();
+    return this.ratio > 0 ? Math.min(this.boxWidth, this.boxHeight / this.ratio) : this.boxWidth;
   }
 
   onMarkerChanged(): void {
@@ -204,6 +262,7 @@ export struct ReaderComicImageItem {
     this.loaded = false;
     this.broken = false;
     this.denied = false;
+    this.resetEnhancement();
     this.unregisterRetry();
     if (this.failure) {
       this.ratio = 0;
@@ -316,11 +375,43 @@ export struct ReaderComicImageItem {
                 const ratio = ReaderComicImageSizes.remember(this.source, event.width, event.height);
                 if (ratio > 0 && Math.abs(ratio - this.ratio) >= 0.0001) this.ratio = ratio;
                 this.loaded = true;
+                this.maybeEnhance();
               }
             })
             .onError((error: ImageError) => this.markBroken(error))
             .id(this.retryKey ? ReaderComicImageItem.snapshotId(this.retryKey) : '')
         }, (token: number) => `${token}`)
+
+        if (this.enhancedUri && this.loaded && !this.broken) {
+          Image(this.enhancedUri)
+            .width(this.boxed() ? '100%' : this.imageWidth())
+            .height(this.boxed() ? '100%' : this.imageHeight() + this.overlap())
+            .objectFit(this.boxed() ? ImageFit.Contain : ImageFit.Fill)
+            .draggable(false)
+            .opacity(this.enhancedShown ? 1 : 0)
+            .animation({ duration: 220, curve: Curve.EaseOut })
+            .hitTestBehavior(HitTestMode.None)
+            .onComplete((event) => {
+              if (event && event.width > 0 && event.height > 0) this.showEnhancedBadge();
+            })
+            .onError((_: ImageError) => {
+              this.enhancedUri = '';
+              this.enhancedShown = false;
+            })
+
+          Text('AI 超分')
+            .fontSize(AppFontSize.CAPTION)
+            .fontColor('#FFFFFF')
+            .backgroundColor('#99000000')
+            .borderRadius(10)
+            .padding({ left: AppSpacing.SM, right: AppSpacing.SM, top: 2, bottom: 2 })
+            .position({ x: '100%', y: 0 })
+            .markAnchor({ x: '100%', y: 0 })
+            .translate({ x: -AppSpacing.SM, y: AppSpacing.SM })
+            .opacity(this.enhancedBadge ? 1 : 0)
+            .animation({ duration: 300, curve: Curve.EaseOut })
+            .hitTestBehavior(HitTestMode.None)
+        }
 
         if (this.broken) {
           Column({ space: AppSpacing.SM }) {
@@ -356,6 +447,18 @@ export struct ReaderComicImageItem {
     .width(this.boxed() ? this.boxWidth : '100%')
     .height(this.boxed() ? this.boxHeight : this.imageHeight() + this.overlap())
     .margin({ top: -this.overlap() })
+    .onVisibleAreaChange([0, 0.01], (isVisible: boolean, ratio: number) => {
+      const visible = isVisible && ratio > 0;
+      if (visible === this.visible) return;
+      this.visible = visible;
+      if (visible) {
+        this.maybeEnhance();
+      } else if (!this.enhancedUri && this.enhanceAttempted) {
+        // 没等到结果就划走：作废排队的任务，下次出现再排。
+        this.enhanceTicket++;
+        this.enhanceAttempted = false;
+      }
+    })
   }
 }
 
@@ -442,6 +545,8 @@ export struct ReaderComicView {
   @Prop viewHeight: number = 0;
   /** 双击放大/还原。关闭后单击不必等待双击判定，响应更快；双指缩放始终可用。 */
   @Prop doubleTapZoom: boolean = true;
+  /** 漫画超分（会员功能）。 */
+  @Prop superResolution: boolean = false;
   @Prop surfaceColor: string = '#000000';
   @Prop textColor: string = '#E6E6E6';
   @Prop hintColor: string = '#99FFFFFF';
@@ -837,6 +942,7 @@ export struct ReaderComicView {
                 pageLabel: `${item.pageIndex + 1}`,
                 hintColor: this.hintColor,
                 retryKey: item.key,
+                superResolution: this.superResolution,
                 retryRegistry: this.retryRegistry,
                 onDenied: (): void => this.onImageDenied(item.chapterIndex)
               })

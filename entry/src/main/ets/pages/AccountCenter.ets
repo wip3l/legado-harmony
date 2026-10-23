@@ -1383,6 +1383,7 @@ struct AccountCenterPage {
       new BenefitCompareRow('专属主题', '曜金藏书 · 手动领取一年', ['—', '—', '—', '—', '✓']),
       new BenefitCompareRow('每月朗读礼包', '标准 / 精品（字）', ['—', '—', '5000\n2500', '8000\n4000', '12000\n6000']),
       new BenefitCompareRow('在线朗读优先排队', '高峰期优先', ['—', '✓', '✓', '✓', '✓']),
+      new BenefitCompareRow('漫画超分', '本机 AI 让低清漫画更清晰', ['—', '✓', '✓', '✓', '✓']),
       new BenefitCompareRow('有效期', '不自动续费', ['—', '1 个月', '12 个月', '永久', '永久'])
     ];
     if (limits) {

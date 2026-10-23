@@ -77,6 +77,8 @@ export class ReaderComicSettings {
   dualPage: boolean = true;
   /** 网络图片向后预先下载的张数。 */
   preloadCount: number = 5;
+  /** 端侧 AI 超分（会员功能）；会员到期后保留开关值，续费后自动恢复。 */
+  superResolution: boolean = false;
 
   copy(): ReaderComicSettings {
     const next = new ReaderComicSettings();
@@ -89,6 +91,7 @@ export class ReaderComicSettings {
     next.doubleTapZoom = this.doubleTapZoom;
     next.dualPage = this.dualPage;
     next.preloadCount = this.preloadCount;
+    next.superResolution = this.superResolution;
     return next;
   }
 
@@ -102,7 +105,8 @@ export class ReaderComicSettings {
       'infoBar': this.infoBar,
       'doubleTapZoom': this.doubleTapZoom,
       'dualPage': this.dualPage,
-      'preloadCount': this.preloadCount
+      'preloadCount': this.preloadCount,
+      'superResolution': this.superResolution
     };
     return JSON.stringify(record);
   }
@@ -122,6 +126,7 @@ export class ReaderComicSettings {
       settings.dualPage = record['dualPage'] !== false;
       settings.preloadCount = ReaderComicSettings.nearest(Number(record['preloadCount']),
         ReaderComicSettings.PRELOAD_COUNTS, 5);
+      settings.superResolution = record['superResolution'] === true;
     } catch (_) {
     }
     return settings;

@@ -30,6 +30,8 @@ export struct ReaderComicPagedView {
   @Prop @Watch('onLayoutChanged') dualPage: boolean = false;
   @Prop rightToLeft: boolean = false;
   @Prop doubleTapZoom: boolean = true;
+  /** 漫画超分（会员功能）。 */
+  @Prop superResolution: boolean = false;
   @Prop surfaceColor: string = '#000000';
   @Prop textColor: string = '#E6E6E6';
   @Prop hintColor: string = '#99FFFFFF';
@@ -467,6 +469,7 @@ export struct ReaderComicPagedView {
         pageLabel: `${pageIndex + 1}`,
         hintColor: this.hintColor,
         retryKey: `${chapterIndex}_${pageIndex}`,
+        superResolution: this.superResolution,
         retryRegistry: this.retryRegistry,
         onDenied: (): void => this.onImageDenied(chapterIndex)
       })

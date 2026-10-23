@@ -140,13 +140,16 @@ export struct ReaderSettingActionRow {
       })
         .layoutWeight(1)
 
-      Button(this.actionText)
-        .height(34)
-        .fontSize(AppFontSize.BODY)
-        .backgroundColor(this.buttonColor)
-        .fontColor(this.buttonTextColor)
-        .margin({ left: AppSpacing.LG })
-        .onClick(() => this.onAction())
+      // 没有按钮文字时只显示说明（如功能不可用）。
+      if (this.actionText) {
+        Button(this.actionText)
+          .height(34)
+          .fontSize(AppFontSize.BODY)
+          .backgroundColor(this.buttonColor)
+          .fontColor(this.buttonTextColor)
+          .margin({ left: AppSpacing.LG })
+          .onClick(() => this.onAction())
+      }
     }
     .width('100%')
     .constraintSize({ minHeight: 56 })

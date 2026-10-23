@@ -387,6 +387,7 @@ struct MemberBenefitsPage {
         router.pushUrl({ url: 'pages/ThemeSettings' });
       })
       this.benefitRow($r('sys.symbol.speaker_wave_2'), '在线朗读优先排队', '高峰期优先 · 已生效', true, undefined)
+      this.benefitRow($r('sys.symbol.picture'), '漫画超分', '漫画阅读 → 画面设置中开启', true, undefined)
       this.benefitRow($r('sys.symbol.arrow_2_circlepath'), '超大书源同步', this.largeSourceSyncText(), true, undefined)
       if (this.isSuperMember()) {
         this.benefitRow($r('sys.symbol.folder'), '我的云空间', this.cloudSpaceText(), false, () => {

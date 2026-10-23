@@ -63,7 +63,7 @@ export class ReaderComicImageExport {
     let bytes: Uint8Array;
     try {
       bytes = /^data:/i.test(value) ? ReaderComicImageExport.decodeDataUri(value) :
-        await ReaderComicImageExport.download(value);
+        await ReaderComicImageExport.downloadImage(value);
     } catch (error) {
       if (!snapshot) throw error as Error;
       console.warn(`[ReaderComicExport] 下载原图失败，改用屏幕截取: ${(error as Error)?.message || error}`);
@@ -95,7 +95,8 @@ export class ReaderComicImageExport {
     }
   }
 
-  private static async download(url: string): Promise<Uint8Array> {
+  /** 带浏览器标识下载网络图片；超分也用它取原图。 */
+  static async downloadImage(url: string): Promise<Uint8Array> {
     const request = http.createHttp();
     try {
       const response = await request.request(url, {
