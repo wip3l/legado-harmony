@@ -112,10 +112,19 @@ struct SettingsPage {
   private readerEyePermissionRequestSerial: number = 0;
   /** 本页已注册过的字体：文件路径 -> 注册得到的 fontFamily。 */
   private registeredFontFamilies: Map<string, string> = new Map();
+  /** 第一层（空串）放小说和漫画共用的设置；SECTION_NOVEL 为小说子页（同一页面按参数显示）。 */
+  private section: string = '';
+  private static readonly SECTION_NOVEL: string = 'novel';
 
   // 设置和字体只在 onPageShow 里读：首次进入时它紧跟 aboutToAppear 执行，两处都读会把同样的活做两遍。
   aboutToAppear() {
+    const params = router.getParams() as Record<string, string> | undefined;
+    this.section = params?.['section'] === SettingsPage.SECTION_NOVEL ? SettingsPage.SECTION_NOVEL : '';
     this.loadThemeMode();
+  }
+
+  isNovelSection(): boolean {
+    return this.section === SettingsPage.SECTION_NOVEL;
   }
 
   onPageShow(): void {
@@ -158,8 +167,12 @@ struct SettingsPage {
 
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
-      PageScaffold({ title: '阅读设置', bottomInset: 0, content: () => {
-        this.pageContent()
+      PageScaffold({ title: this.isNovelSection() ? '小说设置' : '阅读设置', bottomInset: 0, content: () => {
+        if (this.isNovelSection()) {
+          this.novelContent()
+        } else {
+          this.pageContent()
+        }
       } })
 
     }
@@ -169,9 +182,10 @@ struct SettingsPage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
+  /** 第一层：小说和漫画共用的设置，以及两类书各自的入口。 */
   @Builder
   pageContent() {
-    this.sectionTitle('App 配色')
+    this.sectionTitle('外观')
     Column() {
       this.appThemeOptions()
     }
@@ -181,6 +195,71 @@ struct SettingsPage {
     .clip(true)
     .backgroundColor(this.cardColor())
 
+    this.sectionTitle('操作')
+    Column() {
+      this.tapZoneSettingItem()
+      this.selectItem('屏幕方向', '阅读时的屏幕方向',
+        this.screenOrientationOptions(), this.screenOrientationSelectedIndex(), (index: number) => {
+          this.setReaderScreenOrientationByIndex(index);
+        }, 'settings_screen_orientation_select')
+      SettingSwitchRow({
+        title: '音量键翻页',
+        description: '音量上/下键翻到上一页/下一页，条漫为翻一屏',
+        isOn: this.readerVolumeTurnPage,
+        showDivider: false,
+        onChange: (value: boolean) => {
+          this.setReaderVolumeTurnPage(value);
+        }
+      })
+    }
+    .width('calc(100% - 24vp)')
+    .margin({ left: AppSpacing.LG, right: AppSpacing.LG })
+    .borderRadius(ThemeRuntime.cardRadius())
+    .clip(true)
+    .backgroundColor(this.cardColor())
+
+    this.sectionTitle('其他')
+    Column() {
+      this.selectItem('亮屏时间设置', '无操作达到所选时长后恢复系统息屏',
+        this.screenTimeoutOptions(), this.screenTimeoutSelectedIndex(), (index: number) => {
+          this.setReaderScreenTimeoutByIndex(index);
+        }, 'settings_screen_timeout_select')
+      this.preloadSettingPanel()
+    }
+    .width('calc(100% - 24vp)')
+    .margin({ left: AppSpacing.LG, right: AppSpacing.LG })
+    .borderRadius(ThemeRuntime.cardRadius())
+    .clip(true)
+    .backgroundColor(this.cardColor())
+
+    this.sectionTitle('分类设置')
+    Column() {
+      SettingNavRow({
+        title: '小说',
+        description: '排版、背景、翻页',
+        onTap: () => {
+          router.pushUrl({ url: 'pages/Settings', params: { section: SettingsPage.SECTION_NOVEL } });
+        }
+      })
+      SettingNavRow({
+        title: '漫画',
+        description: '阅读方式、画面、漫画超分',
+        showDivider: false,
+        onTap: () => {
+          router.pushUrl({ url: 'pages/ComicSettings' });
+        }
+      })
+    }
+    .width('calc(100% - 24vp)')
+    .margin({ left: AppSpacing.LG, right: AppSpacing.LG, bottom: AppSpacing.XXL })
+    .borderRadius(ThemeRuntime.cardRadius())
+    .clip(true)
+    .backgroundColor(this.cardColor())
+  }
+
+  /** 小说子页：只对文字书生效的排版、背景、翻页与预览。 */
+  @Builder
+  novelContent() {
     this.sectionTitle('排版')
     Column() {
       this.typographyStepper()
@@ -225,15 +304,12 @@ struct SettingsPage {
     .clip(true)
     .backgroundColor(this.cardColor())
 
-    this.sectionTitle('操作')
+    this.sectionTitle('翻页')
     Column() {
       this.selectItem('翻页方式', '上下滑动、横向滑动或滚动阅读',
         this.pageTurnModeOptions(), this.pageTurnModeSelectedIndex(), (index: number) => {
           this.setReaderPageTurnMode(this.pageTurnModeByIndex(index));
         }, 'settings_page_turn_mode_select')
-      if (this.readerPageTurnMode === 2) {
-        this.tapZoneSettingItem()
-      }
       if (this.readerPageTurnMode === 2) {
         this.selectItem('翻页动画', '翻页时的切换效果',
           this.pageTurnAnimationOptions(), this.pageTurnAnimationSelectedIndex(), (index: number) => {
@@ -251,18 +327,6 @@ struct SettingsPage {
         isOn: this.readerLandscapeDoublePage,
         onChange: (value: boolean) => {
           this.setReaderLandscapeDoublePage(value);
-        }
-      })
-      this.selectItem('屏幕方向', '阅读正文时的屏幕方向',
-        this.screenOrientationOptions(), this.screenOrientationSelectedIndex(), (index: number) => {
-          this.setReaderScreenOrientationByIndex(index);
-        }, 'settings_screen_orientation_select')
-      SettingSwitchRow({
-        title: '音量键翻页',
-        description: '音量上/下键翻到上一页/下一页',
-        isOn: this.readerVolumeTurnPage,
-        onChange: (value: boolean) => {
-          this.setReaderVolumeTurnPage(value);
         }
       })
       SettingSwitchRow({
@@ -285,20 +349,6 @@ struct SettingsPage {
       if (this.readerEyeTurnEnabled) {
         this.eyeTurnCalibrationStatusItem()
       }
-    }
-    .width('calc(100% - 24vp)')
-    .margin({ left: AppSpacing.LG, right: AppSpacing.LG })
-    .borderRadius(ThemeRuntime.cardRadius())
-    .clip(true)
-    .backgroundColor(this.cardColor())
-
-    this.sectionTitle('其他')
-    Column() {
-      this.selectItem('亮屏时间设置', '无操作达到所选时长后恢复系统息屏',
-        this.screenTimeoutOptions(), this.screenTimeoutSelectedIndex(), (index: number) => {
-          this.setReaderScreenTimeoutByIndex(index);
-        }, 'settings_screen_timeout_select')
-      this.preloadSettingPanel()
     }
     .width('calc(100% - 24vp)')
     .margin({ left: AppSpacing.LG, right: AppSpacing.LG })
