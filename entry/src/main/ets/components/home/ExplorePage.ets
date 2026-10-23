@@ -20,7 +20,9 @@ import { ExploreCategoryItem, ExploreCategorySheet } from './ExploreCategoryShee
 import { ExploreCacheHit, ExploreResultCache } from '../../utils/ExploreResultCache';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { WebBookService } from '../../core/book/WebBookService';
-import { SystemDialogSession } from '../../utils/SystemDialogSession';
+import { SourceActionKind, SourceActionMenuList, SourceActionRunner, SourceDeleteConfirm, SourceDeleteDialogParams,
+  SourceGroupTag, SourcePickerKit, SourcePickerSearchField, SourceVariableDialogParams, SourceVariableEditor
+} from './SourcePickerKit';
 import { CoverUrlNormalizer } from '../../utils/CoverUrlNormalizer';
 import { ExploreSourceOptionDataSource, ExploreMetadataTask } from '../../core/book/ShelfDataSources';
 import { AppFontSize } from '../../theme/AppFontSize';
@@ -60,17 +62,8 @@ export struct ExplorePage {
   @State showExploreSourceActionMenu: boolean = false;
   @State actionExploreSourceUrl: string = '';
   @State actionExploreSourceNative: boolean = false;
-  private exploreSourceVariableDialogSession: SystemDialogSession = new SystemDialogSession();
-  @State showExploreSourceVariableDialog: boolean = false;
-  @State exploreSourceVariableUrl: string = '';
-  @State exploreSourceVariableName: string = '';
-  @State exploreSourceVariableValue: string = '';
-  @State exploreSourceVariableComment: string = '';
-  @State savingExploreSourceVariable: boolean = false;
-  private exploreSourceDeleteDialogSession: SystemDialogSession = new SystemDialogSession();
-  @State showExploreSourceDeleteDialog: boolean = false;
-  @State exploreSourceDeleteUrl: string = '';
-  @State exploreSourceDeleteName: string = '';
+  /** 书源地址到显示名（同名书源补地址）的对照，书源列表加载时重算。 */
+  private exploreSourceDisplayNames: Map<string, string> = new Map<string, string>();
   @State exploreContextMenuX: number = 16;
   @State exploreContextMenuY: number = 96;
   @State exploreSourceFilterInput: string = '';
@@ -142,7 +135,7 @@ export struct ExplorePage {
         this.clearExploreSourceFilter();
       }
       this.closeExploreSourceActions();
-      this.closeExploreSourceVariableEditor();
+      SourceActionRunner.closeVariableEditor(this.getUIContext());
     }
   }
 
@@ -211,6 +204,7 @@ export struct ExplorePage {
       if (!this.isCurrentExploreLoad(loadVersion)) return;
       // 数据库查询已经按书源管理中的 customOrder 排序，同时只会返回已启用的书源。
       this.sourceOptions = sourceOptions;
+      this.rebuildExploreSourceDisplayNames(sourceOptions);
       this.exploreSourceGroups = this.buildExploreSourceGroups();
       if (this.activeExploreSourceGroup !== '__all__' &&
         !this.exploreSourceGroups.includes(this.activeExploreSourceGroup)) {
@@ -717,29 +711,13 @@ export struct ExplorePage {
   @Builder
   exploreSourcePickerContent() {
     Column({ space: AppSpacing.XS }) {
-      Row({ space: AppSpacing.SM }) {
-        SymbolGlyph($r('sys.symbol.magnifyingglass'))
-          .fontSize(16)
-          .fontColor([this.secondaryTextColor()])
-        TextInput({ placeholder: '搜索书源名称、地址或分组', text: this.exploreSourceFilterInput })
-          .fontSize(AppFontSize.BODY)
-          .fontColor(this.primaryTextColor())
-          .placeholderColor(this.secondaryTextColor())
-          .placeholderFont({ size: AppFontSize.BODY })
-          .layoutWeight(1)
-          .height(36)
-          .padding(0)
-          .backgroundColor(Color.Transparent)
-          .onChange((value: string) => {
-            this.exploreSourceFilterInput = value;
-            this.applyExploreSourceFilter();
-          })
-      }
-      .width('100%')
-      .height(40)
-      .padding({ left: 12, right: 12 })
-      .borderRadius(this.exploreMenuItemRadius())
-      .backgroundColor(ThemeRuntime.softFillColor(this.appDarkMode))
+      SourcePickerSearchField({
+        text: this.exploreSourceFilterInput,
+        onTextChange: (value: string): void => {
+          this.exploreSourceFilterInput = value;
+          this.applyExploreSourceFilter();
+        }
+      })
 
       if (this.exploreSourceGroups.length > 1) {
         this.exploreSourceGroupTabs()
@@ -766,22 +744,14 @@ export struct ExplorePage {
                   .layoutWeight(1)
 
                 if (this.activeExploreSourceGroup === '__all__') {
-                  Text(this.exploreSourceGroupLabel(option.sourceGroup))
-                    .fontSize(AppFontSize.MICRO)
-                    .fontColor(this.secondaryTextColor())
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .constraintSize({ maxWidth: 68 })
-                    .padding({ left: AppSpacing.SM, right: AppSpacing.SM, top: AppSpacing.XXS, bottom: AppSpacing.XXS })
-                    .borderRadius(ThemeRuntime.mediumRadius())
-                    .backgroundColor(this.inputColor())
+                  SourceGroupTag({ label: this.exploreSourceGroupLabel(option.sourceGroup) })
                     .margin({ left: AppSpacing.MD })
                 }
 
                 if (option.sourceUrl === this.selectedSourceUrl) {
-                  Text('✓')
-                    .fontSize(AppFontSize.BODY_LARGE)
-                    .fontColor(this.accentColor())
+                  SymbolGlyph($r('sys.symbol.checkmark'))
+                    .fontSize(18)
+                    .fontColor([this.accentColor()])
                     .margin({ left: AppSpacing.MD })
                 }
               }
@@ -835,85 +805,13 @@ export struct ExplorePage {
         .onClick(() => this.closeExploreSourceActions())
 
       Column() {
-        Row() {
-          SymbolGlyph($r('sys.symbol.arrow_right_up_and_square'))
-            .fontSize(19)
-            .fontColor([this.primaryTextColor()])
-            .width(34)
-          Text('登录')
-            .fontSize(AppFontSize.BODY_LARGE)
-            .fontColor(this.primaryTextColor())
-            .layoutWeight(1)
-        }
-        .width('100%')
-        .height(44)
-        .padding({ left: AppSpacing.MD, right: AppSpacing.MD })
-        .onClick(() => this.loginActionExploreSource())
-
-        Row() {
-          SymbolGlyph($r('sys.symbol.list_bullet'))
-            .fontSize(19)
-            .fontColor([this.primaryTextColor()])
-            .width(34)
-          Text('源变量')
-            .fontSize(AppFontSize.BODY_LARGE)
-            .fontColor(this.primaryTextColor())
-            .layoutWeight(1)
-        }
-        .width('100%')
-        .height(44)
-        .padding({ left: AppSpacing.MD, right: AppSpacing.MD })
-        .onClick(() => this.openExploreSourceVariableEditor())
-
-        if (this.actionExploreSourceNative) {
-          Row() {
-            SymbolGlyph($r('sys.symbol.gearshape'))
-              .fontSize(19)
-              .fontColor([this.primaryTextColor()])
-              .width(34)
-            Text('书源设置')
-              .fontSize(AppFontSize.BODY_LARGE)
-              .fontColor(this.primaryTextColor())
-              .layoutWeight(1)
+        SourceActionMenuList({
+          isNative: this.actionExploreSourceNative,
+          onAction: (kind: string): void => {
+            this.runExploreSourceAction(kind);
           }
-          .width('100%')
-          .height(44)
-          .padding({ left: AppSpacing.MD, right: AppSpacing.MD })
-          .onClick(() => this.openExploreSourceSettings())
-        }
-
-        Row() {
-          SymbolGlyph($r('sys.symbol.square_and_pencil'))
-            .fontSize(19)
-            .fontColor([this.primaryTextColor()])
-            .width(34)
-          Text('编辑')
-            .fontSize(AppFontSize.BODY_LARGE)
-            .fontColor(this.primaryTextColor())
-            .layoutWeight(1)
-        }
-        .width('100%')
-        .height(44)
-        .padding({ left: AppSpacing.MD, right: AppSpacing.MD })
-        .onClick(() => this.editActionExploreSource())
-
-        Row() {
-          SymbolGlyph($r('sys.symbol.trash'))
-            .fontSize(19)
-            .fontColor([ThemeRuntime.dangerColor(this.appDarkMode)])
-            .width(34)
-          Text('删除')
-            .fontSize(AppFontSize.BODY_LARGE)
-            .fontColor(ThemeRuntime.dangerColor(this.appDarkMode))
-            .layoutWeight(1)
-        }
-        .width('100%')
-        .height(44)
-        .padding({ left: AppSpacing.MD, right: AppSpacing.MD })
-        .onClick(() => this.deleteActionExploreSource())
+        })
       }
-      .width(132)
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
       .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
       .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
       .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
@@ -922,140 +820,13 @@ export struct ExplorePage {
       .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'),
         color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'),
         offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: this.exploreContextMenuLeft(132),
-        y: this.exploreContextMenuTop(this.actionExploreSourceNative ? 236 : 192) })
+      .position({ x: this.exploreContextMenuLeft(SourceActionMenuList.WIDTH),
+        y: this.exploreContextMenuTop(SourceActionMenuList.menuHeight(this.actionExploreSourceNative)) })
     }
     .width('100%')
     .height('100%')
     .zIndex(12)
   }
-
-  @Builder
-  exploreSourceVariableDialogContent() {
-    Column({ space: AppSpacing.LG }) {
-      Text('编辑源变量')
-        .fontSize(AppFontSize.TITLE)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(this.primaryTextColor())
-        .width('100%')
-        .textAlign(TextAlign.Center)
-
-      Text(this.exploreSourceVariableName || this.exploreSourceVariableUrl)
-        .fontSize(AppFontSize.BODY)
-        .fontColor(this.secondaryTextColor())
-        .width('100%')
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .textAlign(TextAlign.Center)
-
-      if (this.exploreSourceVariableComment) {
-        Text(this.exploreSourceVariableComment)
-          .fontSize(AppFontSize.CAPTION)
-          .lineHeight(18)
-          .fontColor(this.secondaryTextColor())
-          .width('100%')
-          .padding(AppSpacing.MD)
-          .borderRadius(ThemeRuntime.mediumRadius())
-          .backgroundColor(this.inputColor())
-      }
-
-      TextArea({
-        text: this.exploreSourceVariableValue,
-        placeholder: this.exploreSourceVariableComment || '请输入书源变量'
-      })
-        .width('100%')
-        .height(180)
-        .fontSize(AppFontSize.BODY)
-        .fontColor(this.primaryTextColor())
-        .placeholderColor(this.secondaryTextColor())
-        .backgroundColor(this.inputColor())
-        .borderRadius(ThemeRuntime.mediumRadius())
-        .padding(AppSpacing.LG)
-        .enabled(!this.savingExploreSourceVariable)
-        .onChange((value: string) => {
-          this.exploreSourceVariableValue = value;
-        })
-
-      Row({ space: AppSpacing.MD }) {
-        Button('取消')
-          .layoutWeight(1)
-          .height(40)
-          .fontColor(this.primaryTextColor())
-          .backgroundColor(this.inputColor())
-          .enabled(!this.savingExploreSourceVariable)
-          .onClick(() => this.closeExploreSourceVariableEditor())
-        Button(this.savingExploreSourceVariable ? '保存中…' : '保存')
-          .layoutWeight(1)
-          .height(40)
-          .fontColor(ThemeRuntime.onAccentColor())
-          .backgroundColor(this.buttonColor())
-          .enabled(!this.savingExploreSourceVariable)
-          .onClick(() => this.saveExploreSourceVariable())
-      }
-      .width('100%')
-    }    .padding(AppSpacing.XL)
-  }
-
-  openExploreSourceVariableDialog(): void {
-    this.showExploreSourceVariableDialog = true;
-    // 保存中禁止蒙层关闭，避免丢入输入。
-    this.exploreSourceVariableDialogSession.open(this.getUIContext(), (): void => {
-      this.exploreSourceVariableDialogContent();
-    }, {
-      autoCancel: false,
-      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
-      warnTag: '显示编辑源变量弹窗失败:'
-    });
-  }
-
-  @Builder
-  exploreSourceDeleteDialogContent() {
-    Column() {
-      Text('删除书源')
-        .fontSize(AppFontSize.SUBTITLE)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(this.primaryTextColor())
-        .width('100%')
-        .textAlign(TextAlign.Center)
-
-      Text(`确定删除“${this.exploreSourceDeleteName || this.exploreSourceDeleteUrl}”吗？删除后不可恢复。`)
-        .fontSize(AppFontSize.BODY)
-        .fontColor(this.secondaryTextColor())
-        .width('100%')
-        .textAlign(TextAlign.Center)
-        .margin({ top: AppSpacing.LG, bottom: AppSpacing.XXL })
-
-      Row({ space: AppSpacing.MD }) {
-        Button('取消')
-          .layoutWeight(1)
-          .height(44)
-          .backgroundColor(this.inputColor())
-          .fontColor(this.primaryTextColor())
-          .onClick(() => this.closeExploreSourceDeleteDialog())
-
-        Button('删除')
-          .layoutWeight(1)
-          .height(44)
-          .backgroundColor('#B71C1C')
-          .fontColor('#FFFFFF')
-          .onClick(() => this.confirmDeleteExploreSource())
-      }
-      .width('100%')
-    }
-    .padding(AppSpacing.XXL)
-  }
-
-  openExploreSourceDeleteDialog(): void {
-    this.showExploreSourceDeleteDialog = true;
-    this.exploreSourceDeleteDialogSession.open(this.getUIContext(), (): void => {
-      this.exploreSourceDeleteDialogContent();
-    }, {
-      autoCancel: true,
-      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
-      warnTag: '显示删除书源弹窗失败:'
-    });
-  }
-
 
   @Builder
   exploreSourceGroupTabs() {
@@ -1546,144 +1317,44 @@ export struct ExplorePage {
     this.actionExploreSourceNative = false;
   }
 
-  openExploreSourceSettings(): void {
+  /** 长按菜单的源变量与删除确认框内容；在本组件里创建，系统对话框才有父节点。 */
+  @Builder
+  sourceVariableDialog(params: SourceVariableDialogParams) {
+    SourceVariableEditor({ params: params })
+  }
+
+  @Builder
+  sourceDeleteDialog(params: SourceDeleteDialogParams) {
+    SourceDeleteConfirm({ params: params })
+  }
+
+  /** 长按菜单的执行与搜索范围面板共用；这里只管发现页自己的刷新。 */
+  runExploreSourceAction(kind: string): void {
     const sourceUrl = this.actionExploreSourceUrl;
-    if (!sourceUrl) return;
-    this.closeExploreSourceActions();
-    router.pushUrl({
-      url: 'pages/NativeSourceSettings',
-      params: { bookSourceUrl: sourceUrl }
-    });
-  }
-
-  async openExploreSourceVariableEditor(): Promise<void> {
-    const sourceUrl = this.actionExploreSourceUrl;
-    if (!sourceUrl) return;
-    this.closeExploreSourceActions();
-    try {
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      const source = await db.getBookSource(sourceUrl);
-      if (!source) {
-        HdsFeedback.showToast('书源不存在');
-        return;
-      }
-      this.exploreSourceVariableUrl = source.bookSourceUrl;
-      this.exploreSourceVariableName = source.bookSourceName || source.bookSourceUrl;
-      this.exploreSourceVariableValue = source.variable || '';
-      this.exploreSourceVariableComment = (source.variableComment || '').trim();
-      this.openExploreSourceVariableDialog();
-    } catch (error) {
-      console.error('读取书源变量失败:', error);
-      HdsFeedback.showToast('读取书源变量失败');
-    }
-  }
-
-  closeExploreSourceVariableEditor(): void {
-    if (this.savingExploreSourceVariable) return;
-    this.showExploreSourceVariableDialog = false;
-    this.exploreSourceVariableDialogSession.close(this.getUIContext());
-    this.exploreSourceVariableUrl = '';
-    this.exploreSourceVariableName = '';
-    this.exploreSourceVariableValue = '';
-    this.exploreSourceVariableComment = '';
-  }
-
-  async saveExploreSourceVariable(): Promise<void> {
-    const sourceUrl = this.exploreSourceVariableUrl;
-    if (!sourceUrl || this.savingExploreSourceVariable) return;
-    this.savingExploreSourceVariable = true;
-    try {
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      await db.updateBookSourceVariable(sourceUrl, this.exploreSourceVariableValue);
-      await ExploreResultCache.clearSource(getContext(this), sourceUrl);
-      this.savingExploreSourceVariable = false;
-      this.closeExploreSourceVariableEditor();
-      HdsFeedback.showToast('源变量已保存');
-      if (this.isActive && !this.isLoading && this.selectedSourceUrl === sourceUrl) {
-        await this.loadEntries('', true);
-      }
-    } catch (error) {
-      this.savingExploreSourceVariable = false;
-      console.error('保存书源变量失败:', error);
-      HdsFeedback.showToast('保存源变量失败');
-    }
-  }
-
-  editActionExploreSource(): void {
-    const sourceUrl = this.actionExploreSourceUrl;
-    if (!sourceUrl) return;
     const isNative = this.actionExploreSourceNative;
     this.closeExploreSourceActions();
-    router.pushUrl({
-      url: isNative ? 'pages/NativeSourceEdit' : 'pages/BookSourceEdit',
-      params: { bookSourceUrl: sourceUrl }
-    });
-  }
-
-  loginActionExploreSource(): void {
-    const sourceUrl = this.actionExploreSourceUrl;
     if (!sourceUrl) return;
-    this.closeExploreSourceActions();
-    router.pushUrl({
-      url: 'pages/BookSource',
-      params: { openLoginSourceUrl: sourceUrl }
-    });
-  }
-
-  async deleteActionExploreSource(): Promise<void> {
-    const sourceUrl = this.actionExploreSourceUrl;
-    if (!sourceUrl) return;
-    this.closeExploreSourceActions();
-    try {
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      const source = await db.getBookSource(sourceUrl);
-      if (!source) {
-        HdsFeedback.showToast('书源不存在');
-        return;
-      }
-      if (source.isLocked) {
-        HdsFeedback.showToast('锁定的书源不能删除');
-        return;
-      }
-      this.exploreSourceDeleteUrl = source.bookSourceUrl;
-      this.exploreSourceDeleteName = source.bookSourceName || source.bookSourceUrl;
-      this.openExploreSourceDeleteDialog();
-    } catch (error) {
-      console.error('读取书源失败:', error);
-      HdsFeedback.showToast('读取书源失败');
-    }
-  }
-
-  closeExploreSourceDeleteDialog(): void {
-    this.showExploreSourceDeleteDialog = false;
-    this.exploreSourceDeleteDialogSession.close(this.getUIContext());
-    this.exploreSourceDeleteUrl = '';
-    this.exploreSourceDeleteName = '';
-  }
-
-  async confirmDeleteExploreSource(): Promise<void> {
-    const sourceUrl = this.exploreSourceDeleteUrl;
-    if (!sourceUrl) return;
-    this.showExploreSourceDeleteDialog = false;
-    this.exploreSourceDeleteDialogSession.close(this.getUIContext());
-    try {
-      const db = AppDatabase.getInstance();
-      await db.initWithContext(getContext(this));
-      await db.deleteBookSource(sourceUrl);
-      await ExploreResultCache.clearSource(getContext(this), sourceUrl);
-      this.exploreSourceDeleteUrl = '';
-      this.exploreSourceDeleteName = '';
-      HdsFeedback.showToast('书源已删除');
-      // 删除后重载发现页：若删的是当前源，loadEntries 会自动回退到首个可用源。
-      if (this.isActive) {
-        await this.loadEntries('', true);
-      }
-    } catch (e) {
-      console.error('删除书源失败:', e);
-      HdsFeedback.showToast('删除书源失败');
+    if (SourceActionRunner.isNavigation(kind)) {
+      SourceActionRunner.navigate(kind, sourceUrl, isNative);
+    } else if (kind === SourceActionKind.VARIABLE) {
+      SourceActionRunner.openVariableEditor(this.getUIContext(), sourceUrl,
+        (dialogParams: SourceVariableDialogParams): CustomBuilder => (): void => {
+          this.sourceVariableDialog(dialogParams);
+        }, (): void => {
+        if (this.isActive && !this.isLoading && this.selectedSourceUrl === sourceUrl) {
+          this.loadEntries('', true);
+        }
+      });
+    } else if (kind === SourceActionKind.DELETE) {
+      SourceActionRunner.confirmDelete(this.getUIContext(), sourceUrl,
+        (dialogParams: SourceDeleteDialogParams): CustomBuilder => (): void => {
+          this.sourceDeleteDialog(dialogParams);
+        }, (): void => {
+        // 删除后重载发现页：若删的是当前源，loadEntries 会自动回退到首个可用源。
+        if (this.isActive) {
+          this.loadEntries('', true);
+        }
+      });
     }
   }
 
@@ -1719,27 +1390,32 @@ export struct ExplorePage {
     this.exploreSourceDataSource.replace(this.getFilteredExploreSourceOptions());
   }
 
+  rebuildExploreSourceDisplayNames(options: ExploreSourceOption[]): void {
+    const names = SourcePickerKit.displayNames(
+      options.map((option: ExploreSourceOption): string => option.sourceName),
+      options.map((option: ExploreSourceOption): string => option.sourceUrl));
+    const result: Map<string, string> = new Map<string, string>();
+    options.forEach((option: ExploreSourceOption, index: number): void => {
+      result.set(option.sourceUrl || option.sourceName, names[index]);
+    });
+    this.exploreSourceDisplayNames = result;
+  }
+
   exploreSourceDisplayName(option: ExploreSourceOption): string {
-    const name = option.sourceName || '未命名书源';
-    const duplicateCount = this.sourceOptions.filter((candidate: ExploreSourceOption): boolean =>
-      (candidate.sourceName || '未命名书源') === name).length;
-    if (duplicateCount <= 1) return name;
-    const sourceKey = (option.sourceUrl || '无地址').replace(/^https?:\/\//i, '').replace(/\/$/, '');
-    return `${name} · ${sourceKey}`;
+    return this.exploreSourceDisplayNames.get(option.sourceUrl || option.sourceName) ||
+      option.sourceName || '未命名书源';
   }
 
   buildExploreSourceGroups(): string[] {
-    const groups: string[] = [];
+    const groups: Set<string> = new Set<string>();
     for (const option of this.sourceOptions) {
-      const group = this.exploreSourceGroupLabel(option.sourceGroup);
-      if (!groups.includes(group)) groups.push(group);
+      groups.add(this.exploreSourceGroupLabel(option.sourceGroup));
     }
-    return groups;
+    return SourcePickerKit.sortGroups(Array.from(groups));
   }
 
   exploreSourceGroupLabel(group: string): string {
-    const normalized = (group || '').trim();
-    return normalized || '未分组';
+    return SourcePickerKit.groupLabel(group);
   }
 
   selectExploreSourceGroup(groupKey: string): void {

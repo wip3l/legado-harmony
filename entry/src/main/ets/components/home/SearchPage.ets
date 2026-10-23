@@ -5,6 +5,7 @@ import { AppDatabase } from '../../model/data/AppDatabase';
 import { SearchCoordinator, SearchCallback, SearchProgress } from '../../core/book/SearchCoordinator';
 import { SearchBookResultList } from '../../components/book/SearchBookResultList';
 import { SearchSourceSheet, SearchSourceSheetSession, confirmDiscardSearchSourceChanges } from './SearchSourceSheet';
+import { SourcePickerKit } from './SourcePickerKit';
 import { ImmersiveMaterialSurface } from '../../components/ImmersiveMaterialSurface';
 import { GlassTagModifier, ImmersiveMaterialRuntime, ImmersiveTagModifier } from '../../utils/ImmersiveMaterialRuntime';
 import { CollapsingHeader } from '../../utils/CollapsingHeader';
@@ -285,8 +286,7 @@ export struct SearchPage {
     this.searchSourceUrlList = urls;
     this.searchSourceUrlSet = urlSet;
     this.searchSourceGroupOf = groupOf;
-    this.searchSourceGroupOrder = Array.from(groupSet)
-      .sort((left: string, right: string): number => left.localeCompare(right));
+    this.searchSourceGroupOrder = SourcePickerKit.sortGroups(Array.from(groupSet));
   }
 
   async openSearchSourcePicker(): Promise<void> {
@@ -360,6 +360,9 @@ export struct SearchPage {
       },
       onCancel: (): void => {
         this.showSearchSourcePicker = false;
+      },
+      onSourcesChanged: (): void => {
+        this.loadSearchableSources();
       }
     })
   }
@@ -1502,8 +1505,7 @@ export struct SearchPage {
   }
 
   normalizeSourceGroup(source: BookSource): string {
-    const group = (source.bookSourceGroup || '').trim();
-    return group || '未分组';
+    return SourcePickerKit.groupLabel(source.bookSourceGroup);
   }
 
   applyResultLayout(layout: string): void {

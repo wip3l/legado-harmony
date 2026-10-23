@@ -1,10 +1,13 @@
 import { promptAction } from '@kit.ArkUI';
-import { BookSource } from '@legado/sourceengine';
+import { BookSource, NativeSourceService } from '@legado/sourceengine';
 import { SearchSourceIndexDataSource } from '../../core/book/ShelfDataSources';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
 import { ImmersiveBackButton } from '../ImmersiveBackButton';
+import { SourceActionKind, SourceActionMenuList, SourceActionRunner, SourceDeleteConfirm, SourceDeleteDialogParams,
+  SourceGroupTag, SourcePickerKit, SourcePickerSearchField, SourceVariableDialogParams, SourceVariableEditor
+} from './SourcePickerKit';
 
 /** 搜索页与面板共享的会话：下滑、点遮罩或返回收起时，搜索页靠它判断有没有没保存的勾选。 */
 export class SearchSourceSheetSession {
@@ -55,13 +58,19 @@ export struct SearchSourceSheet {
   };
   onCancel: () => void = (): void => {
   };
+  /** 长按菜单删掉书源后通知搜索页重新加载书源。 */
+  onSourcesChanged: () => void = (): void => {
+  };
   @State keyword: string = '';
+  /** 左栏分组；删掉书源后可能少一组，所以是状态变量。 */
+  @State groupList: string[] = [];
   @State activeKey: string = SearchSourceSheet.ALL_KEY;
   /** 勾选集合不是状态变量，改动后加一，让读到它的勾选框和计数跟着刷新。 */
   @State selectionVersion: number = 0;
   @State visibleCount: number = 0;
   private selected: Set<string> = new Set<string>();
   private searchTexts: string[] = [];
+  private displayNames: string[] = [];
   private matched: boolean[] = [];
   private visibleIndexes: number[] = [];
   /** 进“已选”时记下当时选中的书源，取消勾选后这一行还留着，方便再勾回来。 */
@@ -75,6 +84,16 @@ export struct SearchSourceSheet {
   private listScroller: ListScroller = new ListScroller();
 
   aboutToAppear(): void {
+    this.groupList = this.groups.slice();
+    this.rebuildSourceTexts();
+    this.selected = new Set<string>(this.initialSelectedUrls);
+    this.session.dirty = false;
+    this.computeMatches();
+    this.recount();
+    this.refreshVisible();
+  }
+
+  rebuildSourceTexts(): void {
     const texts: string[] = [];
     for (let index = 0; index < this.sources.length; index++) {
       const source = this.sources[index];
@@ -82,11 +101,9 @@ export struct SearchSourceSheet {
         .toLowerCase().replace(/\s+/g, ''));
     }
     this.searchTexts = texts;
-    this.selected = new Set<string>(this.initialSelectedUrls);
-    this.session.dirty = false;
-    this.computeMatches();
-    this.recount();
-    this.refreshVisible();
+    this.displayNames = SourcePickerKit.displayNames(
+      this.sources.map((source: BookSource): string => source.bookSourceName),
+      this.sources.map((source: BookSource): string => source.bookSourceUrl));
   }
 
   build() {
@@ -126,7 +143,13 @@ export struct SearchSourceSheet {
       .padding({ left: AppSpacing.XXL, right: AppSpacing.XL, top: AppSpacing.XS, bottom: AppSpacing.MD })
       .alignItems(VerticalAlign.Center)
 
-      this.searchField()
+      SourcePickerSearchField({
+        text: this.keyword,
+        onTextChange: (value: string): void => {
+          this.applyKeyword(value);
+        }
+      })
+        .margin({ left: AppSpacing.XXL, right: AppSpacing.XL, bottom: AppSpacing.MD })
 
       Row() {
         this.groupPane()
@@ -144,45 +167,6 @@ export struct SearchSourceSheet {
   }
 
   @Builder
-  searchField() {
-    Row({ space: AppSpacing.MD }) {
-      SymbolGlyph($r('sys.symbol.magnifyingglass'))
-        .fontSize(18)
-        .fontColor([this.subTextColor()])
-      TextInput({ text: this.keyword, placeholder: '搜索书源名称、地址或分组' })
-        .fontSize(AppFontSize.BODY)
-        .fontColor(this.primaryTextColor())
-        .placeholderColor(this.subTextColor())
-        .layoutWeight(1)
-        .height(38)
-        .padding({ left: 0, right: 0 })
-        .backgroundColor(Color.Transparent)
-        .enterKeyType(EnterKeyType.Search)
-        .onChange((value: string): void => {
-          this.applyKeyword(value);
-        })
-      if (this.keyword) {
-        Text('×')
-          .fontSize(AppFontSize.TITLE)
-          .fontColor(this.subTextColor())
-          .width(32)
-          .height(38)
-          .textAlign(TextAlign.Center)
-          .accessibilityText('清空书源搜索')
-          .onClick((): void => {
-            this.applyKeyword('');
-          })
-      }
-    }
-    .width(`calc(100% - ${AppSpacing.XXL + AppSpacing.XL}vp)`)
-    .height(40)
-    .margin({ left: AppSpacing.XXL, right: AppSpacing.XL, bottom: AppSpacing.MD })
-    .padding({ left: AppSpacing.LG, right: AppSpacing.MD })
-    .borderRadius(20)
-    .backgroundColor(ThemeRuntime.hairlineColor(this.appDarkMode))
-  }
-
-  @Builder
   groupPane() {
     List() {
       ListItem() {
@@ -191,7 +175,7 @@ export struct SearchSourceSheet {
       ListItem() {
         this.groupRow('已选', SearchSourceSheet.SELECTED_KEY)
       }
-      ForEach(this.groups, (group: string) => {
+      ForEach(this.groupList, (group: string) => {
         ListItem() {
           this.groupRow(group, group)
         }
@@ -323,7 +307,7 @@ export struct SearchSourceSheet {
             ListItem() {
               this.sourceRow(index)
             }
-          }, (index: number): string => this.sources[index].bookSourceUrl || `${index}`)
+          }, (index: number): string => `${index}\n${this.sources[index].bookSourceUrl}`)
         }
         .width('100%')
         .layoutWeight(1)
@@ -344,32 +328,39 @@ export struct SearchSourceSheet {
   sourceRow(index: number) {
     Row() {
       this.sourceCheck(this.sources[index].bookSourceUrl)
-      Column({ space: 2 }) {
-        Text(this.sources[index].bookSourceName || this.sources[index].bookSourceUrl)
-          .fontSize(AppFontSize.BODY)
-          .fontColor(this.primaryTextColor())
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        // 跨分组的列表里标出所属分组，单个分组里不重复显示。
-        if (this.activeKey === SearchSourceSheet.ALL_KEY || this.activeKey === SearchSourceSheet.SELECTED_KEY) {
-          Text(this.sourceGroupOf[index] || '')
-            .fontSize(AppFontSize.MICRO)
-            .fontColor(this.subTextColor())
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
+      Text(this.displayNames[index] || this.sources[index].bookSourceUrl)
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.primaryTextColor())
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+        .margin({ left: AppSpacing.MD })
+      // 跨分组的列表里标出所属分组，单个分组里不重复显示；样式与发现页书源下拉一致。
+      if (this.activeKey === SearchSourceSheet.ALL_KEY || this.activeKey === SearchSourceSheet.SELECTED_KEY) {
+        SourceGroupTag({ label: this.sourceGroupOf[index] || '' })
+          .margin({ left: AppSpacing.MD })
       }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-      .margin({ left: AppSpacing.MD })
     }
     .width('100%')
     .height(SearchSourceSheet.ROW_HEIGHT)
     .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
     .alignItems(VerticalAlign.Center)
-    .accessibilityText(this.sources[index].bookSourceName || this.sources[index].bookSourceUrl)
+    .accessibilityText(this.displayNames[index] || this.sources[index].bookSourceUrl)
     .accessibilitySelected(this.isSelected(this.sources[index].bookSourceUrl))
     .onClick(() => this.toggleSource(index))
+    .bindContextMenu(this.sourceActionMenu(index), ResponseType.LongPress)
+  }
+
+  /** 长按书源的操作菜单，条目和执行与发现页书源下拉共用。 */
+  @Builder
+  sourceActionMenu(index: number) {
+    SourceActionMenuList({
+      isNative: NativeSourceService.isNative(this.sources[index]),
+      onAction: (kind: string): void => {
+        ContextMenu.close();
+        this.runSourceAction(index, kind);
+      }
+    })
   }
 
   @Builder
@@ -627,6 +618,64 @@ export struct SearchSourceSheet {
     if (this.selected.size === 0) return;
     this.selected.clear();
     this.markChanged();
+  }
+
+  /** 长按菜单的源变量与删除确认框内容；在本组件里创建，系统对话框才有父节点。 */
+  @Builder
+  sourceVariableDialog(params: SourceVariableDialogParams) {
+    SourceVariableEditor({ params: params })
+  }
+
+  @Builder
+  sourceDeleteDialog(params: SourceDeleteDialogParams) {
+    SourceDeleteConfirm({ params: params })
+  }
+
+  runSourceAction(index: number, kind: string): void {
+    const source = this.sources[index];
+    if (!source || !source.bookSourceUrl) return;
+    const sourceUrl = source.bookSourceUrl;
+    if (SourceActionRunner.isNavigation(kind)) {
+      // 跳到别的页面前先按“完成”收起面板，勾选不会丢，回来也不会留着一个过时的面板。
+      this.done();
+      SourceActionRunner.navigate(kind, sourceUrl, NativeSourceService.isNative(source));
+    } else if (kind === SourceActionKind.VARIABLE) {
+      SourceActionRunner.openVariableEditor(this.getUIContext(), sourceUrl,
+        (dialogParams: SourceVariableDialogParams): CustomBuilder => (): void => {
+          this.sourceVariableDialog(dialogParams);
+        }, (): void => {
+      });
+    } else if (kind === SourceActionKind.DELETE) {
+      SourceActionRunner.confirmDelete(this.getUIContext(), sourceUrl,
+        (dialogParams: SourceDeleteDialogParams): CustomBuilder => (): void => {
+          this.sourceDeleteDialog(dialogParams);
+        }, (url: string): void => {
+        this.removeSource(url);
+        this.onSourcesChanged();
+      });
+    }
+  }
+
+  /** 删掉的书源从面板里移除：重建下标对应的各数组，分组没了就回到“全部”。 */
+  removeSource(url: string): void {
+    const keep: number[] = [];
+    for (let index = 0; index < this.sources.length; index++) {
+      if (this.sources[index].bookSourceUrl !== url) keep.push(index);
+    }
+    if (keep.length === this.sources.length) return;
+    this.sources = keep.map((index: number): BookSource => this.sources[index]);
+    this.sourceGroupOf = keep.map((index: number): string => this.sourceGroupOf[index]);
+    this.groupList = SourcePickerKit.sortGroups(Array.from(new Set<string>(this.sourceGroupOf)));
+    this.selected.delete(url);
+    this.selectedSnapshot.delete(url);
+    if (this.activeKey !== SearchSourceSheet.ALL_KEY && this.activeKey !== SearchSourceSheet.SELECTED_KEY &&
+      !this.groupList.includes(this.activeKey)) {
+      this.activeKey = SearchSourceSheet.ALL_KEY;
+    }
+    this.rebuildSourceTexts();
+    this.computeMatches();
+    this.recount();
+    this.refreshVisible();
   }
 
   done(): void {
