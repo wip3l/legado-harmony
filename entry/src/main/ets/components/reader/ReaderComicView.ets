@@ -6,6 +6,8 @@ import { ReaderImageMarker } from '../../core/book/ReaderImageMarker';
 import { ReaderImageResults } from '../../core/book/ReaderImageResults';
 import { ReaderContinuousDataSource, ReaderScrollItem } from '../../core/reader/ReaderDataSources';
 import { ReaderComicSuperResolution } from '../../core/reader/ReaderComicSuperResolution';
+import { ComicChineseConverter } from '../../core/reader/ComicChineseConverter';
+import { ComicTextLayer, ComicTextPatch } from '../../core/reader/ComicTextTypes';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
 
@@ -152,6 +154,8 @@ export struct ReaderComicImageItem {
   @Prop retryKey: string = '';
   /** 在屏幕上时用端侧超分替换低清原图（会员功能，调用方已判断权限）。 */
   @Prop @Watch('onSuperResolutionChanged') superResolution: boolean = false;
+  /** 在屏幕上时识别图中文字，把繁体改写成简体叠在图上（调用方已判断系统能力）。 */
+  @Prop @Watch('onTextConvertChanged') textConvert: boolean = false;
   retryRegistry: ReaderComicRetryRegistry | null = null;
   /** 服务器拒绝了这张图（多为签名地址过期）。 */
   onDenied: () => void = () => {};
@@ -168,6 +172,12 @@ export struct ReaderComicImageItem {
   @State private enhancedShown: boolean = false;
   /** 刚换成超分图时在角上短暂提示一下。 */
   @State private enhancedBadge: boolean = false;
+  /** 繁→简文字层，坐标按原图像素；叠在原图和超分图之上。 */
+  @State private textPatches: ComicTextPatch[] = [];
+  @State private textImageWidth: number = 0;
+  @State private textImageHeight: number = 0;
+  private textTicket: number = 0;
+  private textAttempted: boolean = false;
   private visible: boolean = false;
   /** 每次重置加一，旧任务的结果作废。 */
   private enhanceTicket: number = 0;
@@ -198,6 +208,7 @@ export struct ReaderComicImageItem {
     this.visible = false;
     this.releasePending();
     this.enhanceTicket++;
+    this.textTicket++;
     this.unregisterRetry();
     if (this.registeredReloadKey && this.retryRegistry) {
       this.retryRegistry.unregisterReload(this.registeredReloadKey, this.reloadHandler);
@@ -214,6 +225,7 @@ export struct ReaderComicImageItem {
     this.denied = false;
     this.loaded = false;
     this.resetEnhancement();
+    this.resetTextLayer();
     this.unregisterRetry();
     this.loadToken++;
   }
@@ -229,6 +241,42 @@ export struct ReaderComicImageItem {
     this.enhancedUri = '';
     this.enhancedShown = false;
     this.enhancedBadge = false;
+  }
+
+  onTextConvertChanged(): void {
+    this.resetTextLayer();
+    this.maybeConvertText();
+  }
+
+  private resetTextLayer(): void {
+    this.textTicket++;
+    this.textAttempted = false;
+    this.textPatches = [];
+    this.textImageWidth = 0;
+    this.textImageHeight = 0;
+  }
+
+  /** 原图显示出来且在屏幕上时排队识别，每张图只试一次；识别不了或没有可改写的字就保持原图。 */
+  private maybeConvertText(): void {
+    if (!this.textConvert || !this.visible || !this.loaded || this.broken || this.failure ||
+      this.textAttempted || this.ratio <= 0 || !this.source) return;
+    this.textAttempted = true;
+    const ticket = ++this.textTicket;
+    const active = (): boolean => this.visible && this.textConvert && ticket === this.textTicket;
+    ComicChineseConverter.layer(getContext(this), this.source, active).then((layer: ComicTextLayer): void => {
+      if (ticket !== this.textTicket || !this.textConvert || layer.imageWidth <= 0 || layer.imageHeight <= 0) return;
+      this.textImageWidth = layer.imageWidth;
+      this.textImageHeight = layer.imageHeight;
+      this.textPatches = layer.patches;
+    }).catch((error: Error): void => {
+      if (ticket === this.textTicket && error?.message) console.warn(`[ComicText] 繁→简未完成: ${error.message}`);
+    });
+  }
+
+  /** 图片实际显示高度（vp）。 */
+  private displayHeight(): number {
+    if (!this.boxed()) return this.imageHeight();
+    return this.ratio > 0 ? this.displayWidth() * this.ratio : this.boxHeight;
   }
 
   private showEnhancedBadge(): void {
@@ -318,6 +366,7 @@ export struct ReaderComicImageItem {
     this.broken = false;
     this.denied = false;
     this.resetEnhancement();
+    this.resetTextLayer();
     this.unregisterRetry();
     if (this.failure) {
       this.ratio = 0;
@@ -431,6 +480,7 @@ export struct ReaderComicImageItem {
                 if (ratio > 0 && Math.abs(ratio - this.ratio) >= 0.0001) this.ratio = ratio;
                 this.loaded = true;
                 this.maybeEnhance();
+                this.maybeConvertText();
               }
             })
             .onError((error: ImageError) => this.markBroken(error))
@@ -466,6 +516,10 @@ export struct ReaderComicImageItem {
             .opacity(this.enhancedBadge ? 1 : 0)
             .animation({ duration: 300, curve: Curve.EaseOut })
             .hitTestBehavior(HitTestMode.None)
+        }
+
+        if (this.textPatches.length > 0 && this.loaded && !this.broken) {
+          this.textLayerOverlay()
         }
 
         if (this.broken) {
@@ -509,12 +563,56 @@ export struct ReaderComicImageItem {
       this.syncPendingVisible();
       if (visible) {
         this.maybeEnhance();
-      } else if (!this.enhancedUri && this.enhanceAttempted) {
+        this.maybeConvertText();
+      } else {
         // 没等到结果就划走：作废排队的任务，下次出现再排。
-        this.enhanceTicket++;
-        this.enhanceAttempted = false;
+        if (!this.enhancedUri && this.enhanceAttempted) {
+          this.enhanceTicket++;
+          this.enhanceAttempted = false;
+        }
+        if (this.textImageWidth <= 0 && this.textAttempted) {
+          this.textTicket++;
+          this.textAttempted = false;
+        }
       }
     })
+  }
+
+  /** 与图片显示区域等大的文字层；每块用原底色盖住原字，再按原字方向、颜色写简体。 */
+  @Builder
+  textLayerOverlay() {
+    Stack() {
+      ForEach(this.textPatches, (patch: ComicTextPatch) => {
+        Text(patch.text)
+          .position({ x: patch.x * this.textScaleX(), y: patch.y * this.textScaleY() })
+          .width(patch.width * this.textScaleX())
+          .height(patch.height * this.textScaleY())
+          .fontSize(`${patch.fontSize * this.textScaleX()}vp`)
+          .maxFontSize(`${patch.fontSize * this.textScaleX()}vp`)
+          .minFontSize(`${patch.fontSize * this.textScaleX() * 0.6}vp`)
+          .maxLines(patch.lines)
+          .heightAdaptivePolicy(TextHeightAdaptivePolicy.LAYOUT_CONSTRAINT_FIRST)
+          .lineHeight(`${patch.lineHeight * this.textScaleY()}vp`)
+          .textOverflow({ overflow: TextOverflow.Clip })
+          .textAlign(TextAlign.Center)
+          .align(Alignment.Center)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(patch.color)
+          .backgroundColor(patch.background)
+          .padding(0)
+      }, (patch: ComicTextPatch) => patch.id)
+    }
+    .width(this.displayWidth())
+    .height(this.displayHeight())
+    .hitTestBehavior(HitTestMode.None)
+  }
+
+  private textScaleX(): number {
+    return this.textImageWidth > 0 ? this.displayWidth() / this.textImageWidth : 0;
+  }
+
+  private textScaleY(): number {
+    return this.textImageHeight > 0 ? this.displayHeight() / this.textImageHeight : 0;
   }
 }
 
@@ -630,6 +728,7 @@ export struct ReaderComicView {
   @Prop doubleTapZoom: boolean = true;
   /** 漫画超分（会员功能）。 */
   @Prop superResolution: boolean = false;
+  @Prop textConvert: boolean = false;
   @Prop surfaceColor: string = '#000000';
   @Prop textColor: string = '#E6E6E6';
   @Prop hintColor: string = '#99FFFFFF';
@@ -1026,6 +1125,7 @@ export struct ReaderComicView {
                 hintColor: this.hintColor,
                 retryKey: item.key,
                 superResolution: this.superResolution,
+                textConvert: this.textConvert,
                 retryRegistry: this.retryRegistry,
                 onDenied: (): void => this.onImageDenied(item.chapterIndex)
               })

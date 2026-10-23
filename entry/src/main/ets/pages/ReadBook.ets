@@ -127,6 +127,7 @@ import {
   ReaderComicSuperResolution,
   ReaderComicSuperResolutionAccess
 } from '../core/reader/ReaderComicSuperResolution';
+import { ComicChineseConverter } from '../core/reader/ComicChineseConverter';
 import { ReaderCustomFontItem, ReaderCustomFontData } from '../core/reader/ReaderSettingsModels';
 import {
   PageTurnPreview,
@@ -279,6 +280,8 @@ struct ReadBookPage {
   @State readerComicTitleCapsuleWidth: number = 0;
   /** 本书单独选的漫画阅读方式（书籍变量 readerComicReadingMode）；空串跟随全局默认。 */
   @State readerComicBookMode: string = '';
+  /** 本书漫画图片繁→简（书籍变量 readerComicTextConvert = t2s）。 */
+  @State readerComicTextConvert: boolean = false;
   /** 翻页模式预先切好的相邻章节分页，翻过本话首尾时直接显示；章节号为 -1 表示没有。 */
   @State readerComicPagedPrevPages: string[] = [];
   @State readerComicPagedNextPages: string[] = [];
@@ -300,7 +303,7 @@ struct ReadBookPage {
   @State statusBarSafeHeight: number = 0;
   @StorageProp('statusBarHeight') @Watch('onStoredStatusBarHeightChanged') storedStatusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
-  /** 会员档位变化（登录、开通、到期）时刷新漫画超分的可用状态。 */
+  /** 会员档位变化（登录、开通、到期）时刷新漫画超分、繁→简的可用状态。 */
   @StorageProp('accountMembershipSku') readerMembershipSku: string = '';
   // 加密的书源封面解密完成后递增，朗读面板等处的封面重新取到本地文件地址。
   @StorageProp('sourceCoverRevision') sourceCoverRevision: number = 0;
@@ -2104,6 +2107,7 @@ struct ReadBookPage {
         fitScreen: this.readerComicSettings.fit === ReaderComicFit.SCREEN,
         doubleTapZoom: this.readerComicSettings.doubleTapZoom,
         superResolution: this.isReaderComicSuperResolutionActive(),
+        textConvert: this.isReaderComicTextConvertActive(),
         interactive: this.isReaderComicInteractionEnabled(),
         panDistance: this.readerTapSlop,
         transitionY: this.readerComicChapterTransitionY,
@@ -2171,6 +2175,7 @@ struct ReadBookPage {
         rightToLeft: this.isReaderComicRightToLeft(),
         doubleTapZoom: this.readerComicSettings.doubleTapZoom,
         superResolution: this.isReaderComicSuperResolutionActive(),
+        textConvert: this.isReaderComicTextConvertActive(),
         surfaceColor: this.readerComicSurfaceColor(),
         textColor: this.readerComicSurfaceTextColor(),
         hintColor: this.readerComicSurfaceHintColor(),
@@ -2618,6 +2623,26 @@ struct ReadBookPage {
       this.readerComicSuperResolutionAccess() === ReaderComicSuperResolutionAccess.READY;
   }
 
+  readerComicTextConvertAccess(): string {
+    // 读取会员档位只为让档位变化时界面重算，口径同超分。
+    const sku = this.readerMembershipSku;
+    return sku !== undefined ? ComicChineseConverter.access() : ReaderComicSuperResolutionAccess.MEMBER_REQUIRED;
+  }
+
+  isReaderComicTextConvertActive(): boolean {
+    return this.readerComicTextConvert &&
+      this.readerComicTextConvertAccess() === ReaderComicSuperResolutionAccess.READY;
+  }
+
+  setReaderComicTextConvert(enabled: boolean): void {
+    if (!this.book || enabled === this.readerComicTextConvert) return;
+    this.readerComicTextConvert = enabled;
+    this.book.putVariable('readerComicTextConvert', enabled ? 't2s' : '');
+    AppDatabase.getInstance().updateBook(this.book, false).catch((error: Error) => {
+      console.warn('保存漫画繁→简设置失败:', error);
+    });
+  }
+
   updateReaderComicSettings(mutate: (settings: ReaderComicSettings) => void): void {
     const next = this.readerComicSettings.copy();
     mutate(next);
@@ -2683,6 +2708,8 @@ struct ReadBookPage {
       doubleTapZoom: this.readerComicSettings.doubleTapZoom,
       superResolution: this.readerComicSettings.superResolution,
       superResolutionAccess: this.readerComicSuperResolutionAccess(),
+      textConvert: this.readerComicTextConvert,
+      textConvertAccess: this.readerComicTextConvertAccess(),
       themeBackground: this.getBackgroundColor(),
       colors: this.readerComicPanelColors(),
       onBackgroundChange: (value: string): void => {
@@ -2720,6 +2747,7 @@ struct ReadBookPage {
           settings.superResolution = checked;
         });
       },
+      onTextConvertChange: (checked: boolean): void => this.setReaderComicTextConvert(checked),
       onOpenMembership: (): void => {
         this.hideReaderPanels();
         router.pushUrl({ url: 'pages/AccountCenter' });
@@ -5126,6 +5154,7 @@ struct ReadBookPage {
     this.syncReaderImageDeferral();
     const bookMode = this.book?.getVariable('readerComicReadingMode') || '';
     this.readerComicBookMode = bookMode ? ReaderComicMode.normalize(bookMode) : '';
+    this.readerComicTextConvert = this.book?.getVariable('readerComicTextConvert') === 't2s';
     this.readerComicZoomScale = 1;
     if (this.readerComicMode) {
       this.stopTtsReading();

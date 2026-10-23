@@ -15,6 +15,7 @@
     "pages/BookSourceDebug",
     "pages/Settings",
     "pages/ComicSettings",
+    "pages/ComicText",
     "pages/CustomFontManager",
     "pages/TtsSettings",
     "pages/CustomTtsVoiceManager",

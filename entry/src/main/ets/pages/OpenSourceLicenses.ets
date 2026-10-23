@@ -38,7 +38,7 @@ struct OpenSourceLicensesPage {
   pageContent() {
     Column() {
       Column() {
-        Text('开源轻页采用 GPL-3.0 许可证，并包含 ohos_quickjs、QuickJS 和部分 OpenHarmony/Huawei N-API 封装代码。以下源码信息、版权声明与完整许可文本随 HAP 一同分发。')
+        Text('开源轻页采用 GPL-3.0 许可证，并包含 ohos_quickjs、QuickJS、OpenCC 简繁字典和部分 OpenHarmony/Huawei N-API 封装代码。以下源码信息、版权声明与完整许可文本随 HAP 一同分发。')
           .fontSize(AppFontSize.BODY)
           .fontColor(this.secondaryTextColor())
           .lineHeight(22)
@@ -85,7 +85,12 @@ struct OpenSourceLicensesPage {
       const gplText = util.TextDecoder.create('utf-8').decodeWithStream(gplBytes, { stream: false });
       const thirdPartyText = util.TextDecoder.create('utf-8')
         .decodeWithStream(thirdPartyBytes, { stream: false });
-      this.licenseText = projectNotice + gplText + '\n\n' + thirdPartyText;
+      const openccBytes = await context.resourceManager.getRawFileContent('opencc/LICENSE');
+      const openccText = util.TextDecoder.create('utf-8').decodeWithStream(openccBytes, { stream: false });
+      this.licenseText = projectNotice + gplText + '\n\n' + thirdPartyText +
+        '\n\nOpenCC ver.1.1.9 — TSCharacters / TSPhrases\n' +
+        'Authors: BYVoid and OpenCC contributors\n' +
+        'https://github.com/BYVoid/OpenCC/tree/ver.1.1.9\n' + openccText;
     } catch (error) {
       console.error('加载开源许可失败:', error);
       this.licenseText = '开源许可文本加载失败，请查看项目根目录 LICENSE、NOTICE 和 THIRD_PARTY_NOTICES.md。';

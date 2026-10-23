@@ -1,9 +1,11 @@
 import { common } from '@kit.AbilityKit';
 import image from '@ohos.multimedia.image';
+import { router } from '@kit.ArkUI';
 import { HdsFeedback } from '../../utils/HdsFeedback';
 import { ReaderImageMarker } from '../book/ReaderImageMarker';
 import { ReaderImageResults } from '../book/ReaderImageResults';
 import { ReaderComicImageExport, ReaderComicSnapshotProvider } from './ReaderComicImageExport';
+import { ComicTextRequests } from './ComicTextRequests';
 
 /** 阅读页为漫画图片操作提供的环境。 */
 export interface ReaderComicImageActionsHost {
@@ -76,7 +78,8 @@ export class ReaderComicImageActions {
         buttons: [
           { text: '保存到相册', color: color },
           { text: '分享', color: color },
-          { text: '重新加载', color: color }
+          { text: '重新加载', color: color },
+          { text: '查看本页文字', color: color }
         ]
       });
       index = result.index;
@@ -86,6 +89,16 @@ export class ReaderComicImageActions {
     }
     if (index === 2) {
       reload();
+      return;
+    }
+    if (index === 3) {
+      const requestId = ComicTextRequests.put(source);
+      try {
+        await router.pushUrl({ url: 'pages/ComicText', params: { requestId: requestId } });
+      } catch (_) {
+        ComicTextRequests.take(requestId);
+        HdsFeedback.showToast('无法打开文字识别，请重试');
+      }
       return;
     }
     try {
