@@ -917,16 +917,31 @@ export struct ExplorePage {
 
   exploreSourceLabelWidth(): number {
     const name = this.selectedSourceName || '选择书源';
-    let textWidth = 0;
-    for (let index = 0; index < name.length; index++) {
-      textWidth += name.charCodeAt(index) > 0x2E80 ? AppFontSize.BODY : AppFontSize.BODY * 0.6;
-    }
-    // 左右留白 24、箭头 14、间隔 4。
-    const desired = Math.ceil(textWidth) + 42;
+    // 左右留白 24、箭头 14、间隔 4，再留 2 防止取整后差一点被省略。
+    const desired = Math.ceil(this.measureExploreSourceLabelText(name)) + 44;
     // 右侧还有布局、刷新（以及可选的筛选）按钮，各 40 加 10 间隔；标题约 56，页边距 32。
     const buttonsWidth = (this.exploreFilters.length > 0 ? 3 : 2) * (ExplorePage.HEADER_CONTROL_SIZE + 10);
     const available = this.exploreViewportWidth - 32 - 56 - AppSpacing.MD - buttonsWidth;
     return Math.max(72, Math.min(desired, Math.floor(Math.min(this.exploreViewportWidth * 0.45, available))));
+  }
+
+  /** 按实际字号量书源名宽度：字号是 fp，系统调大字体后按每字 14 估会偏窄，短名字只剩首字。 */
+  measureExploreSourceLabelText(name: string): number {
+    try {
+      const context = this.getUIContext();
+      const widthPx = context.getMeasureUtils().measureText({
+        textContent: name,
+        fontSize: AppFontSize.BODY,
+        fontWeight: FontWeight.Medium
+      });
+      if (widthPx > 0) return context.px2vp(widthPx);
+    } catch (error) {
+    }
+    let textWidth = 0;
+    for (let index = 0; index < name.length; index++) {
+      textWidth += name.charCodeAt(index) > 0x2E80 ? AppFontSize.BODY : AppFontSize.BODY * 0.6;
+    }
+    return textWidth * 1.2;
   }
 
   @Builder
