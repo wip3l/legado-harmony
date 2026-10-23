@@ -104,10 +104,15 @@ export class EpubChapterPlanner {
   /** 把目录条目按文件分组，保持目录顺序。 */
   static groupTocByPath(entries: EpubTocEntry[]): Map<string, EpubTocEntry[]> {
     const grouped = new Map<string, EpubTocEntry[]>();
+    // 按“文件 + 锚点”去重；单文件上千个目录条目时逐个比较会变成平方级。
+    const seen = new Set<string>();
     for (const entry of entries) {
+      const key = `${entry.path}#${entry.fragment}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const list = grouped.get(entry.path);
       if (list) {
-        if (!list.some((item: EpubTocEntry): boolean => item.fragment === entry.fragment)) list.push(entry);
+        list.push(entry);
       } else {
         grouped.set(entry.path, [entry]);
       }

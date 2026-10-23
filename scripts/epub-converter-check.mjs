@@ -227,6 +227,39 @@ try {
   // 漫画识别
   const comic = plan([1, 2, 3, 4, 5].map((n) => ({ path: `/b/${n}.xhtml`, body: '<img src="cover.jpg"/>' })), []);
   check(comic.isComicDominant(), '纯图 spine 识别为漫画');
+
+  // 锚点索引：与逐个正则查找的结果一致
+  {
+    const body = `<p>id="fake"</p><div class="x" id="a1">一</div><a name='n1'></a>` +
+      '<span xml:id="x1">二</span><p id="a1">重复</p><h2 title="t" id="h-1.2">三</h2><br/>';
+    equal(EpubHtmlConverter.findAnchorOffset(body, 'a1'), body.indexOf('<div class="x"'), '同名 id 取第一次出现');
+    equal(EpubHtmlConverter.findAnchorOffset(body, 'n1'), body.indexOf('<a name='), 'name 属性与单引号');
+    equal(EpubHtmlConverter.findAnchorOffset(body, 'x1'), body.indexOf('<span'), 'xml:id');
+    equal(EpubHtmlConverter.findAnchorOffset(body, 'h-1.2'), body.indexOf('<h2'), '含正则特殊字符的 id');
+    equal(EpubHtmlConverter.findAnchorOffset(body, 'fake'), -1, '正文文字里的 id= 不算锚点');
+    equal(EpubHtmlConverter.findAnchorOffset(body, ' a1 '), body.indexOf('<div class="x"'), '查找前去掉首尾空白');
+    equal(EpubHtmlConverter.findAnchorOffset(body, ''), 0, '空 id 表示文件开头');
+    equal(EpubHtmlConverter.findAnchorOffset('<p id="z">另一个文件</p>', 'a1'), -1, '换了 body 重新建索引');
+    equal(EpubHtmlConverter.findAnchorOffset(body, 'x1'), body.indexOf('<span'), '切回原 body 仍正确');
+  }
+
+  // 单文件上千章：按锚点切章不再随章数平方增长
+  {
+    const count = 3000;
+    const parts = [];
+    const entries = [];
+    for (let n = 1; n <= count; n++) {
+      parts.push(`<h2 id="c${n}">第${n}章</h2><p>${'正文'.repeat(40)}</p>`);
+      entries.push(toc('/big.xhtml', `c${n}`, `第${n}章`));
+    }
+    const started = performance.now();
+    const planned = plan([{ path: '/big.xhtml', body: parts.join('') }], entries);
+    const elapsed = performance.now() - started;
+    equal(planned.chapters.length, count, '单文件 3000 个目录锚点切成 3000 章');
+    equal(planned.chapters[count - 1].title, `第${count}章`, '最后一章标题正确');
+    // 改前同一用例约 1.4 秒（每切一章都从头正则扫描整个文件），改后约 50ms。
+    check(elapsed < 800, `单文件 3000 章切章耗时 ${elapsed.toFixed(0)}ms`);
+  }
 } finally {
   cleanup();
 }

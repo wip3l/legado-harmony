@@ -98,6 +98,11 @@ export class LocalBookService {
   private static readonly TXT_PARSER_VERSION: string = '10';
   private static readonly EPUB_PARSER_VERSION: string = '9';
   private static readonly MOBI_PARSER_VERSION: string = '1';
+  /** 导入时同时预读的正文文件数。 */
+  private static readonly IMPORT_READ_AHEAD: number = 4;
+  /** 导入转换连续占用主线程的时长上限，超过后让出一次。 */
+  private static readonly IMPORT_SLICE_MS: number = 32;
+
   /** 可导入的本地书格式。MOBI 解析后与 EPUB 一样按解压目录阅读，书籍类型同为 TYPE_EPUB。 */
   static readonly SUPPORTED_FORMATS: string[] = ['txt', 'epub', 'mobi'];
   static readonly UNSUPPORTED_FORMAT_MESSAGE: string = '仅支持 TXT、EPUB 和 MOBI 文件';
@@ -1128,16 +1133,38 @@ export class LocalBookService {
     return result;
   }
 
-  /** 按 spine 顺序转换并分章；EPUB 与 MOBI（拆成多个 HTML 文件后）共用。 */
+  /**
+   * 按 spine 顺序转换并分章；EPUB 与 MOBI（拆成多个 HTML 文件后）共用。
+   * 读文件预读后面几个，与当前文件的转换并行；转换连续占用主线程超过一帧左右就让出一次，导入大书时界面不卡死。
+   */
   private static async planSpineChapters(files: LocalSpineFile[], tocEntries: EpubTocEntry[],
     extractRoot: string, result: EpubPackageData): Promise<void> {
     const tocByPath = EpubChapterPlanner.groupTocByPath(tocEntries);
     const planner = new EpubChapterPlanner(tocByPath.size > 0);
-    for (const file of files) {
+    const included = (file: LocalSpineFile): boolean =>
+      // linear="no" 的辅助内容（弹注、答案页）不在正文阅读顺序里，除非目录明确列出。
+      !file.nonLinear || (tocByPath.get(file.path) || []).length > 0;
+    const reads = new Map<number, Promise<string>>();
+    const startRead = (index: number): void => {
+      if (index >= files.length || reads.has(index) || files[index].isImage || !included(files[index])) return;
+      const read = LocalChapterContentLoader.readHtmlFile(files[index].path);
+      // 预读失败在轮到这个文件时处理，这里先标记为已处理，避免未处理的拒绝。
+      read.catch((): void => {});
+      reads.set(index, read);
+    };
+    let sliceStart = Date.now();
+    const yieldIfBusy = async (): Promise<void> => {
+      if (Date.now() - sliceStart < LocalBookService.IMPORT_SLICE_MS) return;
+      await new Promise<void>((resolve: () => void): void => {
+        setTimeout(resolve, 0);
+      });
+      sliceStart = Date.now();
+    };
+    for (let index = 0; index < files.length; index++) {
+      const file = files[index];
       const chapterPath = file.path;
       const entries = tocByPath.get(chapterPath) || [];
-      // linear="no" 的辅助内容（弹注、答案页）不在正文阅读顺序里，除非目录明确列出。
-      if (file.nonLinear && entries.length === 0) continue;
+      if (!included(file)) continue;
       planner.beginFile();
       if (file.isImage) {
         const imagePiece = new EpubConvertResult();
@@ -1145,8 +1172,9 @@ export class LocalBookService {
         imagePiece.imagePaths = [chapterPath];
         planner.addPiece(chapterPath, '', '', entries.length > 0 ? entries[0].title : '', imagePiece);
       } else {
+        for (let ahead = index; ahead <= index + LocalBookService.IMPORT_READ_AHEAD; ahead++) startRead(ahead);
         try {
-          const chapterHtml = await LocalChapterContentLoader.readHtmlFile(chapterPath);
+          const chapterHtml = await (reads.get(index) as Promise<string>);
           const body = EpubHtmlConverter.bodyOf(chapterHtml);
           const documentTitle = EpubHtmlConverter.titleOf(chapterHtml);
           const fallbackTitle = documentTitle && documentTitle !== result.title ? documentTitle : '';
@@ -1154,13 +1182,18 @@ export class LocalBookService {
             const converted = await LocalChapterContentLoader.convertBody(body,
               LocalBookService.parentPath(chapterPath), extractRoot, cut.startId, cut.endId);
             planner.addPiece(chapterPath, cut.startId, cut.endId, cut.title, converted, fallbackTitle);
+            await yieldIfBusy();
           }
         } catch (error) {
           console.warn('预解析 EPUB spine 内容失败:', chapterPath, error);
+        } finally {
+          reads.delete(index);
         }
       }
       planner.endFile();
+      await yieldIfBusy();
     }
+    EpubHtmlConverter.clearAnchorIndex();
 
     if (planner.isComicDominant()) {
       const waterfall = new LocalChapterData();

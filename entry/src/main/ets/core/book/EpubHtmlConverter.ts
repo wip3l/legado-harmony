@@ -57,6 +57,9 @@ export class EpubHtmlConverter {
     'p|div|section|article|aside|header|footer|nav|main|figure|figcaption|h[1-6]|li|ul|ol|dl|dt|dd|' +
     'blockquote|table|thead|tbody|tfoot|tr|caption|pre|address|form|fieldset|center|details|summary';
   private static namedEntities: Record<string, string> | null = null;
+  /** 最近一次建过锚点索引的 body。同一个文件按目录切成多章时，每切一章都要查两次锚点。 */
+  private static anchorIndexBody: string = '';
+  private static anchorIndex: Map<string, number> = new Map<string, number>();
 
   /** 返回 <body> 的内部 HTML；没有 body 时去掉 head 后原样返回。 */
   static bodyOf(html: string): string {
@@ -81,15 +84,52 @@ export class EpubHtmlConverter {
       .replace(/\s+/g, ' ').trim();
   }
 
-  /** 带有给定 id/name 的元素起始标签在 body 中的偏移；找不到返回 -1。 */
+  /**
+   * 带有给定 id/name 的元素起始标签在 body 中的偏移；找不到返回 -1。
+   * 第一次查某个 body 时扫一遍建好全部锚点的索引，之后同一个 body 直接查表：
+   * 单文件里放着上千章的书逐章查锚点时，不再每次从头扫整个文件。
+   */
   static findAnchorOffset(body: string, id: string): number {
     const target = (id || '').trim();
     if (!target) return 0;
-    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`<[a-zA-Z][^<>]*\\s(?:xml:)?(?:id|name)\\s*=\\s*(?:"${escaped}"|'${escaped}')[^<>]*>`);
-    const match = pattern.exec(body || '');
-    return match ? match.index : -1;
+    const source = body || '';
+    if (source !== EpubHtmlConverter.anchorIndexBody) {
+      EpubHtmlConverter.anchorIndex = EpubHtmlConverter.buildAnchorIndex(source);
+      EpubHtmlConverter.anchorIndexBody = source;
+    }
+    const offset = EpubHtmlConverter.anchorIndex.get(target);
+    return offset === undefined ? -1 : offset;
   }
+
+  /** 导入结束后释放索引引用的整份 body。 */
+  static clearAnchorIndex(): void {
+    EpubHtmlConverter.anchorIndexBody = '';
+    EpubHtmlConverter.anchorIndex = new Map<string, number>();
+  }
+
+  /** body 中每个 id/name 第一次出现的元素起始标签偏移。 */
+  static buildAnchorIndex(body: string): Map<string, number> {
+    const index = new Map<string, number>();
+    const tag = /<[a-zA-Z][^<>]*>/g;
+    const attribute = /\s(?:xml:)?(?:id|name)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+    let match = tag.exec(body);
+    while (match) {
+      const text = match[0];
+      // 绝大多数标签没有 id/name，先用 indexOf 粗筛。
+      if (text.indexOf('id') >= 0 || text.indexOf('name') >= 0) {
+        attribute.lastIndex = 0;
+        let found = attribute.exec(text);
+        while (found) {
+          const value = found[1] !== undefined ? found[1] : (found[2] || '');
+          if (!index.has(value)) index.set(value, match.index);
+          found = attribute.exec(text);
+        }
+      }
+      match = tag.exec(body);
+    }
+    return index;
+  }
+
 
   /** 按锚点切出 [startId, endId) 之间的 body 片段；空 id 表示文件开头/结尾。 */
   static sliceBody(body: string, startId: string, endId: string): string {
