@@ -7424,7 +7424,7 @@ struct ReadBookPage {
 
   getReaderBottomInfoBarHeight(): number {
     const infoBarConfig = this.getReaderInfoBarConfig();
-    const fallbackHeight = infoBarConfig.fontSize + infoBarConfig.footerExtraHeight();
+    const fallbackHeight = infoBarConfig.footerFontSize + infoBarConfig.footerExtraHeight();
     if (this.readerBottomInfoBarMeasuredHeight > 0) {
       return Math.max(this.readerBottomInfoBarMeasuredHeight, fallbackHeight);
     }
@@ -7470,11 +7470,11 @@ struct ReadBookPage {
     // 页脚开启时正文只需让开页脚（页脚已经画在手势条上方）；没有页脚时才按导航条高度避让。
     if (!this.readerFooterEnabled) return this.getReaderFooterlessBottomReserve();
     const infoBarConfig = this.getReaderInfoBarConfig();
-    let footerHeight = infoBarConfig.fontSize;
+    let footerHeight = infoBarConfig.footerFontSize;
     try {
-      footerHeight = px2vp(Math.max(1, fp2px(infoBarConfig.fontSize)));
+      footerHeight = px2vp(Math.max(1, fp2px(infoBarConfig.footerFontSize)));
     } catch (_) {
-      footerHeight = infoBarConfig.fontSize;
+      footerHeight = infoBarConfig.footerFontSize;
     }
     footerHeight += infoBarConfig.footerExtraHeight();
     return Math.max(8, footerHeight + this.getReaderBottomInfoBarBottomInset() +
@@ -8409,9 +8409,9 @@ struct ReadBookPage {
         leftBattery: this.getReaderInfoSlotBattery(this.getReaderInfoBarConfig().footerLeft),
         centerBattery: this.getReaderInfoSlotBattery(this.getReaderInfoBarConfig().footerCenter),
         rightBattery: this.getReaderInfoSlotBattery(this.getReaderInfoBarConfig().footerRight),
-        textSize: this.getReaderInfoBarConfig().fontSize,
+        textSize: this.getReaderInfoBarConfig().footerFontSize,
         textColor: this.getSubTextColor(),
-        textOpacity: this.getReaderInfoBarConfig().opacity / 100
+        textOpacity: this.getReaderInfoBarConfig().footerOpacity / 100
       })
     }
     .width('100%')
@@ -8441,9 +8441,9 @@ struct ReadBookPage {
           leftBattery: this.getReaderInfoSlotBattery(this.getReaderInfoBarConfig().headerLeft),
           centerBattery: this.getReaderInfoSlotBattery(this.getReaderInfoBarConfig().headerCenter),
           rightBattery: this.getReaderInfoSlotBattery(this.getReaderInfoBarConfig().headerRight),
-          textSize: this.getReaderInfoBarConfig().fontSize,
+          textSize: this.getReaderInfoBarConfig().headerFontSize,
           textColor: this.getSubTextColor(),
-          textOpacity: this.getReaderInfoBarConfig().opacity / 100
+          textOpacity: this.getReaderInfoBarConfig().headerOpacity / 100
         })
       }
       .width('100%')

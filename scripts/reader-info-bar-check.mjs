@@ -49,21 +49,71 @@ const roundTrip = Config.parse(migrated.serialize());
 equal(roundTrip.serialize(), migrated.serialize(), '序列化后再解析结果不变');
 const dirty = Config.parse(JSON.stringify({ headerLeft: 'bogus', fontSize: 99, opacity: 1, progressBar: 'x' }));
 equal(dirty.headerLeft, Item.CHAPTER_TITLE, '未知信息项回退到默认');
-equal(dirty.fontSize, Config.FONT_SIZE_MAX, '字号被限制在上限');
-equal(dirty.opacity, Config.OPACITY_MIN, '不透明度被限制在下限');
+equal(dirty.headerFontSize, 40, '旧版过大字号迁移后页眉被限制为 40');
+equal(dirty.footerFontSize, 40, '旧版过大字号迁移后页脚被限制为 40');
+equal(dirty.headerOpacity, Config.OPACITY_MIN, '旧不透明度迁移到页眉时限制在下限');
+equal(dirty.footerOpacity, Config.OPACITY_MIN, '旧不透明度迁移到页脚时限制在下限');
 equal(dirty.progressBar, Bar.NONE, '未知进度条位置回退到不显示');
+
+const legacySize = Config.parse(JSON.stringify({ fontSize: 15 }));
+equal(legacySize.headerFontSize, 15, '旧共用字号沿用到页眉');
+equal(legacySize.footerFontSize, 15, '旧共用字号沿用到页脚');
+const separateSizes = Config.parse(JSON.stringify({ fontSize: 15, headerFontSize: 32, footerFontSize: 18 }));
+equal(separateSizes.headerFontSize, 32, '独立页眉字号优先于旧字号');
+equal(separateSizes.footerFontSize, 18, '独立页脚字号优先于旧字号');
+equal(separateSizes.copy().serialize(), separateSizes.serialize(), '不同字号复制与序列化后保持不变');
+equal(JSON.parse(separateSizes.serialize()).fontSize, undefined, '新配置不再保存旧共用字号');
+const partialSize = Config.parse(JSON.stringify({ fontSize: 14, headerFontSize: 24 }));
+equal(partialSize.headerFontSize, 24, '部分迁移的页眉使用新字号');
+equal(partialSize.footerFontSize, 14, '部分迁移的页脚沿用旧字号');
+const boundedSizes = Config.parse(JSON.stringify({ headerFontSize: 99, footerFontSize: 1 }));
+equal(boundedSizes.headerFontSize, 40, '页眉字号上限为 40');
+equal(boundedSizes.footerFontSize, 10, '页脚字号下限为 10');
+const invalidSizes = Config.parse(JSON.stringify({ headerFontSize: 'bad', footerFontSize: {} }));
+equal(invalidSizes.headerFontSize, 12, '无效页眉字号回退默认值');
+equal(invalidSizes.footerFontSize, 12, '无效页脚字号回退默认值');
+
+const legacyOpacity = Config.parse(JSON.stringify({ opacity: 60 }));
+equal(legacyOpacity.headerOpacity, 60, '旧共用不透明度沿用到页眉');
+equal(legacyOpacity.footerOpacity, 60, '旧共用不透明度沿用到页脚');
+const separateOpacity = Config.parse(JSON.stringify({ opacity: 60, headerOpacity: 30, footerOpacity: 90 }));
+equal(separateOpacity.headerOpacity, 30, '独立页眉不透明度优先于旧值');
+equal(separateOpacity.footerOpacity, 90, '独立页脚不透明度优先于旧值');
+equal(separateOpacity.copy().serialize(), separateOpacity.serialize(), '独立不透明度序列化与复制后保持不变');
+equal(JSON.parse(separateOpacity.serialize()).opacity, undefined, '新配置不再保存旧共用不透明度');
+for (const field of ['headerOpacity', 'footerOpacity']) {
+  const other = field === 'headerOpacity' ? 'footerOpacity' : 'headerOpacity';
+  const partial = Config.parse(JSON.stringify({ opacity: 60, [field]: 80 }));
+  equal(partial[field], 80, `${field} 使用新值`);
+  equal(partial[other], 60, `${other} 缺失时沿用旧值`);
+  for (const [value, expected] of [[0, 30], [101, 100], ['bad', 100]]) {
+    equal(Config.parse(JSON.stringify({ [field]: value }))[field], expected, `${field} 校验 ${value}`);
+  }
+  equal(new Config()[field], 100, `${field} 默认完全不透明`);
+  const independent = new Config();
+  independent[field] = 40;
+  equal(independent.copy()[other], 100, `${field} 调整不影响另一项`);
+  equal(independent.layoutIdentity(), new Config().layoutIdentity(), `${field} 调整不影响分页`);
+}
 
 // 分页标识：换内容不变，换高度相关项才变。
 const base = new Config();
 const contentOnly = base.copy();
 contentOnly.headerRight = Item.TIME;
 contentOnly.footerCenter = Item.BATTERY;
-contentOnly.opacity = 60;
+contentOnly.headerOpacity = 60;
+contentOnly.footerOpacity = 80;
 contentOnly.followMargin = true;
 equal(contentOnly.layoutIdentity(), base.layoutIdentity(), '只换内容与外观不改变分页标识');
 const bigger = base.copy();
-bigger.fontSize = 14;
-check(bigger.layoutIdentity() !== base.layoutIdentity(), '字号变化改变分页标识');
+bigger.headerFontSize = 40;
+check(bigger.layoutIdentity() !== base.layoutIdentity(), '页眉字号变化改变分页标识');
+equal(bigger.headerLineHeight(), 60, '大页眉字号同步增加行高');
+equal(bigger.footerFontSize, 12, '调整页眉字号不影响页脚字号');
+const biggerFooter = base.copy();
+biggerFooter.footerFontSize = 40;
+check(biggerFooter.layoutIdentity() !== base.layoutIdentity(), '页脚字号变化改变分页标识');
+equal(biggerFooter.headerLineHeight(), base.headerLineHeight(), '调整页脚字号不影响页眉行高');
 const withBar = base.copy();
 withBar.progressBar = Bar.FOOTER;
 check(withBar.layoutIdentity() !== base.layoutIdentity(), '进度条变化改变分页标识');

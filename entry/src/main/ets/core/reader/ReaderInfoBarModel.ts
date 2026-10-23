@@ -85,13 +85,13 @@ export class ReaderInfoProgressBar {
  */
 export class ReaderInfoBarConfig {
   static readonly FONT_SIZE_MIN: number = 10;
-  static readonly FONT_SIZE_MAX: number = 16;
+  static readonly FONT_SIZE_MAX: number = 40;
   static readonly FONT_SIZE_DEFAULT: number = 12;
   static readonly OPACITY_MIN: number = 30;
   static readonly OPACITY_MAX: number = 100;
   static readonly OPACITY_STEP: number = 10;
   static readonly FIXED_SIDE_PADDING: number = 28;
-  static readonly OFFSET_MAX: number = 40;
+  static readonly OFFSET_MAX: number = 350;
   static readonly OFFSET_STEP: number = 2;
 
   headerLeft: string = ReaderInfoItem.CHAPTER_TITLE;
@@ -100,9 +100,15 @@ export class ReaderInfoBarConfig {
   footerLeft: string = ReaderInfoItem.CHAPTER_INDEX_TITLE;
   footerCenter: string = ReaderInfoItem.NONE;
   footerRight: string = ReaderInfoItem.PAGE;
-  fontSize: number = ReaderInfoBarConfig.FONT_SIZE_DEFAULT;
-  /** 文字不透明度，百分比。 */
-  opacity: number = ReaderInfoBarConfig.OPACITY_MAX;
+  /** 仅用于读取旧版共用字号；新配置使用下面的独立字号。 */
+  fontSize?: number;
+  headerFontSize: number = ReaderInfoBarConfig.FONT_SIZE_DEFAULT;
+  footerFontSize: number = ReaderInfoBarConfig.FONT_SIZE_DEFAULT;
+  /** 仅用于读取旧版共用不透明度。 */
+  opacity?: number;
+  /** 页眉、页脚文字不透明度，百分比。 */
+  headerOpacity: number = ReaderInfoBarConfig.OPACITY_MAX;
+  footerOpacity: number = ReaderInfoBarConfig.OPACITY_MAX;
   /** 左右边距跟随正文边距；关闭时使用固定边距。 */
   followMargin: boolean = false;
   /** 页眉在默认位置基础上再下移的距离（vp）。 */
@@ -158,8 +164,10 @@ export class ReaderInfoBarConfig {
       config.footerLeft = ReaderInfoItem.normalize(source.footerLeft, defaults.footerLeft);
       config.footerCenter = ReaderInfoItem.normalize(source.footerCenter, defaults.footerCenter);
       config.footerRight = ReaderInfoItem.normalize(source.footerRight, defaults.footerRight);
-      config.fontSize = ReaderInfoBarConfig.clampFontSize(source.fontSize);
-      config.opacity = ReaderInfoBarConfig.clampOpacity(source.opacity);
+      config.headerFontSize = ReaderInfoBarConfig.clampFontSize(source.headerFontSize ?? source.fontSize);
+      config.footerFontSize = ReaderInfoBarConfig.clampFontSize(source.footerFontSize ?? source.fontSize);
+      config.headerOpacity = ReaderInfoBarConfig.clampOpacity(source.headerOpacity ?? source.opacity);
+      config.footerOpacity = ReaderInfoBarConfig.clampOpacity(source.footerOpacity ?? source.opacity);
       config.followMargin = source.followMargin === true;
       config.headerOffset = ReaderInfoBarConfig.clampOffset(source.headerOffset);
       config.footerOffset = ReaderInfoBarConfig.clampOffset(source.footerOffset);
@@ -228,7 +236,7 @@ export class ReaderInfoBarConfig {
 
   /** 页眉文字行高度（vp）。由字号直接推算，不依赖异步测量，避免打开书时二次分页。 */
   headerLineHeight(): number {
-    return Math.round(this.fontSize * 1.5);
+    return Math.round(this.headerFontSize * 1.5);
   }
 
   /** 页眉文字行以外的附加高度：进度条或分隔线。 */
@@ -245,7 +253,8 @@ export class ReaderInfoBarConfig {
 
   /** 只包含会改变正文可用高度的项；内容槽位变化不需要重新分页。 */
   layoutIdentity(): string {
-    return `${this.fontSize}_${this.headerVisible()}_${this.headerExtraHeight()}_${this.footerExtraHeight()}_` +
+    return `${this.headerFontSize}_${this.footerFontSize}_${this.headerVisible()}_` +
+      `${this.headerExtraHeight()}_${this.footerExtraHeight()}_` +
       `${this.headerOffset}_${this.footerOffset}`;
   }
 }

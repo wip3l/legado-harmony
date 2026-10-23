@@ -220,10 +220,12 @@ export struct ReaderHeaderFooterSettings {
   private static readonly SLOT_FOOTER_LEFT: number = 3;
   private static readonly SLOT_FOOTER_CENTER: number = 4;
   private static readonly SLOT_FOOTER_RIGHT: number = 5;
-  private static readonly STEPPER_FONT_SIZE: number = 0;
-  private static readonly STEPPER_OPACITY: number = 1;
+  private static readonly STEPPER_HEADER_FONT_SIZE: number = 0;
+  private static readonly STEPPER_HEADER_OPACITY: number = 1;
   private static readonly STEPPER_HEADER_OFFSET: number = 2;
   private static readonly STEPPER_FOOTER_OFFSET: number = 3;
+  private static readonly STEPPER_FOOTER_FONT_SIZE: number = 4;
+  private static readonly STEPPER_FOOTER_OPACITY: number = 5;
 
   private config(): ReaderInfoBarConfig {
     return ReaderInfoBarConfig.parse(this.readerInfoBarConfig) ?? new ReaderInfoBarConfig();
@@ -265,7 +267,10 @@ export struct ReaderHeaderFooterSettings {
     const config = this.config();
     if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_OFFSET) return config.headerOffset;
     if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OFFSET) return config.footerOffset;
-    return field === ReaderHeaderFooterSettings.STEPPER_OPACITY ? config.opacity : config.fontSize;
+    if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY) return config.headerOpacity;
+    if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OPACITY) return config.footerOpacity;
+    return field === ReaderHeaderFooterSettings.STEPPER_HEADER_FONT_SIZE ?
+      config.headerFontSize : config.footerFontSize;
   }
 
   private isOffsetStepper(field: number): boolean {
@@ -275,19 +280,24 @@ export struct ReaderHeaderFooterSettings {
 
   private stepperMin(field: number): number {
     if (this.isOffsetStepper(field)) return 0;
-    return field === ReaderHeaderFooterSettings.STEPPER_OPACITY ?
+    return this.isOpacityStepper(field) ?
       ReaderInfoBarConfig.OPACITY_MIN : ReaderInfoBarConfig.FONT_SIZE_MIN;
   }
 
   private stepperMax(field: number): number {
     if (this.isOffsetStepper(field)) return ReaderInfoBarConfig.OFFSET_MAX;
-    return field === ReaderHeaderFooterSettings.STEPPER_OPACITY ?
+    return this.isOpacityStepper(field) ?
       ReaderInfoBarConfig.OPACITY_MAX : ReaderInfoBarConfig.FONT_SIZE_MAX;
+  }
+
+  private isOpacityStepper(field: number): boolean {
+    return field === ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY ||
+      field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OPACITY;
   }
 
   private stepperText(field: number): string {
     const value = this.stepperValue(field);
-    return field === ReaderHeaderFooterSettings.STEPPER_OPACITY ? `${value}%` : `${value}`;
+    return this.isOpacityStepper(field) ? `${value}%` : `${value}`;
   }
 
   private stepBy(field: number, direction: number): void {
@@ -298,10 +308,16 @@ export struct ReaderHeaderFooterSettings {
     } else if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OFFSET) {
       config.footerOffset = ReaderInfoBarConfig.clampOffset(
         config.footerOffset + direction * ReaderInfoBarConfig.OFFSET_STEP);
-    } else if (field === ReaderHeaderFooterSettings.STEPPER_OPACITY) {
-      config.opacity = ReaderInfoBarConfig.clampOpacity(config.opacity + direction * ReaderInfoBarConfig.OPACITY_STEP);
-    } else {
-      config.fontSize = ReaderInfoBarConfig.clampFontSize(config.fontSize + direction);
+    } else if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY) {
+      config.headerOpacity = ReaderInfoBarConfig.clampOpacity(
+        config.headerOpacity + direction * ReaderInfoBarConfig.OPACITY_STEP);
+    } else if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OPACITY) {
+      config.footerOpacity = ReaderInfoBarConfig.clampOpacity(
+        config.footerOpacity + direction * ReaderInfoBarConfig.OPACITY_STEP);
+    } else if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_FONT_SIZE) {
+      config.headerFontSize = ReaderInfoBarConfig.clampFontSize(config.headerFontSize + direction);
+    } else if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_FONT_SIZE) {
+      config.footerFontSize = ReaderInfoBarConfig.clampFontSize(config.footerFontSize + direction);
     }
     this.commit(config);
   }
@@ -318,6 +334,8 @@ export struct ReaderHeaderFooterSettings {
         this.slotItem('页眉左侧', ReaderHeaderFooterSettings.SLOT_HEADER_LEFT, 'reader_header_left_select')
         this.slotItem('页眉中间', ReaderHeaderFooterSettings.SLOT_HEADER_CENTER, 'reader_header_center_select')
         this.slotItem('页眉右侧', ReaderHeaderFooterSettings.SLOT_HEADER_RIGHT, 'reader_header_right_select')
+        this.stepperItem('页眉字号', ReaderHeaderFooterSettings.STEPPER_HEADER_FONT_SIZE)
+        this.stepperItem('页眉不透明度', ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY)
         this.stepperItem('页眉下移', ReaderHeaderFooterSettings.STEPPER_HEADER_OFFSET)
         this.switchItem({ title: '页眉分隔线', description: '页眉下方的细线',
           checked: this.config().headerDivider, onChange: (checked: boolean) => {
@@ -338,6 +356,8 @@ export struct ReaderHeaderFooterSettings {
         this.slotItem('页脚左侧', ReaderHeaderFooterSettings.SLOT_FOOTER_LEFT, 'reader_footer_left_select')
         this.slotItem('页脚中间', ReaderHeaderFooterSettings.SLOT_FOOTER_CENTER, 'reader_footer_center_select')
         this.slotItem('页脚右侧', ReaderHeaderFooterSettings.SLOT_FOOTER_RIGHT, 'reader_footer_right_select')
+        this.stepperItem('页脚字号', ReaderHeaderFooterSettings.STEPPER_FOOTER_FONT_SIZE)
+        this.stepperItem('页脚不透明度', ReaderHeaderFooterSettings.STEPPER_FOOTER_OPACITY)
         this.stepperItem('页脚上移', ReaderHeaderFooterSettings.STEPPER_FOOTER_OFFSET)
         this.switchItem({ title: '页脚分隔线', description: '页脚上方的细线',
           checked: this.config().footerDivider, onChange: (checked: boolean) => {
@@ -349,8 +369,6 @@ export struct ReaderHeaderFooterSettings {
       }
 
       if (this.readerHeaderEnabled || this.readerFooterEnabled) {
-        this.stepperItem('页眉页脚字号', ReaderHeaderFooterSettings.STEPPER_FONT_SIZE)
-        this.stepperItem('页眉页脚不透明度', ReaderHeaderFooterSettings.STEPPER_OPACITY)
         this.switchItem({ title: '边距跟随正文', description: '页眉页脚的左右边距与正文一致',
           checked: this.config().followMargin, onChange: (checked: boolean) => {
             const config = this.config();
