@@ -9,26 +9,29 @@
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
-/* 布局：左侧固定目录 + 右侧单栏正文；窄屏时目录变成顶部横向滑动条。配色取自应用内置「梅影茶烟」主题：青瓷绿为主，梅红只用于提醒。 */
+/* 布局：左侧固定目录 + 右侧单栏正文；窄屏时目录变成顶部横向滑动条。配色与新版介绍海报一致：暖米白、深蓝黑、莓红，浅青绿用于辅助点缀。 */
 :root {
   color-scheme: light;
-  --bg: #f2f5f0;
-  --surface: #fbfcfa;
-  --ink: #1e2924;
-  --muted: #5b6962;
-  --line: #d3dbd3;
-  --accent: #3c6b58;
-  --accent-soft: #e0eae3;
-  --plum: #9c3f48;
-  --plum-soft: #f6e6e4;
+  --bg: #fbf6ee;
+  --surface: #fffaf3;
+  --ink: #26283a;
+  --muted: #706b69;
+  --line: #e4d9d0;
+  --accent: #9d405a;
+  --accent-soft: #f3e3e5;
+  --notice: #496f70;
+  --notice-soft: #e6efeb;
+  --ornament: #82b8b2;
+  --page-glow: #f4e3df;
   --display: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif;
   --body: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
   --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #131916; --surface: #1a221f; --ink: #e3eae5; --muted: #98a79f; --line: #2b3732;
-    --accent: #8dc2a8; --accent-soft: #21322b; --plum: #e18d93; --plum-soft: #382123;
+    --bg: #1c1d29; --surface: #262735; --ink: #f5ede3; --muted: #c0b7b4; --line: #45404b;
+    --accent: #e8a0b0; --accent-soft: #422e3d; --notice: #a6cfca; --notice-soft: #263b3e;
+    --ornament: #82b8b2; --page-glow: #302633;
     color-scheme: dark;
   }
 }
@@ -36,7 +39,7 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { scroll-behavior: smooth; scroll-padding-top: 20px; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.8 var(--body); }
+body { margin: 0; background: radial-gradient(ellipse at top right, var(--page-glow), transparent 65%), var(--bg); color: var(--ink); font: 16px/1.8 var(--body); }
 img { max-width: 100%; }
 a { color: var(--accent); text-underline-offset: 3px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
@@ -65,7 +68,7 @@ section { display: flex; flex-direction: column; gap: 18px; }
 section > *, .sub > * { margin: 0; max-width: 46em; }
 section > .sub, section > .tw, section > .shots, section > .tabs, .sub > .tw { max-width: none; }
 h1 { font: 900 clamp(34px, 6vw, 52px)/1.2 var(--display); letter-spacing: .03em; text-wrap: balance; }
-h2 { font: 900 28px/1.35 var(--display); letter-spacing: .03em; padding-bottom: 12px; border-bottom: 1px solid var(--line); text-wrap: balance; }
+h2 { font: 900 28px/1.35 var(--display); letter-spacing: .03em; padding-bottom: 12px; border-bottom: 1px solid var(--line); border-left: 4px solid var(--ornament); padding-left: 14px; text-wrap: balance; }
 h3 { font: 600 19px/1.5 var(--display); padding-top: 14px; }
 h4 { font: 600 15.5px/1.6 var(--body); color: var(--accent); padding-top: 4px; }
 p, li { text-wrap: pretty; }
@@ -79,8 +82,8 @@ li > ul { margin-top: 6px; }
 .p { font: 600 .92em/1.5 var(--body); color: var(--accent); background: var(--accent-soft); padding: 2px 8px; border-radius: 5px; }
 code { font: .88em var(--mono); background: var(--accent-soft); padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; }
 
-.note { border-left: 3px solid var(--plum); background: var(--plum-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 15px; }
-.note b { color: var(--plum); }
+.note { border-left: 3px solid var(--notice); background: var(--notice-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 15px; }
+.note b { color: var(--notice); }
 .tip { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 15px; }
 
 /* 截图条 */
@@ -150,7 +153,7 @@ footer { font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--lin
 
 <div class="shell">
   <aside class="toc">
-    <div class="brand"><img src="apple-touch-icon.png" alt="" width="44" height="44"><div><strong>开源轻页</strong><span>使用说明书 · v4.2.925</span></div></div>
+    <div class="brand"><img src="apple-touch-icon.png" alt="" width="44" height="44"><div><strong>开源轻页</strong><span>使用说明书 · v4.3.929</span></div></div>
     <input id="q" type="search" placeholder="搜索说明，如：换源、备份" aria-label="搜索说明内容">
     <nav id="nav" aria-label="章节目录">
       <a href="#start">快速上手</a>
@@ -184,7 +187,7 @@ footer { font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--lin
     <section id="top">
       <h1>开源轻页使用说明书</h1>
       <p class="lead">一款 HarmonyOS 原生阅读应用：自己导入书源或本地文件，在手机、平板和电脑上看小说、看漫画、听书与观看书源提供的视频。</p>
-      <p class="meta"><span>当前版本 <b>4.3.928</b></span><span>文档更新 <b>2026-10-23</b></span><span>系统要求 <b>HarmonyOS 6.0.0 及以上</b></span><span>设备 <b>手机 / 平板 / 2in1 电脑</b></span></p>
+      <p class="meta"><span>当前版本 <b>4.3.929</b></span><span>文档更新 <b>2026-10-23</b></span><span>系统要求 <b>HarmonyOS 6.0.0 及以上</b></span><span>设备 <b>手机 / 平板 / 2in1 电脑</b></span></p>
       <div class="shots">
         <img src="shots/01-shelf.webp" alt="书架：小说、漫画、有声书与视频统一管理" width="1080" height="1920">
         <img src="shots/02-search.webp" alt="在线阅读：多书源搜索与同名结果聚合" width="1080" height="1920">
@@ -881,6 +884,13 @@ footer { font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--lin
       </div>
       <div class="sub">
         <h3>漫画</h3>
+        <p>漫画设置在阅读菜单的设置入口中，可调整阅读方式、画面和预加载。图片逐张加载并显示，优先处理屏幕上的图片；单张失败时可长按重新加载，不必等待整章。</p>
+        <ul>
+          <li><b>漫画超分（会员专享）</b>：API 26 起且系统支持时，在设备本地提升漫画显示清晰度，长图分块处理；失败时继续显示原图。</li>
+          <li><b>查看本页文字</b>：长按漫画图片，选择“查看本页文字”，可识别、复制原文、取消或重新识别。识别在本机进行，需要设备支持系统文字识别能力。</li>
+          <li><b>本书繁→简（会员专享）</b>：在漫画设置的“画面”中开启，按书保存，默认关闭。屏幕上的图片识别后，在纯色气泡中按原方向和颜色覆盖简体文字；复杂背景、艺术字和无法可靠识别的区域保留原样。关闭后恢复原图，也可与超分一起使用。</li>
+          <li>文字页的“繁→简”预览同样需要会员。日文、英文、韩文目前仅支持文字识别，尚不提供中文翻译。识别与转换可能有误，可对照原图阅读。</li>
+        </ul>
         <ul>
           <li>漫画使用专用阅读界面，可选条漫或单页翻页；单页可从左往右或从右往左，宽屏自动双页。阅读方式按书保存。</li>
           <li>条漫可以连续滚过相邻章节。画面设置可调背景、页间距、适应宽度或屏幕、信息条与预加载张数；支持双击和双指缩放。</li>
@@ -1321,7 +1331,7 @@ footer { font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--lin
         <ul>
           <li><b>立即同步</b>：手动同步一次，完成后提示上传、下载和处理冲突的数量。</li>
           <li><b>同步设备</b>：列出当前账号下的设备和最近同步时间。在设备上左滑，可以“改名”，或“移除”不再使用的其他设备；移除后该设备停止同步，并从列表里消失。本机不能在这里移除，要通过关闭云同步或退出账号来管理。</li>
-          <li><b>同步问题</b>：有需要处理的问题时会显示在这里。</li>
+          <li><b>同步问题</b>：记录同步失败的原因、云端拒收的数据（例如超出限额的书源，会显示书源名称、地址和大小），以及本地书籍、字体上传失败。每条都带最近出现时间和次数。书源问题可以直接打开或删除该书源。记录不会自动消失，可以逐条“移除记录”，或点右上角按钮全部清除。</li>
           <li><b>重新从云端同步</b>：重新获取云端数据；本机还没上传的修改会保留。数据看起来不一致时使用。</li>
         </ul>
         <p class="tip">云同步和本地备份互不替代。换机或重装前，建议仍然导出一份本地备份。</p>
@@ -1553,7 +1563,7 @@ footer { font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--lin
         <li>应用使用的权限：联网、读取网络状态、后台运行（用于朗读、听书和缓存），以及相机（仅在你开启眼动翻页时才会请求）。</li>
         <li>开源轻页以 GPL-3.0 许可证开源，源码在 <a href="https://github.com/wip3l/qingye-reader">github.com/wip3l/qingye-reader</a>。</li>
       </ul>
-      <footer>本说明书对应开源轻页 4.3.928。界面和设置项仍在迭代，个别名称或位置可能与你手上的版本略有出入。</footer>
+      <footer>本说明书对应开源轻页 4.3.929。界面和设置项仍在迭代，个别名称或位置可能与你手上的版本略有出入。</footer>
     </section>
   </main>
 </div>

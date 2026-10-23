@@ -28,7 +28,7 @@
 | 项目 | 信息 |
 | --- | --- |
 | 应用包名 | `io.legado.read` |
-| 当前版本 | `4.3.928`（以 `AppScope/app.json5` 为准） |
+| 当前版本 | `4.3.929`（以 `AppScope/app.json5` 为准） |
 | 支持设备 | `phone`、`tablet`、`2in1` |
 | 最低 / 目标 API | HarmonyOS 6.0.0（API 20）/ API 26 |
 | 开源协议 | GPL-3.0 |
@@ -95,6 +95,8 @@
 - 滚动阅读与漫画条漫的列表接上相邻章节，向下或向上滚过章节边界都会自动切换当前章，无需下拉或上滑加载。
 - 漫画专用阅读界面：条漫或单页翻页（从左往右、从右往左，宽屏自动双页），阅读方式按书保存；画面设置可调背景、页间距、适应宽度/屏幕、信息条和预加载张数；双击与双指缩放；长按图片保存、分享或重新加载，图片地址过期时自动重新获取本话。支持携带书源请求头、Cookie 或解密规则的远程图片；单张图片下载或解密失败只在原位显示原因，不影响整章。
 - 漫画超分（会员专享，API 26 起）：用系统端侧图片超分把屏幕上的漫画放大到显示宽度的 2 倍，长条漫分块处理后拼接，失败时继续显示原图。
+- 漫画文字识别：长按图片选择“查看本页文字”，在设备本地识别并复制原文；“繁→简”预览与漫画设置中的“本书繁→简”为会员功能，纯色气泡内的繁体对白会在原图上覆盖显示简体，复杂背景保留原样。需要设备支持系统 OCR；日文、英文、韩文目前仅识别，不提供翻译。
+- 漫画图片逐张下载、解密并显示，优先处理屏幕上的图片；预加载与全文缓存共用有上限的调度队列，单图失败不阻塞其他图片。原生书源图片脚本支持 `image.reorderStrips` 条带重排。
 - 段评与本章说显示为跟随主题的数字气泡；深色模式下的评论网页自动反色。
 - 可选的本地眼动翻页：注视底部后向上看即可翻页，相机画面仅在设备内处理，不上传、不保存。
 
@@ -119,7 +121,11 @@
 - 华为账号登录后自动带入昵称和头像（不覆盖应用内改过的资料），点数与主题权益跨设备同步。
 - 浅色/深色模式、按钮色、强调色、自定义字体、阅读背景、封面图库和应用图标；全局字体默认“跟随系统”，在系统里换字体后回到应用即生效；主题页集中展示当前使用、默认与自定义方案、已购主题和更多主题，可在详情页预览、试用或获取。主题自带书籍封面、启动封面、书架文件夹插画、朗读/有声书面板背景和段评气泡样式。
 - 书架、发现、搜索的顶部控件、下拉菜单与目录弹层在 API 26 及以上使用系统沉浸光感材质，旧系统退回半透明磨砂；二级页面的顶栏随内容上滑收起、下滑展开。
+- 自定义主题分享 Beta（会员专享）：导出、分享或导入 `.qytheme`，包含配色、部件选择、阅读排版和用户素材；导入前预览内容，未获得的内置主题部件回退到默认样式。
+- 「我的」页右上角可切换显示模式；页眉与页脚分别设置字号、不透明度、颜色和左右收缩，段首缩进支持 0–4 字符。
 - 「我的 → 帮助」可离线查看随应用打包的使用说明书。
+
+本次发布说明：[926 之后的累计更新](docs/releases/4.3.929-since-926.md) · [928 之后的增量更新](docs/releases/4.3.929-since-928.md)。
 
 ## 快速开始
 
@@ -240,8 +246,8 @@ qingye-reader/
 | 配置 | 值 |
 | --- | --- |
 | 主模块 / 入口 Ability | `entry` / `EntryAbility` |
-| `versionName` | `4.3.928` |
-| `versionCode` / `buildVersion` | `4030928` |
+| `versionName` | `4.3.929` |
+| `versionCode` / `buildVersion` | `4030929` |
 | `minAPIVersion` / `targetAPIVersion` | `20` / `26` |
 | 权限 | `INTERNET`、`GET_NETWORK_INFO`、`KEEP_BACKGROUND_RUNNING`、`CAMERA`（仅在用户启用眼动翻页时请求） |
 
@@ -289,13 +295,13 @@ $env:DEVECO_SDK_HOME = "C:\Program Files\Huawei\DevEco Studio\sdk"
 
 ```powershell
 & "C:\Program Files\Huawei\DevEco Studio\tools\hvigor\bin\hvigorw.bat" `
-  --mode project -p product=release assembleApp --no-daemon
+  --mode project -p product=release -p buildMode=release assembleApp --no-daemon
 ```
 
 输出位置：
 
 - 调试 HAP：`entry/build/default/outputs/default/entry-default-signed.hap`
-- release APP：`build/outputs/release/qingye-reader-release-signed.app`（文件名前缀取自本地工程目录名）
+- release APP：`build/outputs/release/<工程目录名>-release-signed.app`（本地目录为 `legado-harmony` 时，文件名是 `legado-harmony-release-signed.app`）
 
 release 构建依赖本机有效的签名证书、Profile 和 keystore。请使用本地签名配置，不要向仓库提交私钥、证书密码或个人绝对路径；`build`、`oh_modules` 等中间目录也不应提交。
 
