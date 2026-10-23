@@ -33,6 +33,7 @@ function harness() {
     WebBookService: class {},
     BookSourceInteractionPostProcessor: { interactionCacheIdentity: () => 'source-settings' },
     ReaderOpenTrace: { mark() {} },
+    ReaderCacheBudget: { setProtectedBooksProvider() {}, noteTextWrite() {} },
     AppStorage: { setOrCreate: (key, value) => storage.set(key, value) },
     getContext: () => ({}), HdsFeedback: { showToast() {} }
   });

@@ -70,6 +70,7 @@ const themeColorPage = read('entry/src/main/ets/pages/ThemeColorSettings.ets');
 const otherSettingsPage = read('entry/src/main/ets/pages/OtherSettings.ets');
 const bookSourcePage = read('entry/src/main/ets/pages/BookSource.ets');
 const searchCoordinator = read('entry/src/main/ets/core/book/SearchCoordinator.ts');
+const sourcePickerKit = read('entry/src/main/ets/components/home/SourcePickerKit.ets');
 const appIconManager = read('entry/src/main/ets/utils/AppIconManager.ets');
 const fontBootstrap = read('entry/src/main/ets/utils/ReaderFontBootstrap.ets');
 const entryAbility = read('entry/src/main/ets/entryability/EntryAbility.ets');
@@ -499,7 +500,10 @@ assert(bookSourcePage.includes('checkOptionsDialog()') &&
   bookSourcePage.includes('handleCheckedSourceCompletion') &&
   searchCoordinator.includes('await options.onSourceComplete'),
   'Book source validation must support immediate disable/delete actions per completed source');
-assert(indexPage.includes("TextInput({ placeholder: '搜索书源名称、地址或分组'") &&
+// 搜索框与搜索范围面板共用 SourcePickerKit 的 SourcePickerSearchField。
+assert(indexPage.includes('SourcePickerSearchField({') &&
+  sourcePickerKit.includes("SEARCH_PLACEHOLDER: string = '搜索书源名称、地址或分组'") &&
+  /struct SourcePickerSearchField[\s\S]*?TextInput\(/.test(sourcePickerKit) &&
   indexPage.includes('this.exploreSourcePickerContent()') &&
   !indexPage.includes('builder: this.exploreSourcePopup') &&
   indexPage.includes('applyExploreSourceFilter') &&

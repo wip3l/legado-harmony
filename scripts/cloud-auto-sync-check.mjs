@@ -23,7 +23,7 @@ function fixture(settings = {}) {
   const files = new Map(); // path -> { mtime (seconds), size, hash }
   const books = [];
   const cloud = { files: [], tombstones: [] };
-  const log = { staged: [], removed: [], inserted: [], deleted: [], imports: [], downloads: [], copies: [], fontNames: [], fontSaves: 0 };
+  const log = { staged: [], removed: [], inserted: [], deleted: [], imports: [], downloads: [], copies: [], fontNames: [], fontSaves: 0, appliedFonts: [] };
   let sku = 'SUPER_LIFETIME';
 
   class Book {
@@ -112,7 +112,8 @@ function fixture(settings = {}) {
       deleteLocalBookFiles: () => {}
     },
     ReaderFontHelper: { fileNameFromPath: path => path.split('/').pop(), resolveDisplayName: name => name },
-    ReaderSettingsStore: { saveFontSettings: async () => { log.fontSaves++; } }
+    ReaderFontBootstrap: { applyApplicationFont: (_ctx, reason) => { log.appliedFonts.push(reason); } },
+    ReaderSettingsStore: { FONT_MODE_DEVICE: 'device', saveFontSettings: async () => { log.fontSaves++; } }
   });
   vm.runInContext(settingsCompiled, sandbox);
   vm.runInContext(compiled, sandbox);
@@ -260,7 +261,9 @@ test('fonts: removal elsewhere follows; DETACHED keeps; re-import after removal 
   await f.sync.reconcile(f.context);
   assert.equal(f.files.has('/data/files/reader_fonts/old.ttf'), false);
   assert.deepEqual(f.fontPaths(), ['/data/files/reader_fonts/kept.ttf', '/data/files/reader_fonts/again.ttf']);
-  assert.equal(f.storage.get('readerFontMode'), 'system'); // The removed font was in use: back to system font.
+  // The removed font was in use: back to following the device font, applied right away.
+  assert.equal(f.storage.get('readerFontMode'), 'device');
+  assert.deepEqual(f.log.appliedFonts, ['cloud-font-deleted']);
   assert.deepEqual(f.log.staged.map(s => s.name), ['重新导入.ttf']);
 });
 

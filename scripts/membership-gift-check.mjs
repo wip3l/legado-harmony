@@ -3,17 +3,25 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 
-const source = fs.readFileSync(new URL('../entry/src/main/ets/pages/AccountCenter.ets', import.meta.url), 'utf8');
-function method(name) {
+// 礼包字数与说明在“我的权益”页，资格判断在 MembershipGiftRules，会员卡摘要在账号页。
+const read = (relative) => fs.readFileSync(new URL(`../entry/src/main/ets/${relative}`, import.meta.url), 'utf8');
+const benefitsSource = read('pages/MemberBenefits.ets');
+const accountSource = read('pages/AccountCenter.ets');
+const rulesSource = read('account/MembershipGiftRules.ets');
+function method(source, name) {
   const match = new RegExp(`^  ${name}\\(`, 'm').exec(source);
   assert.ok(match, name);
   return source.slice(match.index, source.indexOf('\n  }', match.index) + 4);
 }
 const sandbox = vm.createContext({});
+vm.runInContext(stripTypeScriptTypes(rulesSource.replace(/^import\s[\s\S]*?;\r?\n/gm, '')
+  .replace(/^export /gm, '') + '\nglobalThis.MembershipGiftRules = MembershipGiftRules;', { mode: 'strip' }), sandbox);
 vm.runInContext(stripTypeScriptTypes(`globalThis.page = {
-  ${['giftChars', 'giftIncluded', 'giftPeriodText', 'memberCardBenefits'].map(method).join(',\n')}
+  ${[...['giftChars', 'ruleGiftChars', 'giftPeriodText'].map((name) => method(benefitsSource, name)),
+    method(accountSource, 'memberCardBenefits')].join(',\n')}
 };`, { mode: 'strip' }), sandbox);
 const page = sandbox.page;
+page.giftIncluded = () => sandbox.MembershipGiftRules.included(page.membership, page.membershipSku);
 page.isSuperMember = () => page.membershipSku === 'SUPER_LIFETIME';
 
 for (const [sku, standard, premium] of [

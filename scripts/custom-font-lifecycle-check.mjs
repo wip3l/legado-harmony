@@ -30,7 +30,9 @@ function pageFixture(file, methods) {
     registeredFontFamilies: new Map(),
     getUIContext: () => ({}), familyNameForPath: path => `stable:${path}`, fontFileExists: () => true,
     reloadCustomFonts() {}, rememberCurrentSystemFont() {},
-    saveFontSettings: () => state.saves++, applyApplicationFont: family => state.applied.push(family)
+    saveFontSettings: () => state.saves++,
+    // applyApplicationFont() 不带参数，读页面当前状态：记下调用时生效的字体。
+    applyApplicationFont() { state.applied.push(this.readerActiveFontFamily); }
   });
   return { page, state };
 }
