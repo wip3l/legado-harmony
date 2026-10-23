@@ -69,7 +69,7 @@ runtime.applyTheme('plain-default');store.set('appThemeId','plain-default');
 assert.equal(vm.runInContext("ThemeAccessPolicy.canUseBubbleStyle('harbor-postcard')",sandbox),false);
 store.set('appThemeId','neon-harbor');
 assert.equal(vm.runInContext("ThemeAccessPolicy.canUseBubbleStyle('harbor-postcard')",sandbox),true);
-const manifest=JSON.parse(fs.readFileSync('docs/neon-harbor-generation.json','utf8'));
+const manifest=JSON.parse(fs.readFileSync('scripts/assets/neon-harbor-generation.json','utf8'));
 assert.equal(manifest.items.length,11);
 for(const item of manifest.items) {
   assert.equal(item.status,'success');

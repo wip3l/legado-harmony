@@ -19,7 +19,7 @@ for (const item of state.items) {
   items.push({ ...record, sourceSha256: hash(readFileSync(originalPath)), asset,
     assetWidth: 450, assetHeight: 660, assetSha256: hash(readFileSync(asset)) });
 }
-writeFileSync('docs/obsidian-theme-cover-refresh.json', JSON.stringify({
+writeFileSync('scripts/assets/obsidian-theme-cover-refresh.json', JSON.stringify({
   tool: state.tool, session: state.session, model: state.model, resolution: state.resolution,
   themeId: 'obsidian-archive', revision: 2,
   processing: 'Centre crop and resize to 450x660; JPEG quality 94. Replaces covers 01/02 and adds 03–06.',

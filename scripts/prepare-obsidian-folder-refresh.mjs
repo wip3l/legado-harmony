@@ -10,7 +10,7 @@ await sharp(state.path).resize(450, 660, { fit: 'cover', position: 'centre' })
   .jpeg({ quality: 94, mozjpeg: true }).toFile(asset);
 const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 const { path, ...record } = state;
-writeFileSync('docs/obsidian-theme-folder-refresh.json', JSON.stringify({
+writeFileSync('scripts/assets/obsidian-theme-folder-refresh.json', JSON.stringify({
   ...record, themeId: 'obsidian-archive', revision: 2, sourceSha256: hash(path),
   asset, assetWidth: 450, assetHeight: 660, assetSha256: hash(asset),
   processing: 'Centre crop and resize only; JPEG quality 94. Supersedes the original folder artwork.'

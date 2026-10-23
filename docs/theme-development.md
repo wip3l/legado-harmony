@@ -17,7 +17,7 @@
 低于 API 26 的设备尝试切换时提示“该能力需要鸿蒙7及以上”，其余主题内容仍正常应用。
 主题详情显示配套图标预览，当前使用卡片显示系统实际启用的桌面图标。
 新增的 12 套主题桌面图标（含自定义主题）已使用即梦重绘为 1024×1024 PNG，直接注册到 `alternateIcons`，预览和桌面共用同一资源。
-星愿魔法来自 `dreamina` CLI，其余 11 套来自画布 CLI；模型、提示词、任务与资源标识、裁切和校验摘要记录在 `docs/theme-icon-generation.json`。
+星愿魔法来自 `dreamina` CLI，其余 11 套来自画布 CLI；模型、提示词、任务与资源标识、裁切和校验摘要记录在 `scripts/assets/theme-icon-generation.json`。
 `node scripts/generate-theme-desktop-icons.mjs` 仅生成缺少 PNG 的矢量回退资源；脚本会跳过已有 PNG 的主题，避免覆盖已重绘素材。
 运行 `node scripts/app-icon-check.mjs` 检查图标注册、主题覆盖、版本门控和切换状态。
 
@@ -51,7 +51,7 @@ entry/src/main/resources/base/media/
 
 ## 内置主题
 
-`neon-harbor`（霓港来信）为原创复古都市动画主题，含 11 张即梦位图、浅深阅读角饰、导航和桌面图标、`harbor-postcard` 正则及段评气泡。其听书背景使用 720 × 520 JPG，与现有 SVG 共用资源接口和渐隐组件。设计、生成记录、迁移与验证见 [霓港来信说明](neon-harbor-theme.md)。
+`neon-harbor`（霓港来信）为原创复古都市动画主题，含 11 张即梦位图、浅深阅读角饰、导航和桌面图标、`harbor-postcard` 正则及段评气泡。其听书背景使用 720 × 520 JPG，与现有 SVG 共用资源接口和渐隐组件。素材清单见 [生成记录](../scripts/assets/neon-harbor-generation.json)，校验使用 `scripts/neon-harbor-check.mjs`，主题目录迁移为 `server/migrations/024_neon_harbor_theme.sql`。
 
 主题 ID 定义在 `ThemeIds`，是写入设置、云同步和服务端主题目录的稳定标识，发布后不能改名。
 
@@ -278,7 +278,7 @@ BuiltinThemeRegistry.register(theme);
 
 `obsidian-archive`（曜金藏书）是手动领取型主题，不能套用普通主题的点数购买、会员主题库自动授权或试用逻辑。它使用 `gilded-orbit` 气泡、配套浅深阅读角饰及独立即梦位图。授权同时要求终身超级会员身份和一年内的有效领取记录；到期后才能再次领取。
 
-修改相关入口时，保持 `ThemeAccessPolicy`、自定义部件选择、`ThemeTrialManager`、`AppIconManager` 和 `MembershipThemeGuard` 的一致性。详细规则、资源记录和数据库迁移顺序见 [专属主题说明](membership/super-exclusive-theme.md)。
+修改相关入口时，保持 `ThemeAccessPolicy`、自定义部件选择、`ThemeTrialManager`、`AppIconManager` 和 `MembershipThemeGuard` 的一致性。领取接口与数据库迁移以 `server/src` 和 `server/migrations` 中的实现为准；素材生成与校验记录位于 `scripts/assets/`。
 
 运行主题回归脚本：
 

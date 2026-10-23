@@ -30,7 +30,7 @@ for(const [key,[asset,width,height]] of Object.entries(targets)) {
     reportedCredits:item.credit_count,sourceWidth:metadata.width,sourceHeight:metadata.height,sourceSha256:hash(item.path),
     asset,width,height,assetSha256:hash(asset)});
 }
-fs.writeFileSync('docs/neon-harbor-generation.json',JSON.stringify(manifest,null,2)+'\n');
+fs.writeFileSync('scripts/assets/neon-harbor-generation.json',JSON.stringify(manifest,null,2)+'\n');
 // Contact sheet for inspection of every delivered bitmap.
 const tiles=[];
 for(const [index,item] of manifest.items.entries()) {

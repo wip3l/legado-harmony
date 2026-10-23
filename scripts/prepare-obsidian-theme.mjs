@@ -25,5 +25,5 @@ for (const item of manifest.items) {
 }
 manifest.themeId='obsidian-archive';manifest.themeName='曜金藏书';
 manifest.processing='Centre-crop and resize only, JPEG quality 94 / PNG; no regenerated or replaced artwork.';
-writeFileSync('docs/obsidian-theme-generation.json',JSON.stringify(manifest,null,2)+'\n');
+writeFileSync('scripts/assets/obsidian-theme-generation.json',JSON.stringify(manifest,null,2)+'\n');
 console.log('Prepared five Dreamina assets and provenance.');
