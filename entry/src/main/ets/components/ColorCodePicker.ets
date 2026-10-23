@@ -1,5 +1,6 @@
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
+import { ImmersiveBackButton } from './ImmersiveBackButton';
 import { HexColor } from '../utils/HexColor';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
@@ -380,6 +381,7 @@ export struct ColorCodePicker {
       .bindSheet($$this.pickerVisible, this.colorPickerSheet(), {
         height: 650,
         dragBar: true,
+        showClose: false,
         backgroundColor: this.pageColor(),
         onDisappear: () => {
           this.pickerVisible = false;
@@ -390,24 +392,46 @@ export struct ColorCodePicker {
   @Builder
   colorPickerSheet() {
     Column({ space: AppSpacing.XL }) {
-      Row() {
+      Row({ space: AppSpacing.LG }) {
         Text('选择颜色')
           .fontSize(AppFontSize.HEADLINE)
           .fontWeight(FontWeight.Bold)
           .fontColor(this.primaryTextColor())
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
         if (this.allowEmpty) {
-          Text(this.emptyOptionLabel)
+          Button(this.emptyOptionLabel)
+            .height(40)
             .fontSize(AppFontSize.BODY)
             .fontColor(this.accentColor)
-            .margin({ left: AppSpacing.LG })
+            .backgroundColor(Color.Transparent)
+            .padding({ left: AppSpacing.MD, right: AppSpacing.MD })
+            .flexShrink(0)
             .onClick(() => {
               this.onColorChange('');
               this.pickerVisible = false;
             })
         }
+        ImmersiveBackButton({
+          icon: $r('sys.symbol.xmark'),
+          iconOffsetX: 0,
+          iconColor: this.primaryTextColor(),
+          darkMode: this.appDarkMode,
+          buttonSize: 40,
+          containerWidth: 40,
+          containerHeight: 40,
+          startInset: 0,
+          compactLayout: true,
+          accessibilityLabel: '关闭颜色选择',
+          onBack: () => {
+            this.pickerVisible = false;
+          }
+        })
+          .flexShrink(0)
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
 
       Row({ space: AppSpacing.LG }) {
         Stack({ alignContent: Alignment.TopStart }) {
