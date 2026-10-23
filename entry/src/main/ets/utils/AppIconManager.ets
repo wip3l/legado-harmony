@@ -39,6 +39,7 @@ export class AppIconManager {
     AppIconManager.themeOption(ThemeIds.STARWISH_MAGIC, 'theme_starwish_magic', $r('app.media.ic_app_theme_starwish_magic')),
     AppIconManager.themeOption(ThemeIds.LETTERPRESS_PAGE, 'theme_letterpress_page', $r('app.media.ic_app_theme_letterpress_page')),
     AppIconManager.themeOption(ThemeIds.OBSIDIAN_ARCHIVE, 'theme_obsidian_archive', $r('app.media.ic_app_theme_obsidian_archive')),
+    AppIconManager.themeOption(ThemeIds.NEON_HARBOR, 'theme_neon_harbor', $r('app.media.ic_app_theme_neon_harbor')),
     AppIconManager.themeOption(ThemeIds.CUSTOM, 'theme_custom', $r('app.media.ic_app_theme_custom'))
   ];
   private static changeRevision: number = 0;

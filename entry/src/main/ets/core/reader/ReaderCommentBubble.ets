@@ -88,6 +88,9 @@ const COMMENT_BUBBLE_SPECS: Map<string, ReaderCommentBubbleSpec> = new Map<strin
   ['gilded-orbit', new ReaderCommentBubbleSpec(false, 0.12, 'folio',
     [0xFF292620, 0xFFC5A36A, 0xFFF2DEAE, 0xFFC5A36A, 0xFF292620],
     [0xFFDEC79A, 0xFFAF925E, 0xFF30291E, 0xFFAF925E, 0xFFF7E8C5])],
+  ['harbor-postcard', new ReaderCommentBubbleSpec(false, 0.12, 'postcard',
+    [0xFF994057, 0xFF76364C, 0xFFFFF3E9, 0xFF83BDB9, 0xFFFAF3E9],
+    [0xFFE9B4A2, 0xFFB77B7E, 0xFF38283B, 0xFF387C7A, 0xFFFAF3E9])],
   ['pencil-mark', new ReaderCommentBubbleSpec(false, 0.15, 'sketch',
     [0xFF2F5D48, 0xFF1F3F31, 0xFFFFF3CF, 0x992F5D48, 0], [0xFFF1DE8A, 0xFF7A6A2E, 0xFF2B2620, 0x99F1DE8A, 0])]
 ]);
@@ -261,6 +264,23 @@ export class ReaderCommentBubblePainter {
     const main = style.ornamentColor;
     const alt = style.ornamentAltColor;
     switch (style.ornament) {
+      case 'postcard': {
+        const envelope = new drawing.Path();
+        envelope.moveTo(left + h * 0.02, top - h * 0.08);
+        envelope.lineTo(left + h * 0.33, top - h * 0.08);
+        envelope.lineTo(left + h * 0.33, top + h * 0.14);
+        envelope.lineTo(left + h * 0.02, top + h * 0.14);
+        envelope.close();
+        ReaderCommentBubblePainter.fillPath(canvas, envelope, main);
+        const fold = new drawing.Path();
+        fold.moveTo(left + h * 0.03, top - h * 0.06);
+        fold.lineTo(left + h * 0.175, top + h * 0.04);
+        fold.lineTo(left + h * 0.32, top - h * 0.06);
+        canvas.attachPen(ReaderCommentBubblePainter.pen(alt, Math.max(0.8, h * 0.025)));
+        canvas.drawPath(fold);
+        canvas.detachPen();
+        break;
+      }
       case 'folio': {
         // The ribbon sits on the outer corner, clear of even a one-digit comment count.
         const ribbon = new drawing.Path();

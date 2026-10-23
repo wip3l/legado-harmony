@@ -31,8 +31,10 @@ export class ThemeAssetRegistry {
   static readonly BACKGROUND_STARWISH_MAGIC_DARK: string = 'starwish-magic-dark';
   static readonly BACKGROUND_LETTERPRESS_PAGE_LIGHT: string = 'letterpress-page-light';
   static readonly BACKGROUND_OBSIDIAN_ARCHIVE_LIGHT: string = 'obsidian-archive-light';
+  static readonly BACKGROUND_NEON_HARBOR_LIGHT: string = 'neon-harbor-light';
   static readonly BACKGROUND_LETTERPRESS_PAGE_DARK: string = 'letterpress-page-dark';
   static readonly BACKGROUND_OBSIDIAN_ARCHIVE_DARK: string = 'obsidian-archive-dark';
+  static readonly BACKGROUND_NEON_HARBOR_DARK: string = 'neon-harbor-dark';
 
   static readonly ICON_PACK_CLASSIC: string = 'classic';
   static readonly ICON_PACK_ROUNDED: string = 'rounded';
@@ -49,6 +51,7 @@ export class ThemeAssetRegistry {
   static readonly ICON_PACK_STARWISH_MAGIC: string = 'starwish-magic';
   static readonly ICON_PACK_LETTERPRESS_PAGE: string = 'letterpress-page';
   static readonly ICON_PACK_OBSIDIAN_ARCHIVE: string = 'obsidian-archive';
+  static readonly ICON_PACK_NEON_HARBOR: string = 'neon-harbor';
 
   static readonly TAB_BOOKSHELF: string = 'bookshelf';
   static readonly TAB_EXPLORE: string = 'explore';
@@ -117,10 +120,14 @@ export class ThemeAssetRegistry {
         return $r('app.media.reader_bg_letterpress_page_light');
       case ThemeAssetRegistry.BACKGROUND_OBSIDIAN_ARCHIVE_LIGHT:
         return $r('app.media.reader_bg_obsidian_archive_light');
+      case ThemeAssetRegistry.BACKGROUND_NEON_HARBOR_LIGHT:
+        return $r('app.media.reader_bg_neon_harbor_light');
       case ThemeAssetRegistry.BACKGROUND_LETTERPRESS_PAGE_DARK:
         return $r('app.media.reader_bg_letterpress_page_dark');
       case ThemeAssetRegistry.BACKGROUND_OBSIDIAN_ARCHIVE_DARK:
         return $r('app.media.reader_bg_obsidian_archive_dark');
+      case ThemeAssetRegistry.BACKGROUND_NEON_HARBOR_DARK:
+        return $r('app.media.reader_bg_neon_harbor_dark');
       default:
         return '';
     }
@@ -188,10 +195,14 @@ export class ThemeAssetRegistry {
         return $r('app.media.reader_decor_letterpress_page_light');
       case ThemeAssetRegistry.BACKGROUND_OBSIDIAN_ARCHIVE_LIGHT:
         return $r('app.media.reader_decor_obsidian_archive_light');
+      case ThemeAssetRegistry.BACKGROUND_NEON_HARBOR_LIGHT:
+        return $r('app.media.reader_decor_neon_harbor_light');
       case ThemeAssetRegistry.BACKGROUND_LETTERPRESS_PAGE_DARK:
         return $r('app.media.reader_decor_letterpress_page_dark');
       case ThemeAssetRegistry.BACKGROUND_OBSIDIAN_ARCHIVE_DARK:
         return $r('app.media.reader_decor_obsidian_archive_dark');
+      case ThemeAssetRegistry.BACKGROUND_NEON_HARBOR_DARK:
+        return $r('app.media.reader_decor_neon_harbor_dark');
       default:
         return '';
     }
@@ -262,10 +273,14 @@ export class ThemeAssetRegistry {
         return $r('app.media.reader_decor_letterpress_page_trailing_light');
       case ThemeAssetRegistry.BACKGROUND_OBSIDIAN_ARCHIVE_LIGHT:
         return $r('app.media.reader_decor_obsidian_archive_trailing_light');
+      case ThemeAssetRegistry.BACKGROUND_NEON_HARBOR_LIGHT:
+        return $r('app.media.reader_decor_neon_harbor_trailing_light');
       case ThemeAssetRegistry.BACKGROUND_LETTERPRESS_PAGE_DARK:
         return $r('app.media.reader_decor_letterpress_page_trailing_dark');
       case ThemeAssetRegistry.BACKGROUND_OBSIDIAN_ARCHIVE_DARK:
         return $r('app.media.reader_decor_obsidian_archive_trailing_dark');
+      case ThemeAssetRegistry.BACKGROUND_NEON_HARBOR_DARK:
+        return $r('app.media.reader_decor_neon_harbor_trailing_dark');
       default:
         return ThemeAssetRegistry.readerBackgroundDecoration(assetId);
     }
@@ -296,7 +311,8 @@ export class ThemeAssetRegistry {
       normalizedPackId === ThemeAssetRegistry.ICON_PACK_AZURE_MECHA ||
       normalizedPackId === ThemeAssetRegistry.ICON_PACK_STARWISH_MAGIC ||
       normalizedPackId === ThemeAssetRegistry.ICON_PACK_LETTERPRESS_PAGE ||
-      normalizedPackId === ThemeAssetRegistry.ICON_PACK_OBSIDIAN_ARCHIVE) {
+      normalizedPackId === ThemeAssetRegistry.ICON_PACK_OBSIDIAN_ARCHIVE ||
+      normalizedPackId === ThemeAssetRegistry.ICON_PACK_NEON_HARBOR) {
       return ThemeAssetRegistry.themedNavigationIcon(normalizedPackId, normalizedTabId);
     }
     return ThemeAssetRegistry.classicNavigationIcon(normalizedTabId);
@@ -340,6 +356,8 @@ export class ThemeAssetRegistry {
         return $r('app.media.theme_logo_letterpress_page');
       case ThemeIds.OBSIDIAN_ARCHIVE:
         return $r('app.media.theme_logo_obsidian_archive');
+      case ThemeIds.NEON_HARBOR:
+        return $r('app.media.theme_logo_neon_harbor');
       default:
         return $r('app.media.theme_logo_classic_blue');
     }
@@ -363,6 +381,7 @@ export class ThemeAssetRegistry {
       case ThemeIds.STARWISH_MAGIC: return $r('app.media.theme_startup_starwish_magic');
       case ThemeIds.LETTERPRESS_PAGE: return $r('app.media.theme_startup_letterpress_page');
       case ThemeIds.OBSIDIAN_ARCHIVE: return $r('app.media.theme_startup_obsidian_archive');
+      case ThemeIds.NEON_HARBOR: return $r('app.media.theme_startup_neon_harbor');
       default: return $r('app.media.theme_startup_classic_blue');
     }
   }
@@ -451,6 +470,11 @@ export class ThemeAssetRegistry {
         $r('app.media.theme_cover_obsidian_archive_03'), $r('app.media.theme_cover_obsidian_archive_04'),
         $r('app.media.theme_cover_obsidian_archive_05'), $r('app.media.theme_cover_obsidian_archive_06')
       ];
+      case ThemeIds.NEON_HARBOR: return [
+        $r('app.media.theme_cover_neon_harbor_01'), $r('app.media.theme_cover_neon_harbor_02'),
+        $r('app.media.theme_cover_neon_harbor_03'), $r('app.media.theme_cover_neon_harbor_04'),
+        $r('app.media.theme_cover_neon_harbor_05'), $r('app.media.theme_cover_neon_harbor_06')
+      ];
       default: return [
         $r('app.media.theme_cover_classic_blue_01'), $r('app.media.theme_cover_classic_blue_02'),
         $r('app.media.theme_cover_classic_blue_03'), $r('app.media.theme_cover_classic_blue_04')
@@ -477,6 +501,7 @@ export class ThemeAssetRegistry {
       case ThemeIds.STARWISH_MAGIC: return $r('app.media.theme_frame_starwish_magic');
       case ThemeIds.LETTERPRESS_PAGE: return $r('app.media.theme_frame_letterpress_page');
       case ThemeIds.OBSIDIAN_ARCHIVE: return $r('app.media.theme_frame_obsidian_archive');
+      case ThemeIds.NEON_HARBOR: return $r('app.media.theme_frame_neon_harbor');
       default: return $r('app.media.theme_frame_classic_blue');
     }
   }
@@ -500,6 +525,7 @@ export class ThemeAssetRegistry {
       case ThemeIds.STARWISH_MAGIC: return $r('app.media.theme_folder_art_starwish_magic');
       case ThemeIds.LETTERPRESS_PAGE: return $r('app.media.theme_folder_art_letterpress_page');
       case ThemeIds.OBSIDIAN_ARCHIVE: return $r('app.media.theme_folder_art_obsidian_archive');
+      case ThemeIds.NEON_HARBOR: return $r('app.media.theme_folder_art_neon_harbor');
       default: return $r('app.media.theme_folder_art_classic_blue');
     }
   }
@@ -523,6 +549,7 @@ export class ThemeAssetRegistry {
       case 'starwish-ribbon': return $r('app.media.regex_frame_starwish_ribbon');
       case 'pencil-mark': return $r('app.media.regex_frame_pencil_mark');
       case 'gilded-orbit': return $r('app.media.regex_frame_gilded_orbit');
+      case 'harbor-postcard': return $r('app.media.regex_frame_harbor_postcard');
       default: return '';
     }
   }
@@ -550,6 +577,7 @@ export class ThemeAssetRegistry {
       case 'starwish-ribbon': return $r('app.media.regex_cap_starwish_ribbon');
       case 'pencil-mark': return $r('app.media.regex_cap_pencil_mark');
       case 'gilded-orbit': return $r('app.media.regex_cap_gilded_orbit');
+      case 'harbor-postcard': return $r('app.media.regex_cap_harbor_postcard');
       default: return '';
     }
   }
@@ -592,7 +620,9 @@ export class ThemeAssetRegistry {
       case ThemeAssetRegistry.BACKGROUND_LETTERPRESS_PAGE_LIGHT:
       case ThemeAssetRegistry.BACKGROUND_LETTERPRESS_PAGE_DARK:
       case ThemeAssetRegistry.BACKGROUND_OBSIDIAN_ARCHIVE_LIGHT:
+      case ThemeAssetRegistry.BACKGROUND_NEON_HARBOR_LIGHT:
       case ThemeAssetRegistry.BACKGROUND_OBSIDIAN_ARCHIVE_DARK:
+      case ThemeAssetRegistry.BACKGROUND_NEON_HARBOR_DARK:
         return normalized;
       default:
         return '';
@@ -614,7 +644,8 @@ export class ThemeAssetRegistry {
       normalized === ThemeAssetRegistry.ICON_PACK_AZURE_MECHA ||
       normalized === ThemeAssetRegistry.ICON_PACK_STARWISH_MAGIC ||
       normalized === ThemeAssetRegistry.ICON_PACK_LETTERPRESS_PAGE ||
-      normalized === ThemeAssetRegistry.ICON_PACK_OBSIDIAN_ARCHIVE) {
+      normalized === ThemeAssetRegistry.ICON_PACK_OBSIDIAN_ARCHIVE ||
+      normalized === ThemeAssetRegistry.ICON_PACK_NEON_HARBOR) {
       return normalized;
     }
     return ThemeAssetRegistry.ICON_PACK_CLASSIC;
@@ -756,6 +787,14 @@ export class ThemeAssetRegistry {
         case ThemeAssetRegistry.TAB_SEARCH: return $r('app.media.ic_theme_obsidian_archive_search');
         case ThemeAssetRegistry.TAB_MINE: return $r('app.media.ic_theme_obsidian_archive_mine');
         default: return $r('app.media.ic_theme_obsidian_archive_bookshelf');
+      }
+    }
+    if (iconPackId === ThemeAssetRegistry.ICON_PACK_NEON_HARBOR) {
+      switch (tabId) {
+        case ThemeAssetRegistry.TAB_EXPLORE: return $r('app.media.ic_theme_neon_harbor_explore');
+        case ThemeAssetRegistry.TAB_SEARCH: return $r('app.media.ic_theme_neon_harbor_search');
+        case ThemeAssetRegistry.TAB_MINE: return $r('app.media.ic_theme_neon_harbor_mine');
+        default: return $r('app.media.ic_theme_neon_harbor_bookshelf');
       }
     }
     switch (tabId) {

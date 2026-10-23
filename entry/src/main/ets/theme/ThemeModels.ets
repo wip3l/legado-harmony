@@ -18,6 +18,7 @@ export class ThemeIds {
   static readonly STARWISH_MAGIC: string = 'starwish-magic';
   static readonly LETTERPRESS_PAGE: string = 'letterpress-page';
   static readonly OBSIDIAN_ARCHIVE: string = 'obsidian-archive';
+  static readonly NEON_HARBOR: string = 'neon-harbor';
 }
 
 export class ThemeComponentSourceIds {
@@ -67,6 +68,7 @@ export class ThemeBubbleStyles {
   static readonly STARWISH_RIBBON: string = 'starwish-ribbon';
   static readonly PENCIL_MARK: string = 'pencil-mark';
   static readonly GILDED_ORBIT: string = 'gilded-orbit';
+  static readonly HARBOR_POSTCARD: string = 'harbor-postcard';
 }
 
 export class ThemeColorTokens {

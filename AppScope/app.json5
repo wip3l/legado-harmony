@@ -104,6 +104,10 @@
       {
         "name": "theme_custom",
         "icon": "$media:ic_app_theme_custom"
+      },
+      {
+        "name": "theme_neon_harbor",
+        "icon": "$media:ic_app_theme_neon_harbor"
       }
     ]
   }

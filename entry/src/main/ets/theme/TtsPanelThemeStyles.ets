@@ -85,6 +85,10 @@ export class TtsPanelThemeStyles {
         return darkMode ?
           new TtsPanelThemeStyle($r('app.media.tts_panel_obsidian_archive_dark'), '#24262B', '#121418', '#24D6B878') :
           new TtsPanelThemeStyle($r('app.media.tts_panel_obsidian_archive_light'), '#EDE4D4', '#F3EFE7', '#26795A2F');
+      case ThemeIds.NEON_HARBOR:
+        return darkMode ?
+          new TtsPanelThemeStyle($r('app.media.tts_panel_neon_harbor_dark'), '#1C2A44', '#131A2C', '#1FF4A595') :
+          new TtsPanelThemeStyle($r('app.media.tts_panel_neon_harbor_light'), '#F0DCD3', '#F7F1EA', '#1F9C4058');
       case ThemeIds.AZURE_MECHA:
         return darkMode ?
           new TtsPanelThemeStyle($r('app.media.tts_panel_azure_mecha_dark'), '#0F2236', '#0B1119', '#333FD3E6') :

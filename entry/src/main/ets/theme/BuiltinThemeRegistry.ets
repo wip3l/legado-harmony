@@ -133,6 +133,7 @@ export class BuiltinThemeRegistry {
     themes.push(BuiltinThemeRegistry.starwishMagic());
     themes.push(BuiltinThemeRegistry.letterpressPage());
     themes.push(BuiltinThemeRegistry.obsidianArchive());
+    themes.push(BuiltinThemeRegistry.neonHarbor());
     themes.push(BuiltinThemeRegistry.classicBlue());
     themes.push(BuiltinThemeRegistry.warmPaper());
     themes.push(BuiltinThemeRegistry.forestMist());
@@ -525,6 +526,26 @@ export class BuiltinThemeRegistry {
     theme.radius = BuiltinThemeRegistry.radius(10, 14, 22, 16, 24, 16);
     theme.readerLayout = BuiltinThemeRegistry.readerLayout(20, 14, 2, 22, 22, 22, 22);
     theme.glass = BuiltinThemeRegistry.glass(22, 18, 86, 72, 58, 24, 18, 4);
+    return theme;
+  }
+
+  private static neonHarbor(): ThemePack {
+    const theme = BuiltinThemeRegistry.theme(
+      ThemeIds.NEON_HARBOR, '霓港来信',
+      '海风翻动书页，电台捎来晚安。走进三位都市友人的复古动画日常。', 'sans-serif', 'neon-harbor');
+    theme.light = BuiltinThemeRegistry.variant(
+      BuiltinThemeRegistry.colors('#F7F1EA', '#FFFBF5', '#EDE4DF', '#27283D', '#70646D', '#D8CBCB',
+        '#9C4058', '#994057', '#AD3C48'),
+      BuiltinThemeRegistry.reader('#FAF3E9', 'neon-harbor-light', '#303043', '#726571', 'light'),
+      BuiltinThemeRegistry.regex(ThemeBubbleStyles.HARBOR_POSTCARD, '#EEDBD7', '#643244'));
+    theme.dark = BuiltinThemeRegistry.variant(
+      BuiltinThemeRegistry.colors('#131A2C', '#1E263B', '#2A3349', '#F5EADF', '#B9ACB8', '#394359',
+        '#F4A595', '#994057', '#F29A9F'),
+      BuiltinThemeRegistry.reader('#182032', 'neon-harbor-dark', '#E5DFD8', '#B0A7B6', 'dark'),
+      BuiltinThemeRegistry.regex(ThemeBubbleStyles.HARBOR_POSTCARD, '#3B3048', '#FFE5D5'));
+    theme.radius = BuiltinThemeRegistry.radius(4, 8, 16, 10, 18, 4);
+    theme.readerLayout = BuiltinThemeRegistry.readerLayout(20, 14, 8, 24, 24, 24, 24);
+    theme.glass = BuiltinThemeRegistry.glass(18, 14, 92, 88, 44, 22, 12, 3);
     return theme;
   }
 

@@ -51,6 +51,8 @@ entry/src/main/resources/base/media/
 
 ## 内置主题
 
+`neon-harbor`（霓港来信）为原创复古都市动画主题，含 11 张即梦位图、浅深阅读角饰、导航和桌面图标、`harbor-postcard` 正则及段评气泡。其听书背景使用 720 × 520 JPG，与现有 SVG 共用资源接口和渐隐组件。设计、生成记录、迁移与验证见 [霓港来信说明](neon-harbor-theme.md)。
+
 主题 ID 定义在 `ThemeIds`，是写入设置、云同步和服务端主题目录的稳定标识，发布后不能改名。
 
 | ID | 说明 |

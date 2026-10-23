@@ -156,7 +156,7 @@ export class ReaderRegexFontCodec {
       value === 'crimson-stamp' || value === 'celadon-slip' || value === 'rose-frame' ||
       value === 'moon-halo' || value === 'sword-talisman' || value === 'qingluan-jade' ||
       value === 'pipi-soft-paw' || value === 'mecha-comm' || value === 'starwish-ribbon' ||
-      value === 'pencil-mark' || value === 'gilded-orbit') {
+      value === 'pencil-mark' || value === 'gilded-orbit' || value === 'harbor-postcard') {
       return value;
     }
     // Compatibility with early theme drafts.
@@ -490,6 +490,12 @@ export class ReaderRegexBubbleStyleResolver {
       ReaderRegexBubbleStyleResolver.addShadow(result, 1.4,
         ReaderRegexBubbleStyleResolver.withAlpha(base, 104), 0.5, 1);
       ReaderRegexBubbleStyleResolver.addShadow(result, 0.5, '#88B4935C', -0.5, 0.5);
+      return;
+    }
+    if (result.bubbleStyleId === 'harbor-postcard') {
+      result.backgroundColor = context.darkMode ? '#3B3048' : '#EEDBD7';
+      result.textColor = context.darkMode ? '#FFE5D5' : '#643244';
+      ReaderRegexBubbleStyleResolver.setRadii(result, 3, 8, 3, 8);
       return;
     }
     if (result.bubbleStyleId === 'gilded-orbit') {

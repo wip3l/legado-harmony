@@ -39,6 +39,7 @@ export class ThemeAccessPolicy {
     if (normalized === 'starwish-ribbon') return ThemeIds.STARWISH_MAGIC;
     if (normalized === 'pencil-mark') return ThemeIds.LETTERPRESS_PAGE;
     if (normalized === 'gilded-orbit') return ThemeIds.OBSIDIAN_ARCHIVE;
+    if (normalized === 'harbor-postcard') return ThemeIds.NEON_HARBOR;
     return '';
   }
 
