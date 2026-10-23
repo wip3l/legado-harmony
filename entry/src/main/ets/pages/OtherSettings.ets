@@ -1,4 +1,4 @@
-import { router } from '@kit.ArkUI';
+import { promptAction, router } from '@kit.ArkUI';
 import pasteboard from '@ohos.pasteboard';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
@@ -10,6 +10,8 @@ import { PageScaffold } from '../components/common/PageScaffold';
 import { SettingNavRow, SettingRow, SettingSwitchRow } from '../components/common/SettingRow';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
+import { ReaderCacheBudget, ReaderCacheCleanup } from '../core/book/ReaderCacheBudget';
+import { ReaderCacheBudgetPolicy } from '../core/book/ReaderCacheBudgetPolicy';
 
 @Entry
 @Component
@@ -27,6 +29,10 @@ struct OtherSettingsPage {
   @StorageProp('lanReaderPasswordUnreadable') lanReaderPasswordUnreadable: boolean = false;
   @StorageLink('lanReaderBackgroundStatus') lanReaderBackgroundStatus: string = '未启动';
   @State lanReaderPasswordDraft: string = '';
+  /** -1 表示还在统计。 */
+  @State textCacheBytes: number = -1;
+  @State comicCacheBytes: number = -1;
+  @State cacheClearing: boolean = false;
 
   aboutToAppear(): void {
     this.lanReaderPasswordDraft = this.lanReaderPasswordUnreadable ? '' : this.lanReaderPassword;
@@ -35,6 +41,7 @@ struct OtherSettingsPage {
 
   onPageShow(): void {
     this.syncBars();
+    this.refreshCacheUsage();
   }
 
   build() {
@@ -67,6 +74,32 @@ struct OtherSettingsPage {
           router.pushUrl({ url: 'pages/DataBackup', params: { mode: 'export' } });
         }
       })
+    }
+    .width('calc(100% - 24vp)')
+    .margin({ left: AppSpacing.LG, right: AppSpacing.LG })
+    .borderRadius(ThemeRuntime.cardRadius())
+    .clip(true)
+    .backgroundColor(this.cardColor())
+
+    this.sectionTitle('缓存')
+    Column() {
+      SettingRow({
+        title: '小说正文缓存',
+        description: this.cacheUsageText(this.textCacheBytes, ReaderCacheBudget.TEXT_LIMIT_BYTES,
+          '超出后自动清理阅读时顺带缓存的章节，手动缓存的章节和本地书不清理'),
+        onTap: () => this.confirmClearCache(true)
+      }) {
+        this.cacheClearLabel()
+      }
+      SettingRow({
+        title: '漫画图片缓存',
+        description: this.cacheUsageText(this.comicCacheBytes, ReaderCacheBudget.COMIC_LIMIT_BYTES,
+          '超出后自动清理最久未看的图片'),
+        showDivider: false,
+        onTap: () => this.confirmClearCache(false)
+      }) {
+        this.cacheClearLabel()
+      }
     }
     .width('calc(100% - 24vp)')
     .margin({ left: AppSpacing.LG, right: AppSpacing.LG })
@@ -198,7 +231,72 @@ struct OtherSettingsPage {
     AppStorage.setOrCreate('themeRevision', revision + 1);
   }
 
+  @Builder
+  cacheClearLabel() {
+    Text('清理')
+      .fontSize(AppFontSize.BODY)
+      .fontColor(this.cacheClearing ? this.subTextColor() : this.accentColor())
+      .margin({ left: AppSpacing.LG })
+  }
+
+  cacheUsageText(bytes: number, limit: number, note: string): string {
+    const usage = bytes < 0 ? '正在统计…' :
+      `${ReaderCacheBudgetPolicy.formatBytes(bytes)} / ${ReaderCacheBudgetPolicy.formatBytes(limit)}`;
+    return `${usage}\n${note}`;
+  }
+
+  async refreshCacheUsage(): Promise<void> {
+    try {
+      this.textCacheBytes = await ReaderCacheBudget.textUsageBytes();
+    } catch (e) {
+      console.warn('统计正文缓存失败:', e);
+      this.textCacheBytes = 0;
+    }
+    try {
+      this.comicCacheBytes = await ReaderCacheBudget.comicUsageBytes();
+    } catch (e) {
+      console.warn('统计漫画缓存失败:', e);
+      this.comicCacheBytes = 0;
+    }
+  }
+
+  async confirmClearCache(text: boolean): Promise<void> {
+    if (this.cacheClearing) return;
+    const dark = this.appDarkMode;
+    try {
+      const result = await promptAction.showDialog({
+        title: text ? '清理小说正文缓存？' : '清理漫画图片缓存？',
+        message: text ? '会删除在线书籍已缓存的正文，包括手动缓存的离线章节，之后阅读需要重新联网获取。本地导入的书不受影响，正在阅读的书会保留。' :
+          '会删除已下载的漫画图片，之后阅读需要重新下载。最近 10 分钟内看过的图片会保留。',
+        buttons: [{ text: '取消', color: ThemeRuntime.subTextColor(dark) },
+          { text: '清理', color: ThemeRuntime.dangerColor(dark) }]
+      });
+      if (result.index !== 1) return;
+    } catch (e) {
+      console.warn('显示清理缓存确认失败:', e);
+      return;
+    }
+    this.cacheClearing = true;
+    try {
+      const cleanup = text ? await ReaderCacheBudget.clearText() : await ReaderCacheBudget.clearComic();
+      HdsFeedback.showToast(this.cleanupSummary(cleanup));
+    } catch (e) {
+      HdsFeedback.showToast(`清理失败：${(e as Error).message}`);
+    } finally {
+      this.cacheClearing = false;
+    }
+    await this.refreshCacheUsage();
+  }
+
+  cleanupSummary(cleanup: ReaderCacheCleanup): string {
+    const parts: string[] = [`已释放 ${ReaderCacheBudgetPolicy.formatBytes(cleanup.releasedBytes)}`];
+    if (cleanup.protectedCount > 0) parts.push(`使用中保留 ${cleanup.protectedCount} 项`);
+    if (cleanup.failed > 0) parts.push(`${cleanup.failed} 项删除失败`);
+    return parts.join('，');
+  }
+
   lanReaderUrl(): string {
+
     return this.lanReaderAddress;
   }
 

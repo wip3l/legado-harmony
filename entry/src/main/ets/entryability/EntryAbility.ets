@@ -37,6 +37,7 @@ import { lanReaderServer } from '../core/lan/LanReaderServer';
 import { LanReaderPasswordStore } from '../core/lan/LanReaderPasswordStore';
 import { readStatsTracker } from '../core/stats/ReadStatsTracker';
 import { CloudAutoSync } from '../account/CloudAutoSync';
+import { ReaderCacheBudget } from '../core/book/ReaderCacheBudget';
 
 export default class EntryAbility extends UIAbility {
   private appliedColorMode: number = -1;
@@ -319,7 +320,9 @@ export default class EntryAbility extends UIAbility {
     this.deferredStartupScheduled = true;
     // Let the first frame commit before registering a potentially large custom font file.
     setTimeout(() => {
+      ReaderCacheBudget.scheduleStartupTrim();
       QuickJsDiagnostics.initialize(this.context).catch((error: Error) => {
+
         hilog.warn(0x0000, 'QuickJS', 'Migration initialization failed: %{public}s', error.message);
       });
       // ReaderFontHelper only counts a font as registered when the UIContext registration succeeds, so a null

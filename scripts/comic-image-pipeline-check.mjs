@@ -10,6 +10,7 @@ const mods = await loadNativeSourceModules();
 try {
   const files = new Map();
   let decrypts = 0;
+  const budget = { touched: 0, writes: 0 };
   const scriptRuntime = imageScriptTestRuntime();
   const sandbox = vm.createContext({
     console, Uint8Array, ArrayBuffer,
@@ -23,6 +24,7 @@ try {
     digestHashHex: (algorithm, text) => crypto.createHash(algorithm).update(text).digest('hex'),
     HttpClient: { CANCELLED_ERROR: '书源请求已取消' },
     AppStorage: { get: () => '/cache' },
+    ReaderCacheBudget: { touchComicFile() { budget.touched++; }, noteComicWrite() { budget.writes++; } },
     fs: { OpenMode: { CREATE: 1, WRITE_ONLY: 2, TRUNC: 4 }, mkdirSync() {},
       accessSync: path => files.has(path), openSync: path => ({ fd: path }), closeSync() {},
       writeSync: (fd, data) => files.set(fd, Buffer.from(data)) },
@@ -186,5 +188,7 @@ ${failed}
   definition.content.imageDecode.processPlainImages=false; scripted.jsLib=mods.NativeSourceSpec.pack(definition);
   await assert.rejects(pipeline.materialize(cancelHttp,scripted,raw('cancel',decodeScript),true,()=>stop),/已取消/);
   assert.equal(files.size,fileCount);
+  assert.ok(budget.writes > 0, 'new cache files must notify the comic cache budget');
+  assert.ok(budget.touched > 0, 'cache hits must refresh the file usage time');
   console.log('comic-image-pipeline-check: per-image IVs, AES 128/192/256, fixed IV/CTR/3DES, plaintext/HEIF, data: images, cache identity, failure markers and failures passed');
 } finally { mods.cleanup(); }

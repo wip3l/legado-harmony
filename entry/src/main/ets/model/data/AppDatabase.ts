@@ -18,7 +18,15 @@ export interface BookSourcePositionUpdate {
   isBottom: boolean;
 }
 
+export class CachedContentEntry {
+  rowId: number = 0;
+  bookUrl: string = '';
+  bytes: number = 0;
+  usedAt: number = 0;
+}
+
 export class ReaderPaginationCacheRecord {
+
   starts: number[] = [];
   ends: number[] = [];
 }
@@ -84,7 +92,7 @@ export class AppDatabase implements BookSourceRuntimePersistence {
   private latestBookProgressWriteTimes: Map<string, number> = new Map<string, number>();
   private readStatsWriteTask: Promise<void> = Promise.resolve();
   private readonly DATABASE_NAME = 'legado.db';
-  private readonly SCHEMA_VERSION = 20;
+  private readonly SCHEMA_VERSION = 21;
 
   private constructor() {}
 
@@ -241,6 +249,9 @@ export class AppDatabase implements BookSourceRuntimePersistence {
         chapterName TEXT DEFAULT '',
         content TEXT DEFAULT '',
         cacheDate INTEGER DEFAULT 0,
+        pinned INTEGER DEFAULT 1,
+        contentBytes INTEGER DEFAULT -1,
+        accessDate INTEGER DEFAULT 0,
         PRIMARY KEY (bookUrl, chapterIndex)
       )
     `);
@@ -443,7 +454,11 @@ export class AppDatabase implements BookSourceRuntimePersistence {
       { table: 'book_sources', column: 'isPinned', definition: 'isPinned INTEGER DEFAULT 0' },
       { table: 'book_sources', column: 'isBottom', definition: 'isBottom INTEGER DEFAULT 0' },
       { table: 'book_sources', column: 'validationStatus', definition: 'validationStatus INTEGER DEFAULT 0' },
-      { table: 'book_chapters', column: 'variable', definition: "variable TEXT DEFAULT ''" }
+      { table: 'book_chapters', column: 'variable', definition: "variable TEXT DEFAULT ''" },
+      // 升级前的正文分不出是阅读时顺带缓存的还是手动缓存的，一律按手动缓存保留，不参与自动清理。
+      { table: 'book_contents', column: 'pinned', definition: 'pinned INTEGER DEFAULT 1' },
+      { table: 'book_contents', column: 'contentBytes', definition: 'contentBytes INTEGER DEFAULT -1' },
+      { table: 'book_contents', column: 'accessDate', definition: 'accessDate INTEGER DEFAULT 0' }
     ];
 
     for (const migration of migrations) {
@@ -2136,29 +2151,155 @@ export class AppDatabase implements BookSourceRuntimePersistence {
     }
   }
 
-  async saveCachedChapterContent(bookUrl: string, chapter: BookChapter, content: string): Promise<void> {
+  /**
+   * pinned 为 true 表示用户手动缓存（缓存全文、指定章节），超过容量上限时不会被自动清理；
+   * 阅读和预缓存顺带写入的为 false。已经是手动缓存的章节重新写入时保持手动缓存。
+   */
+  async saveCachedChapterContent(bookUrl: string, chapter: BookChapter, content: string,
+    pinned: boolean = false): Promise<void> {
     if (!this.store || !bookUrl || !content) return;
     const cacheDate = Date.now();
+    const predicates = new relationalStore.RdbPredicates('book_contents');
+    predicates.equalTo('bookUrl', bookUrl);
+    predicates.equalTo('chapterIndex', chapter.index);
+    const resultSet = await this.store.query(predicates, ['pinned']);
+    let exists = false;
+    let wasPinned = false;
+    try {
+      if (resultSet.goToFirstRow()) {
+        exists = true;
+        wasPinned = resultSet.getLong(resultSet.getColumnIndex('pinned')) === 1;
+      }
+    } finally {
+      resultSet.close();
+    }
     const bucket: relationalStore.ValuesBucket = {
       bookUrl: bookUrl,
       chapterIndex: chapter.index,
       chapterUrl: chapter.url,
       chapterName: chapter.title,
       content: content,
-      cacheDate: cacheDate
+      cacheDate: cacheDate,
+      pinned: pinned || wasPinned ? 1 : 0,
+      contentBytes: AppDatabase.utf8ByteLength(content),
+      accessDate: cacheDate
     };
-    const predicates = new relationalStore.RdbPredicates('book_contents');
-    predicates.equalTo('bookUrl', bookUrl);
-    predicates.equalTo('chapterIndex', chapter.index);
-    const resultSet = await this.store.query(predicates, []);
-    const exists = resultSet.rowCount > 0;
-    resultSet.close();
     if (exists) {
       await this.store.update(bucket, predicates);
     } else {
       await this.store.insert('book_contents', bucket);
     }
     chapter.cacheDate = cacheDate;
+  }
+
+  /** 把已缓存的章节标为手动缓存；返回是否存在这一行。 */
+  async pinCachedChapterContent(bookUrl: string, chapterIndex: number): Promise<boolean> {
+    if (!this.store || !bookUrl) return false;
+    const predicates = new relationalStore.RdbPredicates('book_contents');
+    predicates.equalTo('bookUrl', bookUrl);
+    predicates.equalTo('chapterIndex', chapterIndex);
+    const changed = await this.store.update({ pinned: 1 } as relationalStore.ValuesBucket, predicates);
+    return changed > 0;
+  }
+
+  /** 读到磁盘缓存时记下使用时间，自动清理按最久未用的先删。 */
+  async touchCachedChapterContent(bookUrl: string, chapterIndex: number): Promise<void> {
+    if (!this.store || !bookUrl) return;
+    await this.store.executeSql('UPDATE book_contents SET accessDate = ? WHERE bookUrl = ? AND chapterIndex = ?',
+      [Date.now(), bookUrl, chapterIndex]);
+  }
+
+  /** 在线正文缓存的条件：本地导入书的正文只存在这张表里，任何清理都不能碰。 */
+  private static readonly ONLINE_CONTENT_WHERE: string =
+    "bookUrl NOT LIKE 'local://%' AND bookUrl NOT IN (SELECT bookUrl FROM books WHERE origin = 'local')";
+
+  /** 升级前写入的行没有字节数，分批补算；返回本批补了多少行，0 表示已补完。 */
+  async backfillCachedContentBytes(batchSize: number = 400): Promise<number> {
+    if (!this.store) return 0;
+    const resultSet = await this.store.querySql(
+      'SELECT COUNT(*) AS n FROM (SELECT rowid FROM book_contents WHERE contentBytes < 0 AND ' +
+        `${AppDatabase.ONLINE_CONTENT_WHERE} LIMIT ?)`, [batchSize]);
+    let pending = 0;
+    try {
+      if (resultSet.goToFirstRow()) pending = resultSet.getLong(resultSet.getColumnIndex('n'));
+    } finally {
+      resultSet.close();
+    }
+    if (pending === 0) return 0;
+    await this.store.executeSql('UPDATE book_contents SET contentBytes = LENGTH(CAST(content AS BLOB)) ' +
+      `WHERE rowid IN (SELECT rowid FROM book_contents WHERE contentBytes < 0 AND ${AppDatabase.ONLINE_CONTENT_WHERE} ` +
+      'LIMIT ?)', [batchSize]);
+    return pending;
+  }
+
+  /** 在线正文缓存的总字节数（不含本地导入书）。 */
+  async getOnlineCachedContentBytes(): Promise<number> {
+    if (!this.store) return 0;
+    const resultSet = await this.store.querySql(
+      `SELECT SUM(MAX(contentBytes, 0)) AS total FROM book_contents WHERE ${AppDatabase.ONLINE_CONTENT_WHERE}`);
+    try {
+      return resultSet.goToFirstRow() ? resultSet.getLong(resultSet.getColumnIndex('total')) : 0;
+    } finally {
+      resultSet.close();
+    }
+  }
+
+  /** 在线正文缓存逐行的大小与最近使用时间，最久未用的在前；onlyAuto 时只列阅读时顺带缓存的行。 */
+  async listOnlineCachedContentEntries(onlyAuto: boolean): Promise<CachedContentEntry[]> {
+    const entries: CachedContentEntry[] = [];
+    if (!this.store) return entries;
+    const resultSet = await this.store.querySql(
+      'SELECT rowid AS rid, bookUrl, MAX(contentBytes, 0) AS bytes, MAX(accessDate, cacheDate) AS usedAt ' +
+        `FROM book_contents WHERE ${AppDatabase.ONLINE_CONTENT_WHERE}${onlyAuto ? ' AND pinned = 0' : ''} ` +
+        'ORDER BY usedAt ASC');
+    try {
+      const rid = resultSet.getColumnIndex('rid');
+      const book = resultSet.getColumnIndex('bookUrl');
+      const bytes = resultSet.getColumnIndex('bytes');
+      const usedAt = resultSet.getColumnIndex('usedAt');
+      while (resultSet.goToNextRow()) {
+        const entry = new CachedContentEntry();
+        entry.rowId = resultSet.getLong(rid);
+        entry.bookUrl = resultSet.getString(book);
+        entry.bytes = resultSet.getLong(bytes);
+        entry.usedAt = resultSet.getLong(usedAt);
+        entries.push(entry);
+      }
+    } finally {
+      resultSet.close();
+    }
+    return entries;
+  }
+
+  /** 按行号删除正文缓存，并清掉失去正文的分页缓存。 */
+  async deleteCachedContentRows(rowIds: number[]): Promise<void> {
+    if (!this.store || rowIds.length === 0) return;
+    for (let offset = 0; offset < rowIds.length; offset += 200) {
+      const chunk = rowIds.slice(offset, offset + 200);
+      const marks = chunk.map((): string => '?').join(',');
+      await this.store.executeSql(`DELETE FROM book_contents WHERE rowid IN (${marks})`, chunk);
+    }
+    await this.store.executeSql('DELETE FROM reader_pagination_cache WHERE NOT EXISTS (SELECT 1 FROM book_contents c ' +
+      'WHERE c.bookUrl = reader_pagination_cache.bookUrl AND c.chapterIndex = reader_pagination_cache.chapterIndex)');
+  }
+
+  private static utf8ByteLength(value: string): number {
+    let bytes = 0;
+    for (let i = 0; i < value.length; i++) {
+      const code = value.charCodeAt(i);
+      if (code < 0x80) {
+        bytes += 1;
+      } else if (code < 0x800) {
+        bytes += 2;
+      } else if (code >= 0xD800 && code <= 0xDBFF && i + 1 < value.length) {
+        // 代理对合起来是一个 4 字节字符。
+        bytes += 4;
+        i++;
+      } else {
+        bytes += 3;
+      }
+    }
+    return bytes;
   }
 
   async deleteBookCachedContent(bookUrl: string): Promise<void> {

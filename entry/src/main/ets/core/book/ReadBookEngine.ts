@@ -7,6 +7,7 @@ import { LocalChapterContentLoader } from './LocalChapterContentLoader';
 import { BookSourceInteractionPostProcessor } from './BookSourceInteractionPostProcessor';
 import { ReaderOpenTrace } from '../../utils/ReaderOpenTrace';
 import { ReaderImageMarker } from './ReaderImageMarker';
+import { ReaderCacheBudget } from './ReaderCacheBudget';
 
 export class ReadBookEngine {
   private static inst: ReadBookEngine | null = null;
@@ -40,7 +41,14 @@ export class ReadBookEngine {
   private constructor() { this.webBook = new WebBookService(); }
 
   static get(): ReadBookEngine {
-    if (!ReadBookEngine.inst) ReadBookEngine.inst = new ReadBookEngine();
+    if (!ReadBookEngine.inst) {
+      ReadBookEngine.inst = new ReadBookEngine();
+      // 正在阅读的书不参与正文缓存的容量清理。
+      ReaderCacheBudget.setProtectedBooksProvider((): string[] => {
+        const bookUrl = ReadBookEngine.inst?.book?.bookUrl || '';
+        return bookUrl ? [bookUrl] : [];
+      });
+    }
     return ReadBookEngine.inst;
   }
 
@@ -547,6 +555,9 @@ export class ReadBookEngine {
     if (cached && !this.isInvalidChapterContent(cached)) {
       this.putChapterCache(idx, cached);
       chapter.cacheDate = chapter.cacheDate || Date.now();
+      appDb.touchCachedChapterContent(sessionBookUrl, idx).catch((err: Error) => {
+        console.warn('[RE] touch chapter cache failed:', idx, err);
+      });
       ReaderOpenTrace.mark(sessionBookUrl, 'content-disk-hit', `chapter=${idx} length=${cached.length}`);
       return cached;
     }
@@ -581,6 +592,7 @@ export class ReadBookEngine {
       if (ReaderImageMarker.hasFailure(text)) return text;
       try {
         await appDb.saveCachedChapterContent(sessionBookUrl, chapter, text);
+        ReaderCacheBudget.noteTextWrite();
       } catch (err) {
         console.error('[RE] save chapter cache failed:', idx, err);
       }
@@ -623,12 +635,26 @@ export class ReadBookEngine {
       text.includes('升级VIP可享受不限速访问');
   }
 
+  /** 手动缓存（缓存全文、指定章节）：写入的章节标为手动缓存，容量清理不会删它。 */
   async cacheChapter(idx: number, shouldCancel: (() => boolean) | null = null): Promise<boolean> {
     if (shouldCancel && shouldCancel()) return false;
+    const book = this.book;
     const text = await this.fetchContent(idx, shouldCancel);
     // 有图片失败的章节没有写入正文缓存，算作这一章没缓存成功。
-    return !(shouldCancel && shouldCancel()) && !!text && !ReaderImageMarker.hasFailure(text);
+    const ok = !(shouldCancel && shouldCancel()) && !!text && !ReaderImageMarker.hasFailure(text);
+    if (ok && book && book.origin !== 'local' && this.book === book && idx < this.chapters.length) {
+      try {
+        // 内存命中时不会重新写盘；行不存在（例如刚被清理）时补写一次。
+        if (!await appDb.pinCachedChapterContent(book.bookUrl, idx)) {
+          await appDb.saveCachedChapterContent(book.bookUrl, this.chapters[idx], text, true);
+        }
+      } catch (err) {
+        console.warn('[RE] pin chapter cache failed:', idx, err);
+      }
+    }
+    return ok;
   }
+
 
   cancelPendingRequests(): void {
     this.webBook.cancelPendingRequests();

@@ -1,6 +1,7 @@
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
+import { ReaderCacheBudget } from './ReaderCacheBudget';
 import { BookSource, HttpClient, NativeSourceCrypto, SourceImageDecoder, NativeSourceSpec, NativeImageScriptRunner, digestHashHex } from '@legado/sourceengine';
 
 export class ComicImageSpec {
@@ -122,7 +123,10 @@ export class ComicImagePipeline {
     })) : this.hashText(cacheIdentity);
     const basePath = `${dir}/${cacheKey}`;
     const existing = this.findExisting(basePath);
-    if (existing) return existing;
+    if (existing) {
+      ReaderCacheBudget.touchComicFile(existing);
+      return existing;
+    }
 
     let bytes: Uint8Array;
     if (embedded) {
@@ -185,7 +189,9 @@ export class ComicImagePipeline {
     } finally {
       fs.closeSync(file);
     }
+    ReaderCacheBudget.noteComicWrite();
     return path;
+
   }
 
   private static async decodeImage(input: Uint8Array, rule: string): Promise<Uint8Array> {
