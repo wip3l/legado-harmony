@@ -19,6 +19,15 @@ export class ComicImageSpec {
   decodeError: string = '';
 }
 
+/** 单张正文图片各环节耗时（毫秒），用于排查整章图片加载慢。 */
+export class ComicImageTiming {
+  cacheHit: boolean = false;
+  downloadMs: number = 0;
+  /** 图片脚本耗时，包含排队等待全局脚本会话的时间。 */
+  scriptMs: number = 0;
+  decryptMs: number = 0;
+}
+
 /**
  * Materializes protected comic images as app-owned cache files. Imported rules
  * never receive filesystem access; only bounded HTTP headers and allow-listed
@@ -76,7 +85,8 @@ export class ComicImagePipeline {
   }
 
   static async materialize(http: HttpClient, source: BookSource, raw: string,
-    forceLocal: boolean = false, cancelled: () => boolean = (): boolean => false, index: number = 0): Promise<string> {
+    forceLocal: boolean = false, cancelled: () => boolean = (): boolean => false, index: number = 0,
+    timing: ComicImageTiming | null = null): Promise<string> {
     if (cancelled()) throw new Error(HttpClient.CANCELLED_ERROR);
     const spec = this.parse(raw);
     if (spec.decodeError) throw new Error(spec.decodeError);
@@ -124,6 +134,7 @@ export class ComicImagePipeline {
     const basePath = `${dir}/${cacheKey}`;
     const existing = this.findExisting(basePath);
     if (existing) {
+      if (timing) timing.cacheHit = true;
       ReaderCacheBudget.touchComicFile(existing);
       return existing;
     }
@@ -132,6 +143,7 @@ export class ComicImagePipeline {
     if (embedded) {
       bytes = embedded;
     } else {
+      const downloadStarted = Date.now();
       const response = await http.executeBinary({
         cookieSource: source.bookSourceUrl,
         cancelCheck: cancelled,
@@ -144,6 +156,7 @@ export class ComicImagePipeline {
         connectTimeout: 15000,
         readTimeout: 30000
       }, this.MAX_IMAGE_BYTES);
+      if (timing) timing.downloadMs = Date.now() - downloadStarted;
       if (cancelled()) throw new Error(HttpClient.CANCELLED_ERROR);
       if (!response.success || response.data.length === 0) {
         if (spec.decodeAlgorithm || spec.decodeScript) throw new Error(`正文图片下载失败（HTTP ${response.statusCode}）`);
@@ -153,14 +166,18 @@ export class ComicImagePipeline {
       bytes = response.data;
     }
     if (spec.decodeScript && (spec.processPlainImages || !this.looksLikeImage(bytes))) {
+      const scriptStarted = Date.now();
       try {
         bytes = await NativeImageScriptRunner.run(scriptCode, spec.decodeScript, bytes,
           { url: spec.url, index: index, params: spec.decodeParams }, cancelled);
         if (!this.looksLikeImage(bytes)) throw new Error('脚本返回的字节不是支持的图片格式');
       } catch (e) {
         throw new Error(`content.imageDecode.script (${spec.decodeScript})：${(e as Error).message}`);
+      } finally {
+        if (timing) timing.scriptMs = Date.now() - scriptStarted;
       }
     }
+    const decryptStarted = Date.now();
     if (spec.decodeAlgorithm && !this.looksLikeImage(bytes)) {
       try {
         if (!spec.decodeKey) throw new Error('密钥为空');
@@ -180,6 +197,7 @@ export class ComicImagePipeline {
       const decoded = await this.decodeImage(bytes, decodeRule);
       if (decoded.length > 0) bytes = decoded;
     }
+    if (timing) timing.decryptMs = Date.now() - decryptStarted;
     if (!this.looksLikeImage(bytes)) return spec.url;
     if (cancelled()) throw new Error(HttpClient.CANCELLED_ERROR);
     const path = `${basePath}${this.imageExtension(bytes, spec.url)}`;

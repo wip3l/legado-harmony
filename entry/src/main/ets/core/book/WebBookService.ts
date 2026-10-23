@@ -2,7 +2,7 @@ import { SourceEngineHost, Book, BookChapter, BookSource, ContentRule, HttpClien
 import { util } from '@kit.ArkTS';
 import { BookSourceDataUrlSupport } from './BookSourceDataUrlSupport';
 import { ReaderImageMarker } from './ReaderImageMarker';
-import { ComicImagePipeline } from './ComicImagePipeline';
+import { ComicImagePipeline, ComicImageTiming } from './ComicImagePipeline';
 import { BookSourceInteractionPostProcessor } from './BookSourceInteractionPostProcessor';
 import { BookSourceAudioWebRuntime } from './BookSourceAudioWebRuntime';
 import { AudioRuleSupport } from './AudioRuleSupport';
@@ -15,6 +15,11 @@ class ContentPageData {
 
 export class WebBookService {
   static readonly GENERIC_TOC_FALLBACK_KEY: string = '__genericTocFallback';
+  /**
+   * 正文图片同时下载处理的张数。真机实测改成 8 后单张传输时间涨到约 5 倍、整章反而更慢：
+   * 同一图片站的下载速度先到顶，多开请求只是分摊同一份速度。
+   */
+  private static readonly READER_IMAGE_CONCURRENCY: number = 4;
   private http: HttpClient;
   private activeContentRuleOwners: Set<string> = new Set();
 
@@ -847,7 +852,13 @@ export class WebBookService {
     if (!content && imageRuleValues.length === 0) return data;
     content = this.applyContentReplaceRule(content, contentRule.replaceRegex, ctx, chapter, debugContext);
     if (this.contentRequestCanceled(shouldCancel)) return data;
-    data.content = await this.normalizeReaderContent(source, content, baseUrl, imageRuleValues);
+    // 切走章节时图片下载随之停止，不再把整章图片下完。
+    try {
+      data.content = await this.normalizeReaderContent(source, content, baseUrl, imageRuleValues,
+        (): boolean => this.contentRequestCanceled(shouldCancel));
+    } catch (e) {
+      if (!this.contentRequestCanceled(shouldCancel)) throw e as Error;
+    }
     if (this.contentRequestCanceled(shouldCancel)) data.content = '';
     return data;
   }
@@ -1520,25 +1531,46 @@ export class WebBookService {
     if (values.length === 0) return content;
     const resolved: Record<string, string> = {};
     let failed = 0;
-    for (let start = 0; start < values.length; start += 4) {
-      if (cancelled()) throw new Error(HttpClient.CANCELLED_ERROR);
-      const batch = values.slice(start, start + 4);
-      // 一张图下载或解密失败只影响这一张：原因写进它的标记由阅读器显示，其余图片照常显示。
-      const paths = await Promise.all(batch.map(async (value: string, index: number): Promise<string> => {
+    let cursor = 0;
+    const started = Date.now();
+    let firstDoneMs = -1;
+    let cacheHits = 0;
+    let downloadMs = 0;
+    let scriptMs = 0;
+    let decryptMs = 0;
+    // 固定数量的任务各自取下一张，做完一张立刻接着取，一张慢图不会让其余位置空等。
+    const worker = async (): Promise<void> => {
+      while (cursor < values.length) {
+        if (cancelled()) throw new Error(HttpClient.CANCELLED_ERROR);
+        const index = cursor++;
+        const value = values[index];
+        const timing = new ComicImageTiming();
+        // 一张图下载或解密失败只影响这一张：原因写进它的标记由阅读器显示，其余图片照常显示。
         try {
-          return await ComicImagePipeline.materialize(this.http, source, value, true, cancelled, start + index);
+          resolved[value] = await ComicImagePipeline.materialize(this.http, source, value, true, cancelled, index,
+            timing) || value;
         } catch (e) {
           const message = (e as Error)?.message || String(e);
           if (cancelled() || message === HttpClient.CANCELLED_ERROR) throw e as Error;
           failed++;
-          console.warn(`[ReaderImage] 第 ${start + index + 1} 张图片处理失败: ${message}`);
-          return ReaderImageMarker.failureSource(message);
+          console.warn(`[ReaderImage] 第 ${index + 1} 张图片处理失败: ${message}`);
+          resolved[value] = ReaderImageMarker.failureSource(message);
         }
-      }));
-      for (let index = 0; index < batch.length; index++) {
-        resolved[batch[index]] = paths[index] || batch[index];
+        if (firstDoneMs < 0) firstDoneMs = Date.now() - started;
+        if (timing.cacheHit) cacheHits++;
+        downloadMs += timing.downloadMs;
+        scriptMs += timing.scriptMs;
+        decryptMs += timing.decryptMs;
       }
+    };
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < Math.min(WebBookService.READER_IMAGE_CONCURRENCY, values.length); i++) {
+      workers.push(worker());
     }
+    await Promise.all(workers);
+    console.info(`[ReaderImageTiming] 本章 ${values.length} 张 并发 ${WebBookService.READER_IMAGE_CONCURRENCY}：` +
+      `首张完成 ${firstDoneMs}ms，全部完成 ${Date.now() - started}ms，缓存命中 ${cacheHits} 张，失败 ${failed} 张；` +
+      `累计 下载 ${downloadMs}ms 脚本(含排队) ${scriptMs}ms 解密 ${decryptMs}ms`);
     if (failed > 0) console.warn(`[ReaderImage] 本章 ${values.length} 张图片中 ${failed} 张未能显示`);
     return content.replace(pattern, (_all: string, encoded: string): string => {
       try {
