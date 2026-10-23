@@ -25,6 +25,7 @@ import { LocalBookService } from '../core/book/LocalBookService';
 import { WebDavBookService } from '../webdav/WebDavBookService';
 import { BookSourceRuntimeSnapshotStore, BookSourceSettingValue } from '../core/book/BookSourceRuntimeSnapshot';
 import { ReaderInteractionProviderRegistry } from '../core/book/ReaderInteractionProvider';
+import { ReaderCommentWebTheme } from '../core/reader/ReaderCommentWebTheme';
 import { HdsFeedback } from '../utils/HdsFeedback';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
@@ -183,6 +184,20 @@ const READER_CONTINUOUS_LIST_ID = 'reader_continuous_list';
 const READER_CONTINUOUS_TTS_FOLLOW_GRACE_MS = 2500;
 const READER_PROGRESS_OFFSET_CHAPTER_KEY = 'readProgressCharOffsetChapterV2';
 
+/** 评论网页只获得返回/关闭能力，不暴露书源运行时或其它宿主权限。 */
+class ReaderCommentNavigationBridge {
+  private readonly navigateBack: () => void;
+  private readonly dismiss: () => void;
+
+  constructor(navigateBack: () => void, dismiss: () => void) {
+    this.navigateBack = navigateBack;
+    this.dismiss = dismiss;
+  }
+
+  back(): void { this.navigateBack(); }
+  close(): void { this.dismiss(); }
+}
+
 @Entry
 @Component
 struct ReadBookPage {
@@ -218,6 +233,8 @@ struct ReadBookPage {
   @State readerCommentPanelUrl: string = '';
   @State readerCommentPanelProgress: number = 0;
   @State readerCommentPanelLoading: boolean = false;
+  @State readerCommentPanelError: boolean = false;
+  @State readerCommentPanelHeight: number = 0;
   private readerCommentPanelHtml: string = '';
   private readerCommentPanelBaseUrl: string = '';
   private readerCommentPanelHtmlLoaded: boolean = false;
@@ -744,6 +761,8 @@ struct ReadBookPage {
   private readerCommentPageAreaTop: number = -1;
   private readerCommentPageAreaHeight: number = 0;
   private readerCommentPanelController: webview.WebviewController = new webview.WebviewController();
+  private readerCommentNavigationBridge: ReaderCommentNavigationBridge = new ReaderCommentNavigationBridge(
+    () => this.backReaderCommentPanel(), () => this.closeReaderCommentPanel());
   @State eyeTurnState: ReaderEyeTurnViewState = new ReaderEyeTurnViewState();
   private eyeTurnCoordinator?: ReaderEyeTurnCoordinator;
   private readerEyeTurnSurfaceController: XComponentController = new XComponentController();
@@ -3030,8 +3049,10 @@ struct ReadBookPage {
       // 系统拖动条会在网页上方单独占一条底色不同的横带；改为在网页顶部叠一根拖动条（见 readerCommentPanel）。
       dragBar: false,
       showClose: false,
-      // 拖动过程中不逐帧改网页高度：网页每次改尺寸都要重绘，深色下会先露出一块白底再变黑。
-      scrollSizeMode: ScrollSizeMode.FOLLOW_DETENT,
+      scrollSizeMode: ScrollSizeMode.CONTINUOUS,
+      // Web 的百分比高度可能保留首次半屏尺寸，显式同步弹层实际高度（回调单位为 px）。
+      onHeightDidChange: (height: number): void => this.updateReaderCommentPanelHeight(height),
+      onDetentsDidChange: (height: number): void => this.updateReaderCommentPanelHeight(height),
       // 底色与评论页一致，拖动到网页尚未铺满的位置时也看不出接缝。
       backgroundColor: this.readerCommentPanelWebBackground(),
       onDisappear: () => {
@@ -3047,10 +3068,18 @@ struct ReadBookPage {
     return this.appDarkMode ? '#131313' : '#FFFFFF';
   }
 
+  updateReaderCommentPanelHeight(heightPx: number): void {
+    if (!this.showReaderCommentPanel || !Number.isFinite(heightPx) || heightPx <= 0) return;
+    const height = this.getUIContext().px2vp(heightPx);
+    if (Math.abs(height - this.readerCommentPanelHeight) >= 0.5) this.readerCommentPanelHeight = height;
+  }
+
   @Builder
   readerCommentPanel() {
     Stack({ alignContent: Alignment.Top }) {
-      Web({ src: this.readerCommentPanelUrl, controller: this.readerCommentPanelController })
+      // 与弹层同步合成，避免独立 Web surface 在连续扩容时底部露出未绘制的白条。
+      Web({ src: this.readerCommentPanelUrl, controller: this.readerCommentPanelController,
+        renderMode: RenderMode.SYNC_RENDER })
         .width('100%')
         .height('100%')
         .backgroundColor(this.readerCommentPanelWebBackground())
@@ -3062,6 +3091,16 @@ struct ReadBookPage {
         // 强制深色在部分 ArkWeb 版本上不生效，生效时又会和下面的注入样式叠加反色；
         // 没有深色样式的评论页统一由 syncReaderCommentPanelWebTheme 注入反色样式。
         .forceDarkAccess(false)
+        .javaScriptProxy({
+          object: this.readerCommentNavigationBridge,
+          name: 'LegadoCommentHost',
+          methodList: ['back', 'close'],
+          controller: this.readerCommentPanelController
+        })
+        .onWindowExit(() => this.closeReaderCommentPanel())
+        .javaScriptOnDocumentStart([{
+          script: ReaderCommentWebTheme.bootstrap(this.appDarkMode), scriptRules: ['*']
+        }])
         // 上滑先交给弹层展开到全屏，下滑先滚网页、到顶后再交给弹层收起。
         .nestedScroll({
           scrollForward: NestedScrollMode.PARENT_FIRST,
@@ -3072,22 +3111,37 @@ struct ReadBookPage {
           setTimeout(() => this.loadReaderCommentPanelHtmlIfNeeded(), 0);
         })
         .onPageBegin(() => {
+          this.readerCommentPanelLoadSerial++;
+          if (this.readerCommentPanelReadyTimerId >= 0) clearTimeout(this.readerCommentPanelReadyTimerId);
+          this.readerCommentPanelReadyTimerId = -1;
           this.readerCommentPanelLoading = true;
+          this.readerCommentPanelError = false;
+          if (this.readerCommentPanelHtmlLoaded) this.scheduleReaderCommentPanelHostReady(180);
         })
         .onPageEnd(() => {
+          if (this.readerCommentPanelError) return;
           if (this.loadReaderCommentPanelHtmlIfNeeded()) return;
           this.scheduleReaderCommentPanelHostReady(0);
+        })
+        .onErrorReceive((event) => {
+          if (event.request.isMainFrame()) this.failReaderCommentPanelLoad();
         })
 
       if (this.readerCommentPanelLoading) {
         Column({ space: 10 }) {
-          LoadingProgress()
-            .width(38)
-            .height(38)
-            .color(this.accentColor())
-          Text('评论加载中…')
+          if (!this.readerCommentPanelError) {
+            LoadingProgress()
+              .width(38)
+              .height(38)
+              .color(this.accentColor())
+          }
+          Text(this.readerCommentPanelError ? '评论显示失败，请重试' : '评论加载中…')
             .fontSize(AppFontSize.BODY)
             .fontColor(ThemeRuntime.subTextColor(this.appDarkMode))
+          if (this.readerCommentPanelError) {
+            Button('重试')
+              .onClick(() => this.retryReaderCommentPanelLoad())
+          }
         }
         .width('100%')
         .height('100%')
@@ -3107,7 +3161,9 @@ struct ReadBookPage {
         .accessibilityLevel('no')
     }
     .width('100%')
-    .height('100%')
+    .height(this.readerCommentPanelHeight > 0 ? this.readerCommentPanelHeight : '100%')
+    .backgroundColor(this.readerCommentPanelWebBackground())
+    .clip(true)
   }
 
   @Builder
@@ -7915,7 +7971,10 @@ struct ReadBookPage {
       this.scheduleReaderLayoutStabilization(readingOffset);
       this.saveReadingProgress();
       if (this.showReaderCommentPanel) {
-        this.syncReaderCommentPanelWebTheme();
+        this.readerCommentPanelLoadSerial++;
+        this.readerCommentPanelLoading = true;
+        this.readerCommentPanelError = false;
+        this.scheduleReaderCommentPanelHostReady(0);
       }
       this.onTtsCoverSettingsChanged();
     }, 32);
@@ -13207,6 +13266,8 @@ struct ReadBookPage {
     this.readerCommentPanelMarker = marker;
     this.readerCommentPanelProgress = 0;
     this.readerCommentPanelLoading = true;
+    this.readerCommentPanelError = false;
+    this.readerCommentPanelHeight = 0;
     const markerBottom = this.getReaderSourceActionAnchorBottom(marker);
     this.readerCommentPanelAnchorBottom = markerBottom > 0 ? markerBottom :
       (this.readerCommentPageAreaTop >= 0 ? (this.readerCommentPageAreaTop + this.readerCommentPageAreaHeight) : -1);
@@ -13220,40 +13281,80 @@ struct ReadBookPage {
     this.readerCommentPanelHtmlLoaded = true;
     try {
       const baseUrl = this.readerCommentPanelBaseUrl || 'about:blank';
-      this.readerCommentPanelController.loadData(this.readerCommentPanelHtml, 'text/html', 'UTF-8', baseUrl, baseUrl);
+      const html = ReaderCommentWebTheme.prepareHtml(this.readerCommentPanelHtml, this.appDarkMode);
+      this.readerCommentPanelController.loadData(html, 'text/html', 'UTF-8', baseUrl, baseUrl);
       // Some ArkWeb versions do not emit a second onPageEnd for loadData. The embedded page owns its
-      // network loading state, so reveal it after the document has been handed to the controller.
+      // network loading state. Poll the actual document/theme readiness rather than revealing a blank document.
       this.scheduleReaderCommentPanelHostReady(180);
       return true;
     } catch (error) {
       this.readerCommentPanelHtmlLoaded = false;
       console.warn('加载原生评论面板失败:', error);
-      this.scheduleReaderCommentPanelHostReady(0);
+      this.failReaderCommentPanelLoad();
       return false;
     }
   }
 
-  scheduleReaderCommentPanelHostReady(delayMs: number): void {
+  scheduleReaderCommentPanelHostReady(delayMs: number, attempt: number = 0): void {
     if (this.readerCommentPanelReadyTimerId >= 0) clearTimeout(this.readerCommentPanelReadyTimerId);
     const serial = this.readerCommentPanelLoadSerial;
     this.readerCommentPanelReadyTimerId = setTimeout(() => {
       this.readerCommentPanelReadyTimerId = -1;
       if (!this.showReaderCommentPanel || serial !== this.readerCommentPanelLoadSerial) return;
-      this.syncReaderCommentPanelWebTheme().finally(() => {
+      this.syncReaderCommentPanelWebTheme().then((ready: boolean): void => {
         if (!this.showReaderCommentPanel || serial !== this.readerCommentPanelLoadSerial) return;
-        // runJavaScript 返回时反色样式刚插入，网页还要两三帧才画出深色；立刻撤掉加载层会闪出原来的白底。
-        if (!this.appDarkMode) {
+        if (ready) {
+          this.readerCommentPanelError = false;
           this.readerCommentPanelLoading = false;
-          return;
+        } else if (attempt < 60) {
+          this.scheduleReaderCommentPanelHostReady(100, attempt + 1);
+        } else {
+          this.failReaderCommentPanelLoad();
         }
-        this.readerCommentPanelReadyTimerId = setTimeout(() => {
-          this.readerCommentPanelReadyTimerId = -1;
-          if (this.showReaderCommentPanel && serial === this.readerCommentPanelLoadSerial) {
-            this.readerCommentPanelLoading = false;
-          }
-        }, 160);
       });
     }, Math.max(0, delayMs));
+  }
+
+  failReaderCommentPanelLoad(): void {
+    if (!this.showReaderCommentPanel) return;
+    this.readerCommentPanelLoadSerial++;
+    if (this.readerCommentPanelReadyTimerId >= 0) clearTimeout(this.readerCommentPanelReadyTimerId);
+    this.readerCommentPanelReadyTimerId = -1;
+    this.readerCommentPanelLoading = true;
+    this.readerCommentPanelError = true;
+  }
+
+  retryReaderCommentPanelLoad(): void {
+    this.readerCommentPanelLoading = true;
+    this.readerCommentPanelError = false;
+    if (this.readerCommentPanelHtml) {
+      this.readerCommentPanelHtmlLoaded = false;
+      this.loadReaderCommentPanelHtmlIfNeeded();
+    } else {
+      try {
+        this.readerCommentPanelController.refresh();
+      } catch (error) {
+        this.failReaderCommentPanelLoad();
+      }
+    }
+  }
+
+  backReaderCommentPanel(): void {
+    if (!this.showReaderCommentPanel) return;
+    try {
+      const history = this.readerCommentPanelController.getBackForwardEntries();
+      if (history.currentIndex > 0) {
+        const previousUrl = history.getItemAtIndex(history.currentIndex - 1).historyUrl;
+        // loadData 前的启动空白页不是用户可返回的评论页面。
+        if (previousUrl && previousUrl !== 'about:blank') {
+          this.readerCommentPanelController.backward();
+          return;
+        }
+      }
+    } catch (_) {
+      // 控制器尚未就绪也应允许用户退出面板。
+    }
+    this.closeReaderCommentPanel();
   }
 
   closeReaderCommentPanel(): void {
@@ -13277,6 +13378,8 @@ struct ReadBookPage {
     this.readerCommentPanelAnchorBottom = -1;
     this.readerCommentPanelProgress = 0;
     this.readerCommentPanelLoading = false;
+    this.readerCommentPanelError = false;
+    this.readerCommentPanelHeight = 0;
     this.readerCommentPanelHtml = '';
     this.readerCommentPanelBaseUrl = '';
     this.readerCommentPanelHtmlLoaded = false;
@@ -13284,46 +13387,15 @@ struct ReadBookPage {
     this.readerSourceActionOpenedAt = 0;
   }
 
-  async syncReaderCommentPanelWebTheme(): Promise<void> {
-    if (!this.showReaderCommentPanel || !this.readerCommentPanelUrl) return;
-    const scheme = this.appDarkMode ? 'dark' : 'light';
-    const dark = this.appDarkMode ? 'true' : 'false';
-    // 评论页多半是书源服务器的网页，未必写了深色样式。应用为深色而页面底色仍是浅色时，
-    // 注入整页反色（图片再反回来）；切回浅色或页面自己支持深色时移除。
-    const script = `(function(){var scheme='${scheme}',dark=${dark};` +
-      `var root=document.documentElement;if(root){root.style.colorScheme=scheme;` +
-      `root.setAttribute('data-legado-color-scheme',scheme);}` +
-      `var body=document.body,themeToggle=document.getElementById('themeToggle');` +
-      `var ownToggle=!!(body&&themeToggle&&typeof window.toggleCmtTheme==='function');` +
-      `if(ownToggle){` +
-      `var pageDark=body.classList.contains('dark');` +
-      `if(pageDark!==dark){window.toggleCmtTheme();}` +
-      `try{window.localStorage.setItem('cmt-theme',scheme);}catch(_){}` +
-      `body.classList.toggle('dark',dark);}` +
-      `window.__LEGADO_COLOR_SCHEME__=scheme;window.__LEGADO_DARK_MODE__=dark;` +
-      `window.dispatchEvent(new CustomEvent('legado-color-scheme-change',` +
-      `{detail:{colorScheme:scheme,dark:dark}}));` +
-      `var fallbackId='legado-dark-fallback',fallback=document.getElementById(fallbackId);` +
-      `if(fallback&&fallback.parentNode){fallback.parentNode.removeChild(fallback);}` +
-      `if(dark&&!ownToggle&&root){` +
-      `var rgb=function(value){var m=/rgba?\\(([^)]+)\\)/.exec(value||'');if(!m)return null;` +
-      `var p=m[1].split(',').map(function(v){return parseFloat(v);});` +
-      `if(p.length>3&&p[3]<0.5)return null;return (0.2126*p[0]+0.7152*p[1]+0.0722*p[2])/255;};` +
-      `var bodyStyle=body?getComputedStyle(body):null,rootStyle=getComputedStyle(root);` +
-      `var bg=bodyStyle?rgb(bodyStyle.backgroundColor):null;if(bg===null)bg=rgb(rootStyle.backgroundColor);` +
-      `var light=bg!==null?bg>0.6:((rgb((bodyStyle||rootStyle).color)||0)<0.4);` +
-      `if(light){root.style.colorScheme='light';` +
-      `var css='html{filter:invert(.92) hue-rotate(180deg)!important;}' +` +
-      `'img,video,picture,canvas,iframe,embed,object,[style*="background-image"]' +` +
-      `'{filter:invert(1) hue-rotate(180deg)!important;}';` +
-      `if(rgb(rootStyle.backgroundColor)===null)css+='html{background-color:#fff!important;}';` +
-      `fallback=document.createElement('style');fallback.id=fallbackId;fallback.textContent=css;` +
-      `(document.head||root).appendChild(fallback);}}` +
-      `return scheme;})()`;
+  async syncReaderCommentPanelWebTheme(): Promise<boolean> {
+    if (!this.showReaderCommentPanel || !this.readerCommentPanelUrl) return false;
     try {
-      await this.readerCommentPanelController.runJavaScript(script);
+      const result = await this.readerCommentPanelController.runJavaScript(
+        ReaderCommentWebTheme.apply(this.appDarkMode, !!this.readerCommentPanelHtml));
+      return Number(result) === 1;
     } catch (error) {
       console.warn('同步评论面板深浅色模式失败:', error);
+      return false;
     }
   }
 

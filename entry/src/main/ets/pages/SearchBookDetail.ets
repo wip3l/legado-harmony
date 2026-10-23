@@ -6,6 +6,7 @@ import { AppDatabase } from '../model/data/AppDatabase';
 import { WebBookService } from '../core/book/WebBookService';
 import { syncSystemBars } from '../utils/SystemBars';
 import { BookDisplayHelper } from '../utils/BookDisplayHelper';
+import { CollapsingHeader } from '../utils/CollapsingHeader';
 import { GlassTagModifier, ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { BookIdentity } from '../utils/BookIdentity';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
@@ -98,6 +99,7 @@ struct SearchBookDetailPage {
   @State showCatalogSheet: boolean = false;
   /** 正文滚动距离：顶栏底色与书名随之渐显。 */
   @State detailScrollY: number = 0;
+  @State headerCollapse: number = 0;
   @State introExpanded: boolean = true;
   /** 头部封面已加载完成的地址；氛围背景只对它显示，读系统缓存而不再发第二次网络请求。 */
   @State readyCoverUrl: string = '';
@@ -290,11 +292,21 @@ struct SearchBookDetailPage {
         .width('100%')
         .layoutWeight(1)
         .scrollBar(BarState.Off)
-        .onDidScroll(() => {
+        .onDidScroll((_xOffset: number, yOffset: number) => {
+          this.headerCollapse = CollapsingHeader.next(this.headerCollapse, yOffset,
+            this.detailScroller.currentOffset().yOffset);
           // 只在跨过渐显区间时更新，滚动中不逐帧刷新整页。
           const offset = Math.max(0, Math.min(SearchBookDetailPage.TITLE_FADE_DISTANCE, this.detailScroller.currentOffset().yOffset));
           if (Math.abs(offset - this.detailScrollY) >= 4 || offset === 0 || offset === SearchBookDetailPage.TITLE_FADE_DISTANCE) {
             this.detailScrollY = offset;
+          }
+        })
+        .onScrollStop(() => {
+          const target = CollapsingHeader.settle(this.headerCollapse, this.detailScroller.currentOffset().yOffset);
+          if (target !== this.headerCollapse) {
+            animateTo({ duration: 200, curve: Curve.FastOutSlowIn }, () => {
+              this.headerCollapse = target;
+            });
           }
         })
       }
@@ -390,7 +402,7 @@ struct SearchBookDetailPage {
 
   @Builder
   titleBar() {
-    Stack({ alignContent: Alignment.Start }) {
+    Stack({ alignContent: Alignment.TopStart }) {
       Row() {
         ImmersiveBackButton({ iconColor: this.primaryTextColor(), darkMode: this.appDarkMode,
           onBack: () => this.handleBack() })
@@ -404,12 +416,16 @@ struct SearchBookDetailPage {
           .layoutWeight(1)
       }
       .width('100%')
-      .height('100%')
+      .height(56 + this.statusBarHeight)
       .padding({ right: AppSpacing.XL, top: this.statusBarHeight })
       .alignItems(VerticalAlign.Center)
     }
     .width('100%')
-    .height(56 + this.statusBarHeight)
+    .height(56 + this.statusBarHeight - this.headerCollapse)
+    .clip(true)
+    .opacity(CollapsingHeader.contentOpacity(this.headerCollapse))
+    .hitTestBehavior(CollapsingHeader.acceptsTouch(this.headerCollapse) ? HitTestMode.Default : HitTestMode.None)
+    .accessibilityLevel(CollapsingHeader.acceptsTouch(this.headerCollapse) ? 'auto' : 'no-hide-descendants')
     .position({ x: 0, y: 0 })
   }
 

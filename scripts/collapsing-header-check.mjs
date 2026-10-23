@@ -7,7 +7,7 @@ import { projectRoot } from './lib/ets-module-staging.mjs';
 
 const read = file => fs.readFileSync(`${projectRoot}/entry/src/main/ets/${file}.ets`, 'utf8');
 const compile = source => stripTypeScriptTypes(source, { mode: 'strip' });
-const context = vm.createContext({});
+const context = vm.createContext({ SearchBookDetailPage: { TITLE_FADE_DISTANCE: 120 } });
 vm.runInContext(compile(read('utils/CollapsingHeader').replace('export class', 'class')), context);
 
 const pages = [
@@ -22,6 +22,7 @@ const pages = [
   ['pages/ExploreSourceSort', 'headerScroller', true],
   ['pages/GlassSettings', 'headerScroller', false],
   ['pages/CoverGalleryManager', 'headerScroller', false],
+  ['pages/SearchBookDetail', 'detailScroller', false],
   ['components/common/PageScaffold', 'scroller', false]
 ];
 
@@ -32,6 +33,7 @@ for (const [file, scrollerName, isList] of pages) {
   let offset = 0;
   const page = {
     headerCollapse: 0,
+    detailScrollY: 0,
     collapsible: true,
     [scrollerName]: { currentOffset: () => ({ yOffset: offset }) }
   };
