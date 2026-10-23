@@ -17,6 +17,8 @@ export class ComicImageSpec {
   decodeParams: Object = {};
   processPlainImages: boolean = false;
   decodeError: string = '';
+  /** 原生书源给每张图标的本章原始序号；-1 表示没有，用调用方给的序号。 */
+  imageIndex: number = -1;
 }
 
 /** 单张正文图片各环节耗时（毫秒），用于排查整章图片加载慢。 */
@@ -46,6 +48,10 @@ export class ComicImagePipeline {
     const rawOptions = value.substring(optionIndex + 1).trim();
     try {
       const options = JSON.parse(rawOptions) as Record<string, Object>;
+      const imageIndex = options['imageIndex'];
+      if (typeof imageIndex === 'number' && Number.isInteger(imageIndex) && imageIndex >= 0) {
+        spec.imageIndex = imageIndex;
+      }
       const headerObject = options['headers'];
       if (headerObject && typeof headerObject === 'object' && !Array.isArray(headerObject)) {
         const record = headerObject as Record<string, Object>;
@@ -90,6 +96,8 @@ export class ComicImagePipeline {
     if (cancelled()) throw new Error(HttpClient.CANCELLED_ERROR);
     const spec = this.parse(raw);
     if (spec.decodeError) throw new Error(spec.decodeError);
+    // 逐张加载时调用方给的序号未必是图片在本章的原始位置，书源标了 imageIndex 就以它为准。
+    const imageIndex = spec.imageIndex >= 0 ? spec.imageIndex : index;
     let scriptCode = '';
     let scriptConfig = '';
     if (spec.decodeScript) {
@@ -129,7 +137,7 @@ export class ComicImagePipeline {
       `\n${JSON.stringify(spec.headers)}`;
     const cacheKey = spec.decodeScript ? digestHashHex('SHA256', JSON.stringify({
       version: 1, identity: cacheIdentity, js: scriptCode, config: scriptConfig, fn: spec.decodeScript,
-      params: spec.decodeParams, plain: spec.processPlainImages, index: index
+      params: spec.decodeParams, plain: spec.processPlainImages, index: imageIndex
     })) : this.hashText(cacheIdentity);
     const basePath = `${dir}/${cacheKey}`;
     const existing = this.findExisting(basePath);
@@ -169,7 +177,7 @@ export class ComicImagePipeline {
       const scriptStarted = Date.now();
       try {
         bytes = await NativeImageScriptRunner.run(scriptCode, spec.decodeScript, bytes,
-          { url: spec.url, index: index, params: spec.decodeParams }, cancelled);
+          { url: spec.url, index: imageIndex, params: spec.decodeParams }, cancelled);
         if (!this.looksLikeImage(bytes)) throw new Error('脚本返回的字节不是支持的图片格式');
       } catch (e) {
         throw new Error(`content.imageDecode.script (${spec.decodeScript})：${(e as Error).message}`);

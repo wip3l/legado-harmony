@@ -8,6 +8,7 @@ import { BookSourceInteractionPostProcessor } from './BookSourceInteractionPostP
 import { ReaderOpenTrace } from '../../utils/ReaderOpenTrace';
 import { ReaderImageMarker } from './ReaderImageMarker';
 import { ReaderCacheBudget } from './ReaderCacheBudget';
+import { ReaderImageScheduler } from './ReaderImageScheduler';
 
 export class ReadBookEngine {
   private static inst: ReadBookEngine | null = null;
@@ -37,12 +38,15 @@ export class ReadBookEngine {
   private sourceLoadedOrigin: string = '';
   private static readonly SOURCE_INTERACTION_IDENTITY_KEY: string = '__readerSourceInteractionIdentity';
   private static readonly SOURCE_RECHECK_INTERVAL_MS: number = 5000;
+  /** 阅读页用的共享实例；只有它的当前章能占用前台图片名额，书架缓存等后台实例一律排在后面。 */
+  private foregroundReader: boolean = false;
 
   private constructor() { this.webBook = new WebBookService(); }
 
   static get(): ReadBookEngine {
     if (!ReadBookEngine.inst) {
       ReadBookEngine.inst = new ReadBookEngine();
+      ReadBookEngine.inst.foregroundReader = true;
       // 正在阅读的书不参与正文缓存的容量清理。
       ReaderCacheBudget.setProtectedBooksProvider((): string[] => {
         const bookUrl = ReadBookEngine.inst?.book?.bookUrl || '';
@@ -507,7 +511,9 @@ export class ReadBookEngine {
     return await this.fetchContent(idx, shouldCancel);
   }
 
-  private async fetchContent(idx: number, shouldCancel: (() => boolean) | null = null): Promise<string> {
+  /** background 为 true 时（缓存全文、手动缓存）本章图片始终排在阅读用的请求后面。 */
+  private async fetchContent(idx: number, shouldCancel: (() => boolean) | null = null,
+    background: boolean = false): Promise<string> {
     if (idx < 0 || idx >= this.chapters.length || !this.book) return '';
     if (shouldCancel && shouldCancel()) return '';
 
@@ -525,11 +531,11 @@ export class ReadBookEngine {
         const text = await pending;
         if (text || !pendingCancel || !pendingCancel() || (shouldCancel && shouldCancel())) return text;
         // 共用的任务被发起方中途取消而返回空串，本调用方仍需要这一章，重新发起。
-        return await this.fetchContent(idx, shouldCancel);
+        return await this.fetchContent(idx, shouldCancel, background);
       }
     }
 
-    const task = this.fetchContentUncached(idx, shouldCancel);
+    const task = this.fetchContentUncached(idx, shouldCancel, background);
     this.chapterLoading.set(idx, task);
     this.chapterLoadingCancel.set(idx, shouldCancel);
     try {
@@ -542,7 +548,8 @@ export class ReadBookEngine {
     }
   }
 
-  private async fetchContentUncached(idx: number, shouldCancel: (() => boolean) | null = null): Promise<string> {
+  private async fetchContentUncached(idx: number, shouldCancel: (() => boolean) | null = null,
+    background: boolean = false): Promise<string> {
     if (idx < 0 || idx >= this.chapters.length || !this.book) return '';
     if (shouldCancel && shouldCancel()) return '';
     const generation = this.bookGeneration;
@@ -582,7 +589,11 @@ export class ReadBookEngine {
     if (shouldCancel && shouldCancel()) return '';
     if (!this.isCurrentBookSession(generation, sessionBookUrl) || !this.source) return '';
     const sessionSource = this.source;
-    const text = await this.webBook.getContent(sessionSource, sessionBook, chapter, shouldCancel);
+    // 预加载的章节在读者翻到它之前排在后台，翻到后剩下的图片随即提前。
+    const imagePriority = (): number => !background && this.foregroundReader && this.curIdx === idx &&
+      this.book === sessionBook ? ReaderImageScheduler.FOREGROUND : ReaderImageScheduler.BACKGROUND;
+    const text = await this.webBook.getContent(sessionSource, sessionBook, chapter, shouldCancel, null,
+      imagePriority);
     if (shouldCancel && shouldCancel()) return '';
     if (!this.isCurrentBookSession(generation, sessionBookUrl)) return '';
     if (text && !this.isInvalidChapterContent(text)) {
@@ -639,7 +650,7 @@ export class ReadBookEngine {
   async cacheChapter(idx: number, shouldCancel: (() => boolean) | null = null): Promise<boolean> {
     if (shouldCancel && shouldCancel()) return false;
     const book = this.book;
-    const text = await this.fetchContent(idx, shouldCancel);
+    const text = await this.fetchContent(idx, shouldCancel, true);
     // 有图片失败的章节没有写入正文缓存，算作这一章没缓存成功。
     const ok = !(shouldCancel && shouldCancel()) && !!text && !ReaderImageMarker.hasFailure(text);
     if (ok && book && book.origin !== 'local' && this.book === book && idx < this.chapters.length) {
