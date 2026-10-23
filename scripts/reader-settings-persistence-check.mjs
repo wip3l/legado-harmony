@@ -36,6 +36,7 @@ function harness() {
     HexColor: { normalize: (value, fallback) => value || fallback }
   });
   vm.runInContext(compile(read('core/reader/ReaderFontWeight.ts')) + '\n' +
+    compile(read('core/reader/ReaderParagraphIndent.ts')) + '\n' +
     compile(read('core/reader/ReaderInfoBarModel.ts')) + '\n' +
     compile(read('utils/ReaderSettingsStore.ets')) +
     '\n' + compile(read('account/ReaderPreferencesSync.ets')) +
@@ -110,6 +111,44 @@ function openChromePanel(h) {
 }
 
 const tests = {
+  async 'legacy keep-indent switch is ignored when restoring preferences'() {
+    for (const keep of [false, true]) {
+      const h = harness();
+      h.disk.set('readerKeepParagraphIndent', keep);
+      h.disk.set('readerThemeProfileV1_classic-blue', JSON.stringify({
+        paragraphIndent: 3, keepParagraphIndent: keep
+      }));
+      const restored = await h.settings.reload({});
+      assert.equal(restored.paragraphIndent, 3);
+      assert.equal(Object.hasOwn(restored, 'keepParagraphIndent'), false);
+      assert.equal(h.values.has('readerKeepParagraphIndent'), false);
+    }
+  },
+  async 'paragraph indent defaults to two and preserves all five choices across reloads'() {
+    const h = harness();
+    assert.equal((await h.settings.load({})).paragraphIndent, 2);
+    for (let chars = 0; chars <= 4; chars++) {
+      await h.settings.saveLayoutSettings({}, 20, 12, 0, 18, 18, 18, 18, 0, 'justify', 400, chars);
+      assert.equal(h.values.get('readerParagraphIndent'), chars);
+      assert.equal(h.disk.get('readerParagraphIndent'), chars);
+      assert.equal((await h.settings.reload({})).paragraphIndent, chars);
+      // Existing callers that save other typography fields must preserve the indent.
+      await h.settings.saveLayoutSettings({}, 24, 14, 3);
+      assert.equal((await h.settings.reload({})).paragraphIndent, chars);
+    }
+  },
+  async 'paragraph indent survives saveAll and legacy theme profiles default to two'() {
+    const h = harness();
+    const initial = await h.settings.load({});
+    initial.paragraphIndent = 0;
+    await h.settings.saveAll({}, initial);
+    assert.equal((await h.settings.reload({})).paragraphIndent, 0);
+    h.disk.set('readerThemeProfileV1_legacy', JSON.stringify({ fontSize: 23 }));
+    h.values.set('appThemeId', 'legacy');
+    assert.equal((await h.settings.switchThemeProfile({}, 'classic-blue', 'legacy')).paragraphIndent, 2);
+    h.values.set('appThemeId', 'classic-blue');
+    assert.equal((await h.settings.switchThemeProfile({}, 'legacy', 'classic-blue')).paragraphIndent, 0);
+  },
   async 'font weight defaults survive legacy settings and profiles'() {
     const h = harness();
     assert.equal((await h.settings.reload({})).fontWeight, 400);
@@ -326,7 +365,7 @@ const tests = {
   async 'late unrelated save preserves newer layout and header/footer settings'() {
     const h = harness();
     const release = h.pauseNextAccess();
-    const oldSave = h.settings.saveKeepParagraphIndent({}, true);
+    const oldSave = h.settings.savePreloadEnabled({}, false);
     const config = new h.Config();
     config.headerLeft = 'book';
     config.footerOffset = 7;
@@ -342,7 +381,7 @@ const tests = {
     h.values.set('appDarkMode', false);
     loaded = await h.settings.reload({});
     assert.equal(loaded.fontSize, 27);
-    assert.equal(loaded.keepParagraphIndent, true);
+    assert.equal(loaded.preloadEnabled, false);
     assert.equal(loaded.readerHeaderEnabled, true);
   },
   async 'obsidian uses 3D once and preserves subsequent manual choices'() {

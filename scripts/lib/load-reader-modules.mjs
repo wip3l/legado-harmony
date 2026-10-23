@@ -17,6 +17,7 @@ const MODULES = [
   'core/book/MobiBookParser.ts',
   'core/reader/ReaderMixedPageLayout.ts',
   'core/reader/ReaderTextNormalizer.ts',
+  'core/reader/ReaderParagraphIndent.ts',
   'core/reader/ReaderPageOffsets.ts',
   'core/reader/ReaderChunkPagination.ts',
   'core/reader/ReaderChapterRange.ts',

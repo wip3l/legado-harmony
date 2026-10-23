@@ -5,7 +5,7 @@
 
 import { loadReaderModules } from './lib/load-reader-modules.mjs';
 
-const { ReaderTextNormalizer: N, ReaderPageOffsets: O, ReaderActionMarker, ReaderImageMarker, cleanup } =
+const { ReaderTextNormalizer: N, ReaderParagraphIndent: Indent, ReaderPageOffsets: O, ReaderActionMarker, ReaderImageMarker, cleanup } =
   await loadReaderModules();
 
 let failures = 0;
@@ -47,6 +47,25 @@ try {
   const image = ReaderImageMarker.create('images/a.png', 100, 50);
   equal(N.indentLine(`  ${image}  `), image, '图片标记不缩进');
   equal(N.indentChapterBody(''), '', '空正文');
+  for (let chars = 0; chars <= 4; chars++) {
+    const prefix = '　'.repeat(chars);
+    equal(N.indentChapterBody(`第一段。\n  第二段。\n　　　　第三段。\n\n${image}`, chars),
+      `${prefix}第一段。\n${prefix}第二段。\n${prefix}第三段。\n\n${image}`, `${chars} 字符缩进应用于各段，保留空行与插图`);
+    equal(N.indentLine('　　　　正文', chars), `${prefix}正文`, '已有缩进被替换而非叠加');
+    for (let nextChars = 0; nextChars <= 4; nextChars++) {
+      const before = `章节名\n\n${N.indentChapterBody('第一段。\n第二段。', chars)}`;
+      const after = `章节名\n\n${N.indentChapterBody('第一段。\n第二段。', nextChars)}`;
+      for (const token of ['章节名', '第一', '二段']) {
+        equal(Indent.remapOffset(before, after, before.indexOf(token)), after.indexOf(token),
+          `${chars} → ${nextChars} 字符后恢复 ${token} 的阅读位置`);
+      }
+      equal(Indent.remapOffset(before, after, before.length), after.length, '章末偏移恢复');
+    }
+  }
+  for (const [value, expected] of [[undefined, 2], [NaN, 2], [Infinity, 2], [-1, 0], [9, 4], [1.6, 2]]) {
+    equal(Indent.normalize(value), expected, '缺省或异常缩进值归一化');
+  }
+  equal(Indent.remapOffset('旧正文', '新正文', 2), 2, '正文改变时不做缩进偏移映射');
 
   // ---- 重复标题 ----
   equal(N.stripDuplicatedTitle('　　第一章 开端\n\n　　正文。', '第一章 开端'), '正文。', '首行与标题相同则剥离');
@@ -72,18 +91,17 @@ try {
   // ---- 分页起止裁剪 ----
   const source = '\n　　甲乙丙\n\n　　丁戊';
   let pages = [], starts = [], ends = [];
-  N.pushPage(source, 0, 7, pages, starts, ends, false);
-  N.pushPage(source, 7, source.length, pages, starts, ends, false);
-  equal([pages, starts, ends], [['甲乙丙', '丁戊'], [3, 10], [6, 12]], '默认裁掉页首缩进');
+  N.pushPage(source, 0, 7, pages, starts, ends);
+  N.pushPage(source, 7, source.length, pages, starts, ends);
+  equal([pages, starts, ends], [['　　甲乙丙', '　　丁戊'], [1, 8], [6, 12]], '页首只跳过换行，始终保留段落缩进');
   pages = []; starts = []; ends = [];
-  N.pushPage(source, 0, 7, pages, starts, ends, true);
-  N.pushPage(source, 7, source.length, pages, starts, ends, true);
-  equal([pages, starts, ends], [['　　甲乙丙', '　　丁戊'], [1, 8], [6, 12]], '保留段首缩进时只跳过换行');
+  N.pushPage(source, 4, 6, pages, starts, ends);
+  equal([pages, starts, ends], [['乙丙'], [4], [6]], '跨页续行不添加缩进');
   pages = []; starts = []; ends = [];
-  N.pushPage(source, 6, 8, pages, starts, ends, false);
+  N.pushPage(source, 6, 8, pages, starts, ends);
   equal(pages.length, 0, '裁完为空不产生空页');
-  N.pushPage(source, -5, 999, pages, starts, ends, false);
-  equal([starts[0], ends[0]], [3, 12], '越界区间被钳制');
+  N.pushPage(source, -5, 999, pages, starts, ends);
+  equal([starts[0], ends[0]], [1, 12], '越界区间被钳制');
   for (let i = 0; i < pages.length; i++) {
     equal(source.substring(starts[i], ends[i]), pages[i], `页文本与偏移一致 #${i}`);
   }

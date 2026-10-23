@@ -50,6 +50,7 @@ struct SettingsPage {
   @StorageLink('readerTextAlign') readerTextAlign: string = 'justify';
   @StorageLink('readerLineHeight') readerLineHeight: number = 12;
   @StorageLink('readerParagraphSpacing') readerParagraphSpacing: number = 0;
+  @StorageLink('readerParagraphIndent') readerParagraphIndent: number = 2;
   @StorageLink('readerMarginLeft') readerMarginLeft: number = 18;
   @StorageLink('readerMarginRight') readerMarginRight: number = 18;
   @StorageLink('readerMarginTop') readerMarginTop: number = 18;
@@ -86,7 +87,6 @@ struct SettingsPage {
   @StorageLink('readerScreenTimeoutMinutes') readerScreenTimeoutMinutes: number =
     ReaderSettingsStore.SCREEN_TIMEOUT_ALWAYS_ON;
   @StorageLink('readerExtendToStatusBar') readerExtendToStatusBar: boolean = false;
-  @StorageLink('readerKeepParagraphIndent') keepParagraphIndent: boolean = false;
   @StorageLink('readerHeaderEnabled') readerHeaderEnabled: boolean = false;
   @StorageLink('readerFooterEnabled') readerFooterEnabled: boolean = true;
   @StorageLink('readerInfoBarConfig') readerInfoBarConfig: string = '';
@@ -263,6 +263,11 @@ struct SettingsPage {
     this.sectionTitle('排版')
     Column() {
       this.typographyStepper()
+      this.selectItem('段首缩进', '正文每段首行的缩进字符数',
+        this.readerParagraphIndentOptions(), this.readerParagraphIndent, (index: number) => {
+          this.readerParagraphIndent = index;
+          this.saveReaderLayoutSettings();
+        }, 'settings_reader_paragraph_indent_select')
       this.selectItem('正文对齐方式', '正文段落的水平对齐',
         this.readerTextAlignOptions(), this.readerTextAlignSelectedIndex(), (index: number) => {
           this.setReaderTextAlignByIndex(index);
@@ -274,17 +279,9 @@ struct SettingsPage {
         title: '正文扩展至状态栏',
         description: '隐藏状态栏，正文延伸到屏幕顶部',
         isOn: this.readerExtendToStatusBar,
-        onChange: (value: boolean) => {
-          this.setReaderExtendToStatusBar(value);
-        }
-      })
-      SettingSwitchRow({
-        title: '保留段首缩进',
-        description: '章节开头与页首保留原文的全角空格缩进',
-        isOn: this.keepParagraphIndent,
         showDivider: false,
         onChange: (value: boolean) => {
-          this.setKeepParagraphIndent(value);
+          this.setReaderExtendToStatusBar(value);
         }
       })
     }
@@ -665,6 +662,7 @@ struct SettingsPage {
     this.readerTextAlign = settings.textAlign;
     this.readerLineHeight = settings.lineHeight;
     this.readerParagraphSpacing = settings.paragraphSpacing;
+    this.readerParagraphIndent = settings.paragraphIndent;
     this.readerMarginLeft = settings.marginLeft;
     this.readerMarginRight = settings.marginRight;
     this.readerMarginTop = settings.marginTop;
@@ -685,7 +683,6 @@ struct SettingsPage {
     this.readerVolumeTurnPage = settings.volumeTurnPage;
     this.readerScreenTimeoutMinutes = settings.screenTimeoutMinutes;
     this.readerExtendToStatusBar = settings.extendToStatusBar;
-    this.keepParagraphIndent = settings.keepParagraphIndent;
     this.readerHeaderEnabled = settings.readerHeaderEnabled;
     this.readerFooterEnabled = settings.readerFooterEnabled;
     this.readerInfoBarConfig = settings.readerInfoBarConfig;
@@ -802,7 +799,7 @@ struct SettingsPage {
 
   @Builder
   previewReaderText() {
-    Text('窗外的风掠过树梢，纸页在指尖轻轻翻动。夜色渐深，故事也在这一刻慢慢展开。')
+    Text(`${'　'.repeat(this.readerParagraphIndent)}窗外的风掠过树梢，纸页在指尖轻轻翻动。夜色渐深，故事也在这一刻慢慢展开。`)
       .fontSize(this.readerFontSize)
       .fontWeight(this.readerFontWeight)
       .fontFamily(this.getPreviewBodyFontFamily())
@@ -810,7 +807,7 @@ struct SettingsPage {
       .lineHeight(this.getPreviewReaderLineHeight())
       .padding({ bottom: this.readerParagraphSpacing })
 
-    Text('他停在灯下，听见远处传来的脚步声，像是某个被遗忘的约定终于抵达。')
+    Text(`${'　'.repeat(this.readerParagraphIndent)}他停在灯下，听见远处传来的脚步声，像是某个被遗忘的约定终于抵达。`)
       .fontSize(this.readerFontSize)
       .fontWeight(this.readerFontWeight)
       .fontFamily(this.getPreviewBodyFontFamily())
@@ -1195,7 +1192,8 @@ struct SettingsPage {
       this.readerMarginBottom,
       this.readerLetterSpacing,
       this.readerTextAlign,
-      this.readerFontWeight
+      this.readerFontWeight,
+      this.readerParagraphIndent
     ).catch((e: Error) => {
       console.warn('保存阅读排版设置失败:', e);
     });
@@ -1214,6 +1212,10 @@ struct SettingsPage {
   setReaderLetterSpacing(letterSpacing: number): void {
     this.readerLetterSpacing = Math.max(0, Math.min(Math.round(letterSpacing), 8));
     this.saveReaderLayoutSettings();
+  }
+
+  readerParagraphIndentOptions(): SelectOption[] {
+    return [{ value: '0字符' }, { value: '1字符' }, { value: '2字符' }, { value: '3字符' }, { value: '4字符' }];
   }
 
   readerTextAlignOptions(): SelectOption[] {
@@ -1747,13 +1749,6 @@ struct SettingsPage {
   setReaderExtendToStatusBar(enabled: boolean): void {
     this.readerExtendToStatusBar = enabled;
     this.saveReaderInteractionSettings();
-  }
-
-  setKeepParagraphIndent(enabled: boolean): void {
-    this.keepParagraphIndent = enabled;
-    ReaderSettingsStore.saveKeepParagraphIndent(getContext(this), enabled).catch((e: Error) => {
-      console.error('保存保留段首缩进设置失败:', e);
-    });
   }
 
   setReaderPreloadEnabled(enabled: boolean): void {

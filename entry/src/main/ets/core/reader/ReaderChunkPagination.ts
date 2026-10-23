@@ -51,16 +51,16 @@ export class ReaderChunkPagination {
   }
 
   /** 滚动阅读：整章按约 TARGET_LENGTH 字切块。图片标记留在所在的块里，由排版引擎当作图片块处理。 */
-  static splitContinuous(source: string, keepIndent: boolean): ReaderChunkResult {
+  static splitContinuous(source: string): ReaderChunkResult {
     const text = source || '';
     const result = new ReaderChunkResult();
-    ReaderChunkPagination.appendTextChunks(text, 0, text.length, keepIndent, result);
+    ReaderChunkPagination.appendTextChunks(text, 0, text.length, result);
     ReaderChunkPagination.ensureNotEmpty(text, result);
     return result;
   }
 
   /** 漫画：每张图片独占一块，图片之间的文字（说明、报错提示）按滚动阅读的规则切块。 */
-  static splitComic(source: string, keepIndent: boolean): ReaderChunkResult {
+  static splitComic(source: string): ReaderChunkResult {
     const text = source || '';
     const result = new ReaderChunkResult();
     let cursor = 0;
@@ -69,10 +69,10 @@ export class ReaderChunkPagination {
       const suffix = markerStart < 0 ? -1 :
         text.indexOf(ReaderImageMarker.SUFFIX, markerStart + ReaderImageMarker.PREFIX.length);
       if (markerStart < 0 || suffix < 0) {
-        ReaderChunkPagination.appendTextChunks(text, cursor, text.length, keepIndent, result);
+        ReaderChunkPagination.appendTextChunks(text, cursor, text.length, result);
         break;
       }
-      ReaderChunkPagination.appendTextChunks(text, cursor, markerStart, keepIndent, result);
+      ReaderChunkPagination.appendTextChunks(text, cursor, markerStart, result);
       const markerEnd = suffix + ReaderImageMarker.SUFFIX.length;
       result.pages.push(text.substring(markerStart, markerEnd));
       result.starts.push(markerStart);
@@ -90,12 +90,11 @@ export class ReaderChunkPagination {
     result.ends.push(text.length);
   }
 
-  private static appendTextChunks(source: string, from: number, to: number, keepIndent: boolean,
+  private static appendTextChunks(source: string, from: number, to: number,
     result: ReaderChunkResult): void {
     let cursor = from;
     while (cursor < to) {
-      while (cursor < to && (keepIndent ? ReaderTextNormalizer.isPageStartTrimChar(source.charAt(cursor)) :
-        ReaderTextNormalizer.isTrimChar(source.charAt(cursor)))) {
+      while (cursor < to && ReaderTextNormalizer.isPageStartTrimChar(source.charAt(cursor))) {
         cursor++;
       }
       if (cursor >= to) break;
@@ -114,7 +113,7 @@ export class ReaderChunkPagination {
         end = Math.min(to, ReaderChunkPagination.adjustActionMarkerEnd(source, cursor, end));
       }
       if (end <= cursor) end = Math.min(to, cursor + ReaderChunkPagination.TARGET_LENGTH);
-      ReaderTextNormalizer.pushPage(source, cursor, end, result.pages, result.starts, result.ends, keepIndent);
+      ReaderTextNormalizer.pushPage(source, cursor, end, result.pages, result.starts, result.ends);
       cursor = Math.max(cursor + 1, end);
     }
   }

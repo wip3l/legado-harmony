@@ -5,7 +5,7 @@
 
 import { loadReaderModules } from './lib/load-reader-modules.mjs';
 
-const { ReaderChunkPagination: C, ReaderChapterRange, ReaderPageTurnQueue, ReaderActionMarker, ReaderImageMarker,
+const { ReaderChunkPagination: C, ReaderTextNormalizer: N, ReaderChapterRange, ReaderPageTurnQueue, ReaderActionMarker, ReaderImageMarker,
   cleanup } = await loadReaderModules();
 
 let failures = 0;
@@ -53,7 +53,7 @@ try {
   const plain = `第一章 测试\n\n${paragraphs.join('\n')}`;
 
   // ---- 滚动阅读 ----
-  const continuous = C.splitContinuous(plain, false);
+  const continuous = C.splitContinuous(plain);
   consistent(plain, continuous, '滚动');
   check(continuous.pages.length > 3, '滚动：长章节被切成多块', `实际 ${continuous.pages.length}`);
   for (let i = 0; i < continuous.pages.length - 1; i++) {
@@ -61,28 +61,37 @@ try {
       `长度 ${continuous.pages[i].length}`);
     check(plain.charAt(continuous.ends[i]) === '\n', `滚动：块 ${i} 结束在段落边界`);
   }
-  check(!continuous.pages[1].startsWith('　'), '滚动：默认裁掉块首缩进');
-  const kept = C.splitContinuous(plain, true);
-  consistent(plain, kept, '滚动保留缩进');
-  check(kept.pages[1].startsWith('　　'), '滚动：保留段首缩进时块首带缩进');
-  check(JSON.stringify(C.splitContinuous(plain, false)) === JSON.stringify(continuous), '滚动：结果确定');
+  check(continuous.pages[1].startsWith('　　'), '滚动：块首保留段落缩进');
+  for (let chars = 0; chars <= 4; chars++) {
+    const source = N.indentChapterBody(paragraphs.join('\n'), chars);
+    const result = C.splitContinuous(source);
+    consistent(source, result, `滚动 ${chars} 字符缩进`);
+    check(result.pages.every(page => page.startsWith('　'.repeat(chars)) && page.charAt(chars) !== '　'),
+      `滚动：章节开头与每个段落块首均为 ${chars} 字符缩进`);
+  }
+  check(JSON.stringify(C.splitContinuous(plain)) === JSON.stringify(continuous), '滚动：结果确定');
 
-  const short = C.splitContinuous('只有一句话。', false);
+  const short = C.splitContinuous('只有一句话。');
   check(short.pages.length === 1 && short.pages[0] === '只有一句话。', '滚动：短章节一块');
-  check(C.splitContinuous('', false).pages.length === 0, '滚动：空章节无块');
-  const blank = C.splitContinuous('\n　\n', false);
+  check(C.splitContinuous('').pages.length === 0, '滚动：空章节无块');
+  const blank = C.splitContinuous('\n　\n');
   check(blank.pages.length === 1 && blank.starts[0] === 0, '滚动：只有空白时回退为整章一块');
 
   // 没有换行的超长段落也必须前进并切完
   const wall = '墙'.repeat(C.TARGET_LENGTH * 3 + 17);
-  const wallResult = C.splitContinuous(wall, false);
+  const wallResult = C.splitContinuous(wall);
   consistent(wall, wallResult, '无换行长段');
   check(wallResult.pages.length === 4, '无换行长段：按上限硬切', `实际 ${wallResult.pages.length}`);
+  const indentedWall = `　　${wall}`;
+  const indentedWallResult = C.splitContinuous(indentedWall);
+  consistent(indentedWall, indentedWallResult, '带缩进的超长段');
+  check(indentedWallResult.pages[0].startsWith('　　'), '超长段：首行保留缩进');
+  check(indentedWallResult.pages.slice(1).every(page => page.startsWith('墙')), '超长段：跨块续行不补缩进');
 
   // ---- 动作标记 ----
   const action = ReaderActionMarker.create('12', 'https://example.invalid/comment', '段评');
   const withActions = paragraphs.map((text) => `${text}${action}`).join('\n');
-  const actionResult = C.splitContinuous(withActions, false);
+  const actionResult = C.splitContinuous(withActions);
   consistent(withActions, actionResult, '带段评');
   markersIntact(actionResult, ReaderActionMarker.PREFIX, ReaderActionMarker.SUFFIX, '带段评');
 
@@ -103,14 +112,14 @@ try {
   const image = (n) => ReaderImageMarker.create(`/data/comic/${n}.jpg`);
   const sized = ReaderImageMarker.create('/data/comic/sized.jpg', 800, 1200);
   const comic = [image(1), image(2), sized, image(4)].join('\n\n');
-  const comicResult = C.splitComic(comic, false);
+  const comicResult = C.splitComic(comic);
   consistent(comic, comicResult, '漫画');
   check(comicResult.pages.length === 4, '漫画：每张图一块', `实际 ${comicResult.pages.length}`);
   check(comicResult.pages.every((page) => ReaderImageMarker.isMarker(page)), '漫画：每块正好是一个图片标记');
   check(comicResult.pages[2] === sized, '漫画：带尺寸的标记保持原样');
 
   const mixedComic = `作者的话：本话休刊。\n\n${image(1)}\n\n${paragraphs.slice(0, 60).join('\n')}\n\n${image(2)}`;
-  const mixedResult = C.splitComic(mixedComic, false);
+  const mixedResult = C.splitComic(mixedComic);
   consistent(mixedComic, mixedResult, '漫画夹文字');
   check(mixedResult.pages[0] === '作者的话：本话休刊。', '漫画：图片前的文字独立成块');
   check(ReaderImageMarker.isMarker(mixedResult.pages[1]), '漫画：文字后的图片独立成块');
@@ -119,9 +128,9 @@ try {
   markersIntact(mixedResult, ReaderImageMarker.PREFIX, ReaderImageMarker.SUFFIX, '漫画夹文字');
   check(mixedResult.pages.length > 4, '漫画：图片之间的长文字继续切块');
 
-  const errorText = C.splitComic('章节正文加载失败，请重试。', false);
+  const errorText = C.splitComic('章节正文加载失败，请重试。');
   check(errorText.pages.length === 1, '漫画：纯文字提示一块');
-  const broken = C.splitComic(`${ReaderImageMarker.PREFIX}没有结束`, false);
+  const broken = C.splitComic(`${ReaderImageMarker.PREFIX}没有结束`);
   check(broken.pages.length === 1, '漫画：残缺标记按文字处理而不是死循环');
 
   // ---- 章节范围输入 ----

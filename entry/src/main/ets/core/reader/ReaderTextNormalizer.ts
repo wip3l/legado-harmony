@@ -1,5 +1,6 @@
 import { ReaderActionMarker } from '@legado/sourceengine';
 import { ReaderImageMarker } from '../book/ReaderImageMarker';
+import { ReaderParagraphIndent } from './ReaderParagraphIndent';
 
 /**
  * 章节正文归一化（纯逻辑，不依赖 ArkUI）：换行与空白清理、软换行合并、段首缩进、重复标题剥离。
@@ -7,16 +8,13 @@ import { ReaderImageMarker } from '../book/ReaderImageMarker';
  * scripts/reader-text-normalizer-check.mjs。
  */
 export class ReaderTextNormalizer {
-  static readonly PARAGRAPH_INDENT: string = '　　';
-
   static isTrimChar(value: string): boolean {
     return value === ' ' || value === '\t' || value === '\n' || value === '\r' ||
       value === ' ' || value === '　' || value === '﻿' || value === '​' ||
       value === '‌' || value === '‍' || value === '⁠';
   }
 
-  // "保留段首缩进"开启时分页/分块起点仍要跳过的字符：换行与零宽不可见字符。
-  // 空格类字符（全角空格、普通空格等）在此模式下保留，段首缩进因此不被裁掉。
+  // 分页/分块起点只跳过换行与零宽字符，保留正文按字符数设置生成的段首缩进。
   static isPageStartTrimChar(value: string): boolean {
     return value === '\n' || value === '\r' || value === '﻿' ||
       value === '​' || value === '‌' || value === '‍' || value === '⁠';
@@ -119,30 +117,28 @@ export class ReaderTextNormalizer {
     return prev.length < 48 && next.length < 48;
   }
 
-  static indentChapterBody(text: string): string {
+  static indentChapterBody(text: string, indentChars: number = ReaderParagraphIndent.DEFAULT): string {
     const normalized = ReaderTextNormalizer.normalizeChapterBody(text);
     if (!normalized) {
       return '';
     }
     return normalized
       .split('\n')
-      .map((line: string) => ReaderTextNormalizer.indentLine(line))
+      .map((line: string) => ReaderTextNormalizer.indentLine(line, indentChars))
       .join('\n');
   }
 
-  static indentLine(line: string): string {
+  static indentLine(line: string, indentChars: number = ReaderParagraphIndent.DEFAULT): string {
     if (!line || line.trim().length === 0) {
       return line;
     }
     const trimmed = line.trim();
-    // 图片标记是结构数据，不是正文段落；给它添加两个全角空格会被分页器拆成一张不可见的文本页。
+    // 图片标记是结构数据，不是正文段落；添加缩进会被分页器拆成一张不可见的文本页。
     if (ReaderImageMarker.isMarker(trimmed)) {
       return trimmed;
     }
-    if (line.startsWith(ReaderTextNormalizer.PARAGRAPH_INDENT)) {
-      return line;
-    }
-    return `${ReaderTextNormalizer.PARAGRAPH_INDENT}${line.replace(/^[　\s]+/g, '')}`;
+    const indent = '　'.repeat(ReaderParagraphIndent.normalize(indentChars));
+    return `${indent}${line.replace(/^[　\s]+/g, '')}`;
   }
 
   /**
@@ -212,16 +208,14 @@ export class ReaderTextNormalizer {
   }
 
   /**
-   * 把 [rawStart, rawEnd) 裁掉首尾空白后追加为一页；裁完为空则不追加。
-   * keepIndent 为 true 时页首只跳过换行与零宽字符，保留空格类缩进。
+   * 把 [rawStart, rawEnd) 追加为一页；页首保留已有缩进，不给段落续行补缩进。
+   * 裁掉首部换行与零宽字符、尾部空白；裁完为空则不追加。
    */
   static pushPage(source: string, rawStart: number, rawEnd: number, pages: string[], starts: number[],
-    ends: number[], keepIndent: boolean): void {
+    ends: number[]): void {
     let pageStart = Math.max(0, Math.min(rawStart, source.length));
     let pageEnd = Math.max(pageStart, Math.min(rawEnd, source.length));
-    while (pageStart < pageEnd && (keepIndent ?
-      ReaderTextNormalizer.isPageStartTrimChar(source.charAt(pageStart)) :
-      ReaderTextNormalizer.isTrimChar(source.charAt(pageStart)))) {
+    while (pageStart < pageEnd && ReaderTextNormalizer.isPageStartTrimChar(source.charAt(pageStart))) {
       pageStart++;
     }
     while (pageEnd > pageStart && ReaderTextNormalizer.isTrimChar(source.charAt(pageEnd - 1))) {

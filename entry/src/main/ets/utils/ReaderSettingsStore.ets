@@ -1,4 +1,5 @@
 import { ReaderFontWeight } from '../core/reader/ReaderFontWeight';
+import { ReaderParagraphIndent } from '../core/reader/ReaderParagraphIndent';
 import { Context } from '@kit.AbilityKit';
 import preferences from '@ohos.data.preferences';
 import { ReaderThemeHelper } from './ReaderThemeHelper';
@@ -13,8 +14,7 @@ export class ReaderSettings {
   textAlign: string = 'justify';
   lineHeight: number = 12;
   paragraphSpacing: number = 0;
-  // 保留段首缩进：开启后分页/分块边界不再裁掉原文的全角空格缩进（默认关闭，维持裁剪现状）。
-  keepParagraphIndent: boolean = false;
+  paragraphIndent: number = ReaderParagraphIndent.DEFAULT;
   marginLeft: number = 18;
   marginRight: number = 18;
   marginTop: number = 18;
@@ -99,7 +99,7 @@ export class ReaderSettingsStore {
   static readonly KEY_LINE_HEIGHT: string = 'readerLineHeight';
   static readonly KEY_LINE_HEIGHT_MODE: string = 'readerLineHeightMode';
   static readonly KEY_PARAGRAPH_SPACING: string = 'readerParagraphSpacing';
-  static readonly KEY_KEEP_PARAGRAPH_INDENT: string = 'readerKeepParagraphIndent';
+  static readonly KEY_PARAGRAPH_INDENT: string = 'readerParagraphIndent';
   static readonly KEY_MARGIN_LEFT: string = 'readerMarginLeft';
   static readonly KEY_MARGIN_RIGHT: string = 'readerMarginRight';
   static readonly KEY_MARGIN_TOP: string = 'readerMarginTop';
@@ -215,11 +215,8 @@ export class ReaderSettingsStore {
       0,
       'paragraphSpacing'
     );
-    settings.keepParagraphIndent = await ReaderSettingsStore.getBoolean(
-      store,
-      ReaderSettingsStore.KEY_KEEP_PARAGRAPH_INDENT,
-      false
-    );
+    settings.paragraphIndent = await ReaderSettingsStore.getNumber(
+      store, ReaderSettingsStore.KEY_PARAGRAPH_INDENT, ReaderParagraphIndent.DEFAULT, 'paragraphIndent');
     settings.marginLeft = await ReaderSettingsStore.getNumber(
       store, ReaderSettingsStore.KEY_MARGIN_LEFT, 18, 'horizontalMargin');
     settings.marginRight = await ReaderSettingsStore.getNumber(
@@ -497,7 +494,8 @@ export class ReaderSettingsStore {
     marginBottom: number = 18,
     letterSpacing: number = 0,
     textAlign: string = 'justify',
-    fontWeight?: number
+    fontWeight?: number,
+    paragraphIndent?: number
   ): Promise<void> {
     const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
     settings.fontSize = ReaderSettingsStore.normalizeFontSize(fontSize);
@@ -506,6 +504,7 @@ export class ReaderSettingsStore {
     settings.textAlign = ReaderSettingsStore.normalizeTextAlign(textAlign);
     settings.lineHeight = ReaderSettingsStore.normalizeLineHeight(lineHeight);
     settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(paragraphSpacing);
+    settings.paragraphIndent = ReaderParagraphIndent.normalize(paragraphIndent ?? settings.paragraphIndent);
     settings.marginLeft = ReaderSettingsStore.normalizeHorizontalMargin(marginLeft);
     settings.marginRight = ReaderSettingsStore.normalizeHorizontalMargin(marginRight);
     settings.marginTop = ReaderSettingsStore.normalizeVerticalMargin(marginTop);
@@ -541,6 +540,7 @@ export class ReaderSettingsStore {
     await store.put(ReaderSettingsStore.KEY_LINE_HEIGHT, settings.lineHeight);
     await store.put(ReaderSettingsStore.KEY_LINE_HEIGHT_MODE, 'spacing');
     await store.put(ReaderSettingsStore.KEY_PARAGRAPH_SPACING, settings.paragraphSpacing);
+    await store.put(ReaderSettingsStore.KEY_PARAGRAPH_INDENT, settings.paragraphIndent);
     await store.put(ReaderSettingsStore.KEY_MARGIN_LEFT, settings.marginLeft);
     await store.put(ReaderSettingsStore.KEY_MARGIN_RIGHT, settings.marginRight);
     await store.put(ReaderSettingsStore.KEY_MARGIN_TOP, settings.marginTop);
@@ -691,16 +691,6 @@ export class ReaderSettingsStore {
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
     await store.put(ReaderSettingsStore.KEY_PRELOAD_ENABLED, settings.preloadEnabled);
-    await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
-    await store.flush();
-  }
-
-  static async saveKeepParagraphIndent(context: Context, enabled: boolean): Promise<void> {
-    const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
-    settings.keepParagraphIndent = enabled;
-    ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
-    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
-    await store.put(ReaderSettingsStore.KEY_KEEP_PARAGRAPH_INDENT, settings.keepParagraphIndent);
     await ReaderSettingsStore.persistActiveThemeProfile(store, settings);
     await store.flush();
   }
@@ -969,7 +959,8 @@ export class ReaderSettingsStore {
       settings.marginBottom,
       settings.letterSpacing,
       settings.textAlign,
-      settings.fontWeight
+      settings.fontWeight,
+      settings.paragraphIndent
     );
     await ReaderSettingsStore.saveThemeSettings(
       context,
@@ -1004,7 +995,6 @@ export class ReaderSettingsStore {
     );
     await ReaderSettingsStore.saveTapZoneActions(context, settings.tapZoneActions);
     await ReaderSettingsStore.savePreloadEnabled(context, settings.preloadEnabled);
-    await ReaderSettingsStore.saveKeepParagraphIndent(context, settings.keepParagraphIndent);
     await ReaderSettingsStore.savePreloadChapterCount(context, settings.preloadChapterCount);
     await ReaderSettingsStore.saveQuickBookmarkEnabled(context, settings.quickBookmarkEnabled);
     await ReaderSettingsStore.saveFontSettings(
@@ -1049,7 +1039,6 @@ export class ReaderSettingsStore {
     ReaderSettingsStore.applyInteractionToStorage(normalized);
     ReaderSettingsStore.applyEyeTurnToStorage(normalized);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_ENABLED, normalized.preloadEnabled);
-    AppStorage.setOrCreate(ReaderSettingsStore.KEY_KEEP_PARAGRAPH_INDENT, normalized.keepParagraphIndent);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PRELOAD_CHAPTER_COUNT, normalized.preloadChapterCount);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_USE_TTS_QUICK_ACTION, normalized.useTtsQuickAction);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_USE_CHAPTER_QUICK_JUMP, normalized.useChapterQuickJump);
@@ -1124,6 +1113,7 @@ export class ReaderSettingsStore {
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_LINE_HEIGHT, settings.lineHeight);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_LINE_HEIGHT_MODE, 'spacing');
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_PARAGRAPH_SPACING, settings.paragraphSpacing);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_PARAGRAPH_INDENT, settings.paragraphIndent);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_MARGIN_LEFT, settings.marginLeft);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_MARGIN_RIGHT, settings.marginRight);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_MARGIN_TOP, settings.marginTop);
@@ -1317,6 +1307,7 @@ export class ReaderSettingsStore {
     lineHeightMode: string = ''
   ): number {
     if (type === 'fontWeight') return ReaderFontWeight.normalize(value);
+    if (type === 'paragraphIndent') return ReaderParagraphIndent.normalize(value);
     if (type === 'fontSize') {
       return ReaderSettingsStore.normalizeFontSize(value);
     }
@@ -1519,6 +1510,7 @@ export class ReaderSettingsStore {
     settings.textAlign = ReaderSettingsStore.normalizeTextAlign(source.textAlign);
     settings.lineHeight = ReaderSettingsStore.normalizeLineHeight(source.lineHeight);
     settings.paragraphSpacing = ReaderSettingsStore.normalizeParagraphSpacing(source.paragraphSpacing);
+    settings.paragraphIndent = ReaderParagraphIndent.normalize(source.paragraphIndent);
     settings.marginLeft = ReaderSettingsStore.normalizeHorizontalMargin(source.marginLeft);
     settings.marginRight = ReaderSettingsStore.normalizeHorizontalMargin(source.marginRight);
     settings.marginTop = ReaderSettingsStore.normalizeVerticalMargin(source.marginTop);
@@ -1570,7 +1562,6 @@ export class ReaderSettingsStore {
       settings.screenTimeoutMinutes !== ReaderSettingsStore.SCREEN_TIMEOUT_FOLLOW_SYSTEM;
     settings.extendToStatusBar = source.extendToStatusBar;
     settings.preloadEnabled = source.preloadEnabled;
-    settings.keepParagraphIndent = source.keepParagraphIndent;
     settings.preloadChapterCount = ReaderSettingsStore.normalizePreloadChapterCount(source.preloadChapterCount);
     settings.useTtsQuickAction = typeof source.useTtsQuickAction === 'boolean' ? source.useTtsQuickAction :
       (AppStorage.get<boolean>(ReaderSettingsStore.KEY_USE_TTS_QUICK_ACTION) ?? true);
@@ -1706,7 +1697,8 @@ export class ReaderSettingsStore {
       settings.screenTimeoutMinutes !== ReaderSettingsStore.SCREEN_TIMEOUT_FOLLOW_SYSTEM;
     settings.extendToStatusBar = AppStorage.get<boolean>(ReaderSettingsStore.KEY_EXTEND_TO_STATUS_BAR) ?? false;
     settings.preloadEnabled = AppStorage.get<boolean>(ReaderSettingsStore.KEY_PRELOAD_ENABLED) ?? true;
-    settings.keepParagraphIndent = AppStorage.get<boolean>(ReaderSettingsStore.KEY_KEEP_PARAGRAPH_INDENT) ?? false;
+    settings.paragraphIndent = ReaderParagraphIndent.normalize(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_PARAGRAPH_INDENT) ?? ReaderParagraphIndent.DEFAULT);
     settings.preloadChapterCount = ReaderSettingsStore.normalizePreloadChapterCount(
       AppStorage.get<number>(ReaderSettingsStore.KEY_PRELOAD_CHAPTER_COUNT) ?? 1
     );

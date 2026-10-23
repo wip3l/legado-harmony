@@ -137,6 +137,7 @@ import {
   ReaderV2HighlightRect
 } from '../core/reader/ReaderPageModels';
 import { ReaderTextNormalizer } from '../core/reader/ReaderTextNormalizer';
+import { ReaderParagraphIndent } from '../core/reader/ReaderParagraphIndent';
 import { ReaderImageSizeResolver } from '../core/reader/ReaderImageSizeResolver';
 import { ReaderImageBitmapCache } from '../core/reader/ReaderImageBitmapCache';
 import { ReaderChunkPagination, ReaderChunkResult } from '../core/reader/ReaderChunkPagination';
@@ -595,8 +596,7 @@ struct ReadBookPage {
   @StorageLink('readerTextAlign') @Watch('onReadLayoutChanged') readerTextAlign: string = 'justify';
   @StorageLink('readerLineHeight') @Watch('onReadLayoutChanged') readerLineHeight: number = 12;
   @StorageLink('readerParagraphSpacing') @Watch('onReadLayoutChanged') readerParagraphSpacing: number = 0;
-  // 保留段首缩进：开启后分页/分块起点不再裁掉原文的全角空格缩进。
-  @StorageLink('readerKeepParagraphIndent') @Watch('onReadLayoutChanged') keepParagraphIndent: boolean = false;
+  @StorageLink('readerParagraphIndent') @Watch('onReadLayoutChanged') readerParagraphIndent: number = 2;
   @StorageLink('readerMarginLeft') @Watch('onReadLayoutChanged') readerMarginLeft: number = 18;
   @StorageLink('readerMarginRight') @Watch('onReadLayoutChanged') readerMarginRight: number = 18;
   @StorageLink('readerMarginTop') @Watch('onReadLayoutChanged') readerMarginTop: number = 18;
@@ -6597,7 +6597,7 @@ struct ReadBookPage {
     this.readerTextAlign = settings.textAlign;
     this.readerLineHeight = settings.lineHeight;
     this.readerParagraphSpacing = settings.paragraphSpacing;
-    this.keepParagraphIndent = settings.keepParagraphIndent;
+    this.readerParagraphIndent = settings.paragraphIndent;
     this.readerMarginLeft = settings.marginLeft;
     this.readerMarginRight = settings.marginRight;
     this.readerMarginTop = settings.marginTop;
@@ -7718,7 +7718,8 @@ struct ReadBookPage {
   }
 
   applyPendingReaderLayoutChange(): void {
-    const readingOffset = this.getReaderStableReflowOffset();
+    const readingOffset = ReaderParagraphIndent.remapOffset(
+      this.pagedContentText, this.getPagedSourceText(), this.getReaderStableReflowOffset());
     this.readerTypographyRestoreOffset = readingOffset;
     this.invalidateReaderTypographyLayout();
     this.refreshReaderTextRender();
@@ -9402,6 +9403,11 @@ struct ReadBookPage {
     Column({ space: AppSpacing.XS }) {
       // 正文排版作为面板首项，统一调整字号、字距、行距、段距及四侧边距。
       this.readerTypographyCombinedSettings()
+      this.readerSelectSettingItem('段首缩进', '正文每段首行的缩进字符数',
+        this.readerParagraphIndentOptions(), this.readerParagraphIndent, (index: number) => {
+          this.readerParagraphIndent = index;
+          this.saveReaderLayoutSettings();
+        }, 'reader_paragraph_indent_select')
       this.readerSelectSettingItem('正文对齐方式', '正文段落的水平对齐',
         this.readerTextAlignOptions(), this.readerTextAlignSelectedIndex(), (index: number) => {
           this.setReaderTextAlignByIndex(index);
@@ -9417,16 +9423,12 @@ struct ReadBookPage {
         }
       })
 
-      ReaderSettingSwitchRow({
-        title: '保留段首缩进', description: '章节开头与页首保留原文的全角空格缩进',
-        checked: this.keepParagraphIndent, textColor: this.getTextColor(), subTextColor: this.getSubTextColor(),
-        onChange: (checked: boolean) => {
-          this.setKeepParagraphIndent(checked);
-        }
-      })
-
     }
     .width('100%')
+  }
+
+  readerParagraphIndentOptions(): SelectOption[] {
+    return [{ value: '0字符' }, { value: '1字符' }, { value: '2字符' }, { value: '3字符' }, { value: '4字符' }];
   }
 
   readerTextAlignOptions(): SelectOption[] {
@@ -10117,7 +10119,8 @@ struct ReadBookPage {
       this.readerMarginBottom,
       this.readerLetterSpacing,
       this.readerTextAlign,
-      this.readerFontWeight
+      this.readerFontWeight,
+      this.readerParagraphIndent
     ).catch((e: Error) => {
       console.warn('保存阅读排版设置失败:', e);
     });
@@ -10266,15 +10269,6 @@ struct ReadBookPage {
     this.scheduleReaderExtendLayoutRefresh(readingOffset);
     this.saveReaderInteractionSettings();
     this.saveReadConfig();
-  }
-
-  setKeepParagraphIndent(enabled: boolean): void {
-    if (this.keepParagraphIndent === enabled) return;
-    this.keepParagraphIndent = enabled;
-    // StorageLink 的 @Watch 会触发重排；这里同步持久化，保证下次进入阅读时生效。
-    ReaderSettingsStore.saveKeepParagraphIndent(getContext(this), enabled).catch((e: Error) => {
-      console.warn('保存保留段首缩进设置失败:', e);
-    });
   }
 
   setReaderPreloadEnabled(enabled: boolean): void {
@@ -11418,7 +11412,7 @@ struct ReadBookPage {
   }
 
   buildIndentedChapterBody(text: string): string {
-    return ReaderTextNormalizer.indentChapterBody(text);
+    return ReaderTextNormalizer.indentChapterBody(text, this.readerParagraphIndent);
   }
 
   stripDuplicatedChapterTitle(body: string, title: string): string {
@@ -15503,7 +15497,7 @@ struct ReadBookPage {
       `${this.readerRegexFontSize}_${this.readerRegexShadowColor}_${this.themeRevision}_` +
       `${this.themeRegexEmphasisMode()}_${this.themeRegexBubbleStyleId()}_reader_action_layout_v7`;
     return `${this.readerFontSize}_${this.readerFontWeight}_${this.readerLetterSpacing}_${this.readerTextAlign}_${this.readerLineHeight}_${this.readerParagraphSpacing}_` +
-      `${this.keepParagraphIndent}_` +
+      `${this.readerParagraphIndent}_` +
       `${this.readerMarginLeft}_${this.readerMarginRight}_${this.readerMarginTop}_${this.readerMarginBottom}_` +
       `${this.readerBodyFontMode}_${this.readerBodyFontFamily}_${this.getBodyReaderFontFamily()}_` +
       `${this.readerTitleFontSize}_${this.readerTitleFontMode}_${this.readerTitleFontFamily}_` +
@@ -16407,8 +16401,8 @@ struct ReadBookPage {
     let ends: number[] = source ? [source.length] : [];
     if (source && this.isReaderContinuousScrollSurfaceActive()) {
       const chunks: ReaderChunkResult = this.isReaderComicModeActive() ?
-        ReaderChunkPagination.splitComic(source, this.keepParagraphIndent) :
-        ReaderChunkPagination.splitContinuous(source, this.keepParagraphIndent);
+        ReaderChunkPagination.splitComic(source) :
+        ReaderChunkPagination.splitContinuous(source);
       pages = chunks.pages;
       starts = chunks.starts;
       ends = chunks.ends;
