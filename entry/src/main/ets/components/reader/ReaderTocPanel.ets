@@ -998,7 +998,9 @@ export struct ReaderTocPanel {
             .padding({ top: 44, bottom: 44 })
           }
         }
-        ForEach(this.visibleChapters, (chapter: BookChapter, localIndex: number) => {
+        // ForEach 会复用同一章节的节点；筛选后旧回调里的 localIndex 不再对应新列表。
+        // 行内容、选中态和跳转始终使用章节自身的索引。
+        ForEach(this.visibleChapters, (chapter: BookChapter) => {
           ListItem() {
             Column() {
             if (BookChapter.volumeTitleOf(chapter)) {
@@ -1012,18 +1014,18 @@ export struct ReaderTocPanel {
                 .padding({ left: AppSpacing.XL, right: AppSpacing.XL, top: AppSpacing.LG, bottom: AppSpacing.SM })
             }
             Row({ space: AppSpacing.MD }) {
-              Text(this.globalIndex(localIndex) === this.currentChapterIndex ? '•' : '·')
-                .fontSize(this.globalIndex(localIndex) === this.currentChapterIndex ? 22 : 18)
-                .fontColor(this.globalIndex(localIndex) === this.currentChapterIndex ?
+              Text(chapter.index === this.currentChapterIndex ? '•' : '·')
+                .fontSize(chapter.index === this.currentChapterIndex ? 22 : 18)
+                .fontColor(chapter.index === this.currentChapterIndex ?
                   this.accentColor : this.subTextColor)
                 .width(18)
                 .textAlign(TextAlign.Center)
 
-              Text(this.chapterTitle(this.globalIndex(localIndex)))
+              Text(this.chapterTitle(chapter.index))
                 .fontSize(AppFontSize.BODY_LARGE)
-                .fontWeight(this.globalIndex(localIndex) === this.currentChapterIndex ?
+                .fontWeight(chapter.index === this.currentChapterIndex ?
                   FontWeight.Medium : FontWeight.Regular)
-                .fontColor(this.titleColor(chapter, this.globalIndex(localIndex)))
+                .fontColor(this.titleColor(chapter, chapter.index))
                 .maxLines(2)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .layoutWeight(1)
@@ -1039,14 +1041,14 @@ export struct ReaderTocPanel {
             }
             .width('100%')
             .padding({ left: AppSpacing.LG, right: AppSpacing.XL, top: AppSpacing.LG, bottom: AppSpacing.LG })
-            .backgroundColor(this.globalIndex(localIndex) === this.currentChapterIndex ?
+            .backgroundColor(chapter.index === this.currentChapterIndex ?
               this.selectedColor : Color.Transparent)
             .border({ width: { bottom: 0.5 }, color: ThemeRuntime.softFillColor(this.dark) })
-            .onClick(() => this.onJumpToChapter(this.globalIndex(localIndex)))
+            .onClick(() => this.onJumpToChapter(chapter.index))
             }
           }
-        }, (chapter: BookChapter, localIndex: number) =>
-          `${this.orderRevision}_${this.globalIndex(localIndex)}_${chapter.url || chapter.title}`)
+        }, (chapter: BookChapter) =>
+          `${this.orderRevision}_${chapter.index}_${chapter.url || chapter.title}`)
       }
       .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
       .width('100%')
