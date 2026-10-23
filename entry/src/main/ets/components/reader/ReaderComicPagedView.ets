@@ -2,7 +2,9 @@ import { LocalBookService } from '../../core/book/LocalBookService';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
 import { ReaderImageMarker } from '../../core/book/ReaderImageMarker';
-import { ReaderComicImageItem, ReaderComicImageSizes, ReaderComicInfoBadge, ReaderComicRetryRegistry } from './ReaderComicView';
+import {
+  ReaderComicImageItem, ReaderComicImageSizes, ReaderComicInfoBadge, ReaderComicRetryRegistry, ReaderPendingImageHint
+} from './ReaderComicView';
 
 /** 阅读页向翻页视图发出的指令（点击翻页、音量键）；视图挂载时填入实现。 */
 export class ReaderComicPagedController {
@@ -314,6 +316,16 @@ export struct ReaderComicPagedView {
 
   /** 按阅读方向排在当前跨页之后、需要预先下载的网络图片地址。 */
   private prefetchSources(): string[] {
+    return this.prefetchMarkerSources().filter((source: string): boolean => ReaderComicImageSizes.isRemote(source));
+  }
+
+  /** 预加载范围里还在渐进加载的图片：登记为屏幕附近，先于本章其余图片处理。 */
+  private prefetchPendingRaws(): string[] {
+    return this.prefetchMarkerSources().map((source: string): string => ReaderImageMarker.pendingRaw(source))
+      .filter((raw: string): boolean => !!raw);
+  }
+
+  private prefetchMarkerSources(): string[] {
     const result: string[] = [];
     const first = (this.spreadIndex + 2) * this.spreadSize();
     // 本话剩下的页不够时接着预取下一话（第一个跨页已在相邻格里显示，从它之后开始）。
@@ -323,8 +335,7 @@ export struct ReaderComicPagedView {
       const text = (page < this.pages.length ? this.pages[page] :
         this.nextChapterPages[nextStart + page - this.pages.length] || '').trim();
       if (!LocalBookService.isEpubImageMarker(text)) continue;
-      const source = ReaderImageMarker.parse(text).source;
-      if (ReaderComicImageSizes.isRemote(source)) result.push(source);
+      result.push(ReaderImageMarker.parse(text).source);
     }
     return result;
   }
@@ -626,6 +637,10 @@ export struct ReaderComicPagedView {
           .position({ x: 0, y: 0 })
           .hitTestBehavior(HitTestMode.None)
       }, (source: string) => source)
+
+      ForEach(this.prefetchPendingRaws(), (raw: string) => {
+        ReaderPendingImageHint({ raw: raw })
+      }, (raw: string) => raw)
 
       if (this.infoVisible) {
         ReaderComicInfoBadge({

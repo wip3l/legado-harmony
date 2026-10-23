@@ -22,6 +22,7 @@ import { CloudSyncCoordinator } from '../account/CloudSyncCoordinator';
 import { TtsVoiceInfo } from '../account/AccountCommerceModels';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { ReadBookEngine } from '../core/book/ReadBookEngine';
+import { ReaderImageMarker } from '../core/book/ReaderImageMarker';
 import { readStatsTracker } from '../core/stats/ReadStatsTracker';
 import { LocalBookService } from '../core/book/LocalBookService';
 import { WebDavBookService } from '../webdav/WebDavBookService';
@@ -1005,6 +1006,8 @@ struct ReadBookPage {
 
   aboutToDisappear() {
     AppStorage.setOrCreate<boolean>('shelfReaderDirectTransition', false);
+    // 离开阅读页后不再为它在后台补图片；回来时没补完的章节重新获取。
+    this.readerEngine().setReaderImagesDeferred(false);
     this.resetReaderScreenOrientation();
     this.readerPageVisible = false;
     this.syncReaderInfoBarClock();
@@ -1454,6 +1457,7 @@ struct ReadBookPage {
     this.readerInitialPageReady = false;
     this.readerInitialOpening = true;
     this.readerComicMode = false;
+    this.syncReaderImageDeferral();
     this.clearReaderComicPaginationProgress();
     this.readerComicChapterSwitching = false;
     this.readerComicBoundaryDirection = 0;
@@ -5119,6 +5123,7 @@ struct ReadBookPage {
     const autoDetected = this.book?.getVariable('readerComicAutoDetected') === '1';
     this.readerComicMode = manualMode === 'comic' ||
       (manualMode !== 'text' && (autoDetected || this.readerSourceIndicatesComic()));
+    this.syncReaderImageDeferral();
     const bookMode = this.book?.getVariable('readerComicReadingMode') || '';
     this.readerComicBookMode = bookMode ? ReaderComicMode.normalize(bookMode) : '';
     this.readerComicZoomScale = 1;
@@ -5152,6 +5157,7 @@ struct ReadBookPage {
     if (this.readerComicMode || !this.readerSourceIndicatesComic() ||
       this.book?.getVariable('readerComicManualMode') === 'text') return;
     this.readerComicMode = true;
+    this.syncReaderImageDeferral();
     this.showSettings = false;
     this.stopTtsReading();
     this.enterReaderImmersive();
@@ -5163,6 +5169,7 @@ struct ReadBookPage {
     const next = !this.isReaderComicModeActive();
     this.stopTtsReading();
     this.readerComicMode = next;
+    this.syncReaderImageDeferral();
     this.book.putVariable('readerComicManualMode', next ? 'comic' : 'text');
     // 继续写入旧字段，兼容已有导入导出数据；实际判定优先读取手动模式字段。
     this.book.putVariable('readerComicMode', next ? '1' : '0');
@@ -5179,6 +5186,17 @@ struct ReadBookPage {
     this.enterReaderImmersive();
     this.syncReaderInfoBarClock();
     HdsFeedback.showToast(next ? '已切换为漫画阅读' : '已切换为普通阅读');
+    // 漫画模式下渐进加载的本章图片还没补完：普通阅读按本地图片排版，重新获取整章。
+    if (!next && ReaderImageMarker.hasPending(this.content)) {
+      this.refreshCurrentChapter(this.currentPageIndex, true).catch((error: Error) => {
+        console.warn('切换普通阅读后重新获取本章失败:', error);
+      });
+    }
+  }
+
+  /** 漫画模式下正文图片渐进加载：章节先显示，图片逐张补上（见 ReadBookEngine.setReaderImagesDeferred）。 */
+  syncReaderImageDeferral(): void {
+    this.readerEngine().setReaderImagesDeferred(this.isReaderComicModeActive());
   }
 
   isReaderComicModeActive(): boolean {

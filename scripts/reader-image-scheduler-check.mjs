@@ -132,6 +132,32 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   await assert.rejects(Scheduler.run(FG, () => true, async () => 1), (e) => e.message === CANCELLED);
 }
 
+// 屏幕上正等着的图片（VISIBLE）排在其他当前章图片前面，即使提交得更晚。
+{
+  const blockers = [];
+  const running = [];
+  for (let i = 0; i < 4; i++) {
+    running.push(Scheduler.run(FG, never, async () => { const gate = deferred(); blockers.push(gate); await gate.promise; }));
+  }
+  await tick();
+  const order = [];
+  let visible = false;
+  const queued = [
+    Scheduler.run(FG, never, async () => { order.push('early'); }),
+    Scheduler.run(() => (visible ? Scheduler.VISIBLE : Scheduler.FOREGROUND), never, async () => { order.push('visible'); })
+  ];
+  queued.push(Scheduler.run(() => Scheduler.NEAR, never, async () => { order.push('near'); }));
+  visible = true;
+  blockers.shift().resolve();
+  await tick(); await tick();
+  assert.equal(order[0], 'visible');
+  blockers.shift().resolve();
+  await tick(); await tick();
+  assert.equal(order[1], 'near', '屏幕附近的图片排在本章其余图片前面');
+  blockers.splice(0).forEach((gate) => gate.resolve());
+  await Promise.all([...running, ...queued]);
+}
+
 // 任务抛错也要归还名额。
 {
   await assert.rejects(Scheduler.run(FG, never, async () => { throw new Error('boom'); }), /boom/);

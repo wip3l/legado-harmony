@@ -42,6 +42,28 @@ export class ReaderImageMarker {
       `${ReaderImageMarker.PREFIX}${encodeURIComponent(ReaderImageMarker.FAILURE_SCHEME)}`);
   }
 
+  /**
+   * 渐进加载中还没处理好的图片：来源写成这个前缀加原始图片值，阅读器按原始值等 ReaderImageResults 给出结果。
+   * 同样只出现在内存里的章节正文中，整章图片都有结果后才把换成本地路径的正文写入缓存。
+   */
+  static readonly PENDING_SCHEME: string = 'legado-image-pending:';
+
+  static pendingSource(raw: string): string {
+    return `${ReaderImageMarker.PENDING_SCHEME}${raw || ''}`;
+  }
+
+  /** 待加载图片的原始图片值；不是待加载图片时为空串。 */
+  static pendingRaw(source: string): string {
+    const value = source || '';
+    return value.startsWith(ReaderImageMarker.PENDING_SCHEME) ?
+      value.substring(ReaderImageMarker.PENDING_SCHEME.length) : '';
+  }
+
+  static hasPending(text: string): boolean {
+    return (text || '').includes(
+      `${ReaderImageMarker.PREFIX}${encodeURIComponent(ReaderImageMarker.PENDING_SCHEME)}`);
+  }
+
   static isMarker(value: string): boolean {
     const text = (value || '').trim();
     return text.startsWith(ReaderImageMarker.PREFIX) && text.endsWith(ReaderImageMarker.SUFFIX);

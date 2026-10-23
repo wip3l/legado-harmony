@@ -8,7 +8,8 @@ import { BookSourceInteractionPostProcessor } from './BookSourceInteractionPostP
 import { ReaderOpenTrace } from '../../utils/ReaderOpenTrace';
 import { ReaderImageMarker } from './ReaderImageMarker';
 import { ReaderCacheBudget } from './ReaderCacheBudget';
-import { ReaderImageScheduler } from './ReaderImageScheduler';
+import { ReaderImageRequest, ReaderImageScheduler } from './ReaderImageScheduler';
+import { ReaderImageResults } from './ReaderImageResults';
 
 export class ReadBookEngine {
   private static inst: ReadBookEngine | null = null;
@@ -40,6 +41,12 @@ export class ReadBookEngine {
   private static readonly SOURCE_RECHECK_INTERVAL_MS: number = 5000;
   /** 阅读页用的共享实例；只有它的当前章能占用前台图片名额，书架缓存等后台实例一律排在后面。 */
   private foregroundReader: boolean = false;
+  /** 阅读页处在漫画模式：正文先带着待加载图片返回，图片在后台逐张补齐（见 ReaderImageResults）。 */
+  private readerImagesDeferred: boolean = false;
+  /** 关闭渐进模式（离开阅读页、切到文字模式）时加一，作废还没处理完的后台图片。 */
+  private deferredImageGeneration: number = 0;
+  /** 渐进加载中、等图片补完再写缓存的各章正文；刷新本章后旧版本补完也不再写入。 */
+  private deferredChapterTexts: Map<number, string> = new Map();
 
   private constructor() { this.webBook = new WebBookService(); }
 
@@ -503,6 +510,7 @@ export class ReadBookEngine {
     }
     this.chapterCache.delete(idx);
     this.chapterLoading.delete(idx);
+    this.deferredChapterTexts.delete(idx);
     await appDb.deleteCachedChapterContent(this.book.bookUrl, idx);
     const chapter = this.chapters[idx];
     if (chapter) {
@@ -589,16 +597,28 @@ export class ReadBookEngine {
     if (shouldCancel && shouldCancel()) return '';
     if (!this.isCurrentBookSession(generation, sessionBookUrl) || !this.source) return '';
     const sessionSource = this.source;
+    const imageRequest = new ReaderImageRequest();
     // 预加载的章节在读者翻到它之前排在后台，翻到后剩下的图片随即提前。
-    const imagePriority = (): number => !background && this.foregroundReader && this.curIdx === idx &&
+    imageRequest.priority = (): number => !background && this.foregroundReader && this.curIdx === idx &&
       this.book === sessionBook ? ReaderImageScheduler.FOREGROUND : ReaderImageScheduler.BACKGROUND;
+    // 缓存全文、手动缓存要完整的本地内容，始终等整章图片处理完。
+    if (!background && this.foregroundReader && this.readerImagesDeferred) {
+      const deferredGeneration = this.deferredImageGeneration;
+      imageRequest.deferred = true;
+      imageRequest.deferredCancelled = (): boolean => deferredGeneration !== this.deferredImageGeneration ||
+        !this.isCurrentBookSession(generation, sessionBookUrl);
+    }
     const text = await this.webBook.getContent(sessionSource, sessionBook, chapter, shouldCancel, null,
-      imagePriority);
+      imageRequest);
     if (shouldCancel && shouldCancel()) return '';
     if (!this.isCurrentBookSession(generation, sessionBookUrl)) return '';
     if (text && !this.isInvalidChapterContent(text)) {
       this.putChapterCache(idx, text);
       ReaderOpenTrace.mark(sessionBookUrl, 'content-network-ready', `chapter=${idx} length=${text.length}`);
+      if (ReaderImageMarker.hasPending(text)) {
+        this.saveWhenImagesReady(idx, text, chapter, generation, sessionBookUrl, imageRequest.deferredCancelled);
+        return text;
+      }
       // 有图片没下载/解密成功时只留在内存里：写进正文缓存的话，失败会一直留着，重新打开也不再重试。
       if (ReaderImageMarker.hasFailure(text)) return text;
       try {
@@ -609,6 +629,41 @@ export class ReadBookEngine {
       }
     }
     return text;
+  }
+
+  /**
+   * 渐进加载的章节：图片都有结果后把换成本地路径的正文写入缓存（有失败的不写）。内存里仍保留待加载版本，
+   * 阅读页已显示的内容与之一致，图片项从 ReaderImageResults 取结果；处理被取消时从内存里去掉这一章，下次重新获取。
+   */
+  private saveWhenImagesReady(idx: number, text: string, chapter: BookChapter, generation: number,
+    bookUrl: string, cancelled: () => boolean): void {
+    this.deferredChapterTexts.set(idx, text);
+    ReaderImageResults.finalize(text).then(async (finalText: string): Promise<void> => {
+      const latest = this.deferredChapterTexts.get(idx) === text;
+      if (latest) this.deferredChapterTexts.delete(idx);
+      if (!finalText || cancelled()) {
+        if (this.chapterCache.get(idx) === text) this.chapterCache.delete(idx);
+        return;
+      }
+      if (!latest || !this.isCurrentBookSession(generation, bookUrl) || ReaderImageMarker.hasFailure(finalText)) return;
+      await appDb.saveCachedChapterContent(bookUrl, chapter, finalText);
+      ReaderCacheBudget.noteTextWrite();
+      chapter.cacheDate = chapter.cacheDate || Date.now();
+    }).catch((err: Error) => {
+      console.error('[RE] save progressive chapter cache failed:', idx, err);
+    });
+  }
+
+  /** 阅读页进入漫画模式时打开；离开阅读页或切到文字模式时关闭，并作废没处理完的后台图片。 */
+  setReaderImagesDeferred(enabled: boolean): void {
+    if (this.readerImagesDeferred === enabled) return;
+    this.readerImagesDeferred = enabled;
+    if (enabled) return;
+    this.deferredImageGeneration++;
+    this.deferredChapterTexts.clear();
+    for (const item of [...this.chapterCache]) {
+      if (ReaderImageMarker.hasPending(item[1])) this.chapterCache.delete(item[0]);
+    }
   }
 
   private async refreshSourceForContent(expectedGeneration: number = this.bookGeneration,
@@ -650,7 +705,13 @@ export class ReadBookEngine {
   async cacheChapter(idx: number, shouldCancel: (() => boolean) | null = null): Promise<boolean> {
     if (shouldCancel && shouldCancel()) return false;
     const book = this.book;
-    const text = await this.fetchContent(idx, shouldCancel, true);
+    let text = await this.fetchContent(idx, shouldCancel, true);
+    // 阅读时渐进加载的章节在内存里还是待加载版本，等图片都处理完再缓存。
+    if (ReaderImageMarker.hasPending(text)) {
+      text = await ReaderImageResults.finalize(text);
+      // 阅读页离开或切到文字模式后没补完的图片已作废：跳过内存，按整章重新获取。
+      if (!text && !(shouldCancel && shouldCancel())) text = await this.fetchContentUncached(idx, shouldCancel, true);
+    }
     // 有图片失败的章节没有写入正文缓存，算作这一章没缓存成功。
     const ok = !(shouldCancel && shouldCancel()) && !!text && !ReaderImageMarker.hasFailure(text);
     if (ok && book && book.origin !== 'local' && this.book === book && idx < this.chapters.length) {

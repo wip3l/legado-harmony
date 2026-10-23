@@ -3,7 +3,8 @@ import { util } from '@kit.ArkTS';
 import { BookSourceDataUrlSupport } from './BookSourceDataUrlSupport';
 import { ReaderImageMarker } from './ReaderImageMarker';
 import { ComicImagePipeline, ComicImageTiming } from './ComicImagePipeline';
-import { ReaderImageScheduler } from './ReaderImageScheduler';
+import { ReaderImageRequest, ReaderImageScheduler } from './ReaderImageScheduler';
+import { ReaderImageResults } from './ReaderImageResults';
 import { BookSourceInteractionPostProcessor } from './BookSourceInteractionPostProcessor';
 import { BookSourceAudioWebRuntime } from './BookSourceAudioWebRuntime';
 import { AudioRuleSupport } from './AudioRuleSupport';
@@ -594,13 +595,13 @@ export class WebBookService {
     return chapters;
   }
 
-  /** imagePriority 决定正文图片在全局图片名额里的先后，见 ReaderImageScheduler。 */
+  /** imageRequest 决定正文图片的调度优先级，以及是否先返回待加载标记，见 ReaderImageRequest。 */
   async getContent(source: BookSource, book: Book, chapter: BookChapter,
     shouldCancel: (() => boolean) | null = null,
     debugContext: BookSourceDebugContext | null = null,
-    imagePriority: () => number = ReaderImageScheduler.foreground): Promise<string> {
+    imageRequest: ReaderImageRequest = ReaderImageRequest.DEFAULT): Promise<string> {
     if (NativeSourceService.isNative(source)) {
-      return await this.getNativeContent(source, book, chapter, shouldCancel, debugContext, imagePriority);
+      return await this.getNativeContent(source, book, chapter, shouldCancel, debugContext, imageRequest);
     }
     // `ruleContent.audioUrl` is the dedicated media-address rule of an audio source. It takes
     // precedence over `content`, which remains the fallback when it yields nothing.
@@ -613,12 +614,12 @@ export class WebBookService {
         return preferred;
       }
     }
-    return await this.getContentWithRules(source, book, chapter, shouldCancel, debugContext, imagePriority);
+    return await this.getContentWithRules(source, book, chapter, shouldCancel, debugContext, imageRequest);
   }
 
   private async getNativeContent(source: BookSource, book: Book, chapter: BookChapter,
     shouldCancel: (() => boolean) | null, debugContext: BookSourceDebugContext | null = null,
-    imagePriority: () => number = ReaderImageScheduler.foreground): Promise<string> {
+    imageRequest: ReaderImageRequest = ReaderImageRequest.DEFAULT): Promise<string> {
     SourceEngineHost.setError(source, '');
     try {
       const result = await NativeSourceService.getContent(source, this.http, book, chapter,
@@ -629,7 +630,7 @@ export class WebBookService {
         // 漫画图片按显式图片列表处理，地址后附带的请求头选项会在取图时生效。
         return await this.normalizeReaderContent(source, '',
           result.baseUrl || chapter.url || book.bookUrl || source.bookSourceUrl, result.images,
-          (): boolean => this.contentRequestCanceled(shouldCancel), imagePriority);
+          (): boolean => this.contentRequestCanceled(shouldCancel), imageRequest);
       }
       if (!result.text.trim()) {
         SourceEngineHost.setError(source, '正文规则没有取到内容');
@@ -637,7 +638,7 @@ export class WebBookService {
       }
       return await this.normalizeReaderContent(source, result.text,
         result.baseUrl || chapter.url || book.bookUrl || source.bookSourceUrl, [],
-        (): boolean => this.contentRequestCanceled(shouldCancel), imagePriority);
+        (): boolean => this.contentRequestCanceled(shouldCancel), imageRequest);
     } catch (e) {
       if (this.contentRequestCanceled(shouldCancel)) return '';
       console.warn('[WS] native content failed:', source.bookSourceName, (e as Error).message);
@@ -662,7 +663,7 @@ export class WebBookService {
   private async getContentWithRules(source: BookSource, book: Book, chapter: BookChapter,
     shouldCancel: (() => boolean) | null = null,
     debugContext: BookSourceDebugContext | null = null,
-    imagePriority: () => number = ReaderImageScheduler.foreground): Promise<string> {
+    imageRequest: ReaderImageRequest = ReaderImageRequest.DEFAULT): Promise<string> {
     if (this.contentRequestCanceled(shouldCancel)) return '';
     // Validation and reader diagnostics must describe the current content request, not a
     // stale error left by a previous catalog/script stage.
@@ -683,7 +684,7 @@ export class WebBookService {
       return await this.normalizeReaderContent(source,
         this.applyContentReplaceRule(interactiveContent, source.contentRule.replaceRegex, shortcutContext, chapter,
           debugContext),
-        chapter.url || book.bookUrl || source.bookSourceUrl, [], (): boolean => false, imagePriority);
+        chapter.url || book.bookUrl || source.bookSourceUrl, [], (): boolean => false, imageRequest);
     }
     const isAudioContent = source.bookSourceType === 1 || (Number(book.type) & 32) !== 0;
     if (isAudioContent) {
@@ -708,7 +709,7 @@ export class WebBookService {
       if (this.contentRequestCanceled(shouldCancel)) return '';
       return await this.normalizeReaderContent(source,
         this.applyContentReplaceRule(interactiveContent, source.contentRule.replaceRegex,
-          new RuleContext(), chapter, debugContext), chapter.url, [], (): boolean => false, imagePriority);
+          new RuleContext(), chapter, debugContext), chapter.url, [], (): boolean => false, imageRequest);
     }
     if (this.stageRuleCode(source.contentRule.content || '')) {
       // The complete content script was already executed in ArkWeb. Retrying an empty/error result
@@ -762,7 +763,7 @@ export class WebBookService {
         page === 0 ? this.getChapterBaseUrl(chapter, book, source) : currentUrl,
         book.bookUrl || source.bookSourceUrl);
       const pageData = await this.parseContentPage(source, book, chapter, currentResp.body, baseUrl, ctx,
-        shouldCancel, debugContext, imagePriority);
+        shouldCancel, debugContext, imageRequest);
       if (this.contentRequestCanceled(shouldCancel)) return '';
       if (!pageData.content && isAudioContent) {
         // The content rule found nothing; `sourceRegex` may still select the stream from the
@@ -790,7 +791,7 @@ export class WebBookService {
   private async parseContentPage(source: BookSource, book: Book, chapter: BookChapter, body: string,
     baseUrl: string, ctx: RuleContext, shouldCancel: (() => boolean) | null = null,
     debugContext: BookSourceDebugContext | null = null,
-    imagePriority: () => number = ReaderImageScheduler.foreground): Promise<ContentPageData> {
+    imageRequest: ReaderImageRequest = ReaderImageRequest.DEFAULT): Promise<ContentPageData> {
     const data = new ContentPageData();
     if (this.contentRequestCanceled(shouldCancel)) return data;
     const contentRule = source.contentRule;
@@ -856,7 +857,7 @@ export class WebBookService {
     // 切走章节时图片下载随之停止，不再把整章图片下完。
     try {
       data.content = await this.normalizeReaderContent(source, content, baseUrl, imageRuleValues,
-        (): boolean => this.contentRequestCanceled(shouldCancel), imagePriority);
+        (): boolean => this.contentRequestCanceled(shouldCancel), imageRequest);
     } catch (e) {
       if (!this.contentRequestCanceled(shouldCancel)) throw e as Error;
     }
@@ -1347,12 +1348,12 @@ export class WebBookService {
 
   private async normalizeReaderContent(source: BookSource, content: string, baseUrl: string,
     imageRuleValues: string[] = [], cancelled: () => boolean = (): boolean => false,
-    imagePriority: () => number = ReaderImageScheduler.foreground): Promise<string> {
+    imageRequest: ReaderImageRequest = ReaderImageRequest.DEFAULT): Promise<string> {
     const explicitImages = this.collectReaderImageUrls(imageRuleValues, baseUrl, true);
     if (explicitImages.length > 0) {
       return await this.materializeReaderImageMarkers(source,
         explicitImages.map((url: string): string => ReaderImageMarker.create(url)).join('\n\n'), cancelled,
-        imagePriority);
+        imageRequest);
     }
 
     let value = content || '';
@@ -1390,7 +1391,7 @@ export class WebBookService {
       .replace(/\n{3,}/g, '\n\n')
       .trim();
     return await this.materializeReaderImageMarkers(source, ReaderActionMarker.limit(normalized), cancelled,
-      imagePriority);
+      imageRequest);
   }
 
   private convertReaderNativeActions(_source: BookSource, content: string, _baseUrl: string): string {
@@ -1520,7 +1521,7 @@ export class WebBookService {
 
   private async materializeReaderImageMarkers(source: BookSource, content: string,
     cancelled: () => boolean = (): boolean => false,
-    imagePriority: () => number = ReaderImageScheduler.foreground): Promise<string> {
+    imageRequest: ReaderImageRequest = ReaderImageRequest.DEFAULT): Promise<string> {
     if (!content || !content.includes(ReaderImageMarker.PREFIX)) return content;
     const pattern = new RegExp(`${this.escapeRegex(ReaderImageMarker.PREFIX)}([^\\]]+)` +
       `${this.escapeRegex(ReaderImageMarker.SUFFIX)}`, 'g');
@@ -1534,41 +1535,68 @@ export class WebBookService {
       }
     }
     if (values.length === 0) return content;
-    const resolved: Record<string, string> = {};
     let failed = 0;
     const started = Date.now();
-    const startedAs = imagePriority() === ReaderImageScheduler.FOREGROUND ? '当前章' : '后台';
+    const startedAs = imageRequest.priority() < ReaderImageScheduler.BACKGROUND ? '当前章' : '后台';
     let firstDoneMs = -1;
     let cacheHits = 0;
     let downloadMs = 0;
     let scriptMs = 0;
     let decryptMs = 0;
-    // 整章图片一次交给全局调度，按顺序排队；名额由当前章、预加载和缓存全文共用。
-    await Promise.all(values.map((value: string, index: number): Promise<void> =>
-      ReaderImageScheduler.run(imagePriority, cancelled, async (): Promise<void> => {
-        if (cancelled()) throw new Error(HttpClient.CANCELLED_ERROR);
-        const timing = new ComicImageTiming();
-        // 一张图下载或解密失败只影响这一张：原因写进它的标记由阅读器显示，其余图片照常显示。
+    // 一张图下载或解密失败只影响这一张：原因写进它的标记由阅读器显示，其余图片照常显示。
+    const processImage = async (value: string, index: number, stop: () => boolean): Promise<string> => {
+      if (stop()) throw new Error(HttpClient.CANCELLED_ERROR);
+      const timing = new ComicImageTiming();
+      let result: string;
+      try {
+        result = await ComicImagePipeline.materialize(this.http, source, value, true, stop, index, timing) || value;
+      } catch (e) {
+        const message = (e as Error)?.message || String(e);
+        if (stop() || message === HttpClient.CANCELLED_ERROR) throw e as Error;
+        failed++;
+        console.warn(`[ReaderImage] 第 ${index + 1} 张图片处理失败: ${message}`);
+        result = ReaderImageMarker.failureSource(message);
+      }
+      if (firstDoneMs < 0) firstDoneMs = Date.now() - started;
+      if (timing.cacheHit) cacheHits++;
+      downloadMs += timing.downloadMs;
+      scriptMs += timing.scriptMs;
+      decryptMs += timing.decryptMs;
+      return result;
+    };
+    const report = (mode: string): void => {
+      console.info(`[ReaderImageTiming] 本章 ${values.length} 张（${mode}，开始时为${startedAs}）：` +
+        `首张完成 ${firstDoneMs}ms，全部完成 ${Date.now() - started}ms，缓存命中 ${cacheHits} 张，失败 ${failed} 张；` +
+        `累计 下载 ${downloadMs}ms 脚本(含排队) ${scriptMs}ms 解密 ${decryptMs}ms`);
+      if (failed > 0) console.warn(`[ReaderImage] 本章 ${values.length} 张图片中 ${failed} 张未能显示`);
+    };
+
+    if (imageRequest.deferred) {
+      // 渐进：图片全部交给后台，正文先带着待加载标记返回；屏幕上的图片排在最前。
+      const stop = imageRequest.deferredCancelled;
+      const jobs = values.map((value: string, index: number): Promise<void> =>
+        ReaderImageResults.load(value, (): Promise<string> => ReaderImageScheduler.run(
+          (): number => ReaderImageResults.priority(value, imageRequest.priority),
+          stop, (): Promise<string> => processImage(value, index, stop))));
+      Promise.all(jobs).then((): void => {
+        if (!stop()) report('渐进');
+      });
+      return content.replace(pattern, (_all: string, encoded: string): string => {
         try {
-          resolved[value] = await ComicImagePipeline.materialize(this.http, source, value, true, cancelled, index,
-            timing) || value;
-        } catch (e) {
-          const message = (e as Error)?.message || String(e);
-          if (cancelled() || message === HttpClient.CANCELLED_ERROR) throw e as Error;
-          failed++;
-          console.warn(`[ReaderImage] 第 ${index + 1} 张图片处理失败: ${message}`);
-          resolved[value] = ReaderImageMarker.failureSource(message);
+          return ReaderImageMarker.create(ReaderImageMarker.pendingSource(decodeURIComponent(encoded)));
+        } catch (_) {
+          return _all;
         }
-        if (firstDoneMs < 0) firstDoneMs = Date.now() - started;
-        if (timing.cacheHit) cacheHits++;
-        downloadMs += timing.downloadMs;
-        scriptMs += timing.scriptMs;
-        decryptMs += timing.decryptMs;
+      });
+    }
+
+    // 整章：图片一次交给全局调度，按顺序排队，全部处理完才返回正文。
+    const resolved: Record<string, string> = {};
+    await Promise.all(values.map((value: string, index: number): Promise<void> =>
+      ReaderImageScheduler.run(imageRequest.priority, cancelled, async (): Promise<void> => {
+        resolved[value] = await processImage(value, index, cancelled);
       })));
-    console.info(`[ReaderImageTiming] 本章 ${values.length} 张（开始时为${startedAs}）：` +
-      `首张完成 ${firstDoneMs}ms，全部完成 ${Date.now() - started}ms，缓存命中 ${cacheHits} 张，失败 ${failed} 张；` +
-      `累计 下载 ${downloadMs}ms 脚本(含排队) ${scriptMs}ms 解密 ${decryptMs}ms`);
-    if (failed > 0) console.warn(`[ReaderImage] 本章 ${values.length} 张图片中 ${failed} 张未能显示`);
+    report('整章');
     return content.replace(pattern, (_all: string, encoded: string): string => {
       try {
         const raw = decodeURIComponent(encoded);

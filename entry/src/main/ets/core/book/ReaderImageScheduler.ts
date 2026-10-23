@@ -13,8 +13,12 @@ class ReaderImageTicket {
  * 所以当前章、预加载的相邻章和缓存全文共用这 4 个名额：当前章优先；当前章有图片时后台最多占 1 个，
  * 没有时最多占 2 个。
  * 优先级在每次分配名额时重新读取，预加载的章节变成当前章后，剩下的图片随即提前。
+ * 小于 BACKGROUND 的都算前台，数值越小越先处理：屏幕上正等着的图片是 VISIBLE，
+ * 已经挂载在屏幕附近（条漫的缓存项、翻页模式后面几页）的是 NEAR。
  */
 export class ReaderImageScheduler {
+  static readonly VISIBLE: number = -2;
+  static readonly NEAR: number = -1;
   static readonly FOREGROUND: number = 0;
   static readonly BACKGROUND: number = 1;
   static readonly MAX_ACTIVE: number = 4;
@@ -62,13 +66,17 @@ export class ReaderImageScheduler {
     while (ReaderImageScheduler.active < ReaderImageScheduler.MAX_ACTIVE) {
       // 队列按提交顺序排列，各取最早的一张，即本章靠前的图片先处理。
       let firstForeground = -1;
+      let foregroundPriority = 0;
       let firstBackground = -1;
       for (let index = 0; index < ReaderImageScheduler.queue.length; index++) {
-        if (ReaderImageScheduler.queue[index].priority() === ReaderImageScheduler.FOREGROUND) {
+        const priority = ReaderImageScheduler.queue[index].priority();
+        if (priority >= ReaderImageScheduler.BACKGROUND) {
+          if (firstBackground < 0) firstBackground = index;
+        } else if (firstForeground < 0 || priority < foregroundPriority) {
           firstForeground = index;
-          break;
+          foregroundPriority = priority;
+          if (priority <= ReaderImageScheduler.VISIBLE) break;
         }
-        if (firstBackground < 0) firstBackground = index;
       }
       const foregroundBusy = firstForeground >= 0 ||
         ReaderImageScheduler.active > ReaderImageScheduler.activeBackground;
@@ -106,4 +114,14 @@ export class ReaderImageScheduler {
       ReaderImageScheduler.purgeTimer = -1;
     }
   }
+}
+
+/** 一次正文请求里图片怎么处理：调度优先级，以及是否先返回待加载标记、图片在后台逐张处理。 */
+export class ReaderImageRequest {
+  static readonly DEFAULT: ReaderImageRequest = new ReaderImageRequest();
+  priority: () => number = ReaderImageScheduler.foreground;
+  /** 为 true 时正文先带着待加载标记返回，图片交给 ReaderImageResults 在后台逐张处理（阅读页的漫画模式）。 */
+  deferred: boolean = false;
+  /** 渐进模式下后台图片任务的取消条件。正文请求返回后图片仍要继续，所以与那次请求的取消分开。 */
+  deferredCancelled: () => boolean = (): boolean => false;
 }

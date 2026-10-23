@@ -3,6 +3,7 @@ import fileUri from '@ohos.file.fileuri';
 import image from '@ohos.multimedia.image';
 import { LocalBookService } from '../../core/book/LocalBookService';
 import { ReaderImageMarker } from '../../core/book/ReaderImageMarker';
+import { ReaderImageResults } from '../../core/book/ReaderImageResults';
 import { ReaderContinuousDataSource, ReaderScrollItem } from '../../core/reader/ReaderDataSources';
 import { ReaderComicSuperResolution } from '../../core/reader/ReaderComicSuperResolution';
 import { AppFontSize } from '../../theme/AppFontSize';
@@ -42,7 +43,7 @@ export class ReaderComicImageSizes {
   }
 
   static uri(source: string): string {
-    if (!source || ReaderImageMarker.failureReason(source)) return '';
+    if (!source || ReaderImageMarker.failureReason(source) || ReaderImageMarker.pendingRaw(source)) return '';
     if (/^(?:https?:|data:|file:)/i.test(source)) return source;
     try {
       return fileUri.getUriFromPath(source);
@@ -171,7 +172,15 @@ export struct ReaderComicImageItem {
   /** 每次重置加一，旧任务的结果作废。 */
   private enhanceTicket: number = 0;
   private enhanceAttempted: boolean = false;
-  private source: string = '';
+  /** 当前显示的图片来源；渐进加载还没有结果时为空串，显示加载占位。 */
+  @State private source: string = '';
+  /** 渐进加载的图片的原始值，订阅 ReaderImageResults 等结果；不是渐进加载时为空串。 */
+  private pendingRaw: string = '';
+  private unsubscribePending: (() => void) | null = null;
+  /** 已向 ReaderImageResults 登记为屏幕上正等着的图片。 */
+  private pendingVisibleMarked: boolean = false;
+  /** 已登记为屏幕附近的图片：条漫列表只挂载可见区及其缓存项，挂载着就说明马上可能看到。 */
+  private pendingNearMarked: boolean = false;
   private registeredRetryKey: string = '';
   private readonly retryHandler: () => void = (): void => this.retry();
   private readonly reloadHandler: () => void = (): void => this.reload();
@@ -187,6 +196,7 @@ export struct ReaderComicImageItem {
 
   aboutToDisappear(): void {
     this.visible = false;
+    this.releasePending();
     this.enhanceTicket++;
     this.unregisterRetry();
     if (this.registeredReloadKey && this.retryRegistry) {
@@ -256,9 +266,54 @@ export struct ReaderComicImageItem {
   }
 
   private resetForMarker(): void {
+    this.releasePending();
     const info = ReaderImageMarker.parse(this.marker);
-    this.source = info.source;
-    this.failure = ReaderImageMarker.failureReason(info.source);
+    const raw = ReaderImageMarker.pendingRaw(info.source);
+    if (!raw) {
+      this.applySource(info.source, info.width, info.height);
+      return;
+    }
+    this.pendingRaw = raw;
+    let resolved = ReaderImageResults.current(raw);
+    // 登记已被清理、或处理被取消：再也等不到结果，按失败提示刷新本章。
+    if (!resolved && !ReaderImageResults.isAlive(raw)) resolved = ReaderImageMarker.failureSource('图片加载已中断');
+    if (resolved) {
+      this.applySource(resolved, info.width, info.height);
+      return;
+    }
+    this.applySource('', info.width, info.height);
+    this.unsubscribePending = ReaderImageResults.subscribe(raw, (source: string): void => {
+      if (raw !== this.pendingRaw) return;
+      this.applySource(source, info.width, info.height);
+      this.loadToken++;
+      this.syncPendingVisible();
+    });
+    ReaderImageResults.setNear(raw, true);
+    this.pendingNearMarked = true;
+    this.syncPendingVisible();
+  }
+
+  private releasePending(): void {
+    if (this.unsubscribePending) this.unsubscribePending();
+    this.unsubscribePending = null;
+    if (this.pendingVisibleMarked) ReaderImageResults.setVisible(this.pendingRaw, false);
+    this.pendingVisibleMarked = false;
+    if (this.pendingNearMarked) ReaderImageResults.setNear(this.pendingRaw, false);
+    this.pendingNearMarked = false;
+    this.pendingRaw = '';
+  }
+
+  /** 渐进加载还没结果的图片在屏幕上时登记为可见，调度时排在最前。 */
+  private syncPendingVisible(): void {
+    const marked = this.visible && !!this.pendingRaw && !this.source;
+    if (marked === this.pendingVisibleMarked) return;
+    this.pendingVisibleMarked = marked;
+    ReaderImageResults.setVisible(this.pendingRaw, marked);
+  }
+
+  private applySource(source: string, width: number, height: number): void {
+    this.source = source;
+    this.failure = ReaderImageMarker.failureReason(source);
     this.loaded = false;
     this.broken = false;
     this.denied = false;
@@ -268,7 +323,7 @@ export struct ReaderComicImageItem {
       this.ratio = 0;
       return;
     }
-    let ratio = info.width > 0 && info.height > 0 ? info.height / info.width : 0;
+    let ratio = width > 0 && height > 0 ? height / width : 0;
     if (ratio <= 0) ratio = ReaderComicImageSizes.ratio(this.source);
     this.ratio = ratio;
     if (ratio > 0 || !this.source || ReaderComicImageSizes.isRemote(this.source)) return;
@@ -362,7 +417,7 @@ export struct ReaderComicImageItem {
         .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
         .hitTestBehavior(HitTestMode.None)
       } else {
-        ForEach([this.loadToken], (_token: number) => {
+        ForEach(this.source ? [this.loadToken] : [], (_token: number) => {
           Image(ReaderComicImageSizes.uri(this.source))
             .width(this.boxed() ? '100%' : this.imageWidth())
             .height(this.boxed() ? '100%' : this.imageHeight() + this.overlap())
@@ -451,6 +506,7 @@ export struct ReaderComicImageItem {
       const visible = isVisible && ratio > 0;
       if (visible === this.visible) return;
       this.visible = visible;
+      this.syncPendingVisible();
       if (visible) {
         this.maybeEnhance();
       } else if (!this.enhancedUri && this.enhanceAttempted) {
@@ -459,6 +515,33 @@ export struct ReaderComicImageItem {
         this.enhanceAttempted = false;
       }
     })
+  }
+}
+
+/**
+ * 不显示任何内容，只在挂载期间把一张渐进加载的图片登记为屏幕附近，让它先于本章其余图片处理。
+ * 翻页模式用它覆盖当前跨页之后要预加载的几页。
+ */
+@Component
+export struct ReaderPendingImageHint {
+  @Prop raw: string = '';
+  private marked: string = '';
+
+  aboutToAppear(): void {
+    this.marked = this.raw;
+    if (this.marked) ReaderImageResults.setNear(this.marked, true);
+  }
+
+  aboutToDisappear(): void {
+    if (this.marked) ReaderImageResults.setNear(this.marked, false);
+    this.marked = '';
+  }
+
+  build() {
+    Stack()
+      .width(0)
+      .height(0)
+      .hitTestBehavior(HitTestMode.None)
   }
 }
 

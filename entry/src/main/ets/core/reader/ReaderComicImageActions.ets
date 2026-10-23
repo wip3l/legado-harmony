@@ -2,6 +2,7 @@ import { common } from '@kit.AbilityKit';
 import image from '@ohos.multimedia.image';
 import { HdsFeedback } from '../../utils/HdsFeedback';
 import { ReaderImageMarker } from '../book/ReaderImageMarker';
+import { ReaderImageResults } from '../book/ReaderImageResults';
 import { ReaderComicImageExport, ReaderComicSnapshotProvider } from './ReaderComicImageExport';
 
 /** 阅读页为漫画图片操作提供的环境。 */
@@ -39,7 +40,17 @@ export class ReaderComicImageActions {
     this.refreshedChapters.clear();
   }
 
-  async showMenu(source: string, reload: () => void, snapshotId: string): Promise<void> {
+  async showMenu(markerSource: string, reload: () => void, snapshotId: string): Promise<void> {
+    let source = markerSource;
+    const pendingRaw = ReaderImageMarker.pendingRaw(source);
+    if (pendingRaw) {
+      // 渐进加载的图片按处理结果操作；还没处理好时没有可保存的内容。
+      source = ReaderImageResults.current(pendingRaw);
+      if (!source) {
+        HdsFeedback.showToast('图片还在加载');
+        return;
+      }
+    }
     if (!source) return;
     const failure = ReaderImageMarker.failureReason(source);
     if (failure) {
