@@ -12,17 +12,17 @@
 
 <p align="center">
   <a href="docs/manual/shots/01-shelf.webp"><img src="docs/manual/shots/01-shelf.webp" width="19%" alt="书架：小说、漫画、有声书与视频统一管理" /></a>
-  <a href="docs/manual/shots/02-search.webp"><img src="docs/manual/shots/02-search.webp" width="19%" alt="搜索：多书源搜索与分类结果" /></a>
-  <a href="docs/manual/shots/03-discover.webp"><img src="docs/manual/shots/03-discover.webp" width="19%" alt="发现：频道、分类与榜单" /></a>
-  <a href="docs/manual/shots/04-detail.webp"><img src="docs/manual/shots/04-detail.webp" width="19%" alt="详情：书籍信息与目录" /></a>
-  <a href="docs/manual/shots/05-comment.webp"><img src="docs/manual/shots/05-comment.webp" width="19%" alt="段评：阅读中的评论气泡与面板" /></a>
+  <a href="docs/manual/shots/02-search.webp"><img src="docs/manual/shots/02-search.webp" width="19%" alt="在线阅读：多书源搜索与同名结果聚合" /></a>
+  <a href="docs/manual/shots/03-formats.webp"><img src="docs/manual/shots/03-formats.webp" width="19%" alt="多格式支持：在线与离线阅读，导入 TXT、EPUB、MOBI" /></a>
+  <a href="docs/manual/shots/04-stats.webp"><img src="docs/manual/shots/04-stats.webp" width="19%" alt="阅读统计：日周月阅读时长、书籍排行与时长占比" /></a>
+  <a href="docs/manual/shots/05-sync.webp"><img src="docs/manual/shots/05-sync.webp" width="19%" alt="进度同步：阅读进度与书签跨设备自动同步" /></a>
 </p>
 <p align="center">
-  <a href="docs/manual/shots/06-pageturn.webp"><img src="docs/manual/shots/06-pageturn.webp" width="19%" alt="翻页：仿真与 3D 仿真阅读" /></a>
-  <a href="docs/manual/shots/07-comic.webp"><img src="docs/manual/shots/07-comic.webp" width="19%" alt="漫画：条漫与单页阅读" /></a>
-  <a href="docs/manual/shots/08-tts.webp"><img src="docs/manual/shots/08-tts.webp" width="19%" alt="朗读：音色、逐句高亮与后台播放" /></a>
-  <a href="docs/manual/shots/09-media.webp"><img src="docs/manual/shots/09-media.webp" width="19%" alt="媒体：有声书与视频播放" /></a>
-  <a href="docs/manual/shots/10-theme.webp"><img src="docs/manual/shots/10-theme.webp" width="19%" alt="主题：封面、启动页与阅读配色" /></a>
+  <a href="docs/manual/shots/06-layout.webp"><img src="docs/manual/shots/06-layout.webp" width="19%" alt="布局随心：字号、间距、缩进、对齐与页眉页脚" /></a>
+  <a href="docs/manual/shots/07-comic.webp"><img src="docs/manual/shots/07-comic.webp" width="19%" alt="漫画随心：漫画超分、繁体转简体与自由缩放" /></a>
+  <a href="docs/manual/shots/08-voice.webp"><img src="docs/manual/shots/08-voice.webp" width="19%" alt="朗读音色自定义：手动新建、URL 导入与文件导入" /></a>
+  <a href="docs/manual/shots/09-theme-share.webp"><img src="docs/manual/shots/09-theme-share.webp" width="19%" alt="主题分享与导入：导出、分享和导入 .qytheme 主题包" /></a>
+  <a href="docs/manual/shots/10-theme.webp"><img src="docs/manual/shots/10-theme.webp" width="19%" alt="多变主题：多套主题切换与自定义方案" /></a>
 </p>
 
 | 项目 | 信息 |
