@@ -88,7 +88,7 @@ export class CoverGalleryStore {
     return typeof value === 'boolean' ? value : fallback;
   }
 
-  private static snapshotFromStorage(): CoverGallerySnapshot {
+  static snapshotFromStorage(): CoverGallerySnapshot {
     const snapshot = new CoverGallerySnapshot();
     snapshot.albumsRaw = AppStorage.get<string>(CoverGalleryStore.KEY_ALBUMS) || '';
     snapshot.lightAlbumId = AppStorage.get<string>(CoverGalleryStore.KEY_LIGHT_ALBUM) || '';

@@ -1,3 +1,4 @@
+import { BookCover } from './book/BookCover';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { VirtualListScrollbar } from '../utils/VirtualListScrollbar';
 import { ImmersiveBackButton } from './ImmersiveBackButton';
@@ -66,6 +67,7 @@ export struct TtsCatalogSheet {
   @Prop panelColor: string = '#FFFFFF';
   @Prop bookName: string = '';
   @Prop bookInitial: string = '书';
+  @Prop bookUrl: string = '';
   @Prop cover: ResourceStr = '';
   @Prop bookSubtitle: string = '';
   @Prop count: number = 0;
@@ -135,7 +137,11 @@ export struct TtsCatalogSheet {
   @Builder
   catalogHeader() {
     Row({ space: AppSpacing.LG }) {
-      if (this.cover !== '') {
+      if (this.bookUrl) {
+        BookCover({ bookUrl: this.bookUrl, name: this.bookName, placeholderColor: this.accentColor, cornerRadius: 8 })
+          .width(CATALOG_COVER_WIDTH)
+          .height(CATALOG_COVER_HEIGHT)
+      } else if (this.cover !== '') {
         Image(this.cover)
           .width(CATALOG_COVER_WIDTH)
           .height(CATALOG_COVER_HEIGHT)

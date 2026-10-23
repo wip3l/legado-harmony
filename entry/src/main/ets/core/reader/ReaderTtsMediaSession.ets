@@ -1,3 +1,5 @@
+import { BookCoverResolver } from '../../utils/BookCoverResolver';
+import fileUri from '@ohos.file.fileuri';
 import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { avSession } from '@kit.AVSessionKit';
@@ -30,7 +32,7 @@ export interface ReaderTtsMediaHost {
   audioDebugState: () => string;
   mediaInfo: () => ReaderTtsMediaInfo;
   /** 媒体卡片封面的原始地址（书架当前展示的那张）。 */
-  coverRaw: () => string;
+  coverRaw: () => ResourceStr;
   onPlay: () => void;
   onPause: () => void;
   onStop: () => void;
@@ -433,7 +435,8 @@ export class ReaderTtsMediaSession {
   async refreshMediaImage(): Promise<void> {
     const serial = ++this.mediaImageRefreshSerial;
     const raw = this.host.coverRaw();
-    if (raw && raw === this.mediaImageRaw && this.mediaPixelMap) return;
+    const rawKey = JSON.stringify(raw);
+    if (raw && rawKey === this.mediaImageRaw && this.mediaPixelMap) return;
     if (!raw) {
       if (serial === this.mediaImageRefreshSerial) {
         this.mediaImage = '';
@@ -442,15 +445,15 @@ export class ReaderTtsMediaSession {
       }
       return;
     }
-    let resolved = raw;
+    let resolved = typeof raw === 'string' ? raw : '';
     let pixelMap: image.PixelMap | null = null;
     try {
       const context = this.host.abilityContext();
-      const coverPath = await BookCoverCache.prepareCoverFile(context, raw);
+      const coverPath = await BookCoverResolver.prepareFile(context, raw);
       if (coverPath) {
         pixelMap = await this.createMediaPixelMap(coverPath);
-        resolved = pixelMap ? coverPath : await BookCoverCache.resolveCover(context, raw);
-      } else {
+        resolved = fileUri.getUriFromPath(coverPath);
+      } else if (typeof raw === 'string') {
         resolved = await BookCoverCache.resolveCover(context, raw);
       }
     } catch (error) {
@@ -458,8 +461,8 @@ export class ReaderTtsMediaSession {
     }
     if (serial === this.mediaImageRefreshSerial) {
       this.releaseMediaPixelMap();
-      this.mediaImage = resolved || raw;
-      this.mediaImageRaw = raw;
+      this.mediaImage = resolved;
+      this.mediaImageRaw = rawKey;
       this.mediaPixelMap = pixelMap;
     } else if (pixelMap) {
       pixelMap.release().catch((e: Error) => {

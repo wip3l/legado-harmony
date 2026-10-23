@@ -1,3 +1,4 @@
+import { BookCover } from '../components/book/BookCover';
 import { router, promptAction } from '@kit.ArkUI';
 import { Book } from '@legado/sourceengine';
 import { appDb } from '../model/data/AppDatabase';
@@ -85,6 +86,7 @@ struct OpdsBrowsePage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
 
+  @StorageProp('searchExploreUseBookshelfCoverGallery') useBookshelfCover: boolean = false;
   @State server: OpdsServerConfig = new OpdsServerConfig();
   @State serverMissing: boolean = false;
   @State stack: OpdsNavFrame[] = [];
@@ -492,28 +494,11 @@ struct OpdsBrowsePage {
 
   @Builder
   entryCover(entry: OpdsEntry) {
-    Stack() {
-      Column() {
-        Text((entry.title || '书').substring(0, 1))
-          .fontSize(AppFontSize.HEADLINE)
-          .fontColor('#FFFFFF')
-      }
+    BookCover({ bookUrl: entry.id, origin: 'opds', name: entry.title, author: entry.authors.join('、'),
+      coverUrl: this.coverOf(entry.artworkThumbnail()), useBookshelfCover: this.useBookshelfCover,
+      placeholderColor: this.accentColor() })
       .width(48)
       .height(64)
-      .justifyContent(FlexAlign.Center)
-      .backgroundColor(this.accentColor())
-      if (this.coverOf(entry.artworkThumbnail())) {
-        Image(this.coverOf(entry.artworkThumbnail()))
-          .width(48)
-          .height(64)
-          .objectFit(ImageFit.Cover)
-      }
-    }
-    .width(48)
-    .height(64)
-    .borderRadius(6)
-    .clip(true)
-    .backgroundColor(this.subTextColor())
     .onAppear(() => this.ensureEntryCover(entry))
   }
 
@@ -652,28 +637,11 @@ struct OpdsBrowsePage {
 
   @Builder
   detailCoverView() {
-    Stack() {
-      Column() {
-        Text((this.detailEntry.title || '书').substring(0, 1))
-          .fontSize(30)
-          .fontColor('#FFFFFF')
-      }
+    BookCover({ bookUrl: this.detailEntry.id, origin: 'opds', name: this.detailEntry.title, author: this.detailEntry.authors.join('、'),
+      coverUrl: this.coverOf(this.detailArtworkRaw()), useBookshelfCover: this.useBookshelfCover,
+      placeholderColor: this.accentColor(), cornerRadius: 8 })
       .width(96)
       .height(128)
-      .justifyContent(FlexAlign.Center)
-      .backgroundColor(this.accentColor())
-      if (this.coverOf(this.detailArtworkRaw())) {
-        Image(this.coverOf(this.detailArtworkRaw()))
-          .width(96)
-          .height(128)
-          .objectFit(ImageFit.Cover)
-      }
-    }
-    .width(96)
-    .height(128)
-    .borderRadius(8)
-    .clip(true)
-    .backgroundColor(this.subTextColor())
   }
 
   @Builder

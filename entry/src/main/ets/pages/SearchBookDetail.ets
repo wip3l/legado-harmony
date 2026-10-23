@@ -10,10 +10,9 @@ import { CollapsingHeader } from '../utils/CollapsingHeader';
 import { GlassTagModifier, ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { BookIdentity } from '../utils/BookIdentity';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
-import { BookCoverCache } from '../utils/BookCoverCache';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ImmersiveReadButton, IMMERSIVE_READ_BUTTON_WIDTH } from '../components/ImmersiveReadButton';
-import { CoverGallerySettings } from '../utils/CoverGallerySettings';
+import { BookCover } from '../components/book/BookCover';
 import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { SearchBookShelfHelper } from '../utils/SearchBookShelfHelper';
@@ -37,18 +36,12 @@ struct SearchBookDetailPage {
   static readonly AMBIENT_HEIGHT: number = 460;
   /** 简介收起时显示的行数。 */
   static readonly INTRO_COLLAPSED_LINES: number = 6;
-  // 加密的书源封面解密完成后递增，读取它的封面会重新取到本地文件地址。
-  @StorageProp('sourceCoverRevision') sourceCoverRevision: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('appLightButtonColor') appLightButtonColor: string = '#007DFF';
   @StorageLink('appDarkButtonColor') appDarkButtonColor: string = '#3F8CFF';
-  @StorageLink('bookshelfCoverAlbums') bookshelfCoverAlbums: string = '';
-  @StorageLink('bookshelfLightCoverAlbumId') bookshelfLightCoverAlbumId: string = '';
-  @StorageLink('bookshelfDarkCoverAlbumId') bookshelfDarkCoverAlbumId: string = '';
-  @StorageLink('bookshelfCoverMode') bookshelfCoverMode: string = 'sequence';
   @StorageLink('searchExploreUseBookshelfCoverGallery') searchExploreUseBookshelfCoverGallery: boolean = false;
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
@@ -102,7 +95,7 @@ struct SearchBookDetailPage {
   @State headerCollapse: number = 0;
   @State introExpanded: boolean = true;
   /** 头部封面已加载完成的地址；氛围背景只对它显示，读系统缓存而不再发第二次网络请求。 */
-  @State readyCoverUrl: string = '';
+  @State readyCoverUrl: ResourceStr = '';
   private detailScroller: Scroller = new Scroller();
   private openingCatalogChapter: boolean = false;
   private authorSearchDialogBuilder: CustomBuilder | undefined = undefined;
@@ -450,8 +443,8 @@ struct SearchBookDetailPage {
         .height('100%')
         .backgroundColor(this.pageColor())
 
-      if (this.displayCoverUrl() && this.readyCoverUrl === this.displayCoverUrl()) {
-        Image(this.displayCoverUrl())
+      if (this.readyCoverUrl) {
+        Image(this.readyCoverUrl)
           .width('100%')
           .height(SearchBookDetailPage.AMBIENT_HEIGHT)
           .objectFit(ImageFit.Cover)
@@ -487,7 +480,7 @@ struct SearchBookDetailPage {
   detailHero() {
     Row({ space: AppSpacing.XL }) {
       Stack() {
-        this.coverView(this.name, this.displayCoverUrl(), 104, 140)
+        this.coverView(104, 140)
       }
       // 投影按外层形状绘制，不给圆角会是直角矩形的影子，在封面四角露出来。
       .borderRadius(8)
@@ -1628,36 +1621,6 @@ struct SearchBookDetailPage {
     return BookDisplayHelper.splitTags(this.kind, this.status);
   }
 
-  displayCoverUrl(): string {
-    if (this.searchExploreUseBookshelfCoverGallery) {
-      const galleryCover = this.bookshelfGalleryCoverUrl();
-      if (galleryCover) {
-        return galleryCover;
-      }
-    }
-    return this.sourceCoverRevision >= 0 ? BookCoverCache.displayCover(getContext(this), this.coverUrl) : this.coverUrl;
-  }
-
-  bookshelfGalleryCoverUrl(): string {
-    const book = new Book();
-    book.name = this.name;
-    book.author = this.author;
-    book.bookUrl = this.bookUrl;
-    book.coverUrl = this.coverUrl;
-    const covers = CoverGallerySettings.getDisplayCoverList(
-      book,
-      this.appDarkMode,
-      this.bookshelfCoverAlbums,
-      this.bookshelfLightCoverAlbumId,
-      this.bookshelfDarkCoverAlbumId,
-      'all',
-      '',
-      true,
-      this.bookshelfCoverMode
-    );
-    return BookDisplayHelper.pickCover(covers);
-  }
-
   /** 字数、更新时间这类中性信息标签：同样的沉浸光感胶囊，用输入框底色染色。 */
   neutralTagModifier(): GlassTagModifier {
     return new GlassTagModifier(this.appDarkMode);
@@ -1674,38 +1637,15 @@ struct SearchBookDetailPage {
   }
 
   @Builder
-  coverView(name: string, coverUrl: string, width: number, height: number) {
-    // 圆角边缘是抗锯齿的半透明像素：容器底色或占位色垫在封面下面，会在四角透出一圈浅色细边。
-    // 所以容器不设底色，占位色块只在封面没加载好时显示，封面自己也带圆角。
-    Stack() {
-      if (!coverUrl || this.readyCoverUrl !== coverUrl) {
-        Column() {
-          Text(name ? name.substring(0, 1) : '书')
-            .fontSize(30)
-            .fontColor('#FFFFFF')
-        }
-        .width(width)
-        .height(height)
-        .justifyContent(FlexAlign.Center)
-        .backgroundColor(this.accentColor())
-      }
-
-      if (coverUrl) {
-        Image(coverUrl)
-          .width(width)
-          .height(height)
-          .objectFit(ImageFit.Cover)
-          .sourceSize({ width: 360, height: 480 })
-          .borderRadius(8)
-          .onComplete(() => {
-            this.readyCoverUrl = coverUrl;
-          })
-      }
-    }
-    .width(width)
-    .height(height)
-    .borderRadius(8)
-    .clip(true)
+  coverView(width: number, height: number) {
+    BookCover({
+      bookUrl: this.bookUrl, origin: this.origin, coverUrl: this.coverUrl, name: this.name, author: this.author,
+      useBookshelfCover: this.searchExploreUseBookshelfCoverGallery,
+      placeholderColor: this.accentColor(), cornerRadius: 8,
+      onReadyCover: (url: ResourceStr): void => { this.readyCoverUrl = url; }
+    })
+      .width(width)
+      .height(height)
   }
 
   pageColor(): string {

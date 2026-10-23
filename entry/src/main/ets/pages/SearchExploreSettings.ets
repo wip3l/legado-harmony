@@ -60,8 +60,8 @@ struct SearchExploreSettingsPage {
       })
       if (this.searchExploreShowResultCover) {
         SettingSwitchRow({
-          title: '使用书架图集',
-          description: '结果封面改用书架设置里的封面图集',
+          title: '使用书架封面',
+          description: '搜索、发现及书籍详情沿用书架的封面来源、适用范围和展示方式',
           isOn: this.searchExploreUseBookshelfCoverGallery,
           onChange: (value: boolean) => {
             this.searchExploreUseBookshelfCoverGallery = value;

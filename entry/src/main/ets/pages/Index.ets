@@ -73,6 +73,7 @@ struct Index {
   @StorageLink('globalTtsActive') @Watch('onGlobalTtsActiveChanged') globalTtsActive: boolean = false;
   @StorageLink('globalTtsPaused') globalTtsPaused: boolean = false;
   @StorageLink('globalTtsBookName') globalTtsBookName: string = '';
+  @StorageProp('globalTtsBookUrl') globalTtsBookUrl: string = '';
   @StorageLink('globalTtsCover') globalTtsCover: ResourceStr = '';
   @StorageLink('globalTtsChapterTitle') globalTtsChapterTitle: string = '';
   @StorageLink('globalTtsMode') globalTtsMode: string = '';
@@ -642,6 +643,7 @@ struct Index {
   @Builder
   globalTtsCatalogOverlay() {
     TtsCatalogSheet({
+      bookUrl: this.globalTtsBookUrl,
       darkMode: this.appDarkMode,
       accentColor: this.tabBarActiveColor(),
       primaryTextColor: ThemeRuntime.primaryTextColor(this.appDarkMode),

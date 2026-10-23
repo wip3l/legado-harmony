@@ -1,3 +1,7 @@
+import { BookCoverResolver } from '../utils/BookCoverResolver';
+import fileUri from '@ohos.file.fileuri';
+import { ThemeBookCoverSettings } from '../utils/ThemeBookCoverSettings';
+import { BookCover } from '../components/book/BookCover';
 import { NativeSourceService, NativeVoiceOption, Book, BookChapter, BookSource, BookTypeSupport, BookUrlResolver, VerificationSupport } from '@legado/sourceengine';
 import { router } from '@kit.ArkUI';
 import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
@@ -10,10 +14,8 @@ import { BookSourceDataUrlSupport } from '../core/book/BookSourceDataUrlSupport'
 import { AudioRuleSupport } from '../core/book/AudioRuleSupport';
 import { AudioStartTiming, RemoteAudioPlayback, RemoteAudioPlaybackListener } from '../utils/RemoteAudioPlayback';
 import { ReaderTtsFloatingSession } from '../utils/ReaderTtsFloatingSession';
-import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 import { BookCoverCache } from '../utils/BookCoverCache';
 import { syncSystemBars } from '../utils/SystemBars';
-import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ReaderTtsPlayerPanel } from '../components/ReaderTtsPlayerPanel';
 import { TtsCatalogSheet, CatalogTitleDataSource } from '../components/TtsCatalogSheet';
@@ -211,6 +213,7 @@ struct AudioBookPage {
         hostBookName: this.book?.name || '',
         hostChapterTitle: this.currentChapter()?.title || '',
         hostIntro: this.book ? this.displayIntro() : '',
+        hostBookUrl: this.bookUrl,
         hostCover: this.book ? this.panelCover() : '',
         hostPlaying: this.isPlaying(),
         hostStatusText: this.panelStatusText(),
@@ -281,24 +284,13 @@ struct AudioBookPage {
   audioIntroCard() {
     Column({ space: AppSpacing.MD }) {
       Stack({ alignContent: Alignment.Center }) {
-        if (this.displayCover()) {
-          Image(this.displayCover())
-            .width('100%')
-            .height('100%')
-            .objectFit(ImageFit.Contain)
-        } else {
-          Column() {
-            Text(this.book?.name ? this.book.name.substring(0, 1) : '书')
-              .fontSize(42)
-              .fontColor('#FFFFFF')
-          }
+        BookCover({ bookUrl: this.bookUrl, origin: this.book?.origin || '',
+          name: this.book?.name || '', author: this.book?.author || '',
+          coverUrl: this.book?.coverUrl || '', customCoverUrl: this.book?.customCoverUrl || '',
+          placeholderColor: this.accentColor(), cornerRadius: 12 })
           .width('58%')
           .height('88%')
           .constraintSize({ maxWidth: 260, maxHeight: 360 })
-          .borderRadius(ThemeRuntime.mediumRadius())
-          .backgroundColor(this.accentColor())
-          .justifyContent(FlexAlign.Center)
-        }
       }
       .width('100%')
       .height(Math.min(250, Math.max(130,
@@ -478,36 +470,10 @@ struct AudioBookPage {
   @Builder
   coverSection() {
     Column() {
-      if (this.displayCover()) {
-        Image(this.displayCover())
-          .width(190)
-          .height(250)
-          .borderRadius(14)
-          .objectFit(ImageFit.Cover)
-      } else {
-        Column() {
-          Text('🎧')
-            .fontSize(72)
-        }
-        .width(190)
-        .height(250)
-        .borderRadius(14)
-        .backgroundColor(this.cardColor())
-        .justifyContent(FlexAlign.Center)
-      }
-      Text(this.book?.name || '正在加载')
-        .fontSize(AppFontSize.HEADLINE)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(this.primaryTextColor())
-        .maxLines(2)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .textAlign(TextAlign.Center)
-        .margin({ top: AppSpacing.XL })
-      Text(this.book?.author || this.book?.originName || '')
-        .fontSize(AppFontSize.BODY)
-        .fontColor(this.subTextColor())
-        .maxLines(1)
-        .margin({ top: AppSpacing.SM })
+      BookCover({ bookUrl: this.bookUrl, origin: this.book?.origin || '',
+        name: this.book?.name || '', author: this.book?.author || '',
+        coverUrl: this.book?.coverUrl || '', customCoverUrl: this.book?.customCoverUrl || '',
+        placeholderColor: this.accentColor(), cornerRadius: 16 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Center)
@@ -652,6 +618,7 @@ struct AudioBookPage {
   @Builder
   chapterListOverlay() {
     TtsCatalogSheet({
+      bookUrl: this.bookUrl,
       darkMode: this.appDarkMode,
       accentColor: this.accentColor(),
       primaryTextColor: this.primaryTextColor(),
@@ -1505,38 +1472,25 @@ struct AudioBookPage {
     return Number.isFinite(value) ? Math.max(0.5, Math.min(2.5, value)) : 1;
   }
 
-  displayCover(): string {
-    const raw = this.book ? CoverUrlNormalizer.normalize(this.book.getDisplayCover()) : '';
-    return this.sourceCoverRevision >= 0 ? BookCoverCache.displayCover(getContext(this), raw) : raw;
+  displayCover(): ResourceStr {
+    const raw = BookCoverResolver.first(this.book, this.appDarkMode);
+    return typeof raw === 'string' && this.sourceCoverRevision >= 0 ? BookCoverCache.displayCover(getContext(this), raw) : raw;
   }
 
   onThemeBookCoverChanged(): void {
     this.updateFloatingSession();
   }
 
-  // Same rule and per-book pick as the bookshelf, so a book keeps one theme cover everywhere.
   shouldUseThemeBookCover(): boolean {
-    return this.themeBookCoverEnabled &&
-      ThemeAssetRegistry.themeBookCovers(ThemeRuntime.bookTokens(this.appDarkMode).coverAssetId).length > 0;
+    return ThemeBookCoverSettings.enabled(this.appDarkMode, this.themeBookCoverEnabled);
   }
 
   panelCover(): ResourceStr {
-    if (!this.shouldUseThemeBookCover()) return this.displayCover();
-    const covers = ThemeAssetRegistry.themeBookCovers(ThemeRuntime.bookTokens(this.appDarkMode).coverAssetId);
-    return covers[this.themeBookCoverSeed() % covers.length];
-  }
-
-  themeBookCoverSeed(): number {
-    const key = `${this.book?.bookUrl || ''}|${this.book?.name || ''}|${this.book?.author || ''}`;
-    let hash = 17;
-    for (let index = 0; index < key.length; index++) {
-      hash = (hash * 31 + key.charCodeAt(index)) & 0x7FFFFFFF;
-    }
-    return hash;
+    return this.displayCover();
   }
 
   activeThemeShelfFrame(): ResourceStr {
-    return ThemeAssetRegistry.themeShelfFrame(ThemeRuntime.bookTokens(this.appDarkMode).shelfFrameAssetId);
+    return ThemeBookCoverSettings.frame(this.appDarkMode);
   }
 
   formatDuration(valueMs: number): string {
@@ -1680,7 +1634,7 @@ struct AudioBookPage {
       }
       await this.audioAvSession.setLaunchAbility(agent);
       await this.audioAvSession.setAVQueueTitle(this.book?.name || '听书');
-      await this.audioAvSession.setAVMetadata(this.audioAvMetadata());
+      await this.audioAvSession.setAVMetadata(await this.audioAvMetadata());
       await this.audioAvSession.setExtras({
         bookUrl: this.bookUrl,
         chapterIndex: this.chapterIndex,
@@ -1733,7 +1687,7 @@ struct AudioBookPage {
     const session = this.audioAvSession;
     if (!session) return;
     try {
-      await session.setAVMetadata(this.audioAvMetadata());
+      await session.setAVMetadata(await this.audioAvMetadata());
       await session.setAVPlaybackState({
         state: state,
         speed: this.speed,
@@ -1749,7 +1703,7 @@ struct AudioBookPage {
     }
   }
 
-  audioAvMetadata(): avSession.AVMetadata {
+  async audioAvMetadata(): Promise<avSession.AVMetadata> {
     const chapter = this.currentChapter();
     const metadata: avSession.AVMetadata = {
       assetId: `${this.bookUrl}_${this.chapterIndex}`,
@@ -1764,10 +1718,18 @@ struct AudioBookPage {
       avQueueName: this.book?.name || '听书',
       avQueueId: this.bookUrl || 'audio_book'
     };
-    const cover = this.displayCover();
-    if (cover) {
-      metadata.mediaImage = cover;
-      metadata.avQueueImage = cover;
+    const cover = BookCoverResolver.first(this.book, this.appDarkMode);
+    try {
+      // 网络封面沿用系统异步加载，不能让图片下载阻塞媒体会话激活。
+      const image = typeof cover === 'string' ? BookCoverCache.displayCover(getContext(this), cover) :
+        await BookCoverResolver.prepareFile(getContext(this), cover);
+      if (image) {
+        const uri = image.startsWith('/') ? fileUri.getUriFromPath(image) : image;
+        metadata.mediaImage = uri;
+        metadata.avQueueImage = uri;
+      }
+    } catch (error) {
+      console.warn('读取听书媒体封面失败:', error);
     }
     return metadata;
   }

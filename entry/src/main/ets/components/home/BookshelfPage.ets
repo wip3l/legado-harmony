@@ -25,6 +25,7 @@ import { BookshelfSortHelper } from '../../utils/BookshelfSortHelper';
 import { SearchExploreSettingsStore } from '../../utils/SearchExploreSettingsStore';
 import { AppThemeSettingsStore } from '../../utils/AppThemeSettingsStore';
 import { ThemeAssetRegistry } from '../../theme/ThemeAssetRegistry';
+import { ThemeBookCoverSettings } from '../../utils/ThemeBookCoverSettings';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { LocalBookService } from '../../core/book/LocalBookService';
 import { BookChangeSourceDialog } from '../../components/BookChangeSourceDialog';
@@ -4342,38 +4343,19 @@ export struct BookshelfPage {
   }
 
   activeThemeBookCovers(book: Book): ResourceStr[] {
-    const covers = ThemeAssetRegistry.themeBookCovers(ThemeRuntime.bookTokens(this.appDarkMode).coverAssetId);
-    if (covers.length <= 1) return covers;
-    const result: ResourceStr[] = [];
-    const seed = this.themeBookCoverSeed(book);
-    const start = seed % covers.length;
-    const direction = seed % 2 === 0 ? 1 : covers.length - 1;
-    for (let index = 0; index < covers.length; index++) {
-      result.push(covers[(start + index * direction) % covers.length]);
-    }
-    return result;
+    return ThemeBookCoverSettings.covers(book, this.appDarkMode);
   }
 
   shouldUseThemeBookCover(): boolean {
-    return this.themeBookCoverEnabled &&
-      ThemeAssetRegistry.themeBookCovers(ThemeRuntime.bookTokens(this.appDarkMode).coverAssetId).length > 0;
-  }
-
-  themeBookCoverSeed(book: Book): number {
-    const key = `${book.bookUrl}|${book.name}|${book.author}`;
-    let hash = 17;
-    for (let index = 0; index < key.length; index++) {
-      hash = (hash * 31 + key.charCodeAt(index)) & 0x7FFFFFFF;
-    }
-    return hash;
+    return ThemeBookCoverSettings.enabled(this.appDarkMode, this.themeBookCoverEnabled);
   }
 
   themeBookCoverInterval(book: Book): number {
-    return 3200 + this.themeBookCoverSeed(book) % 5 * 420;
+    return ThemeBookCoverSettings.interval(book);
   }
 
   activeThemeShelfFrame(): ResourceStr {
-    return ThemeAssetRegistry.themeShelfFrame(ThemeRuntime.bookTokens(this.appDarkMode).shelfFrameAssetId);
+    return ThemeBookCoverSettings.frame(this.appDarkMode);
   }
 
   activeThemeShelfFolder(): ResourceStr {

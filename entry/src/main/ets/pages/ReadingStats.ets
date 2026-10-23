@@ -6,7 +6,7 @@ import { syncSystemBars } from '../utils/SystemBars';
 import { appDb } from '../model/data/AppDatabase';
 import { ReadStatsTracker, readStatsTracker } from '../core/stats/ReadStatsTracker';
 import { HdsFeedback } from '../utils/HdsFeedback';
-import { BookCoverCache } from '../utils/BookCoverCache';
+import { BookCover } from '../components/book/BookCover';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { PageScaffold } from '../components/common/PageScaffold';
@@ -33,8 +33,6 @@ class StatBookItem {
 @Entry
 @Component
 struct ReadingStatsPage {
-  // 加密的书源封面解密完成后递增，读取它的封面会重新取到本地文件地址。
-  @StorageProp('sourceCoverRevision') sourceCoverRevision: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
@@ -133,9 +131,6 @@ struct ReadingStatsPage {
     }
   }
 
-  imageCover(raw: string): string {
-    return this.sourceCoverRevision >= 0 ? BookCoverCache.displayCover(getContext(this), raw) : raw;
-  }
 
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
@@ -293,29 +288,10 @@ struct ReadingStatsPage {
   @Builder
   bookRow(item: StatBookItem) {
     Row({ space: AppSpacing.LG }) {
-      Stack() {
-        Column() {
-          Text(item.name ? item.name.substring(0, 1) : '书')
-            .fontSize(AppFontSize.BODY_LARGE)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(Color.White)
-        }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-        .backgroundColor(this.accentColor())
-
-        if (this.imageCover(item.coverUrl)) {
-          Image(this.imageCover(item.coverUrl))
-            .width('100%')
-            .height('100%')
-            .objectFit(ImageFit.Cover)
-        }
-      }
-      .width(40)
-      .height(56)
-      .borderRadius(6)
-      .clip(true)
+      BookCover({ bookUrl: item.bookUrl, name: item.name, author: item.author,
+        coverUrl: item.coverUrl, placeholderColor: this.accentColor() })
+        .width(40)
+        .height(56)
 
       Column({ space: AppSpacing.SM }) {
         Row({ space: AppSpacing.MD }) {

@@ -1,8 +1,7 @@
-import { Book, SearchBook, BookTypeSupport } from '@legado/sourceengine';
+import { SearchBook, BookTypeSupport } from '@legado/sourceengine';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { BookDisplayHelper } from '../../utils/BookDisplayHelper';
-import { CoverGallerySettings } from '../../utils/CoverGallerySettings';
-import { BookCoverCache } from '../../utils/BookCoverCache';
+import { BookCover } from './BookCover';
 import { SearchBookShelfHelper } from '../../utils/SearchBookShelfHelper';
 import deviceInfo from '@ohos.deviceInfo';
 import { HdsListItem, HdsSwipeActionOptions } from '@kit.UIDesignKit';
@@ -41,14 +40,9 @@ export struct SearchBookResultList {
   /** 平铺时每列封面的最小、最大宽度，列数由可用宽度按最小列宽算出。 */
   static readonly GRID_MIN_ITEM_WIDTH: number = 100;
   static readonly GRID_MAX_ITEM_WIDTH: number = 150;
-  // 加密的书源封面解密完成后递增，读取它的封面会重新取到本地文件地址。
-  @StorageProp('sourceCoverRevision') sourceCoverRevision: number = 0;
+  @StorageProp('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
-  @StorageLink('bookshelfCoverAlbums') bookshelfCoverAlbums: string = '';
-  @StorageLink('bookshelfLightCoverAlbumId') bookshelfLightCoverAlbumId: string = '';
-  @StorageLink('bookshelfDarkCoverAlbumId') bookshelfDarkCoverAlbumId: string = '';
-  @StorageLink('bookshelfCoverMode') bookshelfCoverMode: string = 'sequence';
   @Prop @Watch('onBooksChanged') books: SearchBook[] = [];
   @Prop @Watch('onShelfBookKeysChanged') shelfBookKeys: string[] = [];
   @Prop busyBookKeys: string[] = [];
@@ -74,14 +68,8 @@ export struct SearchBookResultList {
   scroller: ListScroller = new ListScroller();
   private dataSource: SearchBookResultDataSource = new SearchBookResultDataSource();
   private tagCache: Map<string, string[]> = new Map<string, string[]>();
-  private coverCache: Map<string, string> = new Map<string, string>();
-  /**
-   * 左侧封面已加载完成的地址。模糊背景只对这些地址显示：此时图片已在系统缓存里，背景直接读缓存，
-   * 不再对同一张封面发第二次网络请求（封面服务器偏慢时，请求翻倍会把图片下载队列堵死）。
-   */
-  private loadedCoverUrls: Set<string> = new Set<string>();
-  @State coverLoadRevision: number = 0;
-  private coverLoadTimer: number = -1;
+  /** 只对当前已加载的封面显示氛围背景，轮播切图时同步更新。 */
+  @State readyCoverUrls: Map<string, ResourceStr> = new Map();
   onOpenBook: SearchBookAction = (_book: SearchBook) => {};
   onReadBook: SearchBookAction = (_book: SearchBook) => {};
   onToggleShelf: SearchBookAction = (_book: SearchBook) => {};
@@ -98,7 +86,10 @@ export struct SearchBookResultList {
   onBooksChanged(): void {
     this.dataSource.replace(this.books);
     this.tagCache.clear();
-    this.coverCache.clear();
+    const keys = new Set(this.books.map((book: SearchBook): string => this.itemKey(book)));
+    this.readyCoverUrls.forEach((_url: ResourceStr, key: string): void => {
+      if (!keys.has(key)) this.readyCoverUrls.delete(key);
+    });
   }
 
   onShelfBookKeysChanged(): void {
@@ -187,20 +178,16 @@ export struct SearchBookResultList {
           Column() {
             Text(this.safeText(book.name, '书').substring(0, 1))
               .fontSize(AppFontSize.HEADLINE)
-              .fontColor(this.showResultCover && this.displayCover(book) ? this.secondaryTextColor : '#FFFFFF')
+              .fontColor(this.showResultCover && this.backdropCover(book) ? this.secondaryTextColor : '#FFFFFF')
           }
           .width('100%')
           .height('100%')
           .justifyContent(FlexAlign.Center)
           // 有封面时使用中性底色，避免圆角抗锯齿边缘透出主题色。
-          .backgroundColor(this.showResultCover && this.displayCover(book) ? this.cardColor : this.accentColor())
+          .backgroundColor(this.showResultCover && this.backdropCover(book) ? this.cardColor : this.accentColor())
 
-          if (this.showResultCover && this.displayCover(book)) {
-            Image(this.displayCover(book))
-              .width('100%')
-              .height('100%')
-              .objectFit(ImageFit.Cover)
-              .sourceSize({ width: 360, height: 480 })
+          if (this.showResultCover) {
+            this.resultCover(book, 8, 360, 480)
           }
         }
         .width('100%')
@@ -579,88 +566,39 @@ export struct SearchBookResultList {
   }
 
   @Builder
+  resultCover(book: SearchBook, radius: number, decodeWidth: number, decodeHeight: number) {
+    BookCover({
+      bookUrl: book.bookUrl, origin: book.origin, coverUrl: book.coverUrl, name: book.name, author: book.author,
+      useBookshelfCover: this.useBookshelfCoverGallery,
+      placeholderColor: this.accentColor(), cornerRadius: radius, decodeWidth, decodeHeight,
+      onReadyCover: (url: ResourceStr): void => {
+        const key = this.itemKey(book);
+        if (this.readyCoverUrls.get(key) !== url) this.readyCoverUrls.set(key, url);
+      }
+    })
+  }
+
+  @Builder
   coverView(book: SearchBook) {
     Stack() {
-      Column() {
-        Text(this.safeText(book.name, '书').substring(0, 1))
-          .fontSize(AppFontSize.HEADLINE)
-          .fontColor('#FFFFFF')
-      }
-      .width(54)
-      .height(72)
-      .justifyContent(FlexAlign.Center)
-      .backgroundColor(this.accentColor())
-
-      if (this.displayCover(book)) {
-        Image(this.displayCover(book))
-          .width(54)
-          .height(72)
-          .objectFit(ImageFit.Cover)
-          // 按显示尺寸解码：书源封面常是 1200px 高清图，原尺寸解码一张就占数 MB 内存与显存，滑几屏就会撑爆图片缓存。
-          .sourceSize({ width: 180, height: 240 })
-          .onComplete(() => {
-            this.markCoverLoaded(this.displayCover(book));
-          })
-      }
+      this.resultCover(book, 6, 180, 240)
     }
     .width(54)
     .height(72)
     .borderRadius(6)
     .clip(true)
-    .backgroundColor(this.subTextColor)
   }
 
   isDarkMode(): boolean {
-    return this.pageColor === '#101113' || this.cardColor === '#191B1F';
+    return this.appDarkMode;
   }
 
-  /** 模糊背景用的封面：左侧封面加载完成后才给出地址。 */
-  backdropCover(book: SearchBook): string {
-    const url = this.displayCover(book);
-    return this.coverLoadRevision >= 0 && url && this.loadedCoverUrls.has(url) ? url : '';
-  }
-
-  markCoverLoaded(url: string): void {
-    if (!url || this.loadedCoverUrls.has(url)) return;
-    if (this.loadedCoverUrls.size > 600) this.loadedCoverUrls.clear();
-    this.loadedCoverUrls.add(url);
-    // 一屏封面陆续加载完成时合并成一次刷新。
-    if (this.coverLoadTimer !== -1) return;
-    this.coverLoadTimer = setTimeout(() => {
-      this.coverLoadTimer = -1;
-      this.coverLoadRevision++;
-    }, 150);
-  }
-
-  aboutToDisappear(): void {
-    if (this.coverLoadTimer !== -1) {
-      clearTimeout(this.coverLoadTimer);
-      this.coverLoadTimer = -1;
-    }
+  backdropCover(book: SearchBook): ResourceStr {
+    return this.readyCoverUrls.get(this.itemKey(book)) || '';
   }
 
   accentColor(): string {
     return this.isDarkMode() ? this.appDarkAccentColor : this.appLightAccentColor;
-  }
-
-  displayCover(book: SearchBook): string {
-    const key = `${this.itemKey(book)}\n${book.coverUrl || ''}`;
-    const cached = this.coverCache.get(key);
-    if (cached !== undefined) return this.imageCover(cached);
-    let result = '';
-    if (this.useBookshelfCoverGallery) {
-      const galleryCover = this.bookshelfGalleryCover(book);
-      if (galleryCover) {
-        result = galleryCover;
-      }
-    }
-    if (!result) result = this.safeText(book.coverUrl, '');
-    this.coverCache.set(key, result);
-    return this.imageCover(result);
-  }
-
-  imageCover(raw: string): string {
-    return this.sourceCoverRevision >= 0 ? BookCoverCache.displayCover(getContext(this), raw) : raw;
   }
 
   metadataLine(book: SearchBook): string {
@@ -669,26 +607,6 @@ export struct SearchBookResultList {
     if (this.safeText(book.latestChapterTitle, '')) parts.push(`最新：${this.safeText(book.latestChapterTitle, '')}`);
     if (this.safeText(book.updateTime, '')) parts.push(`更新：${this.safeText(book.updateTime, '')}`);
     return parts.join(' · ');
-  }
-
-  bookshelfGalleryCover(searchBook: SearchBook): string {
-    const book = new Book();
-    book.name = this.safeText(searchBook.name, '');
-    book.author = this.safeText(searchBook.author, '');
-    book.bookUrl = this.safeText(searchBook.bookUrl, '');
-    book.coverUrl = this.safeText(searchBook.coverUrl, '');
-    const covers = CoverGallerySettings.getDisplayCoverList(
-      book,
-      this.isDarkMode(),
-      this.bookshelfCoverAlbums,
-      this.bookshelfLightCoverAlbumId,
-      this.bookshelfDarkCoverAlbumId,
-      'all',
-      '',
-      true,
-      this.bookshelfCoverMode
-    );
-    return BookDisplayHelper.pickCover(covers);
   }
 
   itemKey(book: SearchBook): string {

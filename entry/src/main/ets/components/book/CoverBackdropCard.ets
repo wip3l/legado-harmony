@@ -10,7 +10,7 @@
  */
 @Component
 export struct CoverBackdropCard {
-  @Prop cover: string = '';
+  @Prop cover: ResourceStr = '';
   @Prop showBackdrop: boolean = true;
   @Prop accentColor: string = '#007DFF';
   /** 卡片底色，遮罩在它的基础上加透明度。 */

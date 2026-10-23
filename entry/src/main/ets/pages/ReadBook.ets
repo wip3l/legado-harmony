@@ -1,3 +1,5 @@
+import { BookCoverResolver } from '../utils/BookCoverResolver';
+import { ThemeBookCoverSettings } from '../utils/ThemeBookCoverSettings';
 import { NativeSourceService, HttpClient, Book, BookChapter, Bookmark, BookSource, HttpTTS, BookTypeSupport, VerificationSupport, ReaderActionData, ReaderActionMarker, ReaderActionMatch, BookSourceStageWebRuntime, StageWebRuntimeRequest, WebBookFetchRuntime, SourceRuntimeStage, CooperativeScheduler, sleepMs } from '@legado/sourceengine';
 import { router, window, promptAction } from '@kit.ArkUI';
 import { webview } from '@kit.ArkWeb';
@@ -4716,6 +4718,7 @@ struct ReadBookPage {
   @Builder
   globalTtsCatalogOverlay() {
     TtsCatalogSheet({
+      bookUrl: this.bookUrl,
       darkMode: this.isReaderThemeDark(),
       accentColor: this.accentColor(),
       primaryTextColor: this.getTextColor(),
@@ -4901,8 +4904,8 @@ struct ReadBookPage {
     .onClick(action)
   }
 
-  getTocCover(): string {
-    return this.book ? this.book.getDisplayCover() : '';
+  getTocCover(): ResourceStr {
+    return BookCoverResolver.first(this.book, this.appDarkMode);
   }
 
   getTocBookInitial(): string {
@@ -10947,7 +10950,7 @@ struct ReadBookPage {
           };
           return info;
         },
-        coverRaw: (): string => this.getBookshelfDisplayCoverRaw(),
+        coverRaw: (): ResourceStr => this.getBookshelfDisplayCoverRaw(),
         onPlay: (): void => {
           if (this.isTtsPaused || this.ttsReader.isPaused()) {
             this.toggleTtsReading();
@@ -11141,36 +11144,15 @@ struct ReadBookPage {
   }
 
   shouldUseTtsThemeBookCover(): boolean {
-    return this.themeBookCoverEnabled &&
-      ThemeAssetRegistry.themeBookCovers(ThemeRuntime.bookTokens(this.appDarkMode).coverAssetId).length > 0;
+    return ThemeBookCoverSettings.enabled(this.appDarkMode, this.themeBookCoverEnabled);
   }
 
   activeTtsThemeBookCovers(): ResourceStr[] {
-    const covers = ThemeAssetRegistry.themeBookCovers(ThemeRuntime.bookTokens(this.appDarkMode).coverAssetId);
-    if (covers.length <= 1) {
-      return covers;
-    }
-    const result: ResourceStr[] = [];
-    const seed = this.ttsThemeBookCoverSeed();
-    const start = seed % covers.length;
-    const direction = seed % 2 === 0 ? 1 : covers.length - 1;
-    for (let index = 0; index < covers.length; index++) {
-      result.push(covers[(start + index * direction) % covers.length]);
-    }
-    return result;
-  }
-
-  ttsThemeBookCoverSeed(): number {
-    const key = `${this.book?.bookUrl || this.bookUrl}|${this.book?.name || ''}|${this.book?.author || ''}`;
-    let hash = 17;
-    for (let index = 0; index < key.length; index++) {
-      hash = (hash * 31 + key.charCodeAt(index)) & 0x7FFFFFFF;
-    }
-    return hash;
+    return this.book ? ThemeBookCoverSettings.covers(this.book, this.appDarkMode) : [];
   }
 
   activeTtsThemeShelfFrame(): ResourceStr {
-    return ThemeAssetRegistry.themeShelfFrame(ThemeRuntime.bookTokens(this.appDarkMode).shelfFrameAssetId);
+    return ThemeBookCoverSettings.frame(this.appDarkMode);
   }
 
   getTtsPanelCoverList(): string[] {
@@ -11207,71 +11189,8 @@ struct ReadBookPage {
     return covers.length > 0 ? covers[0] : '';
   }
 
-  getBookshelfDisplayCoverRaw(): string {
-    if (!this.book) {
-      return '';
-    }
-    const albumCover = this.getTtsGalleryCoverRaw();
-    if (albumCover) {
-      return albumCover;
-    }
-    const covers = CoverGallerySettings.getDisplayCoverList(
-      this.book,
-      this.appDarkMode,
-      this.bookshelfCoverAlbums,
-      this.bookshelfLightCoverAlbumId,
-      this.bookshelfDarkCoverAlbumId,
-      this.bookshelfCoverApplyScope,
-      this.bookshelfCoverTargetBooks,
-      this.bookshelfIgnoreSourceCover,
-      this.bookshelfCoverMode
-    );
-    return this.pickStableTtsCover(covers);
-  }
-
-  getTtsGalleryCoverRaw(): string {
-    if (!this.book) {
-      return '';
-    }
-    if (this.bookshelfCoverApplyScope === 'books' &&
-      !CoverGallerySettings.parseTargetBooks(this.bookshelfCoverTargetBooks).includes(this.book.bookUrl)) {
-      return '';
-    }
-    const albumId = CoverGallerySettings.selectedAlbumId(
-      this.appDarkMode,
-      this.bookshelfLightCoverAlbumId,
-      this.bookshelfDarkCoverAlbumId
-    );
-    const album = CoverGallerySettings.getAlbum(CoverGallerySettings.parseAlbums(this.bookshelfCoverAlbums), albumId);
-    return album ? this.pickStableTtsCover(album.covers) : '';
-  }
-
-  pickStableTtsCover(covers: string[]): string {
-    const cleaned: string[] = [];
-    for (const cover of covers) {
-      const value = (cover || '').trim();
-      if (value && !cleaned.includes(value)) {
-        cleaned.push(value);
-      }
-    }
-    if (cleaned.length === 0) {
-      return '';
-    }
-    if (cleaned.length === 1) {
-      return cleaned[0];
-    }
-    const seed = `${this.bookUrl || this.book?.bookUrl || ''}_${this.book?.name || ''}_` +
-      `${this.appDarkMode}_${this.bookshelfLightCoverAlbumId}_${this.bookshelfDarkCoverAlbumId}_` +
-      `${this.bookshelfCoverMode}`;
-    return cleaned[Math.abs(this.hashTtsText(seed)) % cleaned.length];
-  }
-
-  hashTtsText(value: string): number {
-    let hash = 0;
-    for (let i = 0; i < value.length; i++) {
-      hash = value.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    return hash;
+  getBookshelfDisplayCoverRaw(): ResourceStr {
+    return BookCoverResolver.first(this.book, this.appDarkMode);
   }
 
   getTtsPlaybackElapsedTime(): number {

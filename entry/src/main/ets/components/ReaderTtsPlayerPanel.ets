@@ -1,4 +1,4 @@
-import { ThemeAssetRegistry } from '../theme/ThemeAssetRegistry';
+import { BookCover } from './book/BookCover';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { ReaderTtsFloatingSession } from '../utils/ReaderTtsFloatingSession';
@@ -41,6 +41,7 @@ export struct ReaderTtsPlayerPanel {
   // 这段时间面板仍显示这本书和加载/失败提示，而不是朗读模式的占位文字。
   @Prop hostAudioPage: boolean = false;
   @Prop hostBookName: string = '';
+  @Prop hostBookUrl: string = '';
   @Prop hostChapterTitle: string = '';
   @Prop hostIntro: string = '';
   @Prop hostCover: ResourceStr = '';
@@ -52,6 +53,8 @@ export struct ReaderTtsPlayerPanel {
   onSelectHostVoice: (index: number) => void = () => {};
 
   @StorageLink('globalTtsPaused') globalTtsPaused: boolean = false;
+  @StorageProp('globalTtsBookUrl') globalTtsBookUrl: string = '';
+  @State readyBookCover: ResourceStr = '';
   @StorageLink('globalTtsBookName') globalTtsBookName: string = '';
   @StorageLink('globalTtsChapterTitle') globalTtsChapterTitle: string = '';
   @StorageLink('globalTtsMode') globalTtsMode: string = '';
@@ -381,29 +384,11 @@ export struct ReaderTtsPlayerPanel {
   @Builder
   heroCover(large: boolean) {
     Stack({ alignContent: Alignment.Center }) {
-      if (this.coverSource()) {
-        Image(this.coverSource())
-          .width('100%')
-          .height('100%')
-          .objectFit(ImageFit.Cover)
-          .sourceSize({ width: 480, height: 640 })
-        if (this.globalTtsCoverFrame) {
-          Image(this.globalTtsCoverFrame)
-            .width('100%')
-            .height('100%')
-            .objectFit(ImageFit.Fill)
-        }
-      } else if (this.themePlaceholderCover()) {
-        Image(this.themePlaceholderCover())
-          .width('100%')
-          .height('100%')
-          .objectFit(ImageFit.Cover)
-        if (this.themePlaceholderFrame()) {
-          Image(this.themePlaceholderFrame())
-            .width('100%')
-            .height('100%')
-            .objectFit(ImageFit.Fill)
-        }
+      if (this.coverBookUrl()) {
+        BookCover({ bookUrl: this.coverBookUrl(), name: this.hostAudioPage ? this.hostBookName : this.globalTtsBookName,
+          placeholderColor: this.accentColor, cornerRadius: large ? 14 : 6,
+          onReadyCover: (cover: ResourceStr): void => { this.readyBookCover = cover; }
+        })
       } else {
         Text(this.coverInitial())
           .fontSize(large ? Math.max(16, Math.round(this.coverHeight() * 0.22)) : 16)
@@ -812,16 +797,11 @@ export struct ReaderTtsPlayerPanel {
   }
 
   coverSource(): ResourceStr {
-    return this.globalTtsCover || this.hostCover;
+    return this.coverBookUrl() ? this.readyBookCover : (this.globalTtsCover || this.hostCover);
   }
 
-  /** Theme cover shown when the book has none; empty for themes without cover art. */
-  themePlaceholderCover(): ResourceStr {
-    return ThemeAssetRegistry.themeBookCover(ThemeRuntime.bookTokens().coverAssetId);
-  }
-
-  themePlaceholderFrame(): ResourceStr {
-    return ThemeAssetRegistry.themeShelfFrame(ThemeRuntime.bookTokens().shelfFrameAssetId);
+  coverBookUrl(): string {
+    return this.hostAudioPage ? this.hostBookUrl : this.globalTtsBookUrl;
   }
 
   coverHeight(): number {

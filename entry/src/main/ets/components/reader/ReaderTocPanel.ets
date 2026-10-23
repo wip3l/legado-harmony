@@ -4,7 +4,7 @@ import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { Book, BookChapter, Bookmark } from '@legado/sourceengine';
 import { AppDatabase } from '../../model/data/AppDatabase';
 import { HdsFeedback } from '../../utils/HdsFeedback';
-import { BookCoverCache } from '../../utils/BookCoverCache';
+import { BookCover } from '../book/BookCover';
 import { VirtualListScrollbar } from '../../utils/VirtualListScrollbar';
 import { ImmersiveBackButton } from '../ImmersiveBackButton';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
@@ -39,8 +39,6 @@ export class ReaderTocPanelController {
  */
 @Component
 export struct ReaderTocPanel {
-  // 加密的书源封面解密完成后递增，读取它的封面会重新取到本地文件地址。
-  @StorageProp('sourceCoverRevision') sourceCoverRevision: number = 0;
   @Link chapters: BookChapter[];
   @Link bookmarks: Bookmark[];
   /** 目录倒序在阅读页一次会话内保持。 */
@@ -691,42 +689,21 @@ export struct ReaderTocPanel {
     };
   }
 
-  private bookCover(): string {
-    const raw = this.book ? this.book.getDisplayCover() : '';
-    return this.sourceCoverRevision >= 0 ? BookCoverCache.displayCover(getContext(this), raw) : raw;
-  }
-
-  private bookInitial(): string {
-    const name = (this.book?.name || '书').trim();
-    return name.length > 0 ? name.substring(0, 1) : '书';
-  }
-
   // ---------------------------------------------------------------- 界面
 
   build() {
     Column() {
       Row({ space: AppSpacing.LG }) {
-        if (this.bookCover()) {
-          Image(this.bookCover())
-            .width(52)
-            .height(68)
-            .borderRadius(8)
-            .objectFit(ImageFit.Cover)
-            .accessibilityText('查看书籍详情')
-            .onClick(() => this.onOpenBookDetail())
-        } else {
-          Text(this.bookInitial())
-            .fontSize(AppFontSize.HEADLINE)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(ThemeRuntime.onAccentColor())
-            .textAlign(TextAlign.Center)
-            .width(52)
-            .height(68)
-            .borderRadius(ThemeRuntime.mediumRadius())
-            .backgroundColor(this.accentColor)
-            .accessibilityText('查看书籍详情')
-            .onClick(() => this.onOpenBookDetail())
-        }
+        BookCover({
+          bookUrl: this.book?.bookUrl || '', origin: this.book?.origin || '',
+          name: this.book?.name || '', author: this.book?.author || '',
+          coverUrl: this.book?.coverUrl || '', customCoverUrl: this.book?.customCoverUrl || '',
+          placeholderColor: this.accentColor, cornerRadius: 8
+        })
+          .width(52)
+          .height(68)
+          .accessibilityText('查看书籍详情')
+          .onClick(() => this.onOpenBookDetail())
 
         Column({ space: AppSpacing.XS }) {
           Text(this.book?.name || '目录')

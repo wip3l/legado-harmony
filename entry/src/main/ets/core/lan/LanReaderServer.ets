@@ -1,3 +1,5 @@
+import fs from '@ohos.file.fs';
+import { BookCoverResolver } from '../../utils/BookCoverResolver';
 import socket from '@ohos.net.socket';
 import connection from '@ohos.net.connection';
 import { common, wantAgent } from '@kit.AbilityKit';
@@ -577,7 +579,7 @@ export class LanReaderServer {
       dto.name = book.name;
       dto.author = book.author;
       dto.intro = book.getDisplayIntro();
-      dto.cover = book.getDisplayCover() ? `/api/covers/${id}?token=${encodeURIComponent(this.token)}` : '';
+      dto.cover = BookCoverResolver.first(book) ? `/api/covers/${id}?token=${encodeURIComponent(this.token)}` : '';
       dto.chapterIndex = book.durChapterIndex;
       dto.chapterPos = book.durChapterPos;
       dto.chapterTime = book.durChapterTime;
@@ -830,18 +832,20 @@ export class LanReaderServer {
     const bookUrl = this.idBooks.get(id);
     if (!bookUrl) return { status: 404, contentType: 'text/plain; charset=utf-8', body: 'Book Not Found' };
     const book = await appDb.getBook(bookUrl);
-    const url = book?.getDisplayCover() || '';
-    if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
-      return { status: 404, contentType: 'text/plain; charset=utf-8', body: 'Cover Not Found' };
+    const cover = BookCoverResolver.first(book);
+    if (!cover || !this.context) return { status: 404, contentType: 'text/plain; charset=utf-8', body: 'Cover Not Found' };
+    const path = await BookCoverResolver.prepareFile(this.context, cover);
+    if (!path) return { status: 404, contentType: 'text/plain; charset=utf-8', body: 'Cover Not Found' };
+    const file = await fs.open(path, fs.OpenMode.READ_ONLY);
+    try {
+      const size = (await fs.stat(file.fd)).size;
+      if (size <= 0 || size > 8 * 1024 * 1024) return { status: 404, contentType: 'text/plain; charset=utf-8', body: 'Cover Not Found' };
+      const body = new ArrayBuffer(size);
+      await fs.read(file.fd, body);
+      return { status: 200, contentType: this.sniffImageType(new Uint8Array(body)), body };
+    } finally {
+      await fs.close(file);
     }
-    if (SourceCoverUrl.isEncoded(url)) return await this.sourceCoverResponse(url);
-    const response = await this.httpClient.executeBinary({ url, method: 'GET', headers: {}, maxResponseBytes: 8 * 1024 * 1024 });
-    if (!response.success || response.data.byteLength === 0) {
-      return { status: 404, contentType: 'text/plain; charset=utf-8', body: 'Cover Not Found' };
-    }
-    const contentType = this.imageContentType(this.header(response.headers, 'content-type'));
-    if (!contentType) return { status: 404, contentType: 'text/plain; charset=utf-8', body: 'Cover Not Found' };
-    return { status: 200, contentType, body: response.data.buffer as ArrayBuffer };
   }
 
   private async imageProxyResponse(url: string): Promise<LanHttpResponse> {

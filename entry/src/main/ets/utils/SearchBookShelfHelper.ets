@@ -23,6 +23,8 @@ export class SearchBookShelfHelper {
   private static shelfLookupVersion: number = -1;
   private static shelfLookupLoaded: boolean = false;
   private static shelfLookup: Map<string, Book[]> = new Map();
+  private static shelfLookupRequest: Promise<Map<string, Book[]>> | null = null;
+  private static shelfLookupRequestVersion: number = -1;
 
   static keyOf(book: SearchBook): string {
     return BookIdentity.keyOfSearchBook(book);
@@ -198,7 +200,25 @@ export class SearchBookShelfHelper {
     if (SearchBookShelfHelper.shelfLookupLoaded && version === SearchBookShelfHelper.shelfLookupVersion) {
       return SearchBookShelfHelper.shelfLookup;
     }
+    // 一屏多个封面同时挂载时共享同一次书架读取。
+    if (SearchBookShelfHelper.shelfLookupRequest && SearchBookShelfHelper.shelfLookupRequestVersion === version) {
+      return SearchBookShelfHelper.shelfLookupRequest;
+    }
+    const task = SearchBookShelfHelper.loadShelfLookup(version);
+    SearchBookShelfHelper.shelfLookupRequest = task;
+    SearchBookShelfHelper.shelfLookupRequestVersion = version;
+    try {
+      return await task;
+    } finally {
+      if (SearchBookShelfHelper.shelfLookupRequest === task) SearchBookShelfHelper.shelfLookupRequest = null;
+    }
+  }
+
+  private static async loadShelfLookup(version: number): Promise<Map<string, Book[]>> {
     const books = await AppDatabase.getInstance().getAllBooks();
+    if (version !== (AppStorage.get<number>('shelfUpdateTime') || 0)) {
+      return SearchBookShelfHelper.getShelfLookup();
+    }
     SearchBookShelfHelper.cacheShelfBooks(books, version);
     return SearchBookShelfHelper.shelfLookup;
   }
