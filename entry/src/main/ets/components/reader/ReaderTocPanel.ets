@@ -66,6 +66,8 @@ export struct ReaderTocPanel {
   chapterTitle: (chapterIndex: number) => string = (_chapterIndex: number): string => '';
   onClose: () => void = (): void => {
   };
+  onOpenBookDetail: () => void = (): void => {
+  };
   onJumpToChapter: (chapterIndex: number) => void = (_chapterIndex: number): void => {
   };
   onJumpToBookmark: (bookmark: Bookmark) => void = (_bookmark: Bookmark): void => {
@@ -710,6 +712,8 @@ export struct ReaderTocPanel {
             .height(68)
             .borderRadius(8)
             .objectFit(ImageFit.Cover)
+            .accessibilityText('查看书籍详情')
+            .onClick(() => this.onOpenBookDetail())
         } else {
           Text(this.bookInitial())
             .fontSize(AppFontSize.HEADLINE)
@@ -720,6 +724,8 @@ export struct ReaderTocPanel {
             .height(68)
             .borderRadius(ThemeRuntime.mediumRadius())
             .backgroundColor(this.accentColor)
+            .accessibilityText('查看书籍详情')
+            .onClick(() => this.onOpenBookDetail())
         }
 
         Column({ space: AppSpacing.XS }) {
@@ -729,6 +735,8 @@ export struct ReaderTocPanel {
             .fontColor(this.textColor)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .accessibilityText(`${this.book?.name || '书籍'}，查看详情`)
+            .onClick(() => this.onOpenBookDetail())
           Text(this.book?.author || '未知作者')
             .fontSize(AppFontSize.CAPTION)
             .fontColor(this.subTextColor)

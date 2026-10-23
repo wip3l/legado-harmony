@@ -191,6 +191,7 @@ struct ReadBookPage {
   @State chapters: BookChapter[] = [];
   @State tocReverseOrder: boolean = false;
   private tocPanelController: ReaderTocPanelController = new ReaderTocPanelController();
+  private openingBookDetail: boolean = false;
   @State currentChapterIndex: number = 0;
   @State menuChapterPreviewIndex: number = 0;
   @State menuChapterSliderActive: boolean = false;
@@ -3890,6 +3891,9 @@ struct ReadBookPage {
         onClose: (): void => {
           this.showToc = false;
         },
+        onOpenBookDetail: (): void => {
+          this.openCurrentBookDetail();
+        },
         onJumpToChapter: (chapterIndex: number): void => {
           this.showToc = false;
           this.showMenu = false;
@@ -4198,6 +4202,43 @@ struct ReadBookPage {
     this.returningFromReaderReplaceRules = true;
     this.hideReaderPanels();
     router.pushUrl({ url: 'pages/ReaderReplaceRules', params: { previewCurrentChapter: 'true' } });
+  }
+
+  async openCurrentBookDetail(): Promise<void> {
+    if (!this.book || this.openingBookDetail) return;
+    this.openingBookDetail = true;
+    try {
+      await this.flushReadingProgressCheckpoint();
+      const book = this.book;
+      this.hideReaderPanels();
+      await router.pushUrl({
+        url: 'pages/SearchBookDetail',
+        params: {
+          bookUrl: book.bookUrl,
+          tocUrl: book.tocUrl,
+          origin: book.origin,
+          originName: book.originName,
+          name: book.name,
+          author: book.author,
+          kind: book.kind,
+          status: book.status,
+          coverUrl: book.customCoverUrl || book.coverUrl,
+          intro: book.customIntro || book.intro,
+          latestChapterTitle: book.latestChapterTitle,
+          updateTime: book.updateTime,
+          wordCount: book.wordCount,
+          type: `${book.type}`,
+          variable: book.variable,
+          readerBookUrl: book.bookUrl,
+          promptAddToShelfOnBack: 'false'
+        }
+      });
+    } catch (error) {
+      console.error('打开书籍详情失败:', error);
+      HdsFeedback.showToast('打开书籍详情失败');
+    } finally {
+      this.openingBookDetail = false;
+    }
   }
 
   prepareReaderReplaceRulesContext(): void {

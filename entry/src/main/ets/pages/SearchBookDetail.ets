@@ -1,4 +1,6 @@
 import { router } from '@kit.ArkUI';
+import { motion } from '@kit.MultimodalAwarenessKit';
+import deviceInfo from '@ohos.deviceInfo';
 import { Book, SearchBook, BookChapter, BookFieldSanitizer, BookTypeSupport, BookUrlResolver } from '@legado/sourceengine';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { WebBookService } from '../core/book/WebBookService';
@@ -9,6 +11,7 @@ import { BookIdentity } from '../utils/BookIdentity';
 import { CoverUrlNormalizer } from '../utils/CoverUrlNormalizer';
 import { BookCoverCache } from '../utils/BookCoverCache';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
+import { ImmersiveReadButton, IMMERSIVE_READ_BUTTON_WIDTH } from '../components/ImmersiveReadButton';
 import { CoverGallerySettings } from '../utils/CoverGallerySettings';
 import { SearchExplorePendingBook } from '../utils/SearchExplorePendingBook';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
@@ -66,6 +69,13 @@ struct SearchBookDetailPage {
   private bookVariable: string = '';
   private autoStartRead: boolean = false;
   private autoStartReadTriggered: boolean = false;
+  private readerBookUrl: string = '';
+  @State openingReader: boolean = false;
+  @State readButtonOnLeft: boolean = false;
+  @State readButtonBarWidth: number = 0;
+  private holdingHandSubscribed: boolean = false;
+  private holdingHandCallback: (status: motion.HoldingHandStatus) => void =
+    (status: motion.HoldingHandStatus): void => this.onHoldingHandChanged(status);
   @State isInShelf: boolean = false;
   @State isSaving: boolean = false;
   @State isLoadingBookInfo: boolean = false;
@@ -88,7 +98,7 @@ struct SearchBookDetailPage {
   @State showCatalogSheet: boolean = false;
   /** 正文滚动距离：顶栏底色与书名随之渐显。 */
   @State detailScrollY: number = 0;
-  @State introExpanded: boolean = false;
+  @State introExpanded: boolean = true;
   /** 头部封面已加载完成的地址；氛围背景只对它显示，读系统缓存而不再发第二次网络请求。 */
   @State readyCoverUrl: string = '';
   private detailScroller: Scroller = new Scroller();
@@ -123,6 +133,7 @@ struct SearchBookDetailPage {
       this.bookVariable = params['variable'] || '';
       this.promptAddToShelfOnBackFromResult = params['promptAddToShelfOnBack'] === 'true';
       this.autoStartRead = params['autoStartRead'] === 'true';
+      this.readerBookUrl = params['readerBookUrl'] || '';
       // Both operations initialize/read the same AppDatabase instance. Starting them at the
       // same time can make getBookSource() observe the store before initialization has completed,
       // leaving the detail page with an empty intro until the reader opens the book again.
@@ -136,6 +147,7 @@ struct SearchBookDetailPage {
   }
 
   onPageShow(): void {
+    this.startHoldingHandTracking();
     this.syncBars();
     this.checkShelf().then(() => {
       if (this.shouldPromptAddToShelfOnBack()) {
@@ -151,10 +163,57 @@ struct SearchBookDetailPage {
   }
 
   aboutToDisappear(): void {
+    this.stopHoldingHandTracking();
     if (this.bookInfoRetryTimerId >= 0) {
       clearTimeout(this.bookInfoRetryTimerId);
       this.bookInfoRetryTimerId = -1;
     }
+  }
+
+  onPageHide(): void {
+    this.stopHoldingHandTracking();
+  }
+
+  private startHoldingHandTracking(): void {
+    if (this.holdingHandSubscribed || deviceInfo.sdkApiVersion < 20 ||
+      !canIUse('SystemCapability.MultimodalAwareness.Motion')) return;
+    try {
+      this.holdingHandSubscribed = true;
+      motion.on('holdingHandChanged', this.holdingHandCallback);
+    } catch (error) {
+      this.holdingHandSubscribed = false;
+      this.readButtonOnLeft = false;
+      // 系统能力存在也可能不支持当前机型；保留右下角的常规阅读入口。
+      console.warn('握姿感知不可用，阅读按钮保持右侧:', error);
+    }
+  }
+
+  private stopHoldingHandTracking(): void {
+    if (!this.holdingHandSubscribed) return;
+    this.holdingHandSubscribed = false;
+    try {
+      // 仅移除本页回调，不影响系统底栏或其他页面的握姿订阅。
+      motion.off('holdingHandChanged', this.holdingHandCallback);
+    } catch (error) {
+      console.warn('释放书籍详情握姿监听失败:', error);
+    }
+  }
+
+  private onHoldingHandChanged(status: motion.HoldingHandStatus): void {
+    if (!this.holdingHandSubscribed) return;
+    // 双手、未握持、未知状态沿用上次位置，不让按钮在放下手机时突然跳回。
+    if (status !== motion.HoldingHandStatus.LEFT_HAND_HELD &&
+      status !== motion.HoldingHandStatus.RIGHT_HAND_HELD) return;
+    const onLeft = status === motion.HoldingHandStatus.LEFT_HAND_HELD;
+    if (onLeft === this.readButtonOnLeft) return;
+    this.getUIContext().animateTo({ duration: 280, curve: Curve.Friction }, (): void => {
+      this.readButtonOnLeft = onLeft;
+    });
+  }
+
+  private readButtonOffsetX(): number {
+    return this.readButtonOnLeft ?
+      -Math.max(0, this.readButtonBarWidth - IMMERSIVE_READ_BUTTON_WIDTH - AppSpacing.XL * 2) : 0;
   }
 
   build() {
@@ -222,7 +281,8 @@ struct SearchBookDetailPage {
             this.detailIntro()
           }
           .width('100%')
-          .padding({ left: AppSpacing.XL, right: AppSpacing.XL, top: 64 + this.statusBarHeight, bottom: 112 })
+          .padding({ left: AppSpacing.XL, right: AppSpacing.XL, top: 64 + this.statusBarHeight,
+            bottom: 96 + this.navBarHeight })
         }
         .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
         // 内容不足一屏时贴顶，Scroll 默认会把它竖直居中。
@@ -237,30 +297,38 @@ struct SearchBookDetailPage {
             this.detailScrollY = offset;
           }
         })
-
-        Row() {
-          Button(BookTypeSupport.isVideo(this.detailTypeProbe()) ? '开始观看' :
-            (BookTypeSupport.isAudio(this.detailTypeProbe()) ? '开始听书' : '开始阅读'))
-            .width('100%')
-            .height(48)
-            .fontSize(AppFontSize.BODY_LARGE)
-            .fontWeight(FontWeight.Medium)
-            .borderRadius(24)
-            .backgroundColor(this.buttonColor())
-            .fontColor(ThemeRuntime.onAccentColor())
-            .onClick(() => {
-              this.startRead();
-            })
-        }
-        .width('100%')
-        .padding({ left: AppSpacing.XL, right: AppSpacing.XL, top: AppSpacing.MD, bottom: 12 + this.navBarHeight })
-        .backgroundColor(ThemeRuntime.topBarColor(this.appDarkMode))
       }
       .width('100%')
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
       this.titleBar()
+
+      Row() {
+        ImmersiveReadButton({
+          label: BookTypeSupport.isVideo(this.detailTypeProbe()) ? '开始观看' :
+            (BookTypeSupport.isAudio(this.detailTypeProbe()) ? '开始听书' : '开始阅读'),
+          icon: BookTypeSupport.isVideo(this.detailTypeProbe()) || BookTypeSupport.isAudio(this.detailTypeProbe()) ?
+            $r('sys.symbol.play_fill') : $r('sys.symbol.book'),
+          darkMode: this.appDarkMode,
+          accentColor: this.accentColor(),
+          busy: this.isSaving || this.openingReader || this.openingCatalogChapter,
+          onRead: (): void => {
+            this.startRead();
+          }
+        })
+          .translate({ x: this.readButtonOffsetX() })
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.End)
+      .padding({ right: AppSpacing.XL, bottom: AppSpacing.XL + this.navBarHeight })
+      // 锚定整页底边，再上移自身高度；align 不会改变 Row 在父 Stack 中的默认居中位置。
+      .position({ x: 0, y: '100%' })
+      .translate({ y: '-100%' })
+      .hitTestBehavior(HitTestMode.Transparent)
+      .onAreaChange((_oldArea: Area, newArea: Area): void => {
+        this.readButtonBarWidth = Number(newArea.width);
+      })
 
       if (this.showChangeSourcePanel && this.changeSourceTarget) {
         BookChangeSourceDialog({
@@ -1490,27 +1558,35 @@ struct SearchBookDetailPage {
     }
   }
 
-  async startRead() {
-    const ok = await this.prepareBookForReading();
-    if (!ok) return;
+  async startRead(): Promise<void> {
+    if (this.openingReader || this.isSaving || this.openingCatalogChapter) return;
+    this.openingReader = true;
+    try {
+      const ok = await this.prepareBookForReading();
+      if (!ok) return;
 
-    if (BookTypeSupport.isVideo(this.detailTypeProbe())) {
-      await this.startWatch();
-      return;
-    }
+      if (BookTypeSupport.isVideo(this.detailTypeProbe())) {
+        await this.startWatch();
+        return;
+      }
 
-    if (BookTypeSupport.isAudio(this.detailTypeProbe())) {
-      router.pushUrl({
-        url: 'pages/AudioBook',
+      // 从目录进入详情后，继续阅读同一本书直接回到原阅读页，保留分页和当前位置。
+      if (this.readerBookUrl && this.readerBookUrl === this.bookUrl &&
+        !BookTypeSupport.isAudio(this.detailTypeProbe())) {
+        router.back();
+        return;
+      }
+
+      await router.pushUrl({
+        url: BookTypeSupport.isAudio(this.detailTypeProbe()) ? 'pages/AudioBook' : 'pages/ReadBook',
         params: { bookUrl: this.bookUrl }
       });
-      return;
+    } catch (error) {
+      console.error('打开阅读失败:', error);
+      HdsFeedback.showToast('打开阅读失败');
+    } finally {
+      this.openingReader = false;
     }
-
-    router.pushUrl({
-      url: 'pages/ReadBook',
-      params: { bookUrl: this.bookUrl }
-    });
   }
 
   /** 视频类书籍：进入播放页，接着上次看到的那一集；选集由播放页自己加载。 */
