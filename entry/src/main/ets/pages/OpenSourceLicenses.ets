@@ -78,9 +78,9 @@ struct OpenSourceLicensesPage {
         .getRawFileContent('licenses/THIRD_PARTY_LICENSES.txt');
       const projectNotice = 'OPEN SOURCE PROJECT INFORMATION\n' +
         '开源项目信息\n\n' +
-        'Project / 项目：开源轻页 / legado-harmony\n' +
+        'Project / 项目：开源轻页 / qingye-reader\n' +
         'Copyright (c) 2026 李其健\n' +
-        'Source / 源码：https://github.com/wip3l/legado-harmony\n' +
+        'Source / 源码：https://github.com/wip3l/qingye-reader\n' +
         'License / 许可证：GNU General Public License version 3 (GPL-3.0)\n\n';
       const gplText = util.TextDecoder.create('utf-8').decodeWithStream(gplBytes, { stream: false });
       const thirdPartyText = util.TextDecoder.create('utf-8')

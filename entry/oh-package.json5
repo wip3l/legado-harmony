@@ -4,8 +4,8 @@
   "description": "开源轻页主模块",
   "main": "Index.ets",
   "author": "李其健",
-  "homepage": "https://github.com/wip3l/legado-harmony",
-  "repository": "https://github.com/wip3l/legado-harmony.git",
+  "homepage": "https://github.com/wip3l/qingye-reader",
+  "repository": "https://github.com/wip3l/qingye-reader.git",
   "license": "GPL-3.0",
   "dependencies": {
     "@devzeng/quickjs": "file:../harmony-book-source-engine/quickjs",

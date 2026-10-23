@@ -5,7 +5,7 @@
 ![ArkTS](https://img.shields.io/badge/ArkTS-ArkUI-orange.svg)
 ![Devices](https://img.shields.io/badge/devices-phone%20%7C%20tablet%20%7C%202in1-lightgrey.svg)
 
-开源轻页（legado-harmony）是一款使用 ArkTS / ArkUI 开发的 HarmonyOS NEXT 原生阅读应用，使用自有的原生书源格式并兼容 Legado（阅读）书源规则，面向手机、平板和 PC/2in1，提供书架、搜索、发现、书源管理、正文阅读、漫画、有声书、视频、朗读与个性化设置。
+开源轻页（qingye-reader）是一款使用 ArkTS / ArkUI 开发的 HarmonyOS NEXT 原生阅读应用，使用自有的原生书源格式并兼容 Legado（阅读）书源规则，面向手机、平板和 PC/2in1，提供书架、搜索、发现、书源管理、正文阅读、漫画、有声书、视频、朗读与个性化设置。
 
 > [!IMPORTANT]
 > 本项目不内置、不托管、不分发小说正文、章节、封面、付费资源或书源订阅。应用仅处理用户自行导入且具备合法使用权限的书源规则与本地文件。使用前请确认内容授权、目标站点协议及所在地法律法规要求。
@@ -158,7 +158,7 @@
 ## 项目结构
 
 ```text
-legado-harmony/
+qingye-reader/
 ├── AppScope/                         # 应用级配置与资源
 ├── entry/                            # 主应用模块
 │   └── src/main/ets/
@@ -246,7 +246,7 @@ legado-harmony/
 书源解析内核是独立仓库 [harmony-book-source-engine](https://github.com/wip3l/harmony-book-source-engine)，以 git 子模块的形式放在 `harmony-book-source-engine/`。克隆时带上子模块：
 
 ```bash
-git clone --recursive https://github.com/wip3l/legado-harmony.git
+git clone --recursive https://github.com/wip3l/qingye-reader.git
 ```
 
 已经克隆过的仓库补拉子模块：
@@ -291,7 +291,7 @@ $env:DEVECO_SDK_HOME = "C:\Program Files\Huawei\DevEco Studio\sdk"
 输出位置：
 
 - 调试 HAP：`entry/build/default/outputs/default/entry-default-signed.hap`
-- release APP：`build/outputs/release/legado-harmony-release-signed.app`
+- release APP：`build/outputs/release/qingye-reader-release-signed.app`（文件名前缀取自本地工程目录名）
 
 release 构建依赖本机有效的签名证书、Profile 和 keystore。请使用本地签名配置，不要向仓库提交私钥、证书密码或个人绝对路径；`build`、`oh_modules` 等中间目录也不应提交。
 
@@ -417,8 +417,8 @@ for f in harmony-book-source-engine/scripts/*-check.mjs; do node --experimental-
 
 本项目采用 [GPL-3.0](LICENSE) 许可证。
 
-- 项目名称：开源轻页 / legado-harmony
-- 版权所有：Copyright © 2026 legado-harmony contributors
-- 源码地址：https://github.com/wip3l/legado-harmony
+- 项目名称：开源轻页 / qingye-reader
+- 版权所有：Copyright © 2026 qingye-reader contributors
+- 源码地址：https://github.com/wip3l/qingye-reader
 
 项目包含的 QuickJS、ohos_quickjs 及 OpenHarmony/Huawei N-API 封装代码继续适用各自的 MIT 或 Apache-2.0 许可证，详见 [第三方开源软件声明](THIRD_PARTY_NOTICES.md)。相关完整许可文本同时打包进入 HAP，并可在应用“关于 → 开源许可”中查看。
