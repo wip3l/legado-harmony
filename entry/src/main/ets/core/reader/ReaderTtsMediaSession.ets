@@ -1,6 +1,7 @@
 import { common, WantAgent, wantAgent } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { avSession } from '@kit.AVSessionKit';
+import { audio } from '@kit.AudioKit';
 import image from '@ohos.multimedia.image';
 import fs from '@ohos.file.fs';
 import { BookCoverCache } from '../../utils/BookCoverCache';
@@ -60,6 +61,15 @@ export class ReaderTtsMediaSession {
   private mediaImageRaw: string = '';
   private mediaPixelMap: image.PixelMap | null = null;
   private mediaImageRefreshSerial: number = 0;
+  private routingManager: audio.AudioRoutingManager | null = null;
+  private outputOnExternalDevice: boolean = false;
+  private readonly outputRendererInfo: audio.AudioRendererInfo = {
+    usage: audio.StreamUsage.STREAM_USAGE_AUDIOBOOK,
+    rendererFlags: 0
+  };
+  private readonly onPreferredOutputChange = (devices: audio.AudioDeviceDescriptors): void => {
+    this.handleOutputDeviceChange(devices);
+  };
 
   constructor(host: ReaderTtsMediaHost) {
     this.host = host;
@@ -224,6 +234,7 @@ export class ReaderTtsMediaSession {
       if (!this.session) {
         this.session = await avSession.createAVSession(this.host.abilityContext(), 'LegadoReaderTts', 'audio');
         this.registerCommands(this.session);
+        this.watchOutputDevice();
       }
       const info = this.host.mediaInfo();
       await this.session.setLaunchAbility(agent);
@@ -338,6 +349,7 @@ export class ReaderTtsMediaSession {
     const session = this.session;
     this.session = null;
     this.unregisterCommands(session);
+    this.unwatchOutputDevice();
     try {
       await session.setAVPlaybackState({
         state: avSession.PlaybackState.PLAYBACK_STATE_STOP
@@ -362,6 +374,58 @@ export class ReaderTtsMediaSession {
       this.mediaImageRaw = '';
       this.releaseMediaPixelMap();
     }
+  }
+
+  // ---------------------------------------------------------------- 输出设备
+
+  /**
+   * 蓝牙/有线耳机断开时系统把声音切回外放，朗读不会自己停。监听朗读这类流的首选输出设备，
+   * 从耳机等外接设备落回扬声器/听筒时按耳机暂停键处理。系统朗读引擎自己播放，拿不到它的
+   * AudioRenderer，所以在这里统一监听而不是挂在各播放器上。
+   */
+  private watchOutputDevice(): void {
+    if (this.routingManager) return;
+    try {
+      const manager = audio.getAudioManager().getRoutingManager();
+      this.outputOnExternalDevice = ReaderTtsMediaSession.isExternalOutput(
+        manager.getPreferredOutputDeviceForRendererInfoSync(this.outputRendererInfo));
+      manager.on('preferOutputDeviceChangeForRendererInfo', this.outputRendererInfo, this.onPreferredOutputChange);
+      this.routingManager = manager;
+    } catch (error) {
+      console.warn(`[TTS-BG] watch output device failed: ${ReaderTtsMediaSession.formatError(error as Object)}`, error);
+    }
+  }
+
+  private unwatchOutputDevice(): void {
+    if (!this.routingManager) return;
+    try {
+      this.routingManager.off('preferOutputDeviceChangeForRendererInfo', this.onPreferredOutputChange);
+    } catch (error) {
+      console.warn(`[TTS-BG] unwatch output device failed: ${ReaderTtsMediaSession.formatError(error as Object)}`,
+        error);
+    }
+    this.routingManager = null;
+    this.outputOnExternalDevice = false;
+  }
+
+  private handleOutputDeviceChange(devices: audio.AudioDeviceDescriptors): void {
+    const wasExternal = this.outputOnExternalDevice;
+    const external = ReaderTtsMediaSession.isExternalOutput(devices);
+    this.outputOnExternalDevice = external;
+    const builtIn = devices.some((device: audio.AudioDeviceDescriptor): boolean =>
+      device.deviceType === audio.DeviceType.SPEAKER || device.deviceType === audio.DeviceType.EARPIECE);
+    if (!wasExternal || external || !builtIn) return;
+    console.info(`[TTS-BG] output fell back to built-in device, pausing: ${this.debugState()}`);
+    if (this.host.isSpeaking() && !this.host.isPaused()) {
+      this.host.onPause();
+    }
+  }
+
+  private static isExternalOutput(devices: audio.AudioDeviceDescriptors): boolean {
+    return devices.some((device: audio.AudioDeviceDescriptor): boolean =>
+      device.deviceType !== audio.DeviceType.SPEAKER &&
+        device.deviceType !== audio.DeviceType.EARPIECE &&
+        device.deviceType !== audio.DeviceType.INVALID);
   }
 
   // ---------------------------------------------------------------- 媒体卡片封面
