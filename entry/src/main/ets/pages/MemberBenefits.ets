@@ -383,12 +383,22 @@ struct MemberBenefitsPage {
   @Builder
   benefitList() {
     Column() {
-      this.benefitRow($r('sys.symbol.paintpalette'), '会员主题库', '现有及新增会员主题，可直接应用', true, () => {
-        router.pushUrl({ url: 'pages/ThemeSettings' });
-      })
       this.benefitRow($r('sys.symbol.speaker_wave_2'), '在线朗读优先排队', '高峰期优先 · 已生效', true, undefined)
       this.benefitRow($r('sys.symbol.picture'), '漫画超分', '漫画阅读 → 画面设置中开启', true, undefined)
       this.benefitRow($r('sys.symbol.arrow_2_circlepath'), '超大书源同步', this.largeSourceSyncText(), true, undefined)
+      this.benefitRow($r('sys.symbol.star'), '功能尝鲜', '新功能优先试用', true, undefined)
+      this.benefitRow($r('sys.symbol.paintpalette'), '高级主题自定义', '即将推出', true, undefined)
+      if (this.membershipSku === 'LIFETIME' || this.isSuperMember()) {
+        this.benefitRow($r('sys.symbol.person'), '动态头像', '支持 GIF / WebP 动图，可在会员与账号页编辑头像', true, undefined)
+      }
+      if (this.isSuperMember()) {
+        this.benefitRow($r('sys.symbol.textformat'), '上传字体云端同步', '导入即上传，换机可选', true, undefined)
+        this.benefitRow($r('sys.symbol.book_pages'), '本地书籍云端同步', '加入书架即上传', true, undefined)
+        this.benefitRow($r('sys.symbol.arrow_down'), '每月下载额度', '每月 1GB · 云空间下载', true, undefined)
+      }
+      this.benefitRow($r('sys.symbol.paintpalette'), '会员主题库', '现有及新增会员主题，可直接应用', true, () => {
+        router.pushUrl({ url: 'pages/ThemeSettings' });
+      })
       if (this.isSuperMember()) {
         this.benefitRow($r('sys.symbol.folder'), '我的云空间', this.cloudSpaceText(), false, () => {
           router.pushUrl({ url: 'pages/CloudFiles' });
@@ -409,7 +419,7 @@ struct MemberBenefitsPage {
       Row({ space: AppSpacing.LG }) {
         SymbolGlyph(icon)
           .fontSize(22)
-          .fontColor([onClick ? this.accentColor() : this.subTextColor()])
+          .fontColor([this.accentColor()])
           .width(28)
         Column({ space: AppSpacing.XXS }) {
           Text(title)

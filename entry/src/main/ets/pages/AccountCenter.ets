@@ -29,6 +29,7 @@ import { HdsFeedback } from '../utils/HdsFeedback';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { PageScaffold } from '../components/common/PageScaffold';
+import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 
 class BenefitCompareRow {
   title: string;
@@ -209,14 +210,13 @@ struct AccountCenterPage {
   @Builder
   titleActions() {
     if (this.accountLoggedIn) {
-      SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-        .fontSize(21)
-        .fontColor([this.accentColor()])
-        .width(48)
-        .height(48)
-        .onClick(() => {
-          this.refreshAccount();
-        })
+      ImmersiveBackButton({
+        icon: $r('sys.symbol.arrow_clockwise'), iconColor: this.accentColor(),
+        iconSize: 21, iconOffsetX: 0, darkMode: this.appDarkMode,
+        buttonSize: 40, containerWidth: 56, startInset: 8, materialScale: 0.83, compactLayout: true,
+        accessibilityLabel: '刷新账号', buttonEnabled: !this.loading,
+        onBack: () => this.refreshAccount()
+      })
     }
   }
 
@@ -1384,6 +1384,8 @@ struct AccountCenterPage {
       new BenefitCompareRow('每月朗读礼包', '标准 / 精品（字）', ['—', '—', '5000\n2500', '8000\n4000', '12000\n6000']),
       new BenefitCompareRow('在线朗读优先排队', '高峰期优先', ['—', '✓', '✓', '✓', '✓']),
       new BenefitCompareRow('漫画超分', '本机 AI 让低清漫画更清晰', ['—', '✓', '✓', '✓', '✓']),
+      new BenefitCompareRow('功能尝鲜', '新功能优先试用', ['—', '✓', '✓', '✓', '✓']),
+      new BenefitCompareRow('高级主题自定义', '即将推出', ['—', '✓', '✓', '✓', '✓']),
       new BenefitCompareRow('有效期', '不自动续费', ['—', '1 个月', '12 个月', '永久', '永久'])
     ];
     if (limits) {
@@ -1392,7 +1394,7 @@ struct AccountCenterPage {
     rows.push(new BenefitCompareRow('单个书源大小', '云同步上限',
       limits ? ['50KB', '512KB', '512KB', '512KB', '960KB'] : ['512KB', '512KB', '512KB', '512KB', '960KB']));
     rows.push(new BenefitCompareRow('动态头像', 'GIF / WebP 动图', ['—', '—', '—', '✓', '✓']));
-    rows.push(new BenefitCompareRow('自定义字体云端同步', '导入即上传，换机可选', ['—', '—', '—', '—', '✓']));
+    rows.push(new BenefitCompareRow('上传字体云端同步', '导入即上传，换机可选', ['—', '—', '—', '—', '✓']));
     rows.push(new BenefitCompareRow('本地书籍云端同步', '加入书架即上传', ['—', '—', '—', '—', '✓']));
     rows.push(new BenefitCompareRow('云端空间', '书籍、字体与书源共用', ['—', '—', '—', '—', '1GB']));
     rows.push(new BenefitCompareRow('每月下载额度', '云空间下载', ['—', '—', '—', '—', '1GB']));
@@ -1430,7 +1432,8 @@ struct AccountCenterPage {
     for (const row of this.compareRows()) {
       const value = row.values[selected];
       if (value === '—' || (selected !== current && value === row.values[current])) continue;
-      result.push(value === '✓' ? row.title : `${row.title} ${value.replace('\n', '/')}`);
+      const title = row.note === '即将推出' ? `${row.title}（即将推出）` : row.title;
+      result.push(value === '✓' ? title : `${title} ${value.replace('\n', '/')}`);
     }
     return result;
   }
