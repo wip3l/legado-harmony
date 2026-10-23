@@ -53,7 +53,10 @@ export function imageScriptTestRuntime() {
     release() { stats.released++; stats.active--; }
   }
   const context = vm.createContext({ console, setTimeout, setInterval, clearInterval, Uint8Array, ArrayBuffer,
-    JSScriptSession: Session, JSScriptSessionOptions: class {}, NativeSourceCrypto: { imageOperation: cryptoOperation } });
+    JSScriptSession: Session, JSScriptSessionOptions: class {}, NativeSourceCrypto: { imageOperation: cryptoOperation },
+    // 轻页不安装图片脚本执行器，走内核自带的会话；条带重排由内核仓库的 image-strip-check 覆盖。
+    SourceEngineHost: { imageScripts: () => undefined },
+    NativeImageTransform: { reorderStrips: () => { throw new Error('reorderStrips is not available in Node'); } } });
   const code = stripTypeScriptTypes(readEtsModule('core/nativesource/NativeImageScriptRunner.ts')
     .replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, ''), { mode: 'strip' });
   vm.runInContext(code, context);
