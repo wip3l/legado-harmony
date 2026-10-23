@@ -13,6 +13,7 @@ export struct AdaptiveColorPicker {
   @Prop appDarkMode: boolean = false;
   @Prop accentColor: string = '#007DFF';
   @Prop allowEmpty: boolean = false;
+  @Prop emptyOptionLabel: string = '跟随强调色';
   @Prop optionTitle: string = '';
   @Prop hideOptionTrigger: boolean = false;
   @Prop directSelection: boolean = false;
@@ -82,6 +83,7 @@ export struct AdaptiveColorPicker {
         appDarkMode: this.appDarkMode,
         accentColor: this.accentColor,
         allowEmpty: this.allowEmpty,
+        emptyOptionLabel: this.emptyOptionLabel,
         optionTitle: this.optionTitle,
         hideOptionTrigger: this.hideOptionTrigger,
         colorMode: this.colorMode,

@@ -33,9 +33,9 @@ function harness() {
       DARK_CUSTOM_BACKGROUND_COLOR: '#121212', DARK_CUSTOM_TEXT_COLOR: '#CCCCCC',
       APP_THEME_INDEX: 0, normalizeIndex: value => value || 0
     },
-    HexColor: { normalize: (value, fallback) => value || fallback }
   });
-  vm.runInContext(compile(read('core/reader/ReaderFontWeight.ts')) + '\n' +
+  vm.runInContext(compile(read('utils/HexColor.ts')) + '\n' +
+    compile(read('core/reader/ReaderFontWeight.ts')) + '\n' +
     compile(read('core/reader/ReaderParagraphIndent.ts')) + '\n' +
     compile(read('core/reader/ReaderInfoBarModel.ts')) + '\n' +
     compile(read('utils/ReaderSettingsStore.ets')) +
@@ -92,7 +92,8 @@ function openChromePanel(h) {
   h.context.getContext = () => ({});
   vm.runInContext(compile(`{
     const page = { ${method(page, 'saveReaderChromeSettings')} };
-    class Panel {
+    class ReaderHeaderFooterSettings {
+      ${source.match(/  private static readonly STEPPER_.*;/g).join('\n')}
       readerHeaderEnabled = AppStorage.get('readerHeaderEnabled');
       readerFooterEnabled = AppStorage.get('readerFooterEnabled');
       readerInfoBarConfig = AppStorage.get('readerInfoBarConfig');
@@ -102,15 +103,77 @@ function openChromePanel(h) {
       ${method(source, 'private config').replace('private ', '')}
       ${method(source, 'private commit').replace('private ', '')}
       ${method(source, 'private notifyChanged').replace('private ', '')}
+      ${method(source, 'private setInfoColor').replace('private ', '')}
+      ${['stepperValue', 'isOffsetStepper', 'isShrinkStepper', 'isOpacityStepper', 'stepperMin',
+        'stepperMax', 'stepperText', 'stepBy', 'canStep'].map(name =>
+        method(source, `private ${name}`).replace('private ', '')).join('\n')}
       buildOptions() { ${calls.join('\n')} }
     }
-    globalThis.panel = new Panel();
+    globalThis.panel = new ReaderHeaderFooterSettings();
     globalThis.panel.buildOptions();
   }`), h.context);
   return h.context.panel;
 }
 
 const tests = {
+  async 'header and footer colors persist independently and can return to theme defaults'() {
+    const h = harness();
+    let panel = openChromePanel(h);
+    panel.setInfoColor(true, '#ff0011');
+    let loaded = h.Config.parse((await h.settings.reload({})).readerInfoBarConfig);
+    assert.equal(loaded.headerColor, '#FF0011');
+    assert.equal(loaded.footerColor, '');
+    panel.setInfoColor(false, '#1122aa');
+    loaded = h.Config.parse((await h.settings.reload({})).readerInfoBarConfig);
+    assert.equal(loaded.headerColor, '#FF0011');
+    assert.equal(loaded.footerColor, '#1122AA');
+    h.values.set('appDarkMode', true);
+    panel = openChromePanel(h);
+    assert.equal(panel.config().headerColor, '#FF0011');
+    assert.equal(panel.config().footerColor, '#1122AA');
+    panel.setInfoColor(true, '');
+    loaded = h.Config.parse((await h.settings.reload({})).readerInfoBarConfig);
+    assert.equal(loaded.textColor(true, '#CCCCCC'), '#CCCCCC');
+    assert.equal(loaded.footerColor, '#1122AA');
+    panel.setInfoColor(false, '');
+    loaded = h.Config.parse((await h.settings.reload({})).readerInfoBarConfig);
+    assert.equal(loaded.textColor(false, '#808080'), '#808080');
+  },
+  async 'header and footer shrink step independently through zero and persist after reload'() {
+    const h = harness();
+    let panel = openChromePanel(h);
+    const header = panel.constructor.STEPPER_HEADER_SHRINK;
+    const footer = panel.constructor.STEPPER_FOOTER_SHRINK;
+    for (const field of [header, footer]) {
+      assert.equal(panel.stepperValue(field), 0);
+      assert.equal(panel.canStep(field, -1), true);
+      assert.equal(panel.canStep(field, 1), true);
+    }
+    panel.stepBy(header, -1);
+    panel.stepBy(footer, 1);
+    let loaded = h.Config.parse((await h.settings.reload({})).readerInfoBarConfig);
+    assert.equal(loaded.headerShrink, -1);
+    assert.equal(loaded.footerShrink, 1);
+    panel = openChromePanel(h);
+    assert.equal(panel.stepperText(header), '-1');
+    assert.equal(panel.stepperText(footer), '1');
+    panel.stepBy(header, 1);
+    panel.stepBy(header, 1);
+    loaded = h.Config.parse((await h.settings.reload({})).readerInfoBarConfig);
+    assert.equal(loaded.headerShrink, 1);
+    assert.equal(loaded.footerShrink, 1);
+    const extreme = new h.Config();
+    extreme.headerShrink = -350;
+    extreme.footerShrink = 350;
+    panel.commit(extreme);
+    assert.equal(panel.canStep(header, -1), false);
+    assert.equal(panel.canStep(footer, 1), false);
+    panel.stepBy(header, -1);
+    panel.stepBy(footer, 1);
+    loaded = h.Config.parse((await h.settings.reload({})).readerInfoBarConfig);
+    assert.equal(loaded.headerShrink, -350);
+    assert.equal(loaded.footerShrink, 350);
+  },
   async 'legacy keep-indent switch is ignored when restoring preferences'() {
     for (const keep of [false, true]) {
       const h = harness();

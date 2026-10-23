@@ -1,3 +1,5 @@
+import { HexColor } from '../../utils/HexColor';
+
 /** 页眉页脚槽位可选的信息项。值会写入设置并参与云同步，不能改名。 */
 export class ReaderInfoItem {
   static readonly NONE: string = 'none';
@@ -93,6 +95,9 @@ export class ReaderInfoBarConfig {
   static readonly FIXED_SIDE_PADDING: number = 28;
   static readonly OFFSET_MAX: number = 350;
   static readonly OFFSET_STEP: number = 2;
+  static readonly SHRINK_MIN: number = -350;
+  static readonly SHRINK_MAX: number = 350;
+  static readonly SHRINK_STEP: number = 1;
 
   headerLeft: string = ReaderInfoItem.CHAPTER_TITLE;
   headerCenter: string = ReaderInfoItem.NONE;
@@ -104,6 +109,9 @@ export class ReaderInfoBarConfig {
   fontSize?: number;
   headerFontSize: number = ReaderInfoBarConfig.FONT_SIZE_DEFAULT;
   footerFontSize: number = ReaderInfoBarConfig.FONT_SIZE_DEFAULT;
+  /** 文字颜色；空字符串表示沿用当前阅读主题。 */
+  headerColor: string = '';
+  footerColor: string = '';
   /** 仅用于读取旧版共用不透明度。 */
   opacity?: number;
   /** 页眉、页脚文字不透明度，百分比。 */
@@ -115,6 +123,9 @@ export class ReaderInfoBarConfig {
   headerOffset: number = 0;
   /** 页脚在默认位置基础上再上移的距离（vp），用来让开手势指示条。 */
   footerOffset: number = 0;
+  /** 左右两侧在原有边距基础上的收缩距离（vp），负数向外扩展。 */
+  headerShrink: number = 0;
+  footerShrink: number = 0;
   headerDivider: boolean = false;
   footerDivider: boolean = false;
   progressBar: string = ReaderInfoProgressBar.NONE;
@@ -166,11 +177,15 @@ export class ReaderInfoBarConfig {
       config.footerRight = ReaderInfoItem.normalize(source.footerRight, defaults.footerRight);
       config.headerFontSize = ReaderInfoBarConfig.clampFontSize(source.headerFontSize ?? source.fontSize);
       config.footerFontSize = ReaderInfoBarConfig.clampFontSize(source.footerFontSize ?? source.fontSize);
+      config.headerColor = ReaderInfoBarConfig.normalizeColor(source.headerColor);
+      config.footerColor = ReaderInfoBarConfig.normalizeColor(source.footerColor);
       config.headerOpacity = ReaderInfoBarConfig.clampOpacity(source.headerOpacity ?? source.opacity);
       config.footerOpacity = ReaderInfoBarConfig.clampOpacity(source.footerOpacity ?? source.opacity);
       config.followMargin = source.followMargin === true;
       config.headerOffset = ReaderInfoBarConfig.clampOffset(source.headerOffset);
       config.footerOffset = ReaderInfoBarConfig.clampOffset(source.footerOffset);
+      config.headerShrink = ReaderInfoBarConfig.clampShrink(source.headerShrink);
+      config.footerShrink = ReaderInfoBarConfig.clampShrink(source.footerShrink);
       config.headerDivider = source.headerDivider === true;
       config.footerDivider = source.footerDivider === true;
       config.progressBar = ReaderInfoProgressBar.VALUES.indexOf(source.progressBar) >= 0 ?
@@ -188,6 +203,14 @@ export class ReaderInfoBarConfig {
     return Math.max(ReaderInfoBarConfig.FONT_SIZE_MIN, Math.min(Math.round(value), ReaderInfoBarConfig.FONT_SIZE_MAX));
   }
 
+  static normalizeColor(value: string): string {
+    return typeof value === 'string' ? HexColor.parse(value) : '';
+  }
+
+  textColor(header: boolean, fallback: string): string {
+    return (header ? this.headerColor : this.footerColor) || fallback;
+  }
+
   static clampOffset(value: number): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
     return Math.max(0, Math.min(Math.round(value), ReaderInfoBarConfig.OFFSET_MAX));
@@ -196,6 +219,25 @@ export class ReaderInfoBarConfig {
   static clampOpacity(value: number): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return ReaderInfoBarConfig.OPACITY_MAX;
     return Math.max(ReaderInfoBarConfig.OPACITY_MIN, Math.min(Math.round(value), ReaderInfoBarConfig.OPACITY_MAX));
+  }
+
+  static clampShrink(value: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+    return Math.max(ReaderInfoBarConfig.SHRINK_MIN, Math.min(Math.round(value), ReaderInfoBarConfig.SHRINK_MAX));
+  }
+
+  /** 左右对称收缩；向外最多到屏幕边缘，向内仍保留可显示文字的宽度。 */
+  sidePadding(header: boolean, left: boolean, marginLeft: number, marginRight: number, width: number): number {
+    const shrink = header ? this.headerShrink : this.footerShrink;
+    const baseLeft = this.followMargin ? marginLeft : ReaderInfoBarConfig.FIXED_SIDE_PADDING;
+    const baseRight = this.followMargin ? marginRight : ReaderInfoBarConfig.FIXED_SIDE_PADDING;
+    const insetLeft = Math.max(0, baseLeft + shrink);
+    const insetRight = Math.max(0, baseRight + shrink);
+    const total = insetLeft + insetRight;
+    // 视口尚未测量时先使用设置值；测量后限制极端收缩，兼容分屏和横屏。
+    const allowedTotal = width > 0 ? Math.max(0, width - Math.min(width, 96)) : total;
+    const scale = total > allowedTotal ? allowedTotal / total : 1;
+    return (left ? insetLeft : insetRight) * scale;
   }
 
   serialize(): string {

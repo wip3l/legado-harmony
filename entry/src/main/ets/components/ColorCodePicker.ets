@@ -17,6 +17,7 @@ export struct ColorCodePicker {
   @Prop appDarkMode: boolean = false;
   @Prop accentColor: string = '#007DFF';
   @Prop allowEmpty: boolean = false;
+  @Prop emptyOptionLabel: string = '跟随强调色';
   @Prop optionTitle: string = '';
   @Prop hideOptionTrigger: boolean = false;
   @Prop colorMode: string = '';
@@ -396,7 +397,7 @@ export struct ColorCodePicker {
           .fontColor(this.primaryTextColor())
           .layoutWeight(1)
         if (this.allowEmpty) {
-          Text('跟随强调色')
+          Text(this.emptyOptionLabel)
             .fontSize(AppFontSize.BODY)
             .fontColor(this.accentColor)
             .margin({ left: AppSpacing.LG })

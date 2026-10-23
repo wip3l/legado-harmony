@@ -3,6 +3,7 @@ import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
 import { ImmersiveBackButton } from '../ImmersiveBackButton';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { AdaptiveSwitch } from '../AdaptiveSwitch';
+import { AdaptiveColorPicker } from '../AdaptiveColorPicker';
 import { ReaderInfoBarConfig, ReaderInfoItem, ReaderInfoProgressBar } from '../../core/reader/ReaderInfoBarModel';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
@@ -226,6 +227,8 @@ export struct ReaderHeaderFooterSettings {
   private static readonly STEPPER_FOOTER_OFFSET: number = 3;
   private static readonly STEPPER_FOOTER_FONT_SIZE: number = 4;
   private static readonly STEPPER_FOOTER_OPACITY: number = 5;
+  private static readonly STEPPER_HEADER_SHRINK: number = 6;
+  private static readonly STEPPER_FOOTER_SHRINK: number = 7;
 
   private config(): ReaderInfoBarConfig {
     return ReaderInfoBarConfig.parse(this.readerInfoBarConfig) ?? new ReaderInfoBarConfig();
@@ -267,10 +270,20 @@ export struct ReaderHeaderFooterSettings {
     const config = this.config();
     if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_OFFSET) return config.headerOffset;
     if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OFFSET) return config.footerOffset;
+    if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_SHRINK) return config.headerShrink;
+    if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_SHRINK) return config.footerShrink;
     if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY) return config.headerOpacity;
     if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OPACITY) return config.footerOpacity;
     return field === ReaderHeaderFooterSettings.STEPPER_HEADER_FONT_SIZE ?
       config.headerFontSize : config.footerFontSize;
+  }
+
+  private setInfoColor(header: boolean, value: string): void {
+    const config = this.config();
+    const color = ReaderInfoBarConfig.normalizeColor(value);
+    if (header) config.headerColor = color;
+    else config.footerColor = color;
+    this.commit(config);
   }
 
   private isOffsetStepper(field: number): boolean {
@@ -279,12 +292,14 @@ export struct ReaderHeaderFooterSettings {
   }
 
   private stepperMin(field: number): number {
+    if (this.isShrinkStepper(field)) return ReaderInfoBarConfig.SHRINK_MIN;
     if (this.isOffsetStepper(field)) return 0;
     return this.isOpacityStepper(field) ?
       ReaderInfoBarConfig.OPACITY_MIN : ReaderInfoBarConfig.FONT_SIZE_MIN;
   }
 
   private stepperMax(field: number): number {
+    if (this.isShrinkStepper(field)) return ReaderInfoBarConfig.SHRINK_MAX;
     if (this.isOffsetStepper(field)) return ReaderInfoBarConfig.OFFSET_MAX;
     return this.isOpacityStepper(field) ?
       ReaderInfoBarConfig.OPACITY_MAX : ReaderInfoBarConfig.FONT_SIZE_MAX;
@@ -293,6 +308,11 @@ export struct ReaderHeaderFooterSettings {
   private isOpacityStepper(field: number): boolean {
     return field === ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY ||
       field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OPACITY;
+  }
+
+  private isShrinkStepper(field: number): boolean {
+    return field === ReaderHeaderFooterSettings.STEPPER_HEADER_SHRINK ||
+      field === ReaderHeaderFooterSettings.STEPPER_FOOTER_SHRINK;
   }
 
   private stepperText(field: number): string {
@@ -308,6 +328,12 @@ export struct ReaderHeaderFooterSettings {
     } else if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OFFSET) {
       config.footerOffset = ReaderInfoBarConfig.clampOffset(
         config.footerOffset + direction * ReaderInfoBarConfig.OFFSET_STEP);
+    } else if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_SHRINK) {
+      config.headerShrink = ReaderInfoBarConfig.clampShrink(
+        config.headerShrink + direction * ReaderInfoBarConfig.SHRINK_STEP);
+    } else if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_SHRINK) {
+      config.footerShrink = ReaderInfoBarConfig.clampShrink(
+        config.footerShrink + direction * ReaderInfoBarConfig.SHRINK_STEP);
     } else if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY) {
       config.headerOpacity = ReaderInfoBarConfig.clampOpacity(
         config.headerOpacity + direction * ReaderInfoBarConfig.OPACITY_STEP);
@@ -334,9 +360,11 @@ export struct ReaderHeaderFooterSettings {
         this.slotItem('页眉左侧', ReaderHeaderFooterSettings.SLOT_HEADER_LEFT, 'reader_header_left_select')
         this.slotItem('页眉中间', ReaderHeaderFooterSettings.SLOT_HEADER_CENTER, 'reader_header_center_select')
         this.slotItem('页眉右侧', ReaderHeaderFooterSettings.SLOT_HEADER_RIGHT, 'reader_header_right_select')
+        this.colorItem('页眉颜色', true)
         this.stepperItem('页眉字号', ReaderHeaderFooterSettings.STEPPER_HEADER_FONT_SIZE)
         this.stepperItem('页眉不透明度', ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY)
         this.stepperItem('页眉下移', ReaderHeaderFooterSettings.STEPPER_HEADER_OFFSET)
+        this.stepperItem('页眉收缩', ReaderHeaderFooterSettings.STEPPER_HEADER_SHRINK)
         this.switchItem({ title: '页眉分隔线', description: '页眉下方的细线',
           checked: this.config().headerDivider, onChange: (checked: boolean) => {
             const config = this.config();
@@ -356,9 +384,11 @@ export struct ReaderHeaderFooterSettings {
         this.slotItem('页脚左侧', ReaderHeaderFooterSettings.SLOT_FOOTER_LEFT, 'reader_footer_left_select')
         this.slotItem('页脚中间', ReaderHeaderFooterSettings.SLOT_FOOTER_CENTER, 'reader_footer_center_select')
         this.slotItem('页脚右侧', ReaderHeaderFooterSettings.SLOT_FOOTER_RIGHT, 'reader_footer_right_select')
+        this.colorItem('页脚颜色', false)
         this.stepperItem('页脚字号', ReaderHeaderFooterSettings.STEPPER_FOOTER_FONT_SIZE)
         this.stepperItem('页脚不透明度', ReaderHeaderFooterSettings.STEPPER_FOOTER_OPACITY)
         this.stepperItem('页脚上移', ReaderHeaderFooterSettings.STEPPER_FOOTER_OFFSET)
+        this.stepperItem('页脚收缩', ReaderHeaderFooterSettings.STEPPER_FOOTER_SHRINK)
         this.switchItem({ title: '页脚分隔线', description: '页脚上方的细线',
           checked: this.config().footerDivider, onChange: (checked: boolean) => {
             const config = this.config();
@@ -439,6 +469,41 @@ export struct ReaderHeaderFooterSettings {
     this.selectItem(title, '', ReaderInfoItem.LABELS, this.slotIndex(slot), (index: number) => {
       this.setSlot(slot, index);
     }, controlId)
+  }
+
+  @Builder
+  colorItem(title: string, header: boolean) {
+    Stack() {
+      Row() {
+        this.itemLabel(title, '')
+        Row()
+          .width(30)
+          .height(30)
+          .borderRadius(15)
+          .backgroundColor(this.config().textColor(header, this.subTextColor))
+          .border({ width: 2, color: this.dark ? '#55FFFFFF' : '#22000000' })
+      }
+      .width('100%')
+      .height(60)
+      .alignItems(VerticalAlign.Center)
+      .hitTestBehavior(HitTestMode.None)
+
+      AdaptiveColorPicker({
+        value: header ? this.config().headerColor : this.config().footerColor,
+        placeholder: this.subTextColor,
+        appDarkMode: this.dark,
+        accentColor: this.accentColor,
+        optionTitle: title,
+        hideOptionTrigger: true,
+        allowEmpty: true,
+        emptyOptionLabel: '跟随主题',
+        onColorChange: (color: string) => this.setInfoColor(header, color)
+      })
+        .accessibilityText(title)
+    }
+    .width(this.cardStyle ? 'calc(100% - 32vp)' : '100%')
+    .margin({ left: this.cardStyle ? 16 : 0, right: this.cardStyle ? 16 : 0 })
+    .border({ width: { bottom: this.cardStyle ? 0.5 : 0 }, color: this.dividerColor })
   }
 
   @Builder

@@ -5066,9 +5066,9 @@ struct ReadBookPage {
       ReaderInfoBarText.bookPercent(context) : ReaderInfoBarText.chapterPercent(context);
   }
 
-  getReaderInfoBarSidePadding(left: boolean): number {
-    if (!this.getReaderInfoBarConfig().followMargin) return ReaderInfoBarConfig.FIXED_SIDE_PADDING;
-    return left ? this.getEffectiveReaderMarginLeft() : this.getEffectiveReaderMarginRight();
+  getReaderInfoBarSidePadding(header: boolean, left: boolean): number {
+    return this.getReaderInfoBarConfig().sidePadding(header, left,
+      this.getEffectiveReaderMarginLeft(), this.getEffectiveReaderMarginRight(), this.pageViewWidth);
   }
 
   /** 时间和电量只在阅读页可见、且有槽位用到时才每分钟刷新。 */
@@ -8410,14 +8410,14 @@ struct ReadBookPage {
         centerBattery: this.getReaderInfoSlotBattery(this.getReaderInfoBarConfig().footerCenter),
         rightBattery: this.getReaderInfoSlotBattery(this.getReaderInfoBarConfig().footerRight),
         textSize: this.getReaderInfoBarConfig().footerFontSize,
-        textColor: this.getSubTextColor(),
+        textColor: this.getReaderInfoBarConfig().textColor(false, this.getSubTextColor()),
         textOpacity: this.getReaderInfoBarConfig().footerOpacity / 100
       })
     }
     .width('100%')
     .padding({
-      left: this.getReaderInfoBarSidePadding(true),
-      right: this.getReaderInfoBarSidePadding(false),
+      left: this.getReaderInfoBarSidePadding(false, true),
+      right: this.getReaderInfoBarSidePadding(false, false),
       top: 0,
       bottom: 0
     })
@@ -8442,7 +8442,7 @@ struct ReadBookPage {
           centerBattery: this.getReaderInfoSlotBattery(this.getReaderInfoBarConfig().headerCenter),
           rightBattery: this.getReaderInfoSlotBattery(this.getReaderInfoBarConfig().headerRight),
           textSize: this.getReaderInfoBarConfig().headerFontSize,
-          textColor: this.getSubTextColor(),
+          textColor: this.getReaderInfoBarConfig().textColor(true, this.getSubTextColor()),
           textOpacity: this.getReaderInfoBarConfig().headerOpacity / 100
         })
       }
@@ -8459,8 +8459,8 @@ struct ReadBookPage {
     .width('100%')
     .padding({
       top: this.getReaderHeaderOverlayTopInset(),
-      left: this.getReaderInfoBarSidePadding(true),
-      right: this.getReaderInfoBarSidePadding(false)
+      left: this.getReaderInfoBarSidePadding(true, true),
+      right: this.getReaderInfoBarSidePadding(true, false)
     })
     .backgroundColor(Color.Transparent)
     .hitTestBehavior(HitTestMode.None)

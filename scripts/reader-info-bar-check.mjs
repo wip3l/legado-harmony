@@ -128,6 +128,52 @@ equal(base.headerLineHeight(), 18, '默认字号下页眉行高保持 18');
 equal(base.footerExtraHeight(), 0, '默认配置页脚没有附加高度');
 equal(withBar.footerExtraHeight(), 5, '页脚进度条附加高度保持 5');
 
+// 左右收缩：旧配置保持位置，正负值分别内收、外扩，且页眉页脚互不影响。
+const shrinkConfig = Config.parse(JSON.stringify({ headerShrink: 12, footerShrink: -8 }));
+equal(Config.parse('{}').headerShrink, 0, '旧配置页眉收缩默认为 0');
+equal(Config.parse('{}').footerShrink, 0, '旧配置页脚收缩默认为 0');
+equal(shrinkConfig.copy().serialize(), shrinkConfig.serialize(), '收缩正负值保存与复制后保持不变');
+equal(shrinkConfig.layoutIdentity(), base.layoutIdentity(), '左右收缩不影响正文分页');
+equal(base.sidePadding(true, true, 18, 20, 400), 28, '零收缩沿用固定边距');
+equal(shrinkConfig.sidePadding(true, true, 18, 20, 400), 40, '页眉左侧向内收');
+equal(shrinkConfig.sidePadding(true, false, 18, 20, 400), 40, '页眉右侧向内收');
+equal(shrinkConfig.sidePadding(false, true, 18, 20, 400), 20, '页脚左侧向外扩');
+equal(shrinkConfig.sidePadding(false, false, 18, 20, 400), 20, '页脚右侧向外扩');
+shrinkConfig.followMargin = true;
+equal(shrinkConfig.sidePadding(true, true, 18, 20, 400), 30, '内收叠加正文左边距');
+equal(shrinkConfig.sidePadding(true, false, 18, 20, 400), 32, '内收叠加正文右边距');
+equal(shrinkConfig.sidePadding(false, true, 18, 20, 400), 10, '外扩扣减正文左边距');
+equal(shrinkConfig.sidePadding(false, false, 18, 20, 400), 12, '外扩扣减正文右边距');
+const extremes = Config.parse(JSON.stringify({ headerShrink: 999, footerShrink: -999 }));
+equal(extremes.headerShrink, 350, '收缩上限为 350');
+equal(extremes.footerShrink, -350, '收缩下限为 -350');
+for (const width of [80, 200, 400, 1000]) {
+  const left = extremes.sidePadding(true, true, 18, 20, width);
+  const right = extremes.sidePadding(true, false, 18, 20, width);
+  check(width - left - right >= Math.min(96, width), '极端内收仍保留文字宽度');
+  equal(extremes.sidePadding(false, true, 18, 20, width), 0, '外扩不超过左侧屏幕边缘');
+  equal(extremes.sidePadding(false, false, 18, 20, width), 0, '外扩不超过右侧屏幕边缘');
+}
+equal(Config.clampShrink(-1), -1, '允许负值');
+equal(Config.clampShrink(1.8), 2, '收缩使用整数');
+for (const value of [undefined, null, 'bad', NaN, Infinity]) {
+  equal(Config.clampShrink(value), 0, '无效收缩值回退到 0');
+}
+
+// 文字颜色独立保存，旧配置、清空或损坏值沿用主题。
+const colors = Config.parse(JSON.stringify({ headerColor: ' ff00aa ', footerColor: '#123abc' }));
+equal(colors.headerColor, '#FF00AA', '页眉颜色规范化');
+equal(colors.footerColor, '#123ABC', '页脚颜色规范化');
+equal(colors.textColor(true, '#808080'), '#FF00AA', '页眉显示独立颜色');
+equal(colors.textColor(false, '#808080'), '#123ABC', '页脚显示独立颜色');
+equal(colors.copy().serialize(), colors.serialize(), '颜色保存与复制后保持不变');
+equal(colors.layoutIdentity(), base.layoutIdentity(), '颜色不影响分页');
+for (const value of [undefined, null, '', 'oops', '#xyzxyz', '#123', '#AA123456', 123, {}]) {
+  const invalid = Config.parse(JSON.stringify({ headerColor: value, footerColor: value }));
+  equal(invalid.textColor(true, '#808080'), '#808080', '缺失或非法页眉颜色沿用主题');
+  equal(invalid.textColor(false, '#EEEEEE'), '#EEEEEE', '缺失或非法页脚颜色沿用主题');
+}
+
 // 时钟需求。
 equal(base.usesClock(true, true), false, '默认配置不需要时钟');
 equal(contentOnly.usesClock(true, false), true, '页眉用到时间时需要时钟');

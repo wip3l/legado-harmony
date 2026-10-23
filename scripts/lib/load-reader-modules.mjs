@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { ETS_ROOTS, readEtsModule, toNodeModuleSource } from './ets-module-staging.mjs';
 
 const MODULES = [
+  'utils/HexColor.ts',
   'core/book/ReaderImageMarker.ts',
   'core/book/ReaderActionMarker.ts',
   'core/book/EpubHtmlConverter.ts',
