@@ -5793,8 +5793,16 @@ struct ReadBookPage {
 
   getReaderHeaderContentReserve(): number {
     return this.isReaderHeaderVisible() ?
-      this.getReaderHeaderInfoBarHeight() + this.getReaderInfoBarConfig().headerExtraHeight() + 4 +
-        this.getReaderHeaderTopGap() : 0;
+      this.getReaderHeaderInfoBarHeight() + this.getReaderInfoBarConfig().headerExtraHeight() +
+        this.readerVerticalGapWithinMargin(4, true) + this.getReaderHeaderTopGap() : 0;
+  }
+
+  /**
+   * 页眉、页脚和手势条与正文之间原本写死的间隙。用户边距不小于它时照旧留出，已有排版不变；
+   * 边距调得更小时间隙随之收缩，边距为 0 时正文紧贴页眉、页脚或手势条上沿。
+   */
+  readerVerticalGapWithinMargin(gap: number, top: boolean): number {
+    return Math.min(Math.max(0, gap), this.getEffectiveReaderVerticalMargin(top));
   }
 
   getEffectiveReaderMarginBottom(): number {
@@ -6029,7 +6037,7 @@ struct ReadBookPage {
       this.getReaderPaginationBottomInfoBarHeight();
     const readingOffset = this.getReaderStableReflowOffset();
     this.readerBottomInfoBarMeasuredHeight = height;
-    // Reader V2 paints chapter/page metadata as an overlay and always owns one fixed 8vp bottom guard.
+    // Reader V2 paints chapter/page metadata as an overlay and owns a bottom guard computed without measuring it.
     // The first real footer measurement therefore cannot change any V2 page boundary. Rebuilding the retained
     // Paragraph session here used to measure the opening page twice and kept the loading mask visible for seconds.
     if (this.shouldUseReaderLayoutV2(this.pagedContentText || this.getPagedSourceText())) {
@@ -7279,7 +7287,7 @@ struct ReadBookPage {
     // The footer itself is painted inside the navigation area, just above the gesture indicator. With the
     // footer on,正文 only has to clear the footer; the navigation reserve applies only when there is no footer.
     if (this.isReaderComicModeActive()) return 0;
-    if (!this.readerFooterEnabled) return this.getReaderNavigationBottomReserve();
+    if (!this.readerFooterEnabled) return this.getReaderFooterlessBottomReserve();
     return Math.max(8, this.getReaderBottomInfoBarHeight() +
       this.getReaderBottomInfoBarBottomInset() + this.getReaderBottomInfoBarContentGap());
   }
@@ -7303,12 +7311,26 @@ struct ReadBookPage {
     // Only lift the footer enough to sit immediately above the gesture indicator. Use half of the reported
     // navigation inset and keep the result in a narrow range so large three-button areas cannot create a gap.
     // 用户设置的页脚上移距离加在这段上抬之上；正文的页脚预留用的是同一个值，页脚上移不会压住末行。
-    return Math.max(6, Math.min(8, Math.max(0, this.navBarHeight) * 0.5)) +
-      this.getReaderInfoBarConfig().footerOffset;
+    return this.getReaderGestureIndicatorLift() + this.getReaderInfoBarConfig().footerOffset;
+  }
+
+  getReaderGestureIndicatorLift(): number {
+    return Math.max(6, Math.min(8, Math.max(0, this.navBarHeight) * 0.5));
   }
 
   getReaderBottomInfoBarContentGap(): number {
-    return 8;
+    return this.readerVerticalGapWithinMargin(8, false);
+  }
+
+  /**
+   * 关闭页脚时正文的底部避让。手势条上方固定留出与页脚相同的上抬距离，导航区其余高度并入下边距，
+   * 边距调小时正文可以压进手势区，直到正文末行停在页脚原本的位置。
+   */
+  getReaderFooterlessBottomReserve(): number {
+    const navigationReserve = this.getReaderNavigationBottomReserve();
+    if (navigationReserve <= 0) return 0;
+    const lift = Math.min(navigationReserve, this.getReaderGestureIndicatorLift());
+    return lift + this.readerVerticalGapWithinMargin(navigationReserve - lift, false);
   }
 
   getReaderV2BottomGuard(): number {
@@ -7316,7 +7338,7 @@ struct ReadBookPage {
     // fallback line height here so measuring the real Text never invalidates a retained pagination session.
     if (this.isReaderComicModeActive()) return 0;
     // 页脚开启时正文只需让开页脚（页脚已经画在手势条上方）；没有页脚时才按导航条高度避让。
-    if (!this.readerFooterEnabled) return this.getReaderNavigationBottomReserve();
+    if (!this.readerFooterEnabled) return this.getReaderFooterlessBottomReserve();
     const infoBarConfig = this.getReaderInfoBarConfig();
     let footerHeight = infoBarConfig.fontSize;
     try {
