@@ -1,5 +1,5 @@
 import { router } from '@kit.ArkUI';
-import { common } from '@kit.AbilityKit';
+import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { BookSource } from '@legado/sourceengine';
 import { SearchExploreSettings } from '../../utils/SearchExploreSettingsStore';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
@@ -9,6 +9,14 @@ import { AppSpacing } from '../../theme/AppSpacing';
 import { CollapsingHeader } from '../../utils/CollapsingHeader';
 import { CommunityGroup } from '../../utils/CommunityGroup';
 import { MembershipIcons } from '../../account/MembershipIcons';
+import { AppThemeModeStore } from '../../utils/AppThemeModeStore';
+import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
+
+class ThemeModeOption {
+  mode: string = '';
+  label: string = '';
+  icon: Resource = $r('sys.symbol.circle_lefthalf_inset_filled');
+}
 
 /** 首页"我的"页签：设置入口列表。 */
 @Component
@@ -29,6 +37,13 @@ export struct SettingsPage {
   @StorageLink('cloudSyncLastSuccessAt') cloudSyncLastSuccessAt: number = 0;
   @StorageLink('cloudSyncPendingCount') cloudSyncPendingCount: number = 0;
   @StorageLink('cloudSyncStatus') cloudSyncStatus: string = CloudSyncSettingsStore.STATUS_DISABLED;
+  @StorageLink('appThemeMode') appThemeMode: string = 'system';
+  @State showThemeModeMenu: boolean = false;
+  private readonly themeModeOptions: ThemeModeOption[] = [
+    { mode: 'light', label: '浅色', icon: $r('sys.symbol.sun_max') },
+    { mode: 'dark', label: '深色', icon: $r('sys.symbol.moon') },
+    { mode: 'system', label: '自动', icon: $r('sys.symbol.circle_lefthalf_inset_filled') }
+  ];
 
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
@@ -139,11 +154,12 @@ export struct SettingsPage {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.primaryTextColor())
             .layoutWeight(1)
+          this.themeModeButton()
         }
         .width('100%')
         .height(56 + this.statusBarHeight)
         .alignItems(VerticalAlign.Center)
-        .padding({ left: AppSpacing.XL, top: this.statusBarHeight })
+        .padding({ left: AppSpacing.XL, right: AppSpacing.LG, top: this.statusBarHeight })
         .opacity(CollapsingHeader.contentOpacity(this.headerCollapse))
         .hitTestBehavior(CollapsingHeader.acceptsTouch(this.headerCollapse) ? HitTestMode.Default : HitTestMode.None)
       }
@@ -159,6 +175,106 @@ export struct SettingsPage {
     .height('100%')
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  themeModeButton() {
+    Row() {
+      SymbolGlyph(this.themeModeIcon())
+        .fontSize(22)
+        .fontColor([this.primaryTextColor()])
+    }
+    .width(40)
+    .height(40)
+    .justifyContent(FlexAlign.Center)
+    .accessibilityText(`显示模式：${this.themeModeLabel()}，切换显示模式`)
+    .bindPopup(this.showThemeModeMenu, ImmersiveMaterialRuntime.popupMenuOptions((): void => {
+      this.themeModeMenuContent()
+    }, Placement.BottomRight, this.appDarkMode, this.accentColor(), () => {
+      this.showThemeModeMenu = false;
+    }))
+    .onClick(() => {
+      this.showThemeModeMenu = !this.showThemeModeMenu;
+    })
+  }
+
+  @Builder
+  themeModeMenuContent() {
+    Column({ space: AppSpacing.XXS }) {
+      ForEach(this.themeModeOptions, (option: ThemeModeOption) => {
+        Row({ space: AppSpacing.MD }) {
+          SymbolGlyph(option.icon)
+            .fontSize(18)
+            .fontColor([this.isThemeModeSelected(option.mode) ? this.accentColor() : this.primaryTextColor()])
+          Text(option.label)
+            .fontSize(AppFontSize.BODY_LARGE)
+            .fontWeight(this.isThemeModeSelected(option.mode) ? FontWeight.Medium : FontWeight.Regular)
+            .fontColor(this.isThemeModeSelected(option.mode) ? this.accentColor() : this.primaryTextColor())
+            .layoutWeight(1)
+          if (this.isThemeModeSelected(option.mode)) {
+            SymbolGlyph($r('sys.symbol.checkmark'))
+              .fontSize(14)
+              .fontColor([this.accentColor()])
+          }
+        }
+        .width('100%')
+        .height(44)
+        .padding({ left: 12, right: 12 })
+        .borderRadius(ImmersiveMaterialRuntime.POPUP_MENU_RADIUS - ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
+        .backgroundColor(this.isThemeModeSelected(option.mode) ? this.selectedMenuItemColor() : '#00000000')
+        .alignItems(VerticalAlign.Center)
+        .onClick(() => {
+          this.showThemeModeMenu = false;
+          this.applyThemeMode(option.mode);
+        })
+      }, (option: ThemeModeOption) => option.mode)
+    }
+    .width(160)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
+  }
+
+  isThemeModeSelected(mode: string): boolean {
+    return AppThemeModeStore.normalizeMode(this.appThemeMode) === mode;
+  }
+
+  themeModeIcon(): Resource {
+    const mode = AppThemeModeStore.normalizeMode(this.appThemeMode);
+    if (mode === 'system') {
+      return $r('sys.symbol.circle_lefthalf_inset_filled');
+    }
+    return mode === 'dark' ? $r('sys.symbol.moon') : $r('sys.symbol.sun_max');
+  }
+
+  themeModeLabel(): string {
+    const mode = AppThemeModeStore.normalizeMode(this.appThemeMode);
+    return mode === 'light' ? '浅色' : (mode === 'dark' ? '深色' : '自动');
+  }
+
+  applyThemeMode(nextMode: string): void {
+    const mode = AppThemeModeStore.normalizeMode(nextMode);
+    if (mode === AppThemeModeStore.normalizeMode(this.appThemeMode)) {
+      return;
+    }
+    const context = getContext(this) as common.UIAbilityContext;
+    const systemDarkMode = context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    const nextDarkMode = mode === 'dark' || (mode === 'system' && systemDarkMode);
+    const colorMode = mode === 'dark' ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK :
+      (mode === 'light' ? ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT :
+        ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+    // 先同步模式来源，setColorMode 触发的配置更新才不会读到旧模式又改回去。
+    AppThemeModeStore.applyToStorage(mode);
+    if (this.appDarkMode !== nextDarkMode) {
+      this.appDarkMode = nextDarkMode;
+    }
+    context.getApplicationContext().setColorMode(colorMode);
+    AppThemeModeStore.save(context, mode).catch((e: Error) => {
+      console.warn('保存显示模式失败:', e);
+    });
+  }
+
+  selectedMenuItemColor(): string {
+    const color = this.accentColor();
+    return /^#[0-9A-Fa-f]{6}$/.test(color) ? `#11${color.substring(1)}` : '#11000000';
   }
 
   @Builder
