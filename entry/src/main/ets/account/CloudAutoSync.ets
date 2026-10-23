@@ -366,7 +366,7 @@ export class CloudAutoSync {
     const db = AppDatabase.getInstance();
     await db.initWithContext(context);
     const cloudBooks = files.filter((file: CloudFileItem) => file.kind === 'BOOK' &&
-      (!!file.meta?.contentHash || ['txt', 'epub'].includes((file.meta?.format || LocalBookService.extensionOf(file.name)).toLowerCase())));
+      (!!file.meta?.contentHash || LocalBookService.isSupportedFormat(file.meta?.format || LocalBookService.extensionOf(file.name))));
     const bookTombs = tombstones.filter((tomb: CloudTombstone) => tomb.kind === 'BOOK');
     const present = new Set<string>();
     let changed = false;
@@ -449,7 +449,7 @@ export class CloudAutoSync {
     book.author = meta.author || '';
     book.canUpdate = false;
     book.group = 0;
-    book.type = format === 'epub' ? LocalBookService.TYPE_EPUB : LocalBookService.TYPE_TXT;
+    book.type = LocalBookService.bookTypeForFormat(format);
     book.putVariable(CloudAutoSync.PLACEHOLDER_KEY, '1');
     book.putVariable(CloudAutoSync.CLOUD_FILE_ID_KEY, file.id);
     book.putVariable('cloudManifestHash', file.manifestHash || '');

@@ -19,12 +19,13 @@ export class OpdsBookService {
     if (mediaType && mediaType !== 'application/octet-stream') return '';
     const href = (link.href || '').split('?')[0].split('#')[0].toLowerCase();
     if (href.endsWith('.epub')) return 'epub';
+    if (href.endsWith('.mobi')) return 'mobi';
     if (href.endsWith('.txt')) return 'txt';
     return '';
   }
 
   static isDownloadableFormat(format: string): boolean {
-    return format === 'epub' || format === 'txt';
+    return format === 'epub' || format === 'txt' || format === 'mobi';
   }
 
   static async isAlreadyImported(serverId: string, acquisitionUrl: string): Promise<boolean> {
@@ -39,7 +40,7 @@ export class OpdsBookService {
     handleSink?: (handle: OpdsDownloadHandle) => void): Promise<Book> {
     const format = OpdsBookService.formatOfLink(link);
     if (!OpdsBookService.isDownloadableFormat(format)) {
-      throw new OpdsError('unknown', '仅支持下载 EPUB 和 TXT');
+      throw new OpdsError('unknown', '仅支持下载 EPUB、TXT 和 MOBI');
     }
     await appDb.initWithContext(context);
     const tempRoot = `${context.tempDir}/opds_book_${Date.now()}`;

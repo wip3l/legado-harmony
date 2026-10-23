@@ -141,7 +141,7 @@ struct LocalBookSettingsPage {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      Text(book.type === LocalBookService.TYPE_EPUB ? 'EPUB' : 'TXT')
+      Text(LocalBookService.formatOf(book).toUpperCase())
         .fontSize(AppFontSize.CAPTION)
         .fontColor(this.subTextColor())
         .margin({ left: AppSpacing.MD })

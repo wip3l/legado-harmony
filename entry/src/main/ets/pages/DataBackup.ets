@@ -201,7 +201,7 @@ struct DataBackupPage {
         AppDataBackupService.CATEGORY_PROGRESS)
       this.selectionRow('书签', '章节位置和书签正文', exporting,
         AppDataBackupService.CATEGORY_BOOKMARKS)
-      this.selectionRow('本地图书', 'TXT/EPUB 原文件及本地书籍信息', exporting,
+      this.selectionRow('本地图书', 'TXT/EPUB/MOBI 原文件及本地书籍信息', exporting,
         AppDataBackupService.CATEGORY_LOCAL_BOOKS)
       this.selectionRow('自定义设置与资源', '阅读、主题、字体、封面、TTS、替换规则等；敏感字段会清除', exporting,
         AppDataBackupService.CATEGORY_SETTINGS)

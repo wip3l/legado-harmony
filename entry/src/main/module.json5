@@ -118,6 +118,16 @@
                 "scheme": "file",
                 "type": "application/x-epub+zip",
                 "linkFeature": "FileOpen"
+              },
+              {
+                "scheme": "file",
+                "type": "com.amazon.mobi",
+                "linkFeature": "FileOpen"
+              },
+              {
+                "scheme": "file",
+                "type": "application/x-mobipocket-ebook",
+                "linkFeature": "FileOpen"
               }
             ]
           }

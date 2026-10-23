@@ -14,6 +14,7 @@ const MODULES = [
   'core/book/EpubHtmlConverter.ts',
   'core/book/EpubChapterPlanner.ts',
   'core/book/ReaderCacheBudgetPolicy.ts',
+  'core/book/MobiBookParser.ts',
   'core/reader/ReaderMixedPageLayout.ts',
   'core/reader/ReaderTextNormalizer.ts',
   'core/reader/ReaderPageOffsets.ts',

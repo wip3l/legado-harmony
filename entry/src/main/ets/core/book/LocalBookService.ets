@@ -12,6 +12,8 @@ import { ReaderImageMarker } from './ReaderImageMarker';
 import { LocalChapterContentLoader } from './LocalChapterContentLoader';
 import { EpubChapterPlanner, EpubPlannedChapter, EpubTocEntry } from './EpubChapterPlanner';
 import { EpubConvertResult, EpubHtmlConverter } from './EpubHtmlConverter';
+import { MobiBookParser } from './MobiBookParser';
+
 
 export class LocalBookExportResult {
   savedCount: number = 0;
@@ -62,6 +64,13 @@ class EpubPackageData {
   isComic: boolean = false;
 }
 
+class LocalSpineFile {
+  path: string = '';
+  isImage: boolean = false;
+  /** spine 里 linear="no" 的辅助内容。 */
+  nonLinear: boolean = false;
+}
+
 class LocalBookMetadata {
   title: string = '';
   author: string = '';
@@ -88,6 +97,10 @@ export class LocalBookService {
 
   private static readonly TXT_PARSER_VERSION: string = '10';
   private static readonly EPUB_PARSER_VERSION: string = '9';
+  private static readonly MOBI_PARSER_VERSION: string = '1';
+  /** 可导入的本地书格式。MOBI 解析后与 EPUB 一样按解压目录阅读，书籍类型同为 TYPE_EPUB。 */
+  static readonly SUPPORTED_FORMATS: string[] = ['txt', 'epub', 'mobi'];
+  static readonly UNSUPPORTED_FORMAT_MESSAGE: string = '仅支持 TXT、EPUB 和 MOBI 文件';
   private static readonly TXT_READ_CHUNK_BYTES: number = 256 * 1024;
   private static readonly TXT_MAX_CHAPTER_CHARS: number = 32 * 1024;
   private static readonly TXT_DB_BATCH_SIZE: number = 16;
@@ -109,6 +122,27 @@ export class LocalBookService {
     '^[\\s\\u0000-\\u001F\\u007F-\\u009F\\x21-\\x2F\\x3A-\\x40\\x5B-\\x60\\x7B-\\x7E' +
     '\\u2000-\\u206F\\u2100-\\u2BFF\\u2E00-\\u2E7F\\u3000-\\u303F\\uFE10-\\uFE1F' +
     '\\uFE30-\\uFE4F\\uFF01-\\uFF0F\\uFF1A-\\uFF20\\uFF3B-\\uFF40\\uFF5B-\\uFF65]+$';
+
+  static isSupportedFormat(format: string): boolean {
+    return LocalBookService.SUPPORTED_FORMATS.includes((format || '').toLowerCase());
+  }
+
+  static bookTypeForFormat(format: string): number {
+    const value = (format || '').toLowerCase();
+    return value === 'epub' || value === 'mobi' ? LocalBookService.TYPE_EPUB : LocalBookService.TYPE_TXT;
+  }
+
+  /** 本地书的格式；早期导入没有记录 localFormat 时按书籍类型推断。 */
+  static formatOf(book: Book): string {
+    return (book.getVariable('localFormat') ||
+      (book.type === LocalBookService.TYPE_EPUB ? 'epub' : 'txt')).toLowerCase();
+  }
+
+  private static parserVersionFor(format: string): string {
+    if (format === 'epub') return LocalBookService.EPUB_PARSER_VERSION;
+    if (format === 'mobi') return LocalBookService.MOBI_PARSER_VERSION;
+    return LocalBookService.TXT_PARSER_VERSION;
+  }
 
   static isLocalBook(book: Book): boolean {
     return book.origin === LocalBookService.ORIGIN;
@@ -229,7 +263,7 @@ export class LocalBookService {
     const options = new picker.DocumentSelectOptions();
     options.selectMode = picker.DocumentSelectMode.FILE;
     options.maxSelectNumber = 500;
-    options.fileSuffixFilters = ['电子书|.txt,.epub'];
+    options.fileSuffixFilters = ['电子书|.txt,.epub,.mobi'];
     const result = await new picker.DocumentViewPicker(context).select(options);
     const paths: LocalBookFile[] = [];
     for (const uri of result) {
@@ -262,10 +296,10 @@ export class LocalBookService {
   static async importExternalBook(context: Context, sourceUri: string,
     formatHint: string = '', sourceName: string = ''): Promise<Book> {
     await appDb.initWithContext(context);
-    const format = formatHint === 'txt' || formatHint === 'epub' ? formatHint :
+    const format = LocalBookService.isSupportedFormat(formatHint) ? formatHint.toLowerCase() :
       LocalBookService.extensionOf(sourceUri);
-    if (format !== 'txt' && format !== 'epub') {
-      throw new Error('仅支持 TXT 和 EPUB 文件');
+    if (!LocalBookService.isSupportedFormat(format)) {
+      throw new Error(LocalBookService.UNSUPPORTED_FORMAT_MESSAGE);
     }
     return await LocalBookService.importBook(context, sourceUri, format, sourceName);
   }
@@ -276,7 +310,7 @@ export class LocalBookService {
    */
   static async importCloudBook(context: Context, sourcePath: string, format: string, sourceName: string,
     bookUrl: string, clearVariables: string[] = []): Promise<Book> {
-    if (format !== 'txt' && format !== 'epub') throw new Error('仅支持 TXT 和 EPUB 文件');
+    if (!LocalBookService.isSupportedFormat(format)) throw new Error(LocalBookService.UNSUPPORTED_FORMAT_MESSAGE);
     await appDb.initWithContext(context);
     const previous = await appDb.getBook(bookUrl);
     const book = await LocalBookService.importBook(context, sourcePath, format, sourceName, bookUrl);
@@ -292,7 +326,7 @@ export class LocalBookService {
   static async importWebDavBook(context: Context, sourcePath: string, connectionId: string,
     remotePath: string, remoteName: string, format: string, etag: string,
     lastModified: number, remoteSize: number): Promise<Book> {
-    if (format !== 'txt' && format !== 'epub') throw new Error('仅支持 TXT 和 EPUB 文件');
+    if (!LocalBookService.isSupportedFormat(format)) throw new Error(LocalBookService.UNSUPPORTED_FORMAT_MESSAGE);
     const identity = LocalBookService.webDavBookUrl(connectionId, remotePath);
     return await LocalBookService.importBook(context, sourcePath, format, remoteName, identity,
       connectionId, remotePath, etag, lastModified, remoteSize);
@@ -308,7 +342,7 @@ export class LocalBookService {
 
   static async importOpdsBook(context: Context, sourcePath: string, serverId: string,
     name: string, format: string, acquisitionUrl: string, remoteSize: number): Promise<Book> {
-    if (format !== 'txt' && format !== 'epub') throw new Error('仅支持 TXT 和 EPUB 文件');
+    if (!LocalBookService.isSupportedFormat(format)) throw new Error(LocalBookService.UNSUPPORTED_FORMAT_MESSAGE);
     const identity = LocalBookService.opdsBookUrl(serverId, acquisitionUrl);
     const storageVariables: Record<string, string> = {
       'storageKind': 'opds',
@@ -400,7 +434,8 @@ export class LocalBookService {
     webDavLastModified: number = 0, webDavRemoteSize: number = 0,
     storageVariables: Record<string, string> | null = null,
     storageOriginName: string = ''): Promise<Book> {
-    const extension = formatHint || LocalBookService.extensionOf(sourceUri);
+    const extension = (formatHint || LocalBookService.extensionOf(sourceUri)).toLowerCase();
+    if (!LocalBookService.isSupportedFormat(extension)) throw new Error(LocalBookService.UNSUPPORTED_FORMAT_MESSAGE);
     const sourceId = LocalBookService.hashText(sourceUri);
     const bookUrl = bookUrlOverride || `local://${sourceId}`;
     const id = bookUrlOverride ? LocalBookService.hashText(bookUrl) : sourceId;
@@ -411,9 +446,7 @@ export class LocalBookService {
     LocalBookService.ensureDir(root);
     const localPath = `${root}/${id}.${extension}`;
     const oldParserVersion = oldBook?.getVariable('localParserVersion') || '';
-    const parserIsCurrent = extension === 'epub' ?
-      oldParserVersion === LocalBookService.EPUB_PARSER_VERSION :
-      oldParserVersion === LocalBookService.TXT_PARSER_VERSION;
+    const parserIsCurrent = oldParserVersion === LocalBookService.parserVersionFor(extension);
     if (oldBook && parserIsCurrent &&
       oldBook.getVariable('localSourceMtime') === `${sourceStat.mtime}` &&
       oldBook.getVariable('localSourceSize') === `${sourceStat.size}` &&
@@ -445,7 +478,7 @@ export class LocalBookService {
     book.originName = extension.toUpperCase();
     book.canUpdate = false;
     book.group = 0;
-    book.type = extension === 'epub' ? LocalBookService.TYPE_EPUB : LocalBookService.TYPE_TXT;
+    book.type = LocalBookService.bookTypeForFormat(extension);
     book.putVariable('localSourceUri', sourceUri);
     book.putVariable('localFilePath', localPath);
     book.putVariable('localFormat', extension);
@@ -503,7 +536,8 @@ export class LocalBookService {
     }
 
     let chapters: LocalChapterData[] = [];
-    const epub = await LocalBookService.parseEpub(context, localPath, id);
+    const epub = extension === 'mobi' ? await LocalBookService.parseMobi(context, localPath, id) :
+      await LocalBookService.parseEpub(context, localPath, id);
     const oldChapterPath = oldBook ? await LocalBookService.currentEpubChapterPath(book) : '';
     book.name = hasCustomMetadata ? book.getVariable('localCustomName') :
       (epub.title || fileMetadata.title || LocalBookService.fileStem(metadataSource));
@@ -514,7 +548,7 @@ export class LocalBookService {
       LocalBookService.deleteLocalPath(context, oldExtractRoot);
     }
     book.putVariable('localExtractRoot', epub.extractRoot);
-    book.putVariable('localParserVersion', LocalBookService.EPUB_PARSER_VERSION);
+    book.putVariable('localParserVersion', LocalBookService.parserVersionFor(extension));
     book.putVariable('readerComicAutoDetected', epub.isComic ? '1' : '0');
     book.putVariable('readerComicMode', epub.isComic ? '1' : '0');
     chapters = epub.chapters;
@@ -563,7 +597,7 @@ export class LocalBookService {
       return await LocalBookService.ensureTxtParserCurrent(context, book);
     }
     if (book.type !== LocalBookService.TYPE_EPUB ||
-      book.getVariable('localParserVersion') === LocalBookService.EPUB_PARSER_VERSION) {
+      book.getVariable('localParserVersion') === LocalBookService.parserVersionFor(LocalBookService.formatOf(book))) {
       return false;
     }
     const localPath = book.getVariable('localFilePath');
@@ -595,7 +629,9 @@ export class LocalBookService {
   private static async rebuildEpubIndex(context: Context, book: Book, localPath: string): Promise<void> {
     const id = book.bookUrl.startsWith('local://') ? book.bookUrl.substring('local://'.length) :
       LocalBookService.hashText(localPath);
-    const epub = await LocalBookService.parseEpub(context, localPath, id);
+    const format = LocalBookService.formatOf(book);
+    const epub = format === 'mobi' ? await LocalBookService.parseMobi(context, localPath, id) :
+      await LocalBookService.parseEpub(context, localPath, id);
     const oldChapterPath = await LocalBookService.currentEpubChapterPath(book);
     if (book.getVariable('localMetadataCustomized') === '1') {
       book.name = book.getVariable('localCustomName');
@@ -610,11 +646,12 @@ export class LocalBookService {
       LocalBookService.deleteLocalPath(context, oldExtractRoot);
     }
     book.putVariable('localExtractRoot', epub.extractRoot);
-    book.putVariable('localParserVersion', LocalBookService.EPUB_PARSER_VERSION);
+    book.putVariable('localParserVersion', LocalBookService.parserVersionFor(format));
     book.putVariable('readerComicAutoDetected', epub.isComic ? '1' : '0');
     book.putVariable('readerComicMode', epub.isComic ? '1' : '0');
 
     const chapters = epub.chapters;
+
     if (chapters.length === 0) {
       const emptyChapter = new LocalChapterData();
       emptyChapter.title = book.name || '正文';
@@ -1025,21 +1062,84 @@ export class LocalBookService {
       const ncxText = (await LocalBookService.readTextFile(ncxPath, 'utf-8')).text;
       tocEntries = EpubChapterPlanner.parseNcxToc(ncxText, LocalBookService.parentPath(ncxPath), extractRoot);
     }
-    const tocByPath = EpubChapterPlanner.groupTocByPath(tocEntries);
-
     const spineNodes = LocalBookService.findNodes(opf, 'itemref');
-    const planner = new EpubChapterPlanner(tocByPath.size > 0);
+    const files: LocalSpineFile[] = [];
     for (const spine of spineNodes) {
       const idref = spine.attributes['idref'] || '';
       const item = manifest[idref];
       if (!item || !item.href) continue;
       const chapterPath = EpubHtmlConverter.resolvePath(opfDir, item.href, extractRoot);
       if (!chapterPath || !LocalBookService.exists(chapterPath)) continue;
+      const file = new LocalSpineFile();
+      file.path = chapterPath;
+      file.isImage = item.mediaType.toLowerCase().startsWith('image/');
+      file.nonLinear = (spine.attributes['linear'] || '').toLowerCase() === 'no';
+      files.push(file);
+    }
+    await LocalBookService.planSpineChapters(files, tocEntries, extractRoot, result);
+    return result;
+  }
+
+  /**
+   * MOBI 先拆成若干 HTML 文件和图片写进解压目录，之后与 EPUB 走同一套分章、转换和阅读时重建正文的流程。
+   * 目录锚点是 filepos 位置插入的 id="fileposN"。
+   */
+  private static async parseMobi(context: Context, mobiPath: string, id: string): Promise<EpubPackageData> {
+    const stat = await fs.stat(mobiPath);
+    const extractRoot = `${context.filesDir}/local_books/${id}_${stat.mtime}`;
+    const bytes = await LocalBookService.readFileBytes(mobiPath);
+    const mobi = MobiBookParser.parse(bytes, (value: Uint8Array, encoding: string): string => {
+      try {
+        return util.TextDecoder.create(encoding).decodeWithStream(value, { stream: false });
+      } catch (_) {
+        return util.TextDecoder.create('utf-8').decodeWithStream(value, { stream: false });
+      }
+    }, '../images');
+    if (LocalBookService.exists(extractRoot)) fs.rmdirSync(extractRoot);
+    LocalBookService.ensureDir(`${extractRoot}/text`);
+    LocalBookService.ensureDir(`${extractRoot}/images`);
+    const result = new EpubPackageData();
+    result.extractRoot = extractRoot;
+    result.title = mobi.title;
+    result.author = mobi.author;
+    for (const image of mobi.images) {
+      const path = `${extractRoot}/images/${MobiBookParser.imageName(image)}`;
+      LocalBookService.writeFileBytes(path, image.bytes);
+      if (image.recIndex === mobi.coverRecIndex) result.coverPath = path;
+    }
+    const files: LocalSpineFile[] = [];
+    for (let i = 0; i < mobi.parts.length; i++) {
+      const file = new LocalSpineFile();
+      file.path = `${extractRoot}/text/part${`${i + 1}`.padStart(5, '0')}.html`;
+      const html = `<html><head><meta charset="utf-8"/></head><body>${mobi.parts[i]}</body></html>`;
+      LocalBookService.writeFileBytes(file.path, new util.TextEncoder().encodeInto(html));
+      files.push(file);
+    }
+    const tocEntries: EpubTocEntry[] = [];
+    for (const item of mobi.toc) {
+      if (item.part < 0 || item.part >= files.length) continue;
+      const entry = new EpubTocEntry();
+      entry.path = files[item.part].path;
+      entry.fragment = item.fragment;
+      entry.title = item.title;
+      tocEntries.push(entry);
+    }
+    await LocalBookService.planSpineChapters(files, tocEntries, extractRoot, result);
+    return result;
+  }
+
+  /** 按 spine 顺序转换并分章；EPUB 与 MOBI（拆成多个 HTML 文件后）共用。 */
+  private static async planSpineChapters(files: LocalSpineFile[], tocEntries: EpubTocEntry[],
+    extractRoot: string, result: EpubPackageData): Promise<void> {
+    const tocByPath = EpubChapterPlanner.groupTocByPath(tocEntries);
+    const planner = new EpubChapterPlanner(tocByPath.size > 0);
+    for (const file of files) {
+      const chapterPath = file.path;
       const entries = tocByPath.get(chapterPath) || [];
       // linear="no" 的辅助内容（弹注、答案页）不在正文阅读顺序里，除非目录明确列出。
-      if ((spine.attributes['linear'] || '').toLowerCase() === 'no' && entries.length === 0) continue;
+      if (file.nonLinear && entries.length === 0) continue;
       planner.beginFile();
-      if (item.mediaType.toLowerCase().startsWith('image/')) {
+      if (file.isImage) {
         const imagePiece = new EpubConvertResult();
         imagePiece.content = LocalBookService.createReaderImageMarker(chapterPath);
         imagePiece.imagePaths = [chapterPath];
@@ -1084,7 +1184,39 @@ export class LocalBookService {
         result.chapters.push(chapter);
       }
     }
-    return result;
+  }
+
+  private static async readFileBytes(path: string): Promise<Uint8Array> {
+    const stat = await fs.stat(path);
+    const file = await fs.open(path, fs.OpenMode.READ_ONLY);
+    try {
+      const buffer = new ArrayBuffer(stat.size);
+      let offset = 0;
+      while (offset < stat.size) {
+        const read = await fs.read(file.fd, buffer, { offset: offset, length: stat.size - offset });
+        if (read <= 0) break;
+        offset += read;
+      }
+      return new Uint8Array(buffer, 0, offset);
+    } finally {
+      await fs.close(file);
+    }
+  }
+
+  private static writeFileBytes(path: string, bytes: Uint8Array): void {
+    const file = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+    try {
+      let offset = 0;
+      // writeSync 可能短写，按返回值续写。
+      while (offset < bytes.byteLength) {
+        const written = fs.writeSync(file.fd,
+          bytes.buffer.slice(bytes.byteOffset + offset, bytes.byteOffset + bytes.byteLength));
+        if (written <= 0) throw new Error(`写入失败：${path}`);
+        offset += written;
+      }
+    } finally {
+      fs.closeSync(file);
+    }
   }
 
   private static extractEpubMetadata(opf: XmlNodeData): LocalBookMetadata {

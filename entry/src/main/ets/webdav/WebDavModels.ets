@@ -24,12 +24,13 @@ export class WebDavEntry {
   readableBook(): boolean {
     if (this.directory) return false;
     const value = this.name.toLowerCase();
-    return value.endsWith('.txt') || value.endsWith('.epub');
+    return value.endsWith('.txt') || value.endsWith('.epub') || value.endsWith('.mobi');
   }
 
   format(): string {
     const value = this.name.toLowerCase();
     if (value.endsWith('.epub')) return 'epub';
+    if (value.endsWith('.mobi')) return 'mobi';
     if (value.endsWith('.txt')) return 'txt';
     return '';
   }

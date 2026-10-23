@@ -512,7 +512,7 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate('pendingBookSourceImportNonce', nonce + 1);
       return 'bookSource';
     }
-    if (externalUri && (externalFormat === 'txt' || externalFormat === 'epub')) {
+    if (externalUri && (externalFormat === 'txt' || externalFormat === 'epub' || externalFormat === 'mobi')) {
       AppStorage.setOrCreate('pendingLocalBookImportUri', externalUri);
       AppStorage.setOrCreate('pendingLocalBookImportFormat', externalFormat);
       AppStorage.setOrCreate('pendingLocalBookImportName', externalName);
@@ -557,6 +557,7 @@ export default class EntryAbility extends UIAbility {
       type === 'general.json') return 'json';
     if (type === 'general.epub' || type === 'application/epub+zip' ||
       type === 'application/x-epub+zip') return 'epub';
+    if (type === 'com.amazon.mobi' || type === 'application/x-mobipocket-ebook') return 'mobi';
     const sniffed = this.sniffExternalFileFormat(uri);
     if (sniffed) return sniffed;
     if (type === 'general.plain-text' || type === 'text/plain' || type === 'general.text') return 'txt';
@@ -664,6 +665,11 @@ export default class EntryAbility extends UIAbility {
           ((bytes[2] === 0x03 && bytes[3] === 0x04) || (bytes[2] === 0x05 && bytes[3] === 0x06))) {
           return 'epub';
         }
+        // PalmDB 头第 60 字节起是类型与创建者标识。
+        if (readLength >= 68 && util.TextDecoder.create('utf-8').decodeWithStream(bytes.subarray(60, 68),
+          { stream: false }) === 'BOOKMOBI') {
+          return 'mobi';
+        }
         const text = util.TextDecoder.create('utf-8').decodeWithStream(bytes, { stream: false })
           .replace(/^\uFEFF/, '').trim();
         if (text.startsWith('{') || text.startsWith('[')) return 'json';
@@ -683,7 +689,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   private isSupportedExternalExtension(extension: string): boolean {
-    return extension === 'json' || extension === 'txt' || extension === 'epub';
+    return extension === 'json' || extension === 'txt' || extension === 'epub' || extension === 'mobi';
   }
 
   private externalFileName(uriOrName: string): string {

@@ -178,7 +178,7 @@ struct OpdsServersPage {
           }, (server: OpdsServerConfig) => server.id)
 
           ListItem() {
-            Text('仅支持下载 EPUB / TXT 格式')
+            Text('仅支持下载 EPUB / TXT / MOBI 格式')
               .fontSize(AppFontSize.CAPTION)
               .fontColor(this.subTextColor())
               .width('100%')

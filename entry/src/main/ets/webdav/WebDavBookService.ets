@@ -55,7 +55,7 @@ export class WebDavBookService {
 
   static async openOrImport(context: Context, connection: WebDavConnection, password: string,
     entry: WebDavEntry, onProgress?: (message: string, percent: number) => void): Promise<Book> {
-    if (!entry || entry.directory || !entry.readableBook()) throw new Error('仅支持 TXT 和 EPUB 文件');
+    if (!entry || entry.directory || !entry.readableBook()) throw new Error('仅支持 TXT、EPUB 和 MOBI 文件');
     const db = AppDatabase.getInstance();
     await db.initWithContext(context);
     const bookUrl = LocalBookService.webDavBookUrl(connection.id, entry.relativePath);

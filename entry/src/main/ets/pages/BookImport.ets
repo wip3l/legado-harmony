@@ -65,14 +65,14 @@ struct BookImportPage {
           router.pushUrl({ url: 'pages/OpdsServers' });
         })
       this.menuRow($r('sys.symbol.externaldrive'), 'WebDAV 服务',
-        '浏览远程 TXT / EPUB 书库', true, () => {
+        '浏览远程 TXT / EPUB / MOBI 书库', true, () => {
           router.pushUrl({ url: 'pages/WebDav' });
         })
       this.menuRow($r('sys.symbol.book'), '本地导入',
-        '选择并导入 TXT / EPUB 文件', false, () => {
+        '选择并导入 TXT / EPUB / MOBI 文件', false, () => {
           this.addBooks();
         })
-      Text('仅支持 TXT / EPUB 格式')
+      Text('支持 TXT / EPUB / MOBI 格式，MOBI 需未加密且不是 KF8（AZW3）')
         .fontSize(AppFontSize.CAPTION)
         .fontColor(this.subTextColor())
         .width('100%')

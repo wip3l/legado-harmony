@@ -406,7 +406,7 @@ struct CloudFilesPage {
     if (kind !== 'BOOK' && kind !== 'FONT') return;
     try {
       const options = new picker.DocumentSelectOptions(); options.maxSelectNumber = 1;
-      options.fileSuffixFilters = kind === 'BOOK' ? ['书籍|.txt,.epub'] : ['字体|.ttf,.otf,.ttc'];
+      options.fileSuffixFilters = kind === 'BOOK' ? ['书籍|.txt,.epub,.mobi'] : ['字体|.ttf,.otf,.ttc'];
       const picked = await new picker.DocumentViewPicker(this.context).select(options);
       if (!picked.length) return;
       const name = decodeURIComponent(picked[0].split('/').pop() || '云文件').replace(/[\\/\x00-\x1f]/g, '_');
@@ -422,7 +422,9 @@ struct CloudFilesPage {
         const path = book.getVariable('localFilePath');
         if (!path || !fs.accessSync(path)) continue;
         const item = new LocalCloudFile(); item.path = path; item.kind = 'BOOK';
-        item.name = `${book.name}.${path.toLowerCase().endsWith('.epub') ? 'epub' : 'txt'}`; result.push(item);
+        const format = (book.getVariable('localFormat') || (path.toLowerCase().endsWith('.epub') ? 'epub' : 'txt'))
+          .toLowerCase();
+        item.name = `${book.name}.${format}`; result.push(item);
       }
       const fontsRaw = AppStorage.get<string>('readerCustomFontsRaw') || '';
       if (fontsRaw) {
