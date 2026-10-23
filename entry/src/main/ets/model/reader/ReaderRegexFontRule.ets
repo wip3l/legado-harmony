@@ -493,15 +493,18 @@ export class ReaderRegexBubbleStyleResolver {
       return;
     }
     if (result.bubbleStyleId === 'harbor-postcard') {
-      result.backgroundColor = context.darkMode ? '#3B3048' : '#EEDBD7';
-      result.textColor = context.darkMode ? '#FFE5D5' : '#643244';
+      // Preserve the theme palette while honoring the rule's custom bubble color.
+      result.backgroundColor = result.mode === 'custom' ? base : (context.darkMode ? '#3B3048' : '#EEDBD7');
+      result.textColor = result.mode === 'custom' ? ReaderRegexBubbleStyleResolver.contrastTextColor(base) :
+        (context.darkMode ? '#FFE5D5' : '#643244');
       ReaderRegexBubbleStyleResolver.setRadii(result, 3, 8, 3, 8);
       return;
     }
     if (result.bubbleStyleId === 'gilded-orbit') {
       // A dark foil bookplate with folded ribbon caps; the stored style ID stays compatible.
-      result.backgroundColor = context.darkMode ? '#463B2A' : '#292620';
-      result.textColor = context.darkMode ? '#F4E3BF' : '#F2DEAE';
+      result.backgroundColor = result.mode === 'custom' ? base : (context.darkMode ? '#463B2A' : '#292620');
+      result.textColor = result.mode === 'custom' ? ReaderRegexBubbleStyleResolver.contrastTextColor(base) :
+        (context.darkMode ? '#F4E3BF' : '#F2DEAE');
       ReaderRegexBubbleStyleResolver.setRadii(result, 2, 9, 9, 2);
       return;
     }
