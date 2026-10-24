@@ -103,7 +103,8 @@ await assert.rejects(operation('hash',new Uint8Array(20*1024*1024+1),{algorithm:
 // Actual HTTP adapter: cancellation destroys the in-flight request and propagates
 // the binary size limit to the platform transport, without caching cookie headers.
 let requestOptions, hanging=false, started=0, destroyed=0;
-const httpContext=vm.createContext({console,Uint8Array,ArrayBuffer,setInterval,clearInterval,
+const httpContext=vm.createContext({console,Uint8Array,ArrayBuffer,setTimeout,clearTimeout,setInterval,clearInterval,
+  deviceInfo:{sdkApiVersion:20},
   http:{HttpDataType:{ARRAY_BUFFER:1},HttpProtocol:{HTTP1_1:1},RequestMethod:{GET:'GET'},
     createHttp(){let rejectPending;return {
       request(_url,options){started++;requestOptions=options;
@@ -112,8 +113,11 @@ const httpContext=vm.createContext({console,Uint8Array,ArrayBuffer,setInterval,c
       destroy(){destroyed++;if(rejectPending)rejectPending(new Error('destroyed'));}
     };}}
 });
-vm.runInContext(stripTypeScriptTypes(readEtsModule('core/http/HttpClient.ts')
-  .replace(/^import .*;\r?\n/gm,'').replace(/^export /gm,''),{mode:'strip'}),httpContext);
+// Load the real HTTP dependencies too; only platform APIs are supplied by the fixture.
+for (const module of ['HttpProtocolPolicy', 'HttpFinalUrlObserver', 'HttpClient']) {
+  vm.runInContext(stripTypeScriptTypes(readEtsModule(`core/http/${module}.ts`)
+    .replace(/^import .*;\r?\n/gm,'').replace(/^export /gm,''),{mode:'strip'}),httpContext);
+}
 const client=vm.runInContext('new HttpClient()',httpContext);
 client.applyTlsTrust=()=>{}; client.endTransportTiming=()=>{};
 client.decorateTlsError=(_url,error)=>error;
