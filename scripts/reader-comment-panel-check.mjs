@@ -28,7 +28,7 @@ function harness() {
     showReaderCommentPanel: true, readerCommentPanelHeight: 0, readerCommentPanelLoadSerial: 1,
     readerCommentPanelReadyTimerId: -1, readerCommentPanelLoading: true, readerCommentPanelError: false,
     readerCommentPanelUrl: 'https://comments.example/', readerCommentPanelHtml: '',
-    appDarkMode: true, getUIContext: () => ({ px2vp: px => px / 3 }),
+    appDarkMode: true,
     readerCommentPanelController: { runJavaScript: async () => '0' }
   });
   return { page, timers, async tick() {
@@ -42,11 +42,11 @@ function harness() {
 
 {
   const { page } = harness();
-  page.updateReaderCommentPanelHeight(900);
+  page.updateReaderCommentPanelHeight(300);
   assert.equal(page.readerCommentPanelHeight, 300);
-  page.updateReaderCommentPanelHeight(1800);
+  page.updateReaderCommentPanelHeight(600);
   assert.equal(page.readerCommentPanelHeight, 600, 'expanded content uses expanded viewport');
-  page.updateReaderCommentPanelHeight(1200);
+  page.updateReaderCommentPanelHeight(400);
   assert.equal(page.readerCommentPanelHeight, 400, 'collapse updates viewport too');
   for (const invalid of [0, -1, NaN, Infinity]) page.updateReaderCommentPanelHeight(invalid);
   assert.equal(page.readerCommentPanelHeight, 400);
@@ -129,3 +129,25 @@ for (const dark of [false, true]) {
   assert(html.indexOf('__LEGADO_COMMENT_INLINE__') < html.indexOf('pageInit()'), 'theme precedes page scripts');
 }
 console.log('PASS comment panel: live resize, painted-theme reveal, stale callbacks, bounded failure/retry, early HTML theme, Web back/close bridge');
+
+const panel = source.slice(source.indexOf('  readerCommentPanel()'), source.indexOf('  readerFloatingTopMenu()'));
+assert.match(panel, /scrollForward: NestedScrollMode.SELF_ONLY/);
+assert.match(panel, /scrollBackward: NestedScrollMode.SELF_ONLY/);
+assert.doesNotMatch(panel, /hitTestBehavior\(HitTestMode.Block\)/, 'no inert overlay can cover the system drag handle');
+const sheetContext = vm.createContext({ SheetSize: { LARGE: 'large' }, ScrollSizeMode: { CONTINUOUS: 'continuous' } });
+const sheetPage = vm.runInContext(stripTypeScriptTypes(`({${method('readerCommentSheetOptions')}})`, { mode: 'strip' }), sheetContext);
+sheetPage.readerCommentPanelWebBackground = () => '#FFFFFF';
+const sheet = sheetPage.readerCommentSheetOptions();
+assert.equal(sheet.dragBar, true, 'native sheet owns the functional drag handle');
+assert.deepEqual(Array.from(sheet.detents), ['60%', 'large']);
+assert.equal(sheet.scrollSizeMode, 'continuous');
+assert.equal(sheet.onHeightDidChange, undefined, 'whole-sheet height must not be used as Web viewport height');
+const resizeHandler = panel.match(/\.onSizeChange\((\(_oldValue: SizeOptions, newValue: SizeOptions\) => \{[\s\S]*?\n    \})\)/)?.[1];
+assert(resizeHandler, 'measure the content viewport below the native handle');
+const resizeHarness = harness();
+const resize = vm.runInContext(stripTypeScriptTypes(resizeHandler, { mode: 'strip' }), vm.createContext(resizeHarness.page));
+for (const height of [320, 640, 420]) {
+  resize({ height: 0 }, { height });
+  assert.equal(resizeHarness.page.readerCommentPanelHeight, height, 'native drag resizes Web in vp without including the handle');
+}
+console.log('PASS: native drag handle enabled; Web scroll isolated; content viewport follows available height');

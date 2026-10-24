@@ -1,3 +1,4 @@
+import { ReaderCommentBubbleSize } from './ReaderCommentBubbleSize';
 import { ReaderFontWeight } from './ReaderFontWeight';
 import { ReaderCommentBubbleStyle } from './ReaderCommentBubble';
 
@@ -53,6 +54,7 @@ export class ReaderV2LayoutInput {
   textColor: number = 0xFF202124;
   commentBubble: ReaderCommentBubbleStyle = new ReaderCommentBubbleStyle();
   commentFontSizePx: number = 30;
+  commentBubbleSize: number = ReaderCommentBubbleSize.DEFAULT;
   commentHitSlopXPx: number = 16;
   commentHitSlopYPx: number = 12;
   commentsEnabled: boolean = true;
@@ -81,6 +83,7 @@ export class ReaderV2LayoutSnapshot {
   textColor: number = 0xFF202124;
   commentBubble: ReaderCommentBubbleStyle = new ReaderCommentBubbleStyle();
   commentFontSizePx: number = 30;
+  commentBubbleSize: number = ReaderCommentBubbleSize.DEFAULT;
   commentHitSlopXPx: number = 16;
   commentHitSlopYPx: number = 12;
   commentsEnabled: boolean = true;
@@ -125,6 +128,7 @@ export class ReaderV2LayoutSnapshot {
     snapshot.titleFontFamily = input.titleFontFamily || input.bodyFontFamily;
     snapshot.textColor = input.textColor;
     snapshot.commentBubble = input.commentBubble;
+    snapshot.commentBubbleSize = ReaderCommentBubbleSize.normalize(input.commentBubbleSize);
     snapshot.commentFontSizePx = Math.max(1, input.commentFontSizePx);
     snapshot.commentHitSlopXPx = Math.max(0, input.commentHitSlopXPx);
     snapshot.commentHitSlopYPx = Math.max(0, input.commentHitSlopYPx);
@@ -141,7 +145,7 @@ export class ReaderV2LayoutSnapshot {
       snapshot.viewport.width(), snapshot.viewport.height(), snapshot.contentRect.left, snapshot.contentRect.top,
       snapshot.contentRect.right, snapshot.contentRect.bottom, snapshot.columnRects.length,
       snapshot.fontSizePx, snapshot.fontWeight, snapshot.titleFontSizePx, snapshot.lineSpacingPx, snapshot.paragraphSpacingPx,
-      snapshot.letterSpacingPx, snapshot.textAlign, snapshot.commentFontSizePx, snapshot.commentBubble.identity(),
+      snapshot.letterSpacingPx, snapshot.textAlign, snapshot.commentFontSizePx, snapshot.commentBubbleSize, snapshot.commentBubble.identity(),
       snapshot.commentsEnabled ? 1 : 0, snapshot.regexEnabled ? 1 : 0
     ];
     const rounded = values.map((value: string | number): string =>

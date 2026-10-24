@@ -46,6 +46,7 @@ export class ReaderV2RegexBubbleSegment {
 
 /** One line's piece of a paragraph-comment / 本章说 bubble; only the last piece carries the tail. */
 export class ReaderV2CommentBubbleSegment {
+  scale: number = 1;
   rect: ReaderV2Rect = new ReaderV2Rect();
   tail: boolean = true;
   style: ReaderCommentBubbleStyle = new ReaderCommentBubbleStyle();

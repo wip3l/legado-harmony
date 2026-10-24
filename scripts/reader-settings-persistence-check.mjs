@@ -35,6 +35,7 @@ function harness() {
     },
   });
   vm.runInContext(compile(read('utils/HexColor.ts')) + '\n' +
+    compile(read('core/reader/ReaderCommentBubbleSize.ts')) + '\n' +
     compile(read('core/reader/ReaderFontWeight.ts')) + '\n' +
     compile(read('core/reader/ReaderParagraphIndent.ts')) + '\n' +
     compile(read('core/reader/ReaderInfoBarModel.ts')) + '\n' +
@@ -92,7 +93,7 @@ function openChromePanel(h) {
   h.context.getContext = () => ({});
   vm.runInContext(compile(`{
     const page = { ${method(page, 'saveReaderChromeSettings')} };
-    class ReaderHeaderFooterSettings {
+    class ReaderHeaderFooterEditor {
       ${source.match(/  private static readonly STEPPER_.*;/g).join('\n')}
       readerHeaderEnabled = AppStorage.get('readerHeaderEnabled');
       readerFooterEnabled = AppStorage.get('readerFooterEnabled');
@@ -109,13 +110,36 @@ function openChromePanel(h) {
         method(source, `private ${name}`).replace('private ', '')).join('\n')}
       buildOptions() { ${calls.join('\n')} }
     }
-    globalThis.panel = new ReaderHeaderFooterSettings();
+    globalThis.panel = new ReaderHeaderFooterEditor();
     globalThis.panel.buildOptions();
   }`), h.context);
   return h.context.panel;
 }
 
 const tests = {
+  async 'paragraph bubble size defaults, clamps, persists and remains local across theme switches'() {
+    const h = harness();
+    assert.equal((await h.settings.reload({})).commentBubbleSize, 100);
+    for (const [value, expected] of [[10, 10], [200, 200], [0, 10], [999, 200], [NaN, 100]]) {
+      await h.settings.saveLayoutSettings({}, 20, 12, 0, 18, 18, 18, 18, 0, 'justify', 450, 2, value);
+      assert.equal(h.values.get('readerCommentBubbleSize'), expected);
+      assert.equal(h.disk.get('readerCommentBubbleSize'), expected);
+      assert.equal((await h.settings.reload({})).commentBubbleSize, expected);
+      assert.equal((await h.settings.load({})).fontWeight, 450);
+    }
+    const style = await h.settings.load({});
+    style.commentBubbleSize = 175;
+    await h.settings.saveAll({}, style);
+    await h.settings.saveLayoutSettings({}, 22, 14, 2);
+    assert.equal((await h.settings.reload({})).commentBubbleSize, 175);
+    assert.equal('commentBubbleSize' in h.sync.toPayload(style), false);
+    assert.equal(h.sync.merge(style, { commentBubbleSize: 10 }).commentBubbleSize, 175);
+    h.disk.set('readerThemeProfileV1_legacy', JSON.stringify({ fontSize: 20 }));
+    h.values.set('appThemeId', 'legacy');
+    assert.equal((await h.settings.switchThemeProfile({}, 'classic-blue', 'legacy')).commentBubbleSize, 100);
+    h.values.set('appThemeId', 'classic-blue');
+    assert.equal((await h.settings.switchThemeProfile({}, 'legacy', 'classic-blue')).commentBubbleSize, 175);
+  },
   async 'header and footer colors persist independently and can return to theme defaults'() {
     const h = harness();
     let panel = openChromePanel(h);
@@ -221,7 +245,7 @@ const tests = {
     assert.equal((await h.settings.reload({})).fontWeight, 400);
     h.disk.delete('readerThemeProfileV1_classic-blue');
     h.disk.set('readerFontWeight', '650');
-    assert.equal((await h.settings.reload({})).fontWeight, 700);
+    assert.equal((await h.settings.reload({})).fontWeight, 650);
     h.disk.delete('readerThemeProfileV1_classic-blue');
     h.disk.set('readerFontWeight', 'invalid');
     assert.equal((await h.settings.reload({})).fontWeight, 400);
@@ -229,18 +253,18 @@ const tests = {
   async 'font weight normalizes, persists and survives omitted arguments and font changes'() {
     const h = harness();
     await h.settings.saveLayoutSettings({}, 20, 12, 0, 18, 18, 18, 18, 0, 'justify', 650);
-    assert.equal(h.values.get('readerFontWeight'), 700);
-    assert.equal(h.disk.get('readerFontWeight'), 700);
-    assert.equal((await h.settings.reload({})).fontWeight, 700);
+    assert.equal(h.values.get('readerFontWeight'), 650);
+    assert.equal(h.disk.get('readerFontWeight'), 650);
+    assert.equal((await h.settings.reload({})).fontWeight, 650);
     // Older callers, including applying a theme's layout, must preserve the selected weight.
     await h.settings.saveLayoutSettings({}, 24, 14, 2);
     const style = await h.settings.load({});
     style.bodyFontFamily = 'custom-face';
     await h.settings.saveReaderFontStyleSettings({}, style);
-    assert.equal((await h.settings.reload({})).fontWeight, 700);
+    assert.equal((await h.settings.reload({})).fontWeight, 650);
     assert.equal(h.syncMarks, 0);
     assert.equal('fontWeight' in h.sync.toPayload(style), false);
-    assert.equal(h.sync.merge(style, { fontWeight: 100 }).fontWeight, 700);
+    assert.equal(h.sync.merge(style, { fontWeight: 100 }).fontWeight, 650);
     style.fontWeight = 300;
     await h.settings.saveAll({}, style);
     assert.equal((await h.settings.reload({})).fontWeight, 300);

@@ -3,7 +3,7 @@ import { common } from '@kit.AbilityKit';
 import { AppIconManager } from '../utils/AppIconManager';
 import { AppIconSettingsStore } from '../utils/AppIconSettingsStore';
 import { AppThemeSettings, AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
-import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
+import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderFontBootstrap } from '../utils/ReaderFontBootstrap';
 import { ReaderThemeHelper } from '../utils/ReaderThemeHelper';
 import { syncSystemBars } from '../utils/SystemBars';
@@ -176,6 +176,9 @@ struct ThemeSettingsPage {
   @State applyingThemeId: string = '';
   @State focusedThemeId: string = '';
   @State customSchemes: CustomThemeScheme[] = [];
+  // 在主题排版页绑定过排版的方案：方案 ID → 排版摘要。卡片上显示它而不是预设排版。
+  @State boundLayoutRevision: number = 0;
+  private boundLayoutSummaries: Map<string, string> = new Map<string, string>();
   @State customSchemeLimit: number = CustomThemeQuota.current();
   @State addingCustomScheme: boolean = false;
   @State showThemeExportDialog: boolean = false;
@@ -200,7 +203,9 @@ struct ThemeSettingsPage {
   @State startupTextSubtitle: string = '';
   @State showThemeApplyDialog: boolean = false;
   @State applyDialogThemeName: string = '';
-  @State applyDialogLayoutHint: string = '';
+  // 排版开关打开、关闭时各自会得到的排版，提示随开关切换，数值取自实际要生效的设置。
+  @State applyDialogLayoutOnHint: string = '';
+  @State applyDialogLayoutOffHint: string = '';
   @State applyDialogHasCover: boolean = false;
   @State applyDialogApplyLayout: boolean = false;
   @State applyDialogApplyCover: boolean = false;
@@ -593,9 +598,28 @@ struct ThemeSettingsPage {
       if (serial === this.customSchemeRefreshSerial) {
         this.customSchemes = schemes;
       }
+      const summaries = new Map<string, string>();
+      for (const scheme of schemes) {
+        const profileId = ReaderSettingsStore.profileIdFor(ThemeIds.CUSTOM, scheme.id);
+        if (!await ReaderSettingsStore.isTypographyBound(getContext(this), profileId)) continue;
+        const profile = await ReaderSettingsStore.loadProfile(getContext(this), profileId);
+        summaries.set(scheme.id, `绑定排版：字号 ${profile.fontSize} · 行距 ${profile.lineHeight} · ` +
+          `边距 ${profile.marginLeft}/${profile.marginRight}`);
+      }
+      if (serial === this.customSchemeRefreshSerial) {
+        this.boundLayoutSummaries = summaries;
+        this.boundLayoutRevision++;
+      }
     } catch (e) {
       console.warn('加载自定义主题方案失败:', e);
     }
+  }
+
+  themeLayoutSummary(theme: ThemePack, customSchemeId: string): string {
+    const bound = this.boundLayoutRevision >= 0 && customSchemeId ?
+      this.boundLayoutSummaries.get(customSchemeId) : undefined;
+    return bound ?? `字号 ${theme.readerLayout.fontSize} · 行距 ${theme.readerLayout.lineHeight} · ` +
+      `边距 ${theme.readerLayout.marginLeft}/${theme.readerLayout.marginRight}`;
   }
 
   async selectTheme(themeId: string, customSchemeId: string = '',
@@ -633,8 +657,14 @@ struct ThemeSettingsPage {
       const previous: AppThemeSettings = await AppThemeSettingsStore.load(getContext(this));
       // Applying a theme used to always overwrite the reader layout. Ask first so the
       // user decides whether the theme's typography and cover come along.
+      const targetProfileId = ReaderSettingsStore.profileIdFor(themeId, customScheme ? customScheme.id : '');
+      const typographyBound = customScheme ?
+        await ReaderSettingsStore.isTypographyBound(getContext(this), targetProfileId) : false;
+      const currentReader = await ReaderSettingsStore.load(getContext(this));
       const choice: ThemeApplyChoice | null = askApplyOptions ?
-        await this.promptThemeApplyOptions(theme, previous) : ThemeApplyChoice.preserve();
+        await this.promptThemeApplyOptions(theme, previous, typographyBound,
+          await ReaderSettingsStore.loadProfile(getContext(this), targetProfileId), currentReader) :
+        ThemeApplyChoice.preserve();
       if (!choice) {
         return;
       }
@@ -657,7 +687,12 @@ struct ThemeSettingsPage {
       this.themeBookCoverEnabled = settings.themeBookCoverEnabled;
       const readerSettings = await ReaderSettingsStore.switchThemeProfile(getContext(this), previousProfileId,
         ReaderSettingsStore.profileIdFor(settings.themeId, customScheme ? customScheme.id : ''));
-      if (choice.applyLayout) {
+      if (typographyBound) {
+        // 绑定了排版的方案：开关打开即沿用绑定排版（档案里已经是它）；关闭则把应用前的排版带过来。
+        if (askApplyOptions && !choice.applyLayout) {
+          await ReaderSettingsStore.saveTypographyToProfile(getContext(this), targetProfileId, currentReader);
+        }
+      } else if (choice.applyLayout) {
         const layout = theme.readerLayout;
         await ReaderSettingsStore.saveLayoutSettings(getContext(this), layout.fontSize, layout.lineHeight,
           layout.paragraphSpacing, layout.marginLeft, layout.marginRight, layout.marginTop, layout.marginBottom,
@@ -696,16 +731,27 @@ struct ThemeSettingsPage {
     }
   }
 
-  promptThemeApplyOptions(theme: ThemePack, previous: AppThemeSettings): Promise<ThemeApplyChoice | null> {
+  promptThemeApplyOptions(theme: ThemePack, previous: AppThemeSettings, typographyBound: boolean,
+    targetReader: ReaderSettings, currentReader: ReaderSettings): Promise<ThemeApplyChoice | null> {
     this.applyDialogThemeName = theme.name;
-    this.applyDialogLayoutHint = `字号 ${theme.readerLayout.fontSize} · 行距 ${theme.readerLayout.lineHeight} · ` +
-      `段距 ${theme.readerLayout.paragraphSpacing} · 边距 ${theme.readerLayout.marginLeft}/${theme.readerLayout.marginRight}`;
+    const preset = theme.readerLayout;
+    const presetSummary = this.layoutSummary(preset.fontSize, preset.lineHeight, preset.paragraphSpacing,
+      preset.marginLeft, preset.marginRight);
+    const targetSummary = this.layoutSummary(targetReader.fontSize, targetReader.lineHeight,
+      targetReader.paragraphSpacing, targetReader.marginLeft, targetReader.marginRight);
     this.applyDialogHasCover = this.themeHasBookCover(theme);
-    this.applyDialogApplyLayout = previous.themeApplyLayoutEnabled;
-    if (theme.id === ThemeIds.CUSTOM) {
-      // 自定义方案默认开启主题排版；用户可手动关闭以沿用方案自己保存的排版。
-      this.applyDialogLayoutHint = `关闭时使用方案自己的排版；打开则重置为预设（${this.applyDialogLayoutHint}）`;
+    if (theme.id === ThemeIds.CUSTOM && typographyBound) {
+      // 在主题排版页保存过排版的方案：打开（默认）用绑定排版，关闭则保留应用前的排版。
+      this.applyDialogLayoutOnHint = `使用主题绑定的排版：${targetSummary}，含页眉页脚与阅读字体`;
+      this.applyDialogLayoutOffHint = `保留当前排版：${this.layoutSummary(currentReader.fontSize,
+        currentReader.lineHeight, currentReader.paragraphSpacing, currentReader.marginLeft,
+        currentReader.marginRight)}，并替换主题绑定的排版`;
       this.applyDialogApplyLayout = true;
+    } else {
+      this.applyDialogLayoutOnHint = `重置为主题预设：${presetSummary}`;
+      this.applyDialogLayoutOffHint = `沿用这套主题已有的排版：${targetSummary}`;
+      // 自定义方案默认开启主题排版；内置主题沿用上次的选择。
+      this.applyDialogApplyLayout = theme.id === ThemeIds.CUSTOM ? true : previous.themeApplyLayoutEnabled;
     }
     // 主题带封面时默认勾选“应用主题封面”，不再沿用上次的选择。
     this.applyDialogApplyCover = this.applyDialogHasCover;
@@ -737,11 +783,17 @@ struct ThemeSettingsPage {
     }
   }
 
+  layoutSummary(fontSize: number, lineHeight: number, paragraphSpacing: number, marginLeft: number,
+    marginRight: number): string {
+    return `字号 ${fontSize} · 行距 ${lineHeight} · 段距 ${paragraphSpacing} · 边距 ${marginLeft}/${marginRight}`;
+  }
+
   closeThemeApplyDialog(): void {
     this.showThemeApplyDialog = false;
     this.pendingApplyChoice = null;
     this.applyDialogThemeName = '';
-    this.applyDialogLayoutHint = '';
+    this.applyDialogLayoutOnHint = '';
+    this.applyDialogLayoutOffHint = '';
     this.applyDialogHasCover = false;
   }
 
@@ -1165,7 +1217,7 @@ struct ThemeSettingsPage {
       .justifyContent(FlexAlign.End)
       .alignItems(VerticalAlign.Center)
 
-      this.storeNavInfoRow(theme)
+      this.storeNavInfoRow(theme, customSchemeId)
       this.storeThemeActions(theme, customSchemeId)
       if (this.customSchemeAuthor(customSchemeId)) {
         Text(themeAuthorLine(this.customSchemeAuthor(customSchemeId)))
@@ -1494,7 +1546,7 @@ struct ThemeSettingsPage {
 
   /** Emphasis bubble sample beside a mock floating tab bar, plus the reader layout. */
   @Builder
-  storeNavInfoRow(theme: ThemePack) {
+  storeNavInfoRow(theme: ThemePack, customSchemeId: string = '') {
     Column({ space: AppSpacing.SM }) {
       Row({ space: AppSpacing.LG }) {
         Text() {
@@ -1543,8 +1595,7 @@ struct ThemeSettingsPage {
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
-      Text(`字号 ${theme.readerLayout.fontSize} · 行距 ${theme.readerLayout.lineHeight} · ` +
-        `边距 ${theme.readerLayout.marginLeft}/${theme.readerLayout.marginRight}`)
+      Text(this.themeLayoutSummary(theme, customSchemeId))
         .fontSize(AppFontSize.MICRO)
         .fontColor(this.activeVariant(theme).colors.subTextColor)
         .maxLines(1)
@@ -1915,6 +1966,14 @@ struct ThemeSettingsPage {
             params: { schemeId: schemeId }
           });
         })
+        this.contextActionItem($r('sys.symbol.textformat'), '设置排版', this.primaryTextColor(), () => {
+          const schemeId = this.actionCustomSchemeId;
+          this.closeCustomThemeActions();
+          router.pushUrl({
+            url: 'pages/ThemeTypographySettings',
+            params: { schemeId: schemeId }
+          });
+        })
         this.contextActionItem($r('sys.symbol.square_and_pencil'), '重命名', this.primaryTextColor(), () => {
           const scheme = this.actionCustomScheme();
           if (!scheme) return;
@@ -1949,7 +2008,7 @@ struct ThemeSettingsPage {
       })
       .position({
         x: this.contextMenuLeft(148),
-        y: this.contextMenuTop(196)
+        y: this.contextMenuTop(246)
       })
     }
     .width('100%')
@@ -2252,7 +2311,8 @@ struct ThemeSettingsPage {
         Text(category === 'layout' ? '应用主题排版' : category === 'cover' ? '应用主题封面' : '应用主题图标')
           .fontSize(AppFontSize.BODY_LARGE)
           .fontColor(this.primaryTextColor())
-        Text(category === 'layout' ? this.applyDialogLayoutHint : category === 'cover' ?
+        Text(category === 'layout' ? (this.applyDialogApplyLayout ? this.applyDialogLayoutOnHint :
+          this.applyDialogLayoutOffHint) : category === 'cover' ?
           '书架使用主题封面与配套书籍边框' : AppIconManager.isSupported() ?
           '桌面图标同步更换为主题图标' : AppIconManager.UNSUPPORTED_MESSAGE)
           .fontSize(AppFontSize.CAPTION)
@@ -2926,7 +2986,7 @@ struct ThemeSettingsPage {
   @Builder
   themeVisualPreview(theme: ThemePack, customSchemeId: string = '') {
     this.themePreviewPanes(theme, customSchemeId, false)
-    this.storeNavInfoRow(theme)
+    this.storeNavInfoRow(theme, customSchemeId)
   }
 
   customPreviewStartupImage(customSchemeId: string): string {

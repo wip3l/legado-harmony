@@ -89,10 +89,14 @@ export class ThemePackageTheme {
   fonts: ThemePackageFont[] = [];
 }
 
-/** 随主题走的阅读排版字段：正文、标题、缩进、边距、页眉页脚与进度条、方案字体绑定。翻页和手势不属于主题。 */
+/**
+ * 随主题走的阅读排版字段：正文、标题、缩进、边距、段评气泡大小、正文扩展至状态栏、页眉页脚与进度条、
+ * 方案字体绑定，与主题排版页能设置的内容一致（强调规则另在 emphasis 里）。翻页和手势不属于主题。
+ * 旧版本导入时按自己的列表取字段，多出的键会被忽略。
+ */
 export const LAYOUT_KEYS: string[] = [
   'fontSize', 'fontWeight', 'letterSpacing', 'textAlign', 'lineHeight', 'paragraphSpacing', 'paragraphIndent',
-  'marginLeft', 'marginRight', 'marginTop', 'marginBottom',
+  'marginLeft', 'marginRight', 'marginTop', 'marginBottom', 'commentBubbleSize', 'extendToStatusBar',
   'readerHeaderEnabled', 'readerHeaderContentMode', 'readerFooterEnabled', 'readerFooterLeftMode',
   'readerFooterProgressMode', 'readerFooterShowProgressBar', 'readerInfoBarConfig',
   'bodyFontMode', 'bodyFontFamily', 'titleFontMode', 'titleFontFamily', 'titleFontSize'

@@ -55,6 +55,7 @@ struct SettingsPage {
   @StorageLink('readerMarginRight') readerMarginRight: number = 18;
   @StorageLink('readerMarginTop') readerMarginTop: number = 18;
   @StorageLink('readerMarginBottom') readerMarginBottom: number = 18;
+  @StorageLink('readerCommentBubbleSize') readerCommentBubbleSize: number = 100;
   @State typographySettingIndex: number = 0;
   @State showTypographyValueInput: boolean = false;
   @State typographyValueDraft: string = '';
@@ -667,6 +668,7 @@ struct SettingsPage {
     this.readerMarginRight = settings.marginRight;
     this.readerMarginTop = settings.marginTop;
     this.readerMarginBottom = settings.marginBottom;
+    this.readerCommentBubbleSize = settings.commentBubbleSize;
     this.readerLightThemeIndex = settings.lightThemeIndex;
     this.readerDarkThemeIndex = settings.darkThemeIndex;
     this.readerLightCustomThemeBackgroundColor = settings.lightCustomThemeBackgroundColor;
@@ -1193,7 +1195,8 @@ struct SettingsPage {
       this.readerLetterSpacing,
       this.readerTextAlign,
       this.readerFontWeight,
-      this.readerParagraphIndent
+      this.readerParagraphIndent,
+      this.readerCommentBubbleSize
     ).catch((e: Error) => {
       console.warn('保存阅读排版设置失败:', e);
     });
@@ -1285,6 +1288,11 @@ struct SettingsPage {
     return Math.max(0, Math.min(Math.round(value), 120));
   }
 
+  setReaderCommentBubbleSize(value: number): void {
+    this.readerCommentBubbleSize = ReaderTypographyField.clamp(ReaderTypographyField.COMMENT_BUBBLE_SIZE, value);
+    this.saveReaderLayoutSettings();
+  }
+
   typographySettingOptions(): SelectOption[] {
     return ReaderTypographyField.LABELS.map((label: string): SelectOption => ({ value: label }));
   }
@@ -1303,6 +1311,8 @@ struct SettingsPage {
 
   currentTypographySettingValue(): number {
     switch (this.typographySettingIndex) {
+      case ReaderTypographyField.COMMENT_BUBBLE_SIZE:
+        return this.readerCommentBubbleSize;
       case ReaderTypographyField.FONT_WEIGHT:
         return this.readerFontWeight;
       case 2:
@@ -1327,6 +1337,9 @@ struct SettingsPage {
   adjustCurrentTypographySetting(delta: number): void {
     const next = this.currentTypographySettingValue() + delta * ReaderTypographyField.step(this.typographySettingIndex);
     switch (this.typographySettingIndex) {
+      case ReaderTypographyField.COMMENT_BUBBLE_SIZE:
+        this.setReaderCommentBubbleSize(next);
+        return;
       case ReaderTypographyField.FONT_WEIGHT:
         this.setReaderFontWeight(next);
         return;
@@ -1371,6 +1384,9 @@ struct SettingsPage {
       return;
     }
     switch (this.typographySettingIndex) {
+      case ReaderTypographyField.COMMENT_BUBBLE_SIZE:
+        this.setReaderCommentBubbleSize(value);
+        break;
       case ReaderTypographyField.FONT_WEIGHT:
         this.setReaderFontWeight(value);
         break;

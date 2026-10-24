@@ -68,8 +68,12 @@ class ReaderV2PageFrameNode extends FrameNode {
         this.drawRegexBubble(canvas, segment);
       }
       for (const bubble of fragment.commentBubbleSegments) {
-        ReaderCommentBubblePainter.paint(canvas, bubble.rect.left, bubble.rect.top, bubble.rect.right,
-          bubble.rect.bottom, bubble.style, bubble.tail);
+        canvas.save();
+        canvas.translate(bubble.rect.left, bubble.rect.top);
+        canvas.scale(bubble.scale, bubble.scale);
+        ReaderCommentBubblePainter.paint(canvas, 0, 0, (bubble.rect.right - bubble.rect.left) / bubble.scale,
+          (bubble.rect.bottom - bubble.rect.top) / bubble.scale, bubble.style, bubble.tail);
+        canvas.restore();
       }
     }
     for (const fragment of this.page.fragments) {

@@ -607,6 +607,7 @@ struct ReadBookPage {
   @StorageLink('readerMarginRight') @Watch('onReadLayoutChanged') readerMarginRight: number = 18;
   @StorageLink('readerMarginTop') @Watch('onReadLayoutChanged') readerMarginTop: number = 18;
   @StorageLink('readerMarginBottom') @Watch('onReadLayoutChanged') readerMarginBottom: number = 18;
+  @StorageLink('readerCommentBubbleSize') @Watch('onReadLayoutChanged') readerCommentBubbleSize: number = 100;
   @StorageLink('readerLightThemeIndex') @Watch('onReaderThemeChanged') readerLightThemeIndex: number = 0;
   @StorageLink('readerDarkThemeIndex') @Watch('onReaderThemeChanged') readerDarkThemeIndex: number = 0;
   @StorageLink('readerLightCustomThemeBackgroundColor') @Watch('onReaderThemeChanged') readerLightCustomThemeBackgroundColor: string = ReaderThemeHelper.LIGHT_CUSTOM_BACKGROUND_COLOR;
@@ -3074,19 +3075,15 @@ struct ReadBookPage {
   }
 
   /**
-   * 段评弹层与详情页目录一致：系统半模态，停 60% 与全屏两档，网页内上滑先把弹层拉满再滚动评论，
-   * 下滑先滚回顶部再收起弹层，不用再对准顶部那条拖动区。
+   * 段评弹层停 60% 与全屏两档，仅顶部拖动区调整高度，网页手势只滚动评论。
    */
   readerCommentSheetOptions(): SheetOptions {
     return {
       detents: ['60%', SheetSize.LARGE],
-      // 系统拖动条会在网页上方单独占一条底色不同的横带；改为在网页顶部叠一根拖动条（见 readerCommentPanel）。
-      dragBar: false,
+      // 使用系统拖动条承接弹层手势；普通 Row 命中区不会自动驱动弹层高度。
+      dragBar: true,
       showClose: false,
       scrollSizeMode: ScrollSizeMode.CONTINUOUS,
-      // Web 的百分比高度可能保留首次半屏尺寸，显式同步弹层实际高度（回调单位为 px）。
-      onHeightDidChange: (height: number): void => this.updateReaderCommentPanelHeight(height),
-      onDetentsDidChange: (height: number): void => this.updateReaderCommentPanelHeight(height),
       // 底色与评论页一致，拖动到网页尚未铺满的位置时也看不出接缝。
       backgroundColor: this.readerCommentPanelWebBackground(),
       onDisappear: () => {
@@ -3102,9 +3099,9 @@ struct ReadBookPage {
     return this.appDarkMode ? '#131313' : '#FFFFFF';
   }
 
-  updateReaderCommentPanelHeight(heightPx: number): void {
-    if (!this.showReaderCommentPanel || !Number.isFinite(heightPx) || heightPx <= 0) return;
-    const height = this.getUIContext().px2vp(heightPx);
+  updateReaderCommentPanelHeight(height: number): void {
+    // onSizeChange 返回内容区的 vp 高度，已扣除系统拖动条，不能再按整张弹层高度布局 Web。
+    if (!this.showReaderCommentPanel || !Number.isFinite(height) || height <= 0) return;
     if (Math.abs(height - this.readerCommentPanelHeight) >= 0.5) this.readerCommentPanelHeight = height;
   }
 
@@ -3115,7 +3112,7 @@ struct ReadBookPage {
       Web({ src: this.readerCommentPanelUrl, controller: this.readerCommentPanelController,
         renderMode: RenderMode.SYNC_RENDER })
         .width('100%')
-        .height('100%')
+        .height(this.readerCommentPanelHeight > 0 ? this.readerCommentPanelHeight : '100%')
         .backgroundColor(this.readerCommentPanelWebBackground())
         .javaScriptAccess(true)
         .domStorageAccess(true)
@@ -3135,10 +3132,10 @@ struct ReadBookPage {
         .javaScriptOnDocumentStart([{
           script: ReaderCommentWebTheme.bootstrap(this.appDarkMode), scriptRules: ['*']
         }])
-        // 上滑先交给弹层展开到全屏，下滑先滚网页、到顶后再交给弹层收起。
+        // 网页滚动不传递给弹层，高度只由顶部拖动区调整。
         .nestedScroll({
-          scrollForward: NestedScrollMode.PARENT_FIRST,
-          scrollBackward: NestedScrollMode.SELF_FIRST
+          scrollForward: NestedScrollMode.SELF_ONLY,
+          scrollBackward: NestedScrollMode.SELF_ONLY
         })
         .onControllerAttached(() => {
           this.readerCommentPanelHtmlLoaded = false;
@@ -3184,18 +3181,12 @@ struct ReadBookPage {
         .backgroundColor(this.readerCommentPanelWebBackground())
       }
 
-      // 叠在评论页标题栏上方留白处的拖动条，只作提示，不拦截触摸。
-      Row()
-        .width(34)
-        .height(4)
-        .borderRadius(2)
-        .margin({ top: 8 })
-        .backgroundColor(this.appDarkMode ? '#59FFFFFF' : '#33000000')
-        .hitTestBehavior(HitTestMode.None)
-        .accessibilityLevel('no')
     }
     .width('100%')
-    .height(this.readerCommentPanelHeight > 0 ? this.readerCommentPanelHeight : '100%')
+    .height('100%')
+    .onSizeChange((_oldValue: SizeOptions, newValue: SizeOptions) => {
+      this.updateReaderCommentPanelHeight(Number(newValue.height));
+    })
     .backgroundColor(this.readerCommentPanelWebBackground())
     .clip(true)
   }
@@ -6652,6 +6643,7 @@ struct ReadBookPage {
     this.readerMarginRight = settings.marginRight;
     this.readerMarginTop = settings.marginTop;
     this.readerMarginBottom = settings.marginBottom;
+    this.readerCommentBubbleSize = settings.commentBubbleSize;
     this.readerLightThemeIndex = settings.lightThemeIndex;
     this.readerDarkThemeIndex = settings.darkThemeIndex;
     this.readerLightCustomThemeBackgroundColor = settings.lightCustomThemeBackgroundColor;
@@ -9535,7 +9527,7 @@ struct ReadBookPage {
       return [...this.readerTypographyDraft];
     }
     return [this.readerFontSize, this.readerFontWeight, this.readerLetterSpacing, this.readerLineHeight, this.readerParagraphSpacing,
-      this.readerMarginLeft, this.readerMarginRight, this.readerMarginTop, this.readerMarginBottom];
+      this.readerMarginLeft, this.readerMarginRight, this.readerMarginTop, this.readerMarginBottom, this.readerCommentBubbleSize];
   }
 
   onReaderTypographyDraftChange(values: number[]): void {
@@ -9560,6 +9552,7 @@ struct ReadBookPage {
     this.readerMarginRight = draft[ReaderTypographyField.MARGIN_RIGHT];
     this.readerMarginTop = draft[ReaderTypographyField.MARGIN_TOP];
     this.readerMarginBottom = draft[ReaderTypographyField.MARGIN_BOTTOM];
+    this.readerCommentBubbleSize = draft[ReaderTypographyField.COMMENT_BUBBLE_SIZE];
     this.readerLayoutCommitInProgress = false;
   }
 
@@ -10174,7 +10167,8 @@ struct ReadBookPage {
       this.readerLetterSpacing,
       this.readerTextAlign,
       this.readerFontWeight,
-      this.readerParagraphIndent
+      this.readerParagraphIndent,
+      this.readerCommentBubbleSize
     ).catch((e: Error) => {
       console.warn('保存阅读排版设置失败:', e);
     });
@@ -12471,7 +12465,7 @@ struct ReadBookPage {
   readerPlainTextLeaf(text: string) {
     Text(ReaderActionMarker.strip(LocalBookService.stripEpubImageMarkers(text || '', false), false))
       .fontSize(this.readerFontSize)
-      .fontWeight(this.readerFontWeight)
+      .fontWeight(this.readerFontWeight, { enableVariableFontWeight: true })
       .fontFamily(this.getBodyReaderFontFamily())
       .fontColor(this.getTextColor())
       .lineSpacing(LengthMetrics.vp(Math.max(0, this.readerLineHeight)))
@@ -13816,6 +13810,7 @@ struct ReadBookPage {
     input.titleFontFamily = this.getTitleReaderFontFamily();
     input.textColor = ReaderV2Color.parse(this.getTextColor(), 0xFF202124);
     input.commentBubble = this.readerCommentBubbleStyle();
+    input.commentBubbleSize = this.readerCommentBubbleSize;
     const commentLarge = this.readerSourceSettingEnabled('气泡增大');
     input.commentFontSizePx = this.toMeasureFontPx(commentLarge ?
       Math.max(12, this.readerFontSize - 2) : Math.max(10, this.readerFontSize - 5));
@@ -15467,7 +15462,7 @@ struct ReadBookPage {
       `${this.readerRegexFontSize}_${this.readerRegexShadowColor}_${this.themeRevision}_` +
       `${this.themeRegexEmphasisMode()}_${this.themeRegexBubbleStyleId()}_reader_action_layout_v7`;
     return `${this.readerFontSize}_${this.readerFontWeight}_${this.readerLetterSpacing}_${this.readerTextAlign}_${this.readerLineHeight}_${this.readerParagraphSpacing}_` +
-      `${this.readerParagraphIndent}_` +
+      `${this.readerParagraphIndent}_${this.readerCommentBubbleSize}_` +
       `${this.readerMarginLeft}_${this.readerMarginRight}_${this.readerMarginTop}_${this.readerMarginBottom}_` +
       `${this.readerBodyFontMode}_${this.readerBodyFontFamily}_${this.getBodyReaderFontFamily()}_` +
       `${this.readerTitleFontSize}_${this.readerTitleFontMode}_${this.readerTitleFontFamily}_` +

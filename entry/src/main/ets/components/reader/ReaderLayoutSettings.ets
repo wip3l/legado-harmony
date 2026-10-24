@@ -1,3 +1,4 @@
+import { ReaderCommentBubbleSize } from '../../core/reader/ReaderCommentBubbleSize';
 import { ReaderFontWeight } from '../../core/reader/ReaderFontWeight';
 import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
 import { ImmersiveBackButton } from '../ImmersiveBackButton';
@@ -26,16 +27,19 @@ export class ReaderTypographyField {
   static readonly MARGIN_RIGHT: number = 6;
   static readonly MARGIN_TOP: number = 7;
   static readonly MARGIN_BOTTOM: number = 8;
-  static readonly COUNT: number = 9;
+  static readonly COMMENT_BUBBLE_SIZE: number = 9;
+  static readonly COUNT: number = 10;
 
-  static readonly LABELS: string[] = ['字号', '字体粗细', '字距', '行距', '段落间距', '左边距', '右边距', '上边距', '下边距'];
+  static readonly LABELS: string[] = ['字号', '字体粗细', '字距', '行距', '段落间距', '左边距', '右边距', '上边距', '下边距', '气泡大小'];
 
   static min(field: number): number {
+    if (field === ReaderTypographyField.COMMENT_BUBBLE_SIZE) return ReaderCommentBubbleSize.MIN;
     if (field === ReaderTypographyField.FONT_WEIGHT) return ReaderFontWeight.MIN;
     return field === ReaderTypographyField.FONT_SIZE ? 14 : 0;
   }
 
   static max(field: number): number {
+    if (field === ReaderTypographyField.COMMENT_BUBBLE_SIZE) return ReaderCommentBubbleSize.MAX;
     if (field === ReaderTypographyField.FONT_WEIGHT) return ReaderFontWeight.MAX;
     if (field === ReaderTypographyField.FONT_SIZE) return 50;
     if (field === ReaderTypographyField.LETTER_SPACING) return 8;
@@ -56,7 +60,7 @@ export class ReaderTypographyField {
 }
 
 /**
- * 正文排版的统一调节控件：下拉选一个参数（字号、字体粗细、字距、行距、段距、四侧边距），用加减按钮或直接输入数值。
+ * 正文排版的统一调节控件：下拉选一个参数（字号、字体粗细、字距、行距、段距、四侧边距、气泡大小），用加减按钮或直接输入数值。
  * 数值草稿是组件自己的状态，连点加减只刷新这个控件；每次变化把整组草稿交给页面，
  * 页面稍后一次性提交并重排正文。
  */
@@ -82,7 +86,7 @@ export struct ReaderTypographyStepper {
     const values: number[] = [];
     for (let field = 0; field < ReaderTypographyField.COUNT; field++) {
       const fallback = field === ReaderTypographyField.FONT_WEIGHT ? ReaderFontWeight.DEFAULT :
-        ReaderTypographyField.min(field);
+        (field === ReaderTypographyField.COMMENT_BUBBLE_SIZE ? ReaderCommentBubbleSize.DEFAULT : ReaderTypographyField.min(field));
       values.push(ReaderTypographyField.clamp(field,
         field < this.initialValues.length ? this.initialValues[field] : fallback));
     }
@@ -215,6 +219,45 @@ export struct ReaderHeaderFooterSettings {
   @StorageLink('readerFooterEnabled') readerFooterEnabled: boolean = true;
   @StorageLink('readerInfoBarConfig') readerInfoBarConfig: string = '';
 
+  build() {
+    ReaderHeaderFooterEditor({
+      dark: this.dark,
+      textColor: this.textColor,
+      subTextColor: this.subTextColor,
+      accentColor: this.accentColor,
+      switchColor: this.switchColor,
+      menuColor: this.menuColor,
+      cardStyle: this.cardStyle,
+      dividerColor: this.dividerColor,
+      readerHeaderEnabled: $readerHeaderEnabled,
+      readerFooterEnabled: $readerFooterEnabled,
+      readerInfoBarConfig: $readerInfoBarConfig,
+      onChanged: (headerEnabled: boolean, footerEnabled: boolean, infoBarConfig: string): void =>
+        this.onChanged(headerEnabled, footerEnabled, infoBarConfig)
+    })
+  }
+}
+
+/**
+ * 页眉页脚设置组本体，三项设置由调用方双向绑定：上面的 ReaderHeaderFooterSettings 绑定全局设置，
+ * 主题排版页绑定自己的草稿。
+ */
+@Component
+export struct ReaderHeaderFooterEditor {
+  @Prop dark: boolean = false;
+  @Prop textColor: string = '#202124';
+  @Prop subTextColor: string = '#80868B';
+  @Prop accentColor: string = '#0A59F7';
+  @Prop switchColor: string = '#0A59F7';
+  @Prop menuColor: string = '#FFFFFF';
+  @Prop cardStyle: boolean = false;
+  @Prop dividerColor: string = '#00000000';
+  onChanged: (headerEnabled: boolean, footerEnabled: boolean, infoBarConfig: string) => void = () => {
+  };
+  @Link readerHeaderEnabled: boolean;
+  @Link readerFooterEnabled: boolean;
+  @Link readerInfoBarConfig: string;
+
   private static readonly SLOT_HEADER_LEFT: number = 0;
   private static readonly SLOT_HEADER_CENTER: number = 1;
   private static readonly SLOT_HEADER_RIGHT: number = 2;
@@ -246,35 +289,35 @@ export struct ReaderHeaderFooterSettings {
   private slotIndex(slot: number): number {
     const config = this.config();
     let item = config.headerLeft;
-    if (slot === ReaderHeaderFooterSettings.SLOT_HEADER_CENTER) item = config.headerCenter;
-    if (slot === ReaderHeaderFooterSettings.SLOT_HEADER_RIGHT) item = config.headerRight;
-    if (slot === ReaderHeaderFooterSettings.SLOT_FOOTER_LEFT) item = config.footerLeft;
-    if (slot === ReaderHeaderFooterSettings.SLOT_FOOTER_CENTER) item = config.footerCenter;
-    if (slot === ReaderHeaderFooterSettings.SLOT_FOOTER_RIGHT) item = config.footerRight;
+    if (slot === ReaderHeaderFooterEditor.SLOT_HEADER_CENTER) item = config.headerCenter;
+    if (slot === ReaderHeaderFooterEditor.SLOT_HEADER_RIGHT) item = config.headerRight;
+    if (slot === ReaderHeaderFooterEditor.SLOT_FOOTER_LEFT) item = config.footerLeft;
+    if (slot === ReaderHeaderFooterEditor.SLOT_FOOTER_CENTER) item = config.footerCenter;
+    if (slot === ReaderHeaderFooterEditor.SLOT_FOOTER_RIGHT) item = config.footerRight;
     return Math.max(0, ReaderInfoItem.VALUES.indexOf(item));
   }
 
   private setSlot(slot: number, index: number): void {
     const item = index >= 0 && index < ReaderInfoItem.VALUES.length ? ReaderInfoItem.VALUES[index] : ReaderInfoItem.NONE;
     const config = this.config();
-    if (slot === ReaderHeaderFooterSettings.SLOT_HEADER_LEFT) config.headerLeft = item;
-    if (slot === ReaderHeaderFooterSettings.SLOT_HEADER_CENTER) config.headerCenter = item;
-    if (slot === ReaderHeaderFooterSettings.SLOT_HEADER_RIGHT) config.headerRight = item;
-    if (slot === ReaderHeaderFooterSettings.SLOT_FOOTER_LEFT) config.footerLeft = item;
-    if (slot === ReaderHeaderFooterSettings.SLOT_FOOTER_CENTER) config.footerCenter = item;
-    if (slot === ReaderHeaderFooterSettings.SLOT_FOOTER_RIGHT) config.footerRight = item;
+    if (slot === ReaderHeaderFooterEditor.SLOT_HEADER_LEFT) config.headerLeft = item;
+    if (slot === ReaderHeaderFooterEditor.SLOT_HEADER_CENTER) config.headerCenter = item;
+    if (slot === ReaderHeaderFooterEditor.SLOT_HEADER_RIGHT) config.headerRight = item;
+    if (slot === ReaderHeaderFooterEditor.SLOT_FOOTER_LEFT) config.footerLeft = item;
+    if (slot === ReaderHeaderFooterEditor.SLOT_FOOTER_CENTER) config.footerCenter = item;
+    if (slot === ReaderHeaderFooterEditor.SLOT_FOOTER_RIGHT) config.footerRight = item;
     this.commit(config);
   }
 
   private stepperValue(field: number): number {
     const config = this.config();
-    if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_OFFSET) return config.headerOffset;
-    if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OFFSET) return config.footerOffset;
-    if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_SHRINK) return config.headerShrink;
-    if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_SHRINK) return config.footerShrink;
-    if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY) return config.headerOpacity;
-    if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OPACITY) return config.footerOpacity;
-    return field === ReaderHeaderFooterSettings.STEPPER_HEADER_FONT_SIZE ?
+    if (field === ReaderHeaderFooterEditor.STEPPER_HEADER_OFFSET) return config.headerOffset;
+    if (field === ReaderHeaderFooterEditor.STEPPER_FOOTER_OFFSET) return config.footerOffset;
+    if (field === ReaderHeaderFooterEditor.STEPPER_HEADER_SHRINK) return config.headerShrink;
+    if (field === ReaderHeaderFooterEditor.STEPPER_FOOTER_SHRINK) return config.footerShrink;
+    if (field === ReaderHeaderFooterEditor.STEPPER_HEADER_OPACITY) return config.headerOpacity;
+    if (field === ReaderHeaderFooterEditor.STEPPER_FOOTER_OPACITY) return config.footerOpacity;
+    return field === ReaderHeaderFooterEditor.STEPPER_HEADER_FONT_SIZE ?
       config.headerFontSize : config.footerFontSize;
   }
 
@@ -287,8 +330,8 @@ export struct ReaderHeaderFooterSettings {
   }
 
   private isOffsetStepper(field: number): boolean {
-    return field === ReaderHeaderFooterSettings.STEPPER_HEADER_OFFSET ||
-      field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OFFSET;
+    return field === ReaderHeaderFooterEditor.STEPPER_HEADER_OFFSET ||
+      field === ReaderHeaderFooterEditor.STEPPER_FOOTER_OFFSET;
   }
 
   private stepperMin(field: number): number {
@@ -306,13 +349,13 @@ export struct ReaderHeaderFooterSettings {
   }
 
   private isOpacityStepper(field: number): boolean {
-    return field === ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY ||
-      field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OPACITY;
+    return field === ReaderHeaderFooterEditor.STEPPER_HEADER_OPACITY ||
+      field === ReaderHeaderFooterEditor.STEPPER_FOOTER_OPACITY;
   }
 
   private isShrinkStepper(field: number): boolean {
-    return field === ReaderHeaderFooterSettings.STEPPER_HEADER_SHRINK ||
-      field === ReaderHeaderFooterSettings.STEPPER_FOOTER_SHRINK;
+    return field === ReaderHeaderFooterEditor.STEPPER_HEADER_SHRINK ||
+      field === ReaderHeaderFooterEditor.STEPPER_FOOTER_SHRINK;
   }
 
   private stepperText(field: number): string {
@@ -322,27 +365,27 @@ export struct ReaderHeaderFooterSettings {
 
   private stepBy(field: number, direction: number): void {
     const config = this.config();
-    if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_OFFSET) {
+    if (field === ReaderHeaderFooterEditor.STEPPER_HEADER_OFFSET) {
       config.headerOffset = ReaderInfoBarConfig.clampOffset(
         config.headerOffset + direction * ReaderInfoBarConfig.OFFSET_STEP);
-    } else if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OFFSET) {
+    } else if (field === ReaderHeaderFooterEditor.STEPPER_FOOTER_OFFSET) {
       config.footerOffset = ReaderInfoBarConfig.clampOffset(
         config.footerOffset + direction * ReaderInfoBarConfig.OFFSET_STEP);
-    } else if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_SHRINK) {
+    } else if (field === ReaderHeaderFooterEditor.STEPPER_HEADER_SHRINK) {
       config.headerShrink = ReaderInfoBarConfig.clampShrink(
         config.headerShrink + direction * ReaderInfoBarConfig.SHRINK_STEP);
-    } else if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_SHRINK) {
+    } else if (field === ReaderHeaderFooterEditor.STEPPER_FOOTER_SHRINK) {
       config.footerShrink = ReaderInfoBarConfig.clampShrink(
         config.footerShrink + direction * ReaderInfoBarConfig.SHRINK_STEP);
-    } else if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY) {
+    } else if (field === ReaderHeaderFooterEditor.STEPPER_HEADER_OPACITY) {
       config.headerOpacity = ReaderInfoBarConfig.clampOpacity(
         config.headerOpacity + direction * ReaderInfoBarConfig.OPACITY_STEP);
-    } else if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_OPACITY) {
+    } else if (field === ReaderHeaderFooterEditor.STEPPER_FOOTER_OPACITY) {
       config.footerOpacity = ReaderInfoBarConfig.clampOpacity(
         config.footerOpacity + direction * ReaderInfoBarConfig.OPACITY_STEP);
-    } else if (field === ReaderHeaderFooterSettings.STEPPER_HEADER_FONT_SIZE) {
+    } else if (field === ReaderHeaderFooterEditor.STEPPER_HEADER_FONT_SIZE) {
       config.headerFontSize = ReaderInfoBarConfig.clampFontSize(config.headerFontSize + direction);
-    } else if (field === ReaderHeaderFooterSettings.STEPPER_FOOTER_FONT_SIZE) {
+    } else if (field === ReaderHeaderFooterEditor.STEPPER_FOOTER_FONT_SIZE) {
       config.footerFontSize = ReaderInfoBarConfig.clampFontSize(config.footerFontSize + direction);
     }
     this.commit(config);
@@ -357,14 +400,14 @@ export struct ReaderHeaderFooterSettings {
         } })
 
       if (this.readerHeaderEnabled) {
-        this.slotItem('页眉左侧', ReaderHeaderFooterSettings.SLOT_HEADER_LEFT, 'reader_header_left_select')
-        this.slotItem('页眉中间', ReaderHeaderFooterSettings.SLOT_HEADER_CENTER, 'reader_header_center_select')
-        this.slotItem('页眉右侧', ReaderHeaderFooterSettings.SLOT_HEADER_RIGHT, 'reader_header_right_select')
+        this.slotItem('页眉左侧', ReaderHeaderFooterEditor.SLOT_HEADER_LEFT, 'reader_header_left_select')
+        this.slotItem('页眉中间', ReaderHeaderFooterEditor.SLOT_HEADER_CENTER, 'reader_header_center_select')
+        this.slotItem('页眉右侧', ReaderHeaderFooterEditor.SLOT_HEADER_RIGHT, 'reader_header_right_select')
         this.colorItem('页眉颜色', true)
-        this.stepperItem('页眉字号', ReaderHeaderFooterSettings.STEPPER_HEADER_FONT_SIZE)
-        this.stepperItem('页眉不透明度', ReaderHeaderFooterSettings.STEPPER_HEADER_OPACITY)
-        this.stepperItem('页眉下移', ReaderHeaderFooterSettings.STEPPER_HEADER_OFFSET)
-        this.stepperItem('页眉收缩', ReaderHeaderFooterSettings.STEPPER_HEADER_SHRINK)
+        this.stepperItem('页眉字号', ReaderHeaderFooterEditor.STEPPER_HEADER_FONT_SIZE)
+        this.stepperItem('页眉不透明度', ReaderHeaderFooterEditor.STEPPER_HEADER_OPACITY)
+        this.stepperItem('页眉下移', ReaderHeaderFooterEditor.STEPPER_HEADER_OFFSET)
+        this.stepperItem('页眉收缩', ReaderHeaderFooterEditor.STEPPER_HEADER_SHRINK)
         this.switchItem({ title: '页眉分隔线', description: '页眉下方的细线',
           checked: this.config().headerDivider, onChange: (checked: boolean) => {
             const config = this.config();
@@ -381,14 +424,14 @@ export struct ReaderHeaderFooterSettings {
         } })
 
       if (this.readerFooterEnabled) {
-        this.slotItem('页脚左侧', ReaderHeaderFooterSettings.SLOT_FOOTER_LEFT, 'reader_footer_left_select')
-        this.slotItem('页脚中间', ReaderHeaderFooterSettings.SLOT_FOOTER_CENTER, 'reader_footer_center_select')
-        this.slotItem('页脚右侧', ReaderHeaderFooterSettings.SLOT_FOOTER_RIGHT, 'reader_footer_right_select')
+        this.slotItem('页脚左侧', ReaderHeaderFooterEditor.SLOT_FOOTER_LEFT, 'reader_footer_left_select')
+        this.slotItem('页脚中间', ReaderHeaderFooterEditor.SLOT_FOOTER_CENTER, 'reader_footer_center_select')
+        this.slotItem('页脚右侧', ReaderHeaderFooterEditor.SLOT_FOOTER_RIGHT, 'reader_footer_right_select')
         this.colorItem('页脚颜色', false)
-        this.stepperItem('页脚字号', ReaderHeaderFooterSettings.STEPPER_FOOTER_FONT_SIZE)
-        this.stepperItem('页脚不透明度', ReaderHeaderFooterSettings.STEPPER_FOOTER_OPACITY)
-        this.stepperItem('页脚上移', ReaderHeaderFooterSettings.STEPPER_FOOTER_OFFSET)
-        this.stepperItem('页脚收缩', ReaderHeaderFooterSettings.STEPPER_FOOTER_SHRINK)
+        this.stepperItem('页脚字号', ReaderHeaderFooterEditor.STEPPER_FOOTER_FONT_SIZE)
+        this.stepperItem('页脚不透明度', ReaderHeaderFooterEditor.STEPPER_FOOTER_OPACITY)
+        this.stepperItem('页脚上移', ReaderHeaderFooterEditor.STEPPER_FOOTER_OFFSET)
+        this.stepperItem('页脚收缩', ReaderHeaderFooterEditor.STEPPER_FOOTER_SHRINK)
         this.switchItem({ title: '页脚分隔线', description: '页脚上方的细线',
           checked: this.config().footerDivider, onChange: (checked: boolean) => {
             const config = this.config();

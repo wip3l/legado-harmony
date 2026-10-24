@@ -31,6 +31,7 @@
     "pages/AppIconSettings",
     "pages/ThemeColorSettings",
     "pages/ThemeSettings",
+    "pages/ThemeTypographySettings",
     "pages/AccountCenter",
     "pages/MemberBenefits",
     "pages/DataSync",

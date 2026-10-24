@@ -12,6 +12,7 @@ import {
   ReaderV2SelectionRun
 } from './ReaderV2PageLayout';
 import { ReaderV2SpanStyleRange } from './ReaderV2Style';
+import { ReaderCommentBubbleSize } from './ReaderCommentBubbleSize';
 import { ReaderCommentBubblePainter } from './ReaderCommentBubble';
 import { ReaderMixedPageLayout } from './ReaderMixedPageLayout';
 
@@ -405,7 +406,8 @@ export class ReaderV2Paginator {
       graphicsText.FontWeight.W900];
 
   private static bodyFontWeight(weight: number): graphicsText.FontWeight {
-    return ReaderV2Paginator.FONT_WEIGHTS[weight / 100 - 1];
+    // Static faces use the nearest SDK weight; the wght axis below preserves precise variable-font values.
+    return ReaderV2Paginator.FONT_WEIGHTS[Math.max(0, Math.min(8, Math.round(weight / 100) - 1))];
   }
 
   private static baseTextStyle(block: ReaderV2Block, snapshot: ReaderV2LayoutSnapshot): graphicsText.TextStyle {
@@ -419,6 +421,7 @@ export class ReaderV2Paginator {
       letterSpacing: snapshot.letterSpacingPx,
       fontFamilies: [heading ? snapshot.titleFontFamily : snapshot.bodyFontFamily],
       fontWeight: heading ? graphicsText.FontWeight.W600 : ReaderV2Paginator.bodyFontWeight(snapshot.fontWeight),
+      fontVariations: [{ axis: 'wght', value: heading ? 600 : snapshot.fontWeight }],
       color: ReaderV2Paginator.graphicsColor(snapshot.textColor),
       halfLeading: false,
       heightOnly: true,
@@ -482,10 +485,12 @@ export class ReaderV2Paginator {
     if (actionIndex < document.actions.length) {
       const action = document.actions[actionIndex];
       if (absoluteOffset >= action.displayStart && absoluteOffset < action.displayEnd) {
-      base.fontSize = snapshot.commentFontSizePx;
-      // The bubble behind the label is painted by the page node, not as a text background.
-      base.color = ReaderV2Paginator.graphicsColor(snapshot.commentBubble.text);
-      return base;
+        const scale = ReaderCommentBubbleSize.scale(action.label, snapshot.commentBubbleSize);
+        base.fontSize = snapshot.commentFontSizePx * scale;
+        base.letterSpacing = snapshot.letterSpacingPx * scale;
+        // The bubble behind the label is painted by the page node, not as a text background.
+        base.color = ReaderV2Paginator.graphicsColor(snapshot.commentBubble.text);
+        return base;
       }
     }
     for (const style of regexStyles) {
@@ -751,8 +756,9 @@ export class ReaderV2Paginator {
     const localStart = Math.max(0, action.bubbleStart - fragment.displayStart);
     const localEnd = Math.min(fragment.localEnd - fragment.localStart, action.displayEnd - fragment.displayStart);
     if (localEnd <= localStart) return;
-    const height = ReaderCommentBubblePainter.heightFor(snapshot.commentFontSizePx);
-    const inflateX = snapshot.commentFontSizePx * 0.18;
+    const scale = ReaderCommentBubbleSize.scale(action.label, snapshot.commentBubbleSize);
+    const height = ReaderCommentBubblePainter.heightFor(snapshot.commentFontSizePx) * scale;
+    const inflateX = snapshot.commentFontSizePx * 0.18 * scale;
     const pieces: ReaderV2CommentBubbleSegment[] = [];
     for (const line of fragment.paragraph.getLineMetrics()) {
       const segmentStart = Math.max(localStart, line.startIndex);
@@ -777,6 +783,7 @@ export class ReaderV2Paginator {
       const centerY = fragment.paragraphY + (top + bottom) / 2;
       const segment = new ReaderV2CommentBubbleSegment();
       segment.style = snapshot.commentBubble;
+      segment.scale = scale;
       segment.tail = false;
       segment.rect = new ReaderV2Rect(fragment.paragraphX + left - inflateX, centerY - height / 2,
         fragment.paragraphX + right + inflateX, centerY + height / 2);

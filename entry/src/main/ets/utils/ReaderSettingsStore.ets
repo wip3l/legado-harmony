@@ -1,3 +1,4 @@
+import { ReaderCommentBubbleSize } from '../core/reader/ReaderCommentBubbleSize';
 import { ReaderFontWeight } from '../core/reader/ReaderFontWeight';
 import { ReaderParagraphIndent } from '../core/reader/ReaderParagraphIndent';
 import { Context } from '@kit.AbilityKit';
@@ -19,6 +20,7 @@ export class ReaderSettings {
   marginRight: number = 18;
   marginTop: number = 18;
   marginBottom: number = 18;
+  commentBubbleSize: number = ReaderCommentBubbleSize.DEFAULT;
   themeIndex: number = 0;
   lightThemeIndex: number = 0;
   darkThemeIndex: number = 0;
@@ -104,6 +106,7 @@ export class ReaderSettingsStore {
   static readonly KEY_MARGIN_RIGHT: string = 'readerMarginRight';
   static readonly KEY_MARGIN_TOP: string = 'readerMarginTop';
   static readonly KEY_MARGIN_BOTTOM: string = 'readerMarginBottom';
+  static readonly KEY_COMMENT_BUBBLE_SIZE: string = 'readerCommentBubbleSize';
   static readonly KEY_THEME_INDEX: string = 'readerThemeIndex';
   static readonly KEY_LIGHT_THEME_INDEX: string = 'readerLightThemeIndex';
   static readonly KEY_DARK_THEME_INDEX: string = 'readerDarkThemeIndex';
@@ -167,6 +170,7 @@ export class ReaderSettingsStore {
   private static readonly STORE_NAME: string = 'reader_settings';
   private static readonly THEME_PROFILE_PREFIX: string = 'readerThemeProfileV1_';
   private static readonly LEGACY_CUSTOM_PROFILE_ID: string = 'custom';
+  private static readonly TYPOGRAPHY_BOUND_PREFIX: string = 'readerThemeTypographyBoundV1_';
   private static cachedSettings: ReaderSettings | null = null;
   private static cachedThemeId: string = '';
   private static readerFontStyleSaveQueue: Promise<void> = Promise.resolve();
@@ -226,6 +230,8 @@ export class ReaderSettingsStore {
       store, ReaderSettingsStore.KEY_MARGIN_TOP, 18, 'verticalMargin');
     settings.marginBottom = await ReaderSettingsStore.getNumber(
       store, ReaderSettingsStore.KEY_MARGIN_BOTTOM, 18, 'verticalMargin');
+    settings.commentBubbleSize = await ReaderSettingsStore.getNumber(
+      store, ReaderSettingsStore.KEY_COMMENT_BUBBLE_SIZE, ReaderCommentBubbleSize.DEFAULT, 'commentBubbleSize');
     const legacyThemeIndex = await ReaderSettingsStore.getNumber(
       store,
       ReaderSettingsStore.KEY_THEME_INDEX,
@@ -496,7 +502,8 @@ export class ReaderSettingsStore {
     letterSpacing: number = 0,
     textAlign: string = 'justify',
     fontWeight?: number,
-    paragraphIndent?: number
+    paragraphIndent?: number,
+    commentBubbleSize?: number
   ): Promise<void> {
     const settings = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
     settings.fontSize = ReaderSettingsStore.normalizeFontSize(fontSize);
@@ -510,6 +517,7 @@ export class ReaderSettingsStore {
     settings.marginRight = ReaderSettingsStore.normalizeHorizontalMargin(marginRight);
     settings.marginTop = ReaderSettingsStore.normalizeVerticalMargin(marginTop);
     settings.marginBottom = ReaderSettingsStore.normalizeVerticalMargin(marginBottom);
+    settings.commentBubbleSize = ReaderCommentBubbleSize.normalize(commentBubbleSize ?? settings.commentBubbleSize);
     ReaderSettingsStore.cachedSettings = ReaderSettingsStore.clone(settings);
     ReaderSettingsStore.applyLayoutToStorage(settings);
     const snapshot = ReaderSettingsStore.clone(settings);
@@ -546,6 +554,7 @@ export class ReaderSettingsStore {
     await store.put(ReaderSettingsStore.KEY_MARGIN_RIGHT, settings.marginRight);
     await store.put(ReaderSettingsStore.KEY_MARGIN_TOP, settings.marginTop);
     await store.put(ReaderSettingsStore.KEY_MARGIN_BOTTOM, settings.marginBottom);
+    await store.put(ReaderSettingsStore.KEY_COMMENT_BUBBLE_SIZE, settings.commentBubbleSize);
     await ReaderSettingsStore.persistThemeProfile(store, themeId, settings);
     await store.flush();
   }
@@ -961,7 +970,8 @@ export class ReaderSettingsStore {
       settings.letterSpacing,
       settings.textAlign,
       settings.fontWeight,
-      settings.paragraphIndent
+      settings.paragraphIndent,
+      settings.commentBubbleSize
     );
     await ReaderSettingsStore.saveThemeSettings(
       context,
@@ -1119,6 +1129,7 @@ export class ReaderSettingsStore {
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_MARGIN_RIGHT, settings.marginRight);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_MARGIN_TOP, settings.marginTop);
     AppStorage.setOrCreate(ReaderSettingsStore.KEY_MARGIN_BOTTOM, settings.marginBottom);
+    AppStorage.setOrCreate(ReaderSettingsStore.KEY_COMMENT_BUBBLE_SIZE, settings.commentBubbleSize);
   }
 
   private static applyThemeToStorage(settings: ReaderSettings): void {
@@ -1196,7 +1207,89 @@ export class ReaderSettingsStore {
     if (id === ReaderSettingsStore.activeThemeId() || id === ReaderSettingsStore.LEGACY_CUSTOM_PROFILE_ID) return;
     const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
     await store.delete(ReaderSettingsStore.themeProfileKey(id));
+    await store.delete(ReaderSettingsStore.typographyBoundKey(id));
     await store.flush();
+  }
+
+  /**
+   * 主题排版页能编辑的全部字段：正文排版、段首缩进与对齐、页眉页脚、正文扩展至状态栏，
+   * 以及阅读字体页的正文、标题字体和正则强调规则。全局字体是全应用共用的选择，不在其中。
+   */
+  static copyTypography(source: ReaderSettings, target: ReaderSettings): void {
+    target.fontSize = source.fontSize;
+    target.fontWeight = source.fontWeight;
+    target.letterSpacing = source.letterSpacing;
+    target.textAlign = source.textAlign;
+    target.lineHeight = source.lineHeight;
+    target.paragraphSpacing = source.paragraphSpacing;
+    target.paragraphIndent = source.paragraphIndent;
+    target.marginLeft = source.marginLeft;
+    target.marginRight = source.marginRight;
+    target.marginTop = source.marginTop;
+    target.marginBottom = source.marginBottom;
+    target.commentBubbleSize = source.commentBubbleSize;
+    target.extendToStatusBar = source.extendToStatusBar;
+    target.readerHeaderEnabled = source.readerHeaderEnabled;
+    target.readerFooterEnabled = source.readerFooterEnabled;
+    target.readerInfoBarConfig = ReaderSettingsStore.resolveInfoBarConfig(source.readerInfoBarConfig, source);
+    target.bodyFontMode = source.bodyFontMode;
+    target.bodyFontFamily = source.bodyFontFamily;
+    target.titleFontMode = source.titleFontMode;
+    target.titleFontFamily = source.titleFontFamily;
+    target.titleFontSize = source.titleFontSize;
+    ReaderSettingsStore.updateFontRules(target, source);
+  }
+
+  /** 用户在主题排版页为这套主题保存过排版。应用主题时据此默认沿用它，而不是重置成预设排版。 */
+  static async isTypographyBound(context: Context, profileId: string): Promise<boolean> {
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    return await store.get(ReaderSettingsStore.typographyBoundKey(profileId), false) === true;
+  }
+
+  /**
+   * 把主题排版页的设置写进对应主题的档案并记为已绑定。正在使用的档案走各项原有的保存路径，
+   * 阅读页与设置页立即同步；其他档案直接改存储，切换到这套主题时随档案一起生效。
+   */
+  static async saveTypographyToProfile(context: Context, profileId: string, source: ReaderSettings): Promise<void> {
+    const id = ReaderSettingsStore.normalizeThemeProfileId(profileId);
+    if (id === ReaderSettingsStore.activeThemeId()) {
+      await ReaderSettingsStore.saveLayoutSettings(context, source.fontSize, source.lineHeight, source.paragraphSpacing,
+        source.marginLeft, source.marginRight, source.marginTop, source.marginBottom, source.letterSpacing,
+        source.textAlign, source.fontWeight, source.paragraphIndent, source.commentBubbleSize);
+      await ReaderSettingsStore.saveReaderFontStyleSettings(context, source);
+      await ReaderSettingsStore.saveReaderChromeSettings(context, source.readerHeaderEnabled,
+        source.readerFooterEnabled, source.readerInfoBarConfig);
+      const current = ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage();
+      await ReaderSettingsStore.saveReadingInteractionSettings(context, current.volumeTurnPage,
+        current.screenTimeoutMinutes, source.extendToStatusBar);
+    } else {
+      await ReaderSettingsStore.waitForReaderFontStyleSaves();
+      await ReaderSettingsStore.waitForReaderLayoutSaves();
+      await ReaderSettingsStore.waitForReaderChromeSaves();
+      const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+      let profile = await ReaderSettingsStore.loadThemeProfile(store, id);
+      if (!profile) {
+        // 与第一次切换到该主题时一样：从当前设置复制一份，阅读背景跟随主题。
+        profile = ReaderSettingsStore.clone(ReaderSettingsStore.cachedSettings || ReaderSettingsStore.fromStorage());
+        profile.themeIndex = ReaderThemeHelper.APP_THEME_INDEX;
+        profile.lightThemeIndex = ReaderThemeHelper.APP_THEME_INDEX;
+        profile.darkThemeIndex = ReaderThemeHelper.APP_THEME_INDEX;
+      }
+      ReaderSettingsStore.copyTypography(source, profile);
+      await store.put(ReaderSettingsStore.themeProfileKey(id), JSON.stringify(ReaderSettingsStore.clone(profile)));
+    }
+    // 排版本身只存在本机，与阅读页里调整排版一样不触发云同步；强调规则的变化由各自的保存路径标记。
+    await ReaderSettingsStore.markTypographyBound(context, id);
+  }
+
+  static async markTypographyBound(context: Context, profileId: string): Promise<void> {
+    const store = await preferences.getPreferences(context, ReaderSettingsStore.STORE_NAME);
+    await store.put(ReaderSettingsStore.typographyBoundKey(profileId), true);
+    await store.flush();
+  }
+
+  private static typographyBoundKey(profileId: string): string {
+    return `${ReaderSettingsStore.TYPOGRAPHY_BOUND_PREFIX}${ReaderSettingsStore.normalizeThemeProfileId(profileId)}`;
   }
 
   private static normalizeThemeProfileId(themeId: string): string {
@@ -1361,6 +1454,7 @@ export class ReaderSettingsStore {
     fontSize: number = 20,
     lineHeightMode: string = ''
   ): number {
+    if (type === 'commentBubbleSize') return ReaderCommentBubbleSize.normalize(value);
     if (type === 'fontWeight') return ReaderFontWeight.normalize(value);
     if (type === 'paragraphIndent') return ReaderParagraphIndent.normalize(value);
     if (type === 'fontSize') {
@@ -1570,6 +1664,7 @@ export class ReaderSettingsStore {
     settings.marginRight = ReaderSettingsStore.normalizeHorizontalMargin(source.marginRight);
     settings.marginTop = ReaderSettingsStore.normalizeVerticalMargin(source.marginTop);
     settings.marginBottom = ReaderSettingsStore.normalizeVerticalMargin(source.marginBottom);
+    settings.commentBubbleSize = ReaderCommentBubbleSize.normalize(source.commentBubbleSize);
     settings.themeIndex = ReaderSettingsStore.normalizeThemeIndex(source.themeIndex);
     settings.lightThemeIndex = ReaderSettingsStore.normalizeThemeIndex(source.lightThemeIndex);
     settings.darkThemeIndex = ReaderSettingsStore.normalizeThemeIndex(source.darkThemeIndex);
@@ -1678,6 +1773,8 @@ export class ReaderSettingsStore {
       AppStorage.get<number>(ReaderSettingsStore.KEY_MARGIN_TOP) ?? 18);
     settings.marginBottom = ReaderSettingsStore.normalizeVerticalMargin(
       AppStorage.get<number>(ReaderSettingsStore.KEY_MARGIN_BOTTOM) ?? 18);
+    settings.commentBubbleSize = ReaderCommentBubbleSize.normalize(
+      AppStorage.get<number>(ReaderSettingsStore.KEY_COMMENT_BUBBLE_SIZE) ?? ReaderCommentBubbleSize.DEFAULT);
     const legacyThemeIndex = ReaderSettingsStore.normalizeThemeIndex(
       AppStorage.get<number>(ReaderSettingsStore.KEY_THEME_INDEX) ?? 0
     );

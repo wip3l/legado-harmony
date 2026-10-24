@@ -467,7 +467,8 @@ export class ThemePackageService {
         const merged = mergeRules(existing, JSON.stringify(incomingRules), Date.now());
         profileRecord['regexFontRulesRaw'] = ReaderRegexFontCodec.encode(
           ReaderRegexFontCodec.decode(merged.rulesJson));
-        if (merged.added > 0 && preview.theme.emphasis.enabled) {
+        // 作者开着强调规则就打开，即使规则全都和本机已有的重复（没有新增）也要生效。
+        if (preview.theme.emphasis.enabled) {
           profileRecord['regexFontEnabled'] = true;
         }
         result.addedRules = merged.added;
@@ -487,6 +488,11 @@ export class ThemePackageService {
       }
       await ReaderSettingsStore.writeProfile(context, ReaderSettingsStore.profileIdFor(ThemeIds.CUSTOM, scheme.id),
         JSON.parse(JSON.stringify(profileRecord)) as ReaderSettings);
+      if (layout) {
+        // 包里带了作者的排版：应用这套主题时默认沿用它，而不是重置成预设排版。
+        await ReaderSettingsStore.markTypographyBound(context,
+          ReaderSettingsStore.profileIdFor(ThemeIds.CUSTOM, scheme.id));
+      }
       result.scheme = scheme;
       if (replaceSchemeId) {
         await ThemePackageService.cleanupImportedFiles(context);

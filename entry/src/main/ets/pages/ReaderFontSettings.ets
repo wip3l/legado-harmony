@@ -25,6 +25,7 @@ import { AppSpacing } from '../theme/AppSpacing';
 import { PageScaffold } from '../components/common/PageScaffold';
 import { CloudAutoSync, CloudRemoteFont } from '../account/CloudAutoSync';
 import { CloudFontMenu } from '../account/CloudFontMenu';
+import { ThemeTypographyDraft } from '../utils/ThemeTypographyDraft';
 
 class ReaderCustomFontItem {
   familyName: string = '';
@@ -60,7 +61,8 @@ struct ReaderFontSettingsPage {
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('accountEntitlementsRevision') accountEntitlementsRevision: number = 0;
-  @StorageLink('readerFontWeight') readerFontWeight: number = 400;
+  // 只用于预览；草稿模式下不能写回全局的字体粗细。
+  @State readerFontWeight: number = 400;
   @State readerFontSize: number = 20;
   @State readerBodyFontMode: string = 'global';
   @State readerBodyFontFamily: string = '';
@@ -89,8 +91,13 @@ struct ReaderFontSettingsPage {
   private latestReaderFontStyleSave: Promise<void> = Promise.resolve();
   private latestReaderFontStyleSettings: ReaderSettings | null = null;
   private readerFontStyleSaveTimerId: number = -1;
+  // 从主题排版页打开时只编辑那一页的草稿，保存与否由主题排版页决定。
+  private draftMode: boolean = false;
 
   aboutToAppear(): void {
+    const params = router.getParams() as Record<string, Object> | undefined;
+    this.draftMode = !!params && params[ThemeTypographyDraft.DRAFT_PARAM] === true &&
+      ThemeTypographyDraft.current() !== null;
     this.loadSettings();
     this.syncBars();
   }
@@ -113,6 +120,10 @@ struct ReaderFontSettingsPage {
     }
     this.closingReaderFontSettings = true;
     this.flushScheduledSettingsSave();
+    if (this.draftMode) {
+      router.back();
+      return;
+    }
     // Every editing control saves its own updated snapshot. Re-encoding the component
     // state while the route is being removed can read a stale ForEach item and overwrite
     // the just-persisted regex switches, which is especially visible when this page was
@@ -139,7 +150,8 @@ struct ReaderFontSettingsPage {
     }
     this.readerSettingsLoading = true;
     try {
-      const settings = await ReaderSettingsStore.load(getContext(this));
+      const draft = this.draftMode ? ThemeTypographyDraft.current() : null;
+      const settings = draft ? draft : await ReaderSettingsStore.load(getContext(this));
       this.readerFontSize = settings.fontSize;
       this.readerFontWeight = settings.fontWeight;
       this.readerBodyFontMode = settings.bodyFontMode;
@@ -166,7 +178,7 @@ struct ReaderFontSettingsPage {
 
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
-      PageScaffold({ title: '阅读字体', onBack: () => this.closeReaderFontSettings(), content: () => {
+      PageScaffold({ title: this.draftMode ? '主题阅读字体' : '阅读字体', onBack: () => this.closeReaderFontSettings(), content: () => {
         this.pageContent()
       } })
     }
@@ -274,6 +286,10 @@ struct ReaderFontSettingsPage {
 
   persistLatestSettings(): void {
     if (!this.latestReaderFontStyleSettings) return;
+    if (this.draftMode) {
+      ThemeTypographyDraft.applyFontStyle(this.latestReaderFontStyleSettings);
+      return;
+    }
     this.latestReaderFontStyleSave = ReaderSettingsStore.saveReaderFontStyleSettings(
       getContext(this), this.latestReaderFontStyleSettings);
     this.latestReaderFontStyleSave.catch((e: Error) => {
