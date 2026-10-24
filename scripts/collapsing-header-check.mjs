@@ -20,7 +20,6 @@ const pages = [
   ['pages/ReaderReplaceRules', 'ruleListScroller', true],
   ['pages/CustomTtsVoiceManager', 'voiceListScroller', true],
   ['pages/ExploreSourceSort', 'headerScroller', true],
-  ['pages/GlassSettings', 'headerScroller', false],
   ['pages/CoverGalleryManager', 'headerScroller', false],
   ['pages/SearchBookDetail', 'detailScroller', false],
   ['components/common/PageScaffold', 'scroller', false]

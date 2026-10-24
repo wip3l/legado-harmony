@@ -41,10 +41,11 @@ struct DataBackupPage {
   @State importReady: boolean = false;
   @State importDescription: string = '请先选择备份文件';
   @State mode: string = 'export';
-  @State busy: boolean = false;
+  @State @Watch('syncBusyDialog') busy: boolean = false;
   @State busyText: string = '';
   @State busyProgress: number = 0;
   private exportPasswordDialogSession: SystemDialogSession = new SystemDialogSession();
+  private busyDialogSession: SystemDialogSession = new SystemDialogSession();
   private importPasswordDialogSession: SystemDialogSession = new SystemDialogSession();
   @State @Watch('onSystemDialogFlagChanged') showExportPasswordDialog: boolean = false;
   @State @Watch('onSystemDialogFlagChanged') showImportPasswordDialog: boolean = false;
@@ -86,45 +87,43 @@ struct DataBackupPage {
       } })
 
 
-
-      if (this.busy) {
-        Stack({ alignContent: Alignment.Center }) {
-          Column()
-            .width('100%')
-            .height('100%')
-            .backgroundColor('#66000000')
-
-          Column({ space: AppSpacing.LG }) {
-            LoadingProgress()
-              .width(42)
-              .height(42)
-              .color(this.accentColor())
-            Text(this.busyText || '正在处理...')
-              .fontSize(AppFontSize.BODY)
-              .fontColor(this.primaryTextColor())
-              .textAlign(TextAlign.Center)
-              .width('100%')
-            if (this.busyProgress > 0) {
-              Text(`${this.busyProgress}%`)
-                .fontSize(AppFontSize.CAPTION)
-                .fontColor(this.subTextColor())
-            }
-          }
-          .width(240)
-          .padding(AppSpacing.XXL)
-          .borderRadius(ThemeRuntime.largeRadius())
-          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-        }
-        .width('100%')
-        .height('100%')
-        .zIndex(30)
-        .hitTestBehavior(HitTestMode.Block)
-      }
     }
     .width('100%')
     .height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  /** 备份/恢复进度：系统对话框。 */
+  @Builder
+  busyDialogContent() {
+    Column({ space: AppSpacing.LG }) {
+      LoadingProgress()
+        .width(42)
+        .height(42)
+        .color(this.accentColor())
+      Text(this.busyText || '正在处理...')
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.primaryTextColor())
+        .textAlign(TextAlign.Center)
+        .width('100%')
+      if (this.busyProgress > 0) {
+        Text(`${this.busyProgress}%`)
+          .fontSize(AppFontSize.CAPTION)
+          .fontColor(this.subTextColor())
+      }
+    }
+    .width('100%')
+    .padding(AppSpacing.XXL)
+  }
+
+  syncBusyDialog(): void {
+    this.busyDialogSession.sync(this.getUIContext(), this.busy, (): void => {
+      this.busyDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示处理进度弹窗失败:'
+    });
   }
 
   @Builder

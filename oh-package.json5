@@ -9,6 +9,8 @@
   "repository": "https://github.com/wip3l/qingye-reader.git",
   "license": "GPL-3.0",
   "dependencies": {},
-  "devDependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.25"
+  },
   "scripts": {}
 }

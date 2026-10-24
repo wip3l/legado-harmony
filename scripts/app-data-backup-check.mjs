@@ -174,6 +174,7 @@ test('full export/import preserves themes, OPDS, fonts, books and reports missin
     readerBodyFontFamily: family, readerTitleFontFamily: family,
     readerRegexFontRulesRaw: profile.regexFontRulesRaw, readerThemeProfileV1_custom_2: JSON.stringify(profile)
   });
+  h.from.prefs.set('immersive_light_settings', { immersiveLightLevel: 'balanced' });
   h.from.prefs.set('custom_theme_schemes', { active_scheme_id: 'custom_2', active_scheme_revision: 4,
     schemes: JSON.stringify([{ id: 'custom_1', name: '白天' }, { id: 'custom_2', name: '夜间', revision: 4 }]) });
   h.from.prefs.set('opds_settings', { active_server_id: 'opds-1', servers_v1: JSON.stringify([
@@ -210,6 +211,7 @@ test('full export/import preserves themes, OPDS, fonts, books and reports missin
   assert.equal(result.bookmarks, 1);
   assert.equal(result.progress, 2);
   assert.equal(result.settings, 14);
+  assert.equal(h.to.prefs.get('immersive_light_settings').immersiveLightLevel, 'balanced');
   assert.equal(h.to.books.get('local://1').durChapterPos, 120);
   assert.equal(fs.readFileSync(`${h.target.filesDir}/local_books/1.txt`, 'utf8'), '本地书正文');
   assert.deepEqual(h.to.prefs.get('custom_theme_schemes'), h.from.prefs.get('custom_theme_schemes'));

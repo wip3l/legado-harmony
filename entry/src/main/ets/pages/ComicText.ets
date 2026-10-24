@@ -1,3 +1,4 @@
+import { MembershipBadge } from '../components/common/MembershipBadge';
 import { common } from '@kit.AbilityKit';
 import { router } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -146,7 +147,7 @@ struct ComicTextPage {
   @Builder
   pageContent() {
     Column({ space: 16 }) {
-      Text('在本机识别中文、日文、英文和韩文。繁→简为会员专享，仅转换中文；外语翻译尚未开放。')
+      Text('借助AI识别中文、日文、英文和韩文。繁→简仅转换中文；外语翻译尚未开放。')
         .fontSize(AppFontSize.CAPTION)
         .fontColor(ThemeRuntime.subTextColor(this.appDarkMode))
         .width('100%')
@@ -164,8 +165,15 @@ struct ComicTextPage {
         if (this.original) {
           Row({ space: 12 }) {
             Button('原文').enabled(!this.converting).onClick(() => { this.showSimplified = false; })
-            Button(this.converting ? '转换中…' : '繁→简')
-              .enabled(!this.converting).onClick(() => { this.simplify(); })
+            Button() {
+              Row({ space: 4 }) {
+                MembershipBadge({ sku: 'MONTHLY' })
+                Text(this.converting ? '转换中…' : '繁→简')
+                  .fontColor(Color.White)
+              }
+            }
+            .accessibilityText('繁→简，月度会员起可用')
+            .enabled(!this.converting).onClick(() => { this.simplify(); })
             Button('复制').enabled(!this.converting).onClick(() => { this.copyText(); })
           }
           Text(this.showSimplified ? '简体文本' : '识别原文')
@@ -181,7 +189,7 @@ struct ComicTextPage {
             .borderRadius(ThemeRuntime.cardRadius())
         }
         Button('重新识别').enabled(!this.converting).onClick(() => { this.recognize(true); })
-        Text('这里列出识别出的全部文字。在漫画画面设置里打开「本书繁→简」，对白会直接在图上改写成简体。竖排、特殊字体的文字与顺序请对照原图。')
+        Text('这里列出识别出的全部文字。在漫画画面设置的「AI翻译」中选择「繁→简」，对白会直接在图上改写成简体。竖排、特殊字体的文字与顺序请对照原图。')
           .fontSize(AppFontSize.CAPTION)
           .fontColor(ThemeRuntime.subTextColor(this.appDarkMode))
           .width('100%')

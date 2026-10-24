@@ -40,6 +40,7 @@ import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { CollapsingHeader } from '../utils/CollapsingHeader';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
+import { PopupMenuAction, PopupMenuHeader } from '../components/common/PopupMenuAction';
 
 const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const BOOK_SOURCE_IMPORT_MAX_FILES = 50;
@@ -97,6 +98,7 @@ const SOURCE_GROUP_ROW_HEIGHT: number = 34 + AppSpacing.MD;
 @Entry
 @Component
 struct BookSourcePage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
@@ -124,6 +126,14 @@ struct BookSourcePage {
   @State searchText: string = '';
   @State activeSourceGroup: string = '__all__';
   private sourceFilterDialogSession: SystemDialogSession = new SystemDialogSession();
+  private importUrlDialogSession: SystemDialogSession = new SystemDialogSession();
+  private batchDeleteDialogSession: SystemDialogSession = new SystemDialogSession();
+  private sourceGroupDialogSession: SystemDialogSession = new SystemDialogSession();
+  private checkProgressDialogSession: SystemDialogSession = new SystemDialogSession();
+  private importingDialogSession: SystemDialogSession = new SystemDialogSession();
+  private batchOperatingDialogSession: SystemDialogSession = new SystemDialogSession();
+  private checkOptionsDialogSession: SystemDialogSession = new SystemDialogSession();
+  private sourceLoginUiDialogSession: SystemDialogSession = new SystemDialogSession();
   private importSourceSelectionDialogSession: SystemDialogSession = new SystemDialogSession();
   private sourceDeleteDialogSession: SystemDialogSession = new SystemDialogSession();
   private renameSourceGroupDialogSession: SystemDialogSession = new SystemDialogSession();
@@ -143,17 +153,17 @@ struct BookSourcePage {
   @State sourceSortMode: string = 'custom';
   @State bottomSourceUrls: string[] = [];
   @State showAddDialog: boolean = false;
-  @State showImportUrlDialog: boolean = false;
+  @State @Watch('syncImportUrlDialog') showImportUrlDialog: boolean = false;
   @State @Watch('onSystemDialogFlagChanged') showImportSourceSelectionDialog: boolean = false;
   @State pendingImportSources: BookSource[] = [];
   @State selectedImportSourceUrls: string[] = [];
   @State selectionMode: boolean = false;
   @State selectedSourceUrls: string[] = [];
-  @State showBatchDeleteDialog: boolean = false;
-  @State showGroupDialog: boolean = false;
+  @State @Watch('syncBatchDeleteDialog') showBatchDeleteDialog: boolean = false;
+  @State @Watch('syncGroupDialog') showGroupDialog: boolean = false;
   @State showMoreActionDialog: boolean = false;
   @State showSourceActionDialog: boolean = false;
-  @State showSourceLoginUiDialog: boolean = false;
+  @State @Watch('syncSourceLoginUiDialog') showSourceLoginUiDialog: boolean = false;
   @State sourceLoginItems: BookSourceLoginItem[] = [];
   @State isExecutingLoginAction: boolean = false;
   @State loginRuntimeActive: boolean = false;
@@ -179,11 +189,11 @@ struct BookSourcePage {
   @State groupActionSourceUrl: string = '';
   @State draggingSourceUrl: string = '';
   @State importUrl: string = '';
-  @State isImporting: boolean = false;
-  @State isBatchOperating: boolean = false;
+  @State @Watch('syncIsImporting') isImporting: boolean = false;
+  @State @Watch('syncIsBatchOperating') isBatchOperating: boolean = false;
   @State batchOperationText: string = '正在操作书源...';
-  @State showCheckDialog: boolean = false;
-  @State showCheckOptionsDialog: boolean = false;
+  @State @Watch('syncCheckDialog') showCheckDialog: boolean = false;
+  @State @Watch('syncCheckOptionsDialog') showCheckOptionsDialog: boolean = false;
   @State isCheckingSources: boolean = false;
   @State checkDone: number = 0;
   @State checkTotal: number = 0;
@@ -639,6 +649,11 @@ struct BookSourcePage {
               .onClick(() => {
                 this.showMoreActionDialog = true;
               })
+              .bindPopup(this.showMoreActionDialog, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+                this.batchMorePopupMenu()
+              }, Placement.TopRight, this.appDarkMode, this.accentColor(), () => {
+                this.showMoreActionDialog = false;
+              }))
           }
           .width('100%')
           .padding({ left: AppSpacing.XL, right: AppSpacing.XL, top: AppSpacing.MD, bottom: AppSpacing.LG })
@@ -669,434 +684,31 @@ struct BookSourcePage {
 
       this.bookSourceTitleBar()
 
-      if (!this.selectionMode && !this.showAddDialog && !this.isImporting && !this.isBatchOperating) {
+      if (!this.selectionMode && !this.isImporting && !this.isBatchOperating) {
         this.addSourceFloatingButton()
       }
 
-      if (this.showAddDialog) {
-        this.addSourceDropdown()
-      }
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: this.contextMenuX, y: this.contextMenuY })
+        .hitTestBehavior(HitTestMode.None)
+        .bindPopup(this.showSourceActionDialog, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.sourceActionDialog()
+        }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+          this.showSourceActionDialog = false;
+        }))
 
-      if (this.showImportUrlDialog) {
-        Column() {
-          Column() {
-            Text('从URL导入')
-              .fontSize(AppFontSize.SUBTITLE)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: AppSpacing.XL })
-
-            TextInput({ placeholder: '请输入书源URL', text: this.importUrl })
-              .width('100%')
-              .height(48)
-              .borderRadius(ThemeRuntime.mediumRadius())
-              .backgroundColor(this.inputColor())
-              .fontColor(this.primaryTextColor())
-              .placeholderColor(this.placeholderTextColor())
-              .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-              .margin({ bottom: AppSpacing.XL })
-              .onChange((value: string) => {
-                this.importUrl = value;
-              })
-
-            Row() {
-              Button('取消')
-                .width('45%')
-                .height(44)
-                .backgroundColor(this.inputColor())
-                .fontColor(this.primaryTextColor())
-                .onClick(() => {
-                  this.showImportUrlDialog = false;
-                  this.importUrl = '';
-                })
-
-              Button('导入')
-                .width('45%')
-                .height(44)
-                .backgroundColor(this.buttonColor())
-                .fontColor(ThemeRuntime.onAccentColor())
-                .onClick(() => {
-                  this.importFromUrl();
-                })
-            }
-            .width('100%')
-            .justifyContent(FlexAlign.SpaceBetween)
-          }
-          .width('90%')
-          .padding(AppSpacing.XXXL)
-          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .justifyContent(FlexAlign.Center)
-        .onClick(() => {
-          this.showImportUrlDialog = false;
-        })
-      }
-
-
-      if (this.showBatchDeleteDialog) {
-        Column() {
-          Column() {
-            Text('确认删除')
-              .fontSize(AppFontSize.SUBTITLE)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: AppSpacing.LG })
-
-            Text(`确定删除已选择的 ${this.selectedSourceUrls.length} 个书源吗？删除后不可恢复。`)
-              .fontSize(AppFontSize.BODY_LARGE)
-              .fontColor(this.secondaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: AppSpacing.XXL })
-
-            Row() {
-              Button('取消')
-                .width('45%')
-                .height(44)
-                .backgroundColor(this.inputColor())
-                .fontColor(this.primaryTextColor())
-                .onClick(() => {
-                  this.showBatchDeleteDialog = false;
-                })
-
-              Button('删除')
-                .width('45%')
-                .height(44)
-                .backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode))
-                .onClick(() => {
-                  this.showBatchDeleteDialog = false;
-                  this.batchDeleteSelectedSources();
-                })
-            }
-            .width('100%')
-            .justifyContent(FlexAlign.SpaceBetween)
-          }
-          .width('85%')
-          .padding(AppSpacing.XXXL)
-          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .justifyContent(FlexAlign.Center)
-        .onClick(() => {
-          this.showBatchDeleteDialog = false;
-        })
-      }
-
-      if (this.showGroupDialog) {
-        Column() {
-          Column() {
-            Text('设置书源分组')
-              .fontSize(AppFontSize.SUBTITLE)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: AppSpacing.LG })
-
-            Text(this.groupActionSourceUrl ? `书源：${this.actionGroupingSourceName()}` :
-              `已选择 ${this.selectedSourceUrls.length} 个书源`)
-              .fontSize(AppFontSize.BODY)
-              .fontColor(this.subTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: AppSpacing.LG })
-
-            TextInput({ placeholder: '输入新分组名称，留空为未分组', text: this.groupNameInput })
-              .width('100%')
-              .height(44)
-              .borderRadius(ThemeRuntime.mediumRadius())
-              .backgroundColor(this.inputColor())
-              .fontColor(this.primaryTextColor())
-              .placeholderColor(this.placeholderTextColor())
-              .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-              .onChange((value: string) => {
-                this.groupNameInput = value;
-              })
-
-            if (this.getSourceGroups().length > 0) {
-              Scroll() {
-                Flex({ wrap: FlexWrap.Wrap }) {
-                  ForEach(this.getSourceGroups(), (group: string) => {
-                    Text(group)
-                      .fontSize(AppFontSize.BODY)
-                      .fontColor(this.secondaryTextColor())
-                      .padding({ left: AppSpacing.MD, right: AppSpacing.MD, top: AppSpacing.XS, bottom: AppSpacing.XS })
-                      .backgroundColor(this.inputColor())
-                      .borderRadius(ThemeRuntime.buttonRadius())
-                      .margin({ right: AppSpacing.MD, top: AppSpacing.MD })
-                      .onClick(() => {
-                        this.groupNameInput = group;
-                      })
-                  })
-                }
-                .width('100%')
-              }
-              .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-              .width('100%')
-              .constraintSize({ maxHeight: 240 })
-              .scrollBar(BarState.Auto)
-            }
-
-            Row() {
-              Button('取消')
-                .width('45%')
-                .height(44)
-                .backgroundColor(this.inputColor())
-                .fontColor(this.primaryTextColor())
-                .onClick(() => {
-                  this.closeSourceGroupDialog();
-                })
-
-              Button('保存')
-                .width('45%')
-                .height(44)
-                .backgroundColor(this.buttonColor())
-                .fontColor(ThemeRuntime.onAccentColor())
-                .onClick(() => {
-                  this.applySelectedSourceGroup();
-                })
-            }
-            .width('100%')
-            .justifyContent(FlexAlign.SpaceBetween)
-            .margin({ top: AppSpacing.XL })
-          }
-          .width('88%')
-          .constraintSize({ maxHeight: '78%' })
-          .padding(AppSpacing.XXXL)
-          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .justifyContent(FlexAlign.Center)
-        .onClick(() => {
-          this.closeSourceGroupDialog();
-        })
-      }
-
-      if (this.showMoreActionDialog) {
-        this.batchMorePopupMenu()
-      }
-
-      if (this.showSourceGroupActionMenu) {
-        this.sourceGroupActionMenu()
-      }
-
-      if (this.showSourceGroupToolsMenu) {
-        this.sourceGroupToolsMenu()
-      }
-
-
-
-
-
-
-
-      if (this.showCheckOptionsDialog) {
-        this.checkOptionsDialog()
-      }
-
-      if (this.showSourceActionDialog) {
-        this.sourceActionDialog()
-      }
-
-      if (this.showSourceLoginUiDialog) {
-        this.sourceLoginUiDialog()
-      }
-
-
-      if (this.showCheckDialog) {
-        Column() {
-          Column() {
-            Text(this.isCheckingSources ? '正在校验书源' : '校验完成')
-              .fontSize(AppFontSize.SUBTITLE)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: AppSpacing.LG })
-
-            if (this.isCheckingSources) {
-              LoadingProgress()
-                .width(42)
-                .height(42)
-                .color(this.accentColor())
-                .margin({ bottom: AppSpacing.LG })
-            }
-
-            Text(this.checkDialogStatusText())
-              .fontSize(AppFontSize.BODY)
-              .fontColor(this.secondaryTextColor())
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: AppSpacing.LG })
-
-            Progress({ value: this.checkDone, total: Math.max(this.checkTotal, 1), type: ProgressType.Linear })
-              .width('100%')
-              .height(8)
-              .color(this.buttonColor())
-              .backgroundColor(this.inputColor())
-              .margin({ bottom: AppSpacing.LG })
-
-            Text(`${this.checkDone}/${this.checkTotal}`)
-              .fontSize(AppFontSize.BODY)
-              .fontColor(this.subTextColor())
-              .margin({ bottom: this.isCheckingSources ? 0 : 12 })
-
-            if (this.isCheckingSources) {
-              Row({ space: AppSpacing.MD }) {
-                Button('取消', { type: ButtonType.Normal })
-                  .layoutWeight(1)
-                  .height(42)
-                  .borderRadius(ThemeRuntime.buttonRadius())
-                  .fontSize(AppFontSize.BODY)
-                  .backgroundColor(this.inputColor())
-                  .fontColor(this.primaryTextColor())
-                  .onClick(() => {
-                    this.cancelBookSourceCheck(true);
-                  })
-
-                Button('后台', { type: ButtonType.Normal })
-                  .layoutWeight(1)
-                  .height(42)
-                  .borderRadius(ThemeRuntime.buttonRadius())
-                  .fontSize(AppFontSize.BODY)
-                  .backgroundColor(this.buttonColor())
-                  .fontColor(ThemeRuntime.onAccentColor())
-                  .onClick(() => {
-                    this.continueBookSourceCheckInBackground();
-                  })
-              }
-              .width('100%')
-              .margin({ top: AppSpacing.XL })
-            }
-
-            if (!this.isCheckingSources) {
-              if (this.checkResultDetails.length > 0) {
-                Scroll() {
-                  Column() {
-                    ForEach(this.checkResultDetails, (name: string, index: number) => {
-                      Text(name)
-                        .fontSize(AppFontSize.BODY)
-                        .fontColor(this.subTextColor())
-                        .width('100%')
-                        .maxLines(2)
-                        .textOverflow({ overflow: TextOverflow.Ellipsis })
-                        .margin({ bottom: index === this.checkResultDetails.length - 1 ? 0 : 6 })
-                    }, (name: string, index: number) => `${index}-${name}`)
-                  }
-                  .width('100%')
-                  .alignItems(HorizontalAlign.Start)
-                }
-                .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-                .width('100%')
-                .height(Math.min(this.checkResultDetails.length * 40 + 20, 160))
-                .padding(AppSpacing.MD)
-                .backgroundColor(this.inputColor())
-                .borderRadius(ThemeRuntime.mediumRadius())
-                .margin({ bottom: AppSpacing.XL })
-                .scrollBar(BarState.Auto)
-              }
-
-              if (this.checkTlsTrustHosts.length > 0) {
-                Button(`信任证书并重试（${this.checkTlsTrustHosts.length} 个主机）`, { type: ButtonType.Normal })
-                  .width('100%')
-                  .height(42)
-                  .borderRadius(ThemeRuntime.buttonRadius())
-                  .fontSize(AppFontSize.BODY)
-                  .backgroundColor('#B26A00')
-                  .fontColor('#FFFFFF')
-                  .margin({ bottom: AppSpacing.MD })
-                  .onClick(() => {
-                    this.trustCheckCertificateHostsAndRetry();
-                  })
-              }
-
-              Row({ space: AppSpacing.MD }) {
-                if (this.checkInvalidAction === 'none') {
-                  Button('禁用失败项', { type: ButtonType.Normal })
-                    .layoutWeight(1)
-                    .height(42)
-                    .borderRadius(ThemeRuntime.buttonRadius())
-                    .fontSize(AppFontSize.CAPTION)
-                    .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
-                    .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#F57C00' : this.inputColor())
-                    .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
-                    .onClick(() => {
-                      this.disableFailedCheckedSources();
-                    })
-
-                  Button('删除失败项', { type: ButtonType.Normal })
-                    .layoutWeight(1)
-                    .height(42)
-                    .borderRadius(ThemeRuntime.buttonRadius())
-                    .fontSize(AppFontSize.CAPTION)
-                    .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
-                    .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? ThemeRuntime.dangerColor(this.appDarkMode) : this.inputColor())
-                    .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
-                    .onClick(() => {
-                      this.deleteFailedCheckedSources();
-                    })
-                }
-
-                Button('关闭', { type: ButtonType.Normal })
-                  .layoutWeight(1)
-                  .height(42)
-                  .borderRadius(ThemeRuntime.buttonRadius())
-                  .fontSize(AppFontSize.CAPTION)
-                  .backgroundColor(this.inputColor())
-                  .fontColor(this.primaryTextColor())
-                  .onClick(() => {
-                    this.showCheckDialog = false;
-                  })
-              }
-              .width('100%')
-              .justifyContent(FlexAlign.SpaceBetween)
-            }
-          }
-          .width('88%')
-          .constraintSize({ maxHeight: '78%' })
-          .padding(AppSpacing.XXXL)
-          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-          .alignItems(HorizontalAlign.Center)
-          .onClick(() => {
-          })
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .justifyContent(FlexAlign.Center)
-        .onClick(() => {
-          if (!this.isCheckingSources) {
-            this.showCheckDialog = false;
-          }
-        })
-      }
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: this.contextMenuX, y: this.contextMenuY })
+        .hitTestBehavior(HitTestMode.None)
+        .bindPopup(this.showSourceGroupActionMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.sourceGroupActionMenu()
+        }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+          this.showSourceGroupActionMenu = false;
+        }))
 
       if (this.webImportActive) {
         Web({ src: 'about:blank', controller: this.webImportController })
@@ -1135,77 +747,6 @@ struct BookSourcePage {
           this.continueLoginRuntime();
         })
 
-      if (this.isImporting) {
-        Column() {
-          Column() {
-            LoadingProgress()
-              .width(46)
-              .height(46)
-              .color(this.accentColor())
-
-            Text('正在导入书源...')
-              .fontSize(AppFontSize.BODY_LARGE)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .margin({ top: AppSpacing.LG })
-
-            Text('请稍候')
-              .fontSize(AppFontSize.BODY)
-              .fontColor(this.subTextColor())
-              .margin({ top: AppSpacing.SM })
-          }
-          .width(180)
-          .padding({ left: AppSpacing.XXXL, right: AppSpacing.XXXL, top: AppSpacing.XXXL, bottom: AppSpacing.XXXL })
-          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-          .alignItems(HorizontalAlign.Center)
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .justifyContent(FlexAlign.Center)
-        .onClick(() => {
-        })
-      }
-
-      if (this.isBatchOperating) {
-        Column() {
-          Column() {
-            LoadingProgress()
-              .width(46)
-              .height(46)
-              .color(this.accentColor())
-
-            Text(this.batchOperationText)
-              .fontSize(AppFontSize.BODY_LARGE)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-              .margin({ top: AppSpacing.LG })
-
-            Text('请稍候')
-              .fontSize(AppFontSize.BODY)
-              .fontColor(this.subTextColor())
-              .margin({ top: AppSpacing.SM })
-          }
-          .width(190)
-          .padding({ left: AppSpacing.XXXL, right: AppSpacing.XXXL, top: AppSpacing.XXXL, bottom: AppSpacing.XXXL })
-          .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-          .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-          .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-          .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-          .alignItems(HorizontalAlign.Center)
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .justifyContent(FlexAlign.Center)
-        .onClick(() => {
-        })
-      }
     }
     .width('100%')
     .height('100%')
@@ -1302,37 +843,40 @@ struct BookSourcePage {
 
   @Builder
   addSourceFloatingButton() {
-    Button({ type: ButtonType.Circle, stateEffect: true }) {
-      SymbolGlyph($r('sys.symbol.plus'))
-        .fontSize(25)
-        .fontColor([this.accentColor()])
+    Stack() {
+      ImmersiveMaterialSurface({
+        surfaceWidth: 52,
+        surfaceHeight: 52,
+        darkMode: this.appDarkMode,
+        fallbackColor: this.cardColor(),
+        glowColor: `#40${this.accentColor().substring(1)}`
+      }) {
+        SymbolGlyph($r('sys.symbol.plus'))
+          .fontSize(25)
+          .fontColor([this.accentColor()])
+      }
     }
     .width(52)
     .height(52)
     .margin({ right: AppSpacing.XXL, bottom: this.navBarHeight + 22 })
-    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor(), 'button'))
-    .backdropBlur(ThemeRuntime.glassBlur('button', 12))
-    .border({ width: ThemeRuntime.glassBorderWidth('button'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'button') })
-    .shadow({ radius: ThemeRuntime.glassShadowRadius('button'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'button'), offsetX: ThemeRuntime.glassShadowOffsetX('button'), offsetY: ThemeRuntime.glassShadowOffsetY('button') })
     .accessibilityText('新增书源')
+    .accessibilityRole(AccessibilityRoleType.BUTTON)
     .translate({ y: (52 + this.navBarHeight + 38) * this.sourceChromeCollapseProgress() })
     .opacity(1 - this.sourceChromeCollapseProgress())
     .hitTestBehavior(this.sourceChromeCollapseProgress() < 0.5 ? HitTestMode.Default : HitTestMode.None)
     .onClick(() => {
       this.showAddDialog = true;
     })
+    .bindPopup(this.showAddDialog, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+      this.addSourceDropdown()
+    }, Placement.TopRight, this.appDarkMode, this.accentColor(), () => {
+      this.showAddDialog = false;
+    }))
   }
 
   @Builder
   addSourceDropdown() {
-    Stack({ alignContent: Alignment.BottomEnd }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .onClick(() => {
-          this.showAddDialog = false;
-        })
-
+    Scroll() {
       Column() {
         this.popupActionItem($r('sys.symbol.plus'), '新建原生书源', this.primaryTextColor(), () => {
           this.showAddDialog = false;
@@ -1340,7 +884,7 @@ struct BookSourcePage {
             url: 'pages/NativeSourceEdit',
             params: { bookSourceUrl: '' }
           });
-        }, true, '推荐')
+        }, '推荐')
         this.popupActionItem($r('sys.symbol.plus'), '新建兼容书源', this.primaryTextColor(), () => {
           this.showAddDialog = false;
           router.pushUrl({
@@ -1355,40 +899,22 @@ struct BookSourcePage {
         this.popupActionItem($r('sys.symbol.download'), '从文件导入', this.primaryTextColor(), () => {
           this.showAddDialog = false;
           this.importFromFile();
-        }, false)
+        })
+
       }
-      .width(208)
-      .padding({ left: AppSpacing.SM, right: AppSpacing.SM, top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .margin({ right: AppSpacing.XXL, bottom: this.navBarHeight + 82 })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(188)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
   batchMorePopupMenu() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .onClick(() => {
-          this.showMoreActionDialog = false;
-        })
-
+    Scroll() {
       Column() {
-        Text(`已选择 ${this.selectedSourceUrls.length} 个书源`)
-          .fontSize(AppFontSize.CAPTION)
-          .fontColor(this.subTextColor())
-          .width('100%')
-          .height(34)
-          .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-          .textAlign(TextAlign.Start)
-
+        PopupMenuHeader(`已选择 ${this.selectedSourceUrls.length} 个书源`, this.subTextColor())
         this.popupActionItem($r('sys.symbol.checkmark_shield'), '校验所选', this.primaryTextColor(), () => {
           this.showMoreActionDialog = false;
           this.checkSelectedSources();
@@ -1416,57 +942,496 @@ struct BookSourcePage {
         this.popupActionItem($r('sys.symbol.trash'), '删除', ThemeRuntime.dangerColor(this.appDarkMode), () => {
           this.showMoreActionDialog = false;
           this.showBatchDeleteDialog = true;
-        }, false)
+        })
       }
-      .width(188)
-      .padding({ left: AppSpacing.SM, right: AppSpacing.SM, top: AppSpacing.XS, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: '100%', y: '100%' })
-      .translate({ x: -200, y: -(378 + Math.max(this.navBarHeight, 8)) })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(188)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
-  popupActionItem(icon: Resource, label: string, color: string, action: () => void,
-    showDivider: boolean = true, badge: string = '') {
+  popupActionItem(icon: Resource, label: string, color: string, action: () => void, badge: string = '') {
+    PopupMenuAction(icon, label, color, action, true, badge, this.accentColor())
+  }
+
+  /** 从 URL 导入书源 */
+  @Builder
+  importUrlDialogContent() {
     Column() {
-      Row({ space: AppSpacing.MD }) {
-        SymbolGlyph(icon)
-          .fontSize(19)
-          .fontColor([color])
-          .width(24)
-        Text(label)
-          .fontSize(AppFontSize.BODY_LARGE)
-          .fontColor(color)
-          .layoutWeight(1)
-        if (badge) {
-          Text(badge)
-            .fontSize(AppFontSize.MICRO)
-            .fontColor(this.accentColor())
-            .padding({ left: AppSpacing.SM, right: AppSpacing.SM, top: AppSpacing.XXS, bottom: AppSpacing.XXS })
-            .backgroundColor(this.inputColor())
-            .borderRadius(ThemeRuntime.smallRadius())
-        }
+      Text('从URL导入')
+        .fontSize(AppFontSize.SUBTITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: AppSpacing.XL })
+
+      TextInput({ placeholder: '请输入书源URL', text: this.importUrl })
+        .width('100%')
+        .height(48)
+        .borderRadius(ThemeRuntime.mediumRadius())
+        .backgroundColor(this.inputColor())
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.placeholderTextColor())
+        .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
+        .margin({ bottom: AppSpacing.XL })
+        .onChange((value: string) => {
+          this.importUrl = value;
+        })
+
+      Row() {
+        Button('取消')
+          .width('45%')
+          .height(44)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.showImportUrlDialog = false;
+            this.importUrl = '';
+          })
+
+        Button('导入')
+          .width('45%')
+          .height(44)
+          .backgroundColor(this.buttonColor())
+          .fontColor(ThemeRuntime.onAccentColor())
+          .onClick(() => {
+            this.importFromUrl();
+          })
       }
       .width('100%')
-      .height(44)
-      .padding({ left: AppSpacing.MD, right: AppSpacing.MD })
+      .justifyContent(FlexAlign.SpaceBetween)
+    }
+    .width('100%')
+    .padding(AppSpacing.XXXL)
+  }
 
-      if (showDivider) {
-        Divider()
-          .strokeWidth(0.5)
-          .color(ThemeRuntime.glassBorderColor(this.appDarkMode))
-          .margin({ left: 44, right: AppSpacing.MD })
+  /** 批量删除确认 */
+  @Builder
+  batchDeleteDialogContent() {
+    Column() {
+      Text('确认删除')
+        .fontSize(AppFontSize.SUBTITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: AppSpacing.LG })
+
+      Text(`确定删除已选择的 ${this.selectedSourceUrls.length} 个书源吗？删除后不可恢复。`)
+        .fontSize(AppFontSize.BODY_LARGE)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: AppSpacing.XXL })
+
+      Row() {
+        Button('取消')
+          .width('45%')
+          .height(44)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.showBatchDeleteDialog = false;
+          })
+
+        Button('删除')
+          .width('45%')
+          .height(44)
+          .backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode))
+          .onClick(() => {
+            this.showBatchDeleteDialog = false;
+            this.batchDeleteSelectedSources();
+          })
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.SpaceBetween)
+    }
+    .width('100%')
+    .padding(AppSpacing.XXXL)
+  }
+
+  /** 设置书源分组 */
+  @Builder
+  sourceGroupDialogContent() {
+    Column() {
+      Text('设置书源分组')
+        .fontSize(AppFontSize.SUBTITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: AppSpacing.LG })
+
+      Text(this.groupActionSourceUrl ? `书源：${this.actionGroupingSourceName()}` :
+        `已选择 ${this.selectedSourceUrls.length} 个书源`)
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.subTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: AppSpacing.LG })
+
+      TextInput({ placeholder: '输入新分组名称，留空为未分组', text: this.groupNameInput })
+        .width('100%')
+        .height(44)
+        .borderRadius(ThemeRuntime.mediumRadius())
+        .backgroundColor(this.inputColor())
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.placeholderTextColor())
+        .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
+        .onChange((value: string) => {
+          this.groupNameInput = value;
+        })
+
+      if (this.getSourceGroups().length > 0) {
+        Scroll() {
+          Flex({ wrap: FlexWrap.Wrap }) {
+            ForEach(this.getSourceGroups(), (group: string) => {
+              Text(group)
+                .fontSize(AppFontSize.BODY)
+                .fontColor(this.secondaryTextColor())
+                .padding({ left: AppSpacing.MD, right: AppSpacing.MD, top: AppSpacing.XS, bottom: AppSpacing.XS })
+                .backgroundColor(this.inputColor())
+                .borderRadius(ThemeRuntime.buttonRadius())
+                .margin({ right: AppSpacing.MD, top: AppSpacing.MD })
+                .onClick(() => {
+                  this.groupNameInput = group;
+                })
+            })
+          }
+          .width('100%')
+        }
+        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+        .width('100%')
+        .constraintSize({ maxHeight: 240 })
+        .scrollBar(BarState.Auto)
+      }
+
+      Row() {
+        Button('取消')
+          .width('45%')
+          .height(44)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.closeSourceGroupDialog();
+          })
+
+        Button('保存')
+          .width('45%')
+          .height(44)
+          .backgroundColor(this.buttonColor())
+          .fontColor(ThemeRuntime.onAccentColor())
+          .onClick(() => {
+            this.applySelectedSourceGroup();
+          })
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.SpaceBetween)
+      .margin({ top: AppSpacing.XL })
+    }
+    .width('100%')
+    .padding(AppSpacing.XXXL)
+  }
+
+  /** 校验进度与结果 */
+  @Builder
+  checkProgressDialogContent() {
+    Column() {
+      Text(this.isCheckingSources ? '正在校验书源' : '校验完成')
+        .fontSize(AppFontSize.SUBTITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: AppSpacing.LG })
+
+      if (this.isCheckingSources) {
+        LoadingProgress()
+          .width(42)
+          .height(42)
+          .color(this.accentColor())
+          .margin({ bottom: AppSpacing.LG })
+      }
+
+      Text(this.checkDialogStatusText())
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.secondaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: AppSpacing.LG })
+
+      Progress({ value: this.checkDone, total: Math.max(this.checkTotal, 1), type: ProgressType.Linear })
+        .width('100%')
+        .height(8)
+        .color(this.buttonColor())
+        .backgroundColor(this.inputColor())
+        .margin({ bottom: AppSpacing.LG })
+
+      Text(`${this.checkDone}/${this.checkTotal}`)
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.subTextColor())
+        .margin({ bottom: this.isCheckingSources ? 0 : 12 })
+
+      if (this.isCheckingSources) {
+        Row({ space: AppSpacing.MD }) {
+          Button('取消', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(ThemeRuntime.buttonRadius())
+            .fontSize(AppFontSize.BODY)
+            .backgroundColor(this.inputColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => {
+              this.cancelBookSourceCheck(true);
+            })
+
+          Button('后台', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(ThemeRuntime.buttonRadius())
+            .fontSize(AppFontSize.BODY)
+            .backgroundColor(this.buttonColor())
+            .fontColor(ThemeRuntime.onAccentColor())
+            .onClick(() => {
+              this.continueBookSourceCheckInBackground();
+            })
+        }
+        .width('100%')
+        .margin({ top: AppSpacing.XL })
+      }
+
+      if (!this.isCheckingSources) {
+        if (this.checkResultDetails.length > 0) {
+          Scroll() {
+            Column() {
+              ForEach(this.checkResultDetails, (name: string, index: number) => {
+                Text(name)
+                  .fontSize(AppFontSize.BODY)
+                  .fontColor(this.subTextColor())
+                  .width('100%')
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .margin({ bottom: index === this.checkResultDetails.length - 1 ? 0 : 6 })
+              }, (name: string, index: number) => `${index}-${name}`)
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+          }
+          .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+          .width('100%')
+          .height(Math.min(this.checkResultDetails.length * 40 + 20, 160))
+          .padding(AppSpacing.MD)
+          .backgroundColor(this.inputColor())
+          .borderRadius(ThemeRuntime.mediumRadius())
+          .margin({ bottom: AppSpacing.XL })
+          .scrollBar(BarState.Auto)
+        }
+
+        if (this.checkTlsTrustHosts.length > 0) {
+          Button(`信任证书并重试（${this.checkTlsTrustHosts.length} 个主机）`, { type: ButtonType.Normal })
+            .width('100%')
+            .height(42)
+            .borderRadius(ThemeRuntime.buttonRadius())
+            .fontSize(AppFontSize.BODY)
+            .backgroundColor('#B26A00')
+            .fontColor('#FFFFFF')
+            .margin({ bottom: AppSpacing.MD })
+            .onClick(() => {
+              this.trustCheckCertificateHostsAndRetry();
+            })
+        }
+
+        Row({ space: AppSpacing.MD }) {
+          if (this.checkInvalidAction === 'none') {
+            Button('禁用失败项', { type: ButtonType.Normal })
+              .layoutWeight(1)
+              .height(42)
+              .borderRadius(ThemeRuntime.buttonRadius())
+              .fontSize(AppFontSize.CAPTION)
+              .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
+              .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#F57C00' : this.inputColor())
+              .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
+              .onClick(() => {
+                this.disableFailedCheckedSources();
+              })
+
+            Button('删除失败项', { type: ButtonType.Normal })
+              .layoutWeight(1)
+              .height(42)
+              .borderRadius(ThemeRuntime.buttonRadius())
+              .fontSize(AppFontSize.CAPTION)
+              .enabled(this.checkBadUrls.length > 0 && !this.isBatchOperating)
+              .backgroundColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? ThemeRuntime.dangerColor(this.appDarkMode) : this.inputColor())
+              .fontColor(this.checkBadUrls.length > 0 && !this.isBatchOperating ? '#FFFFFF' : this.subTextColor())
+              .onClick(() => {
+                this.deleteFailedCheckedSources();
+              })
+          }
+
+          Button('关闭', { type: ButtonType.Normal })
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(ThemeRuntime.buttonRadius())
+            .fontSize(AppFontSize.CAPTION)
+            .backgroundColor(this.inputColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => {
+              this.showCheckDialog = false;
+            })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.SpaceBetween)
       }
     }
     .width('100%')
-    .onClick(action)
+    .padding(AppSpacing.XXXL)
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  /** 导入中 */
+  @Builder
+  importingDialogContent() {
+    Column() {
+      LoadingProgress()
+        .width(46)
+        .height(46)
+        .color(this.accentColor())
+
+      Text('正在导入书源...')
+        .fontSize(AppFontSize.BODY_LARGE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .margin({ top: AppSpacing.LG })
+
+      Text('请稍候')
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.subTextColor())
+        .margin({ top: AppSpacing.SM })
+    }
+    .width('100%')
+    .padding({ left: AppSpacing.XXXL, right: AppSpacing.XXXL, top: AppSpacing.XXXL, bottom: AppSpacing.XXXL })
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  /** 批量操作中 */
+  @Builder
+  batchOperatingDialogContent() {
+    Column() {
+      LoadingProgress()
+        .width(46)
+        .height(46)
+        .color(this.accentColor())
+
+      Text(this.batchOperationText)
+        .fontSize(AppFontSize.BODY_LARGE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .margin({ top: AppSpacing.LG })
+
+      Text('请稍候')
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.subTextColor())
+        .margin({ top: AppSpacing.SM })
+    }
+    .width('100%')
+    .padding({ left: AppSpacing.XXXL, right: AppSpacing.XXXL, top: AppSpacing.XXXL, bottom: AppSpacing.XXXL })
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  syncImportUrlDialog(): void {
+    this.importUrlDialogSession.sync(this.getUIContext(), this.showImportUrlDialog, (): void => {
+      this.importUrlDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示从URL导入弹窗失败:',
+      onDismiss: (): void => {
+        this.showImportUrlDialog = false;
+      }
+    });
+  }
+
+  syncBatchDeleteDialog(): void {
+    this.batchDeleteDialogSession.sync(this.getUIContext(), this.showBatchDeleteDialog, (): void => {
+      this.batchDeleteDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示批量删除弹窗失败:',
+      onDismiss: (): void => {
+        this.showBatchDeleteDialog = false;
+      }
+    });
+  }
+
+  syncGroupDialog(): void {
+    this.sourceGroupDialogSession.sync(this.getUIContext(), this.showGroupDialog, (): void => {
+      this.sourceGroupDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示设置分组弹窗失败:',
+      onDismiss: (): void => {
+        this.closeSourceGroupDialog();
+      }
+    });
+  }
+
+  syncCheckDialog(): void {
+    this.checkProgressDialogSession.sync(this.getUIContext(), this.showCheckDialog, (): void => {
+      this.checkProgressDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示校验进度弹窗失败:'
+    });
+  }
+
+  syncIsImporting(): void {
+    this.importingDialogSession.sync(this.getUIContext(), this.isImporting, (): void => {
+      this.importingDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示导入进度弹窗失败:'
+    });
+  }
+
+  syncIsBatchOperating(): void {
+    this.batchOperatingDialogSession.sync(this.getUIContext(), this.isBatchOperating, (): void => {
+      this.batchOperatingDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示批量操作进度弹窗失败:'
+    });
+  }
+
+  syncCheckOptionsDialog(): void {
+    this.checkOptionsDialogSession.sync(this.getUIContext(), this.showCheckOptionsDialog, (): void => {
+      this.checkOptionsDialog();
+    }, {
+      autoCancel: true,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示校验设置弹窗失败:',
+      onDismiss: (): void => {
+        this.showCheckOptionsDialog = false;
+      }
+    });
+  }
+
+  syncSourceLoginUiDialog(): void {
+    this.sourceLoginUiDialogSession.sync(this.getUIContext(), this.showSourceLoginUiDialog, (): void => {
+      this.sourceLoginUiDialog();
+    }, {
+      autoCancel: false,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示登录与接口弹窗失败:'
+    });
   }
 
   @Builder
@@ -1623,80 +1588,58 @@ struct BookSourcePage {
 
   @Builder
   checkOptionsDialog() {
-    Stack({ alignContent: Alignment.TopEnd }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.appDarkMode ? '#38000000' : '#14FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('menu', 10))
-        .onClick(() => {
-          this.showCheckOptionsDialog = false;
-        })
-
-      Column({ space: AppSpacing.LG }) {
-        Text('校验设置')
-          .fontSize(AppFontSize.SUBTITLE)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-
-        Text(this.checkValidationMode === 'exploreReading' ?
-          '逐源运行发现、详情、目录与首个非付费章节。登录、验证、VIP 或付费内容只会提示用户处理。' :
-          '只有明确的请求或规则错误会标记为失败并参与自动处理；无结果、需要验证和暂时异常不会被禁用或删除。')
-          .fontSize(AppFontSize.BODY)
-          .fontColor(this.secondaryTextColor())
-          .width('100%')
-
-        Row({ space: AppSpacing.MD }) {
-          this.checkModeOption('search', '搜索能力')
-          this.checkModeOption('exploreReading', '发现/阅读链路')
-        }
+    Column({ space: AppSpacing.LG }) {
+      Text('校验设置')
+        .fontSize(AppFontSize.SUBTITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
 
-        if (this.checkValidationMode === 'search') {
-          this.checkActionOption('仅校验', '记录各类校验状态，校验完成后再手动处理', 'none')
-          this.checkActionOption('自动禁用', '仅禁用明确失败的书源，可稍后重新启用', 'disable')
-          this.checkActionOption('自动删除', '仅删除明确失败的书源，此操作不可恢复', 'delete', true)
-        }
-
-        Row({ space: AppSpacing.MD }) {
-          Button('取消')
-            .layoutWeight(1)
-            .height(42)
-            .backgroundColor(this.inputColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.showCheckOptionsDialog = false;
-            })
-
-          Button('开始校验')
-            .layoutWeight(1)
-            .height(42)
-            .backgroundColor(this.checkValidationMode === 'search' && this.checkInvalidAction === 'delete' ?
-              '#B71C1C' : this.buttonColor())
-            .fontColor('#FFFFFF')
-            .onClick(() => {
-              this.startCheckEnabledSources(this.checkValidationMode === 'exploreReading' ?
-                'none' : this.checkInvalidAction);
-            })
-        }
+      Text(this.checkValidationMode === 'exploreReading' ?
+        '逐源运行发现、详情、目录与首个非付费章节。登录、验证、VIP 或付费内容只会提示用户处理。' :
+        '只有明确的请求或规则错误会标记为失败并参与自动处理；无结果、需要验证和暂时异常不会被禁用或删除。')
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.secondaryTextColor())
         .width('100%')
-        .margin({ top: AppSpacing.XS })
+
+      Row({ space: AppSpacing.MD }) {
+        this.checkModeOption('search', '搜索能力')
+        this.checkModeOption('exploreReading', '发现/阅读链路')
       }
-      .width('calc(100% - 24vp)')
-      .constraintSize({ maxWidth: 360 })
-      .padding(AppSpacing.XL)
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .margin({ top: this.statusBarHeight + 62, right: AppSpacing.LG })
-      .onClick(() => {
-      })
+      .width('100%')
+
+      if (this.checkValidationMode === 'search') {
+        this.checkActionOption('仅校验', '记录各类校验状态，校验完成后再手动处理', 'none')
+        this.checkActionOption('自动禁用', '仅禁用明确失败的书源，可稍后重新启用', 'disable')
+        this.checkActionOption('自动删除', '仅删除明确失败的书源，此操作不可恢复', 'delete', true)
+      }
+
+      Row({ space: AppSpacing.MD }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(42)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.showCheckOptionsDialog = false;
+          })
+
+        Button('开始校验')
+          .layoutWeight(1)
+          .height(42)
+          .backgroundColor(this.checkValidationMode === 'search' && this.checkInvalidAction === 'delete' ?
+            '#B71C1C' : this.buttonColor())
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.startCheckEnabledSources(this.checkValidationMode === 'exploreReading' ?
+              'none' : this.checkInvalidAction);
+          })
+      }
+      .width('100%')
+      .margin({ top: AppSpacing.XS })
     }
     .width('100%')
-    .height('100%')
+    .padding(AppSpacing.XL)
   }
 
   @Builder
@@ -1752,13 +1695,7 @@ struct BookSourcePage {
 
   @Builder
   sourceActionDialog() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-        .onClick(() => this.closeSourceActions())
+    Scroll() {
       Column() {
         this.contextActionItem($r('sys.symbol.magnifyingglass'), '搜索', this.primaryTextColor(),
           () => this.openActionSourceSearch())
@@ -1801,211 +1738,179 @@ struct BookSourcePage {
               this.openSourceDeleteDialog();
             })
         }
+
       }
-      .width(158)
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({
-        x: this.contextMenuLeft(158),
-        y: this.contextMenuTop(this.sourceActionMenuHeight())
-      })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(188)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
   sourceLoginUiDialog() {
     Column() {
-      Column() {
-        Text(`${this.actionSourceName()} · 登录与接口`)
-          .fontSize(AppFontSize.SUBTITLE)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: AppSpacing.LG })
+      Text(`${this.actionSourceName()} · 登录与接口`)
+        .fontSize(AppFontSize.SUBTITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: AppSpacing.LG })
 
-        Scroll() {
-          Column({ space: AppSpacing.MD }) {
-            ForEach(this.sourceLoginItems, (item: BookSourceLoginItem, index: number) => {
-              if (this.isSourceLoginInput(item)) {
-                Column({ space: AppSpacing.XS }) {
-                  Text(item.name)
-                    .fontSize(AppFontSize.CAPTION)
-                    .fontColor(this.subTextColor())
-                    .width('100%')
-                  Row({ space: AppSpacing.MD }) {
-                    TextInput({ text: item.value, placeholder: item.placeholder || item.name })
-                      .type(item.type.toLowerCase() === 'password' ? InputType.Password : InputType.Normal)
-                      .layoutWeight(1)
-                      .height(42)
-                      .borderRadius(ThemeRuntime.mediumRadius())
-                      .backgroundColor(this.inputColor())
-                      .fontColor(this.primaryTextColor())
-                      .placeholderColor(this.placeholderTextColor())
-                      .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-                      .enabled(!this.isExecutingLoginAction)
-                      .onChange((value: string) => {
-                        this.updateSourceLoginInput(index, value);
-                      })
-                    if (item.action) {
-                      Button(this.isExecutingLoginAction ? '执行中' : '执行', { type: ButtonType.Normal })
-                        .width(68)
-                        .height(42)
-                        .fontSize(AppFontSize.BODY)
-                        .fontColor(this.primaryTextColor())
-                        .backgroundColor(this.inputColor())
-                        .enabled(!this.isExecutingLoginAction)
-                        .onClick(() => {
-                          this.executeSourceLoginAction(item);
-                        })
-                    }
-                  }
+      Scroll() {
+        Column({ space: AppSpacing.MD }) {
+          ForEach(this.sourceLoginItems, (item: BookSourceLoginItem, index: number) => {
+            if (this.isSourceLoginInput(item)) {
+              Column({ space: AppSpacing.XS }) {
+                Text(item.name)
+                  .fontSize(AppFontSize.CAPTION)
+                  .fontColor(this.subTextColor())
                   .width('100%')
-                }
-                .width('100%')
-              } else if (this.isSourceLoginToggle(item)) {
-                Row({ space: AppSpacing.LG }) {
-                  Column({ space: AppSpacing.XXS }) {
-                    Text(this.sourceLoginItemDisplayName(item))
+                Row({ space: AppSpacing.MD }) {
+                  TextInput({ text: item.value, placeholder: item.placeholder || item.name })
+                    .type(item.type.toLowerCase() === 'password' ? InputType.Password : InputType.Normal)
+                    .layoutWeight(1)
+                    .height(42)
+                    .borderRadius(ThemeRuntime.mediumRadius())
+                    .backgroundColor(this.inputColor())
+                    .fontColor(this.primaryTextColor())
+                    .placeholderColor(this.placeholderTextColor())
+                    .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
+                    .enabled(!this.isExecutingLoginAction)
+                    .onChange((value: string) => {
+                      this.updateSourceLoginInput(index, value);
+                    })
+                  if (item.action) {
+                    Button(this.isExecutingLoginAction ? '执行中' : '执行', { type: ButtonType.Normal })
+                      .width(68)
+                      .height(42)
                       .fontSize(AppFontSize.BODY)
                       .fontColor(this.primaryTextColor())
-                      .width('100%')
-                    Text(this.sourceLoginToggleOn(item) ? '已开启' : '已关闭')
-                      .fontSize(AppFontSize.CAPTION)
-                      .fontColor(this.sourceLoginToggleOn(item) ? this.accentColor() : this.subTextColor())
-                      .width('100%')
+                      .backgroundColor(this.inputColor())
+                      .enabled(!this.isExecutingLoginAction)
+                      .onClick(() => {
+                        this.executeSourceLoginAction(item);
+                      })
                   }
-                  .layoutWeight(1)
-                  .alignItems(HorizontalAlign.Start)
-
-                  AdaptiveSwitch({
-                    isOn: this.sourceLoginToggleOn(item),
-                    switchEnabled: !this.isExecutingLoginAction,
-                    onChange: (isOn: boolean) => {
-                      this.updateSourceLoginToggle(index, isOn);
-                    }
-                  })
                 }
                 .width('100%')
-                .height(48)
-                .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-                .borderRadius(ThemeRuntime.mediumRadius())
-                .backgroundColor(this.inputColor())
-              } else if (this.isSourceLoginSelect(item)) {
-                Row({ space: AppSpacing.LG }) {
+              }
+              .width('100%')
+            } else if (this.isSourceLoginToggle(item)) {
+              Row({ space: AppSpacing.LG }) {
+                Column({ space: AppSpacing.XXS }) {
                   Text(this.sourceLoginItemDisplayName(item))
                     .fontSize(AppFontSize.BODY)
                     .fontColor(this.primaryTextColor())
-                    .layoutWeight(1)
-                    .maxLines(2)
-                  Select(this.sourceLoginSelectOptions(item))
-                    .selected(this.sourceLoginSelectIndex(item))
-                    .value(this.sourceLoginChoiceValue(item))
-                    .fontColor(this.primaryTextColor())
-                    .selectedOptionFontColor(this.accentColor())
-                    .backgroundColor(this.cardColor())
-                    .divider(null)
-                    .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
-                    .menuBackgroundBlurStyle(BlurStyle.NONE)
-                    .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
-                    .enabled(!this.isExecutingLoginAction)
-                    .onSelect((selectedIndex: number) => {
-                      this.updateSourceLoginSelect(index, selectedIndex);
-                    })
+                    .width('100%')
+                  Text(this.sourceLoginToggleOn(item) ? '已开启' : '已关闭')
+                    .fontSize(AppFontSize.CAPTION)
+                    .fontColor(this.sourceLoginToggleOn(item) ? this.accentColor() : this.subTextColor())
+                    .width('100%')
                 }
-                .width('100%')
-                .height(48)
-                .padding({ left: AppSpacing.LG, right: AppSpacing.MD })
-                .borderRadius(ThemeRuntime.mediumRadius())
-                .backgroundColor(this.inputColor())
-              } else {
-                Button(this.isExecutingLoginAction && item.action ? `执行中 · ${item.name}` :
-                  this.sourceLoginButtonLabel(item),
-                  { type: ButtonType.Normal })
-                  .width('100%')
-                  .height(40)
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+
+                AdaptiveSwitch({
+                  isOn: this.sourceLoginToggleOn(item),
+                  switchEnabled: !this.isExecutingLoginAction,
+                  onChange: (isOn: boolean) => {
+                    this.updateSourceLoginToggle(index, isOn);
+                  }
+                })
+              }
+              .width('100%')
+              .height(48)
+              .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
+              .borderRadius(ThemeRuntime.mediumRadius())
+              .backgroundColor(this.inputColor())
+            } else if (this.isSourceLoginSelect(item)) {
+              Row({ space: AppSpacing.LG }) {
+                Text(this.sourceLoginItemDisplayName(item))
                   .fontSize(AppFontSize.BODY)
-                  .fontColor(item.action ? this.primaryTextColor() : this.subTextColor())
-                  .backgroundColor(item.action ? this.inputColor() : this.cardColor())
-                  .enabled(!!item.action && !this.isExecutingLoginAction)
-                  .onClick(() => {
-                    this.executeSourceLoginAction(item);
+                  .fontColor(this.primaryTextColor())
+                  .layoutWeight(1)
+                  .maxLines(2)
+                Select(this.sourceLoginSelectOptions(item))
+                  .selected(this.sourceLoginSelectIndex(item))
+                  .value(this.sourceLoginChoiceValue(item))
+                  .fontColor(this.primaryTextColor())
+                  .selectedOptionFontColor(this.accentColor())
+                  .backgroundColor(this.cardColor())
+                  .divider(null)
+                  .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
+                  .menuBackgroundBlurStyle(BlurStyle.NONE)
+                  .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
+                  .enabled(!this.isExecutingLoginAction)
+                  .onSelect((selectedIndex: number) => {
+                    this.updateSourceLoginSelect(index, selectedIndex);
                   })
               }
-            }, (item: BookSourceLoginItem, index: number) => this.sourceLoginItemRenderKey(item, index))
-          }
-          .width('100%')
+              .width('100%')
+              .height(48)
+              .padding({ left: AppSpacing.LG, right: AppSpacing.MD })
+              .borderRadius(ThemeRuntime.mediumRadius())
+              .backgroundColor(this.inputColor())
+            } else {
+              Button(this.isExecutingLoginAction && item.action ? `执行中 · ${item.name}` :
+                this.sourceLoginButtonLabel(item),
+                { type: ButtonType.Normal })
+                .width('100%')
+                .height(40)
+                .fontSize(AppFontSize.BODY)
+                .fontColor(item.action ? this.primaryTextColor() : this.subTextColor())
+                .backgroundColor(item.action ? this.inputColor() : this.cardColor())
+                .enabled(!!item.action && !this.isExecutingLoginAction)
+                .onClick(() => {
+                  this.executeSourceLoginAction(item);
+                })
+            }
+          }, (item: BookSourceLoginItem, index: number) => this.sourceLoginItemRenderKey(item, index))
         }
-        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
         .width('100%')
-        .constraintSize({ maxHeight: 430 })
-        .scrollBar(BarState.Auto)
+      }
+      .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+      .width('100%')
+      .constraintSize({ maxHeight: 430 })
+      .scrollBar(BarState.Auto)
 
-        if (this.sourceLoginSupportsConfirmAction(this.actionSourceDetail)) {
-          Button(this.isExecutingLoginAction ? '登录中...' : '确认登录', { type: ButtonType.Normal })
-            .width('100%')
-            .height(42)
-            .margin({ top: AppSpacing.MD })
-            .fontSize(AppFontSize.BODY)
-            .fontColor(ThemeRuntime.onAccentColor())
-            .backgroundColor(this.accentColor())
-            .enabled(!this.isExecutingLoginAction)
-            .onClick(() => {
-              this.confirmSourceLoginInputs();
-            })
-        }
-
-        Button('关闭')
+      if (this.sourceLoginSupportsConfirmAction(this.actionSourceDetail)) {
+        Button(this.isExecutingLoginAction ? '登录中...' : '确认登录', { type: ButtonType.Normal })
           .width('100%')
           .height(42)
           .margin({ top: AppSpacing.MD })
-          .backgroundColor(this.buttonColor())
+          .fontSize(AppFontSize.BODY)
           .fontColor(ThemeRuntime.onAccentColor())
+          .backgroundColor(this.accentColor())
+          .enabled(!this.isExecutingLoginAction)
           .onClick(() => {
-            this.saveSourceLoginInputs();
-            this.showSourceLoginUiDialog = false;
-            this.sourceLoginItems = [];
-            this.actionSourceUrl = '';
-            this.actionSourceDetail = null;
+            this.confirmSourceLoginInputs();
           })
       }
-      .width('90%')
-      .padding(AppSpacing.XXL)
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
+
+      Button('关闭')
+        .width('100%')
+        .height(42)
+        .margin({ top: AppSpacing.MD })
+        .backgroundColor(this.buttonColor())
+        .fontColor(ThemeRuntime.onAccentColor())
+        .onClick(() => {
+          this.saveSourceLoginInputs();
+          this.showSourceLoginUiDialog = false;
+          this.sourceLoginItems = [];
+          this.actionSourceUrl = '';
+          this.actionSourceDetail = null;
+        })
     }
     .width('100%')
-    .height('100%')
-    .backgroundColor('#80000000')
-    .justifyContent(FlexAlign.Center)
+    .padding(AppSpacing.XXL)
   }
 
   @Builder
   contextActionItem(icon: Resource, label: string, color: string, action: () => void) {
-    Row({ space: AppSpacing.MD }) {
-      SymbolGlyph(icon)
-        .fontSize(18)
-        .fontColor([color])
-        .width(24)
-      Text(label)
-        .fontSize(AppFontSize.BODY_LARGE)
-        .fontColor(color)
-        .layoutWeight(1)
-    }
-    .width('100%')
-    .height(44)
-    .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-    .alignItems(VerticalAlign.Center)
-    .onClick(action)
+    PopupMenuAction(icon, label, color, action)
   }
 
   /** 名称独占主行；次要信息允许换行，不再从右侧挤占名称宽度。 */
@@ -2720,11 +2625,14 @@ struct BookSourcePage {
           .borderRadius(16)
           .backgroundColor(this.glassCardColor())
           .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
-          .onClick((event: ClickEvent) => {
-            this.contextMenuX = event.windowX;
-            this.contextMenuY = event.windowY;
+          .onClick(() => {
             this.showSourceGroupToolsMenu = true;
           })
+          .bindPopup(this.showSourceGroupToolsMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+            this.sourceGroupToolsMenu()
+          }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+            this.showSourceGroupToolsMenu = false;
+          }))
         this.sourceGroupChip('全部', '__all__')
         ForEach(this.getSourceGroups(), (group: string) => {
           this.sourceGroupChip(group, group, true)
@@ -2759,15 +2667,7 @@ struct BookSourcePage {
 
   @Builder
   sourceGroupToolsMenu() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(Color.Transparent)
-        .onClick(() => {
-          this.showSourceGroupToolsMenu = false;
-        })
-
+    Scroll() {
       Column() {
         this.contextActionItem($r('sys.symbol.list_bullet'), '分组管理', this.primaryTextColor(), () => {
           this.showSourceGroupToolsMenu = false;
@@ -2783,18 +2683,14 @@ struct BookSourcePage {
           this.newSourceGroupInput = '';
           this.openAddSourceGroupDialog();
         })
+
       }
-      .width(166)
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: this.contextMenuLeft(166), y: this.contextMenuTop(144) })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(188)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
@@ -2951,14 +2847,7 @@ struct BookSourcePage {
 
   @Builder
   sourceGroupActionMenu() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-        .onClick(() => this.closeSourceGroupActions())
-
+    Scroll() {
       Column() {
         this.contextActionItem($r('sys.symbol.square_and_pencil'), '重命名', this.primaryTextColor(), () => {
             this.renameSourceGroupInput = this.pendingSourceGroup;
@@ -2969,18 +2858,14 @@ struct BookSourcePage {
             this.showSourceGroupActionMenu = false;
             this.openDeleteSourceGroupDialog();
           })
+
       }
-      .width(148)
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(100) })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(188)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
@@ -4034,16 +3919,6 @@ struct BookSourcePage {
     if (Number.isFinite(height) && height > 0) this.contextViewportHeight = height;
   }
 
-  contextMenuLeft(menuWidth: number): number {
-    return Math.max(12, Math.min(this.contextMenuX - 18, this.contextViewportWidth - menuWidth - 12));
-  }
-
-  contextMenuTop(menuHeight: number): number {
-    const below = this.contextMenuY + 12;
-    if (below + menuHeight <= this.contextViewportHeight - 12) return below;
-    return Math.max(this.statusBarHeight + 8, this.contextMenuY - menuHeight - 12);
-  }
-
   closeSourceActions(): void {
     this.showSourceActionDialog = false;
     this.actionSourceUrl = '';
@@ -4109,16 +3984,6 @@ struct BookSourcePage {
   actionSourceTlsTrusted(): boolean {
     const source = this.actionSource();
     return source ? TlsTrustStore.isTrustedUrl(source.bookSourceUrl) : false;
-  }
-
-  sourceActionMenuHeight(): number {
-    const trustHeight = this.actionSourceTlsTrusted() ? 44 : 0;
-    const debugHeight = 44;
-    const hasSettingsItem = this.actionSourceIsNative() || this.actionSourceNeedsLogin();
-    if (this.actionSourceLocked()) {
-      return (hasSettingsItem ? 320 : 276) + trustHeight + debugHeight;
-    }
-    return (hasSettingsItem ? 496 : 452) + trustHeight + debugHeight;
   }
 
   async revokeActionSourceTlsTrust(): Promise<void> {

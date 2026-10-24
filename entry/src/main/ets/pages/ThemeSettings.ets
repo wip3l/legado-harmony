@@ -1,3 +1,4 @@
+import { MembershipBadge } from '../components/common/MembershipBadge';
 import { promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { AppIconManager } from '../utils/AppIconManager';
@@ -51,6 +52,9 @@ import {
   ThemeImportPreview,
   ThemePackageService
 } from '../theme/share/ThemePackageService';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
+import { SystemDialogSession } from '../utils/SystemDialogSession';
+import { PopupMenuAction } from '../components/common/PopupMenuAction';
 
 const STORE_COVER_MIN_HEIGHT = 170;
 const STORE_COVER_MAX_HEIGHT = 340;
@@ -134,6 +138,7 @@ class ThemeListEntry {
 @Entry
 @Component
 struct ThemeSettingsPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('appThemeId') appThemeId: string = AppThemeSettingsStore.DEFAULT_THEME_ID;
   @StorageLink('appIconId') appIconId: string = AppIconSettingsStore.DEFAULT_ICON_ID;
@@ -181,27 +186,33 @@ struct ThemeSettingsPage {
   private boundLayoutSummaries: Map<string, string> = new Map<string, string>();
   @State customSchemeLimit: number = CustomThemeQuota.current();
   @State addingCustomScheme: boolean = false;
-  @State showThemeExportDialog: boolean = false;
+  @State @Watch('syncThemeExportDialog') showThemeExportDialog: boolean = false;
   @State exportPlan: ThemeExportPlan = new ThemeExportPlan();
-  @State showThemeImportDialog: boolean = false;
+  @State @Watch('syncThemeImportDialog') showThemeImportDialog: boolean = false;
   @State importPreview: ThemeImportPreview = new ThemeImportPreview();
   @State preparingThemeImport: boolean = false;
   // 外部“用本应用打开”.qytheme 文件时由 EntryAbility 写入。
   @StorageLink('pendingThemeImportNonce') @Watch('onPendingThemeImport') pendingThemeImportNonce: number = 0;
   @State showCustomThemeActionMenu: boolean = false;
-  @State showRenameCustomThemeDialog: boolean = false;
-  @State showDeleteCustomThemeDialog: boolean = false;
+  @State @Watch('syncShowRenameCustomThemeDialog') showRenameCustomThemeDialog: boolean = false;
+  private renameCustomThemeDialogSession: SystemDialogSession = new SystemDialogSession();
+  private themeExportDialogSession: SystemDialogSession = new SystemDialogSession();
+  private themeImportDialogSession: SystemDialogSession = new SystemDialogSession();
+  private themeApplyDialogSession: SystemDialogSession = new SystemDialogSession();
+  private startupTextDialogSession: SystemDialogSession = new SystemDialogSession();
+  private deleteCustomThemeDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('syncShowDeleteCustomThemeDialog') showDeleteCustomThemeDialog: boolean = false;
   @State actionCustomSchemeId: string = '';
   @State renameCustomThemeName: string = '';
   @State contextMenuX: number = 24;
   @State contextMenuY: number = 120;
   @State contextViewportWidth: number = 360;
   @State contextViewportHeight: number = 720;
-  @State showStartupTextDialog: boolean = false;
+  @State @Watch('syncShowStartupTextDialog') showStartupTextDialog: boolean = false;
   @State startupTextThemeId: string = '';
   @State startupTextTitle: string = '';
   @State startupTextSubtitle: string = '';
-  @State showThemeApplyDialog: boolean = false;
+  @State @Watch('syncShowThemeApplyDialog') showThemeApplyDialog: boolean = false;
   @State applyDialogThemeName: string = '';
   // 排版开关打开、关闭时各自会得到的排版，提示随开关切换，数值取自实际要生效的设置。
   @State applyDialogLayoutOnHint: string = '';
@@ -413,42 +424,16 @@ struct ThemeSettingsPage {
         this.themeStoreOverlay()
       }
 
-      if (this.showCustomThemeActionMenu) {
-        this.customThemeActionMenu()
-      }
-      if (this.showRenameCustomThemeDialog) {
-        this.renameCustomThemeDialog()
-      }
-      if (this.showDeleteCustomThemeDialog) {
-        this.deleteCustomThemeDialog()
-      }
-      if (this.showStartupTextDialog) {
-        this.startupTextDialog()
-      }
-      if (this.showThemeApplyDialog) {
-        this.themeApplyDialog()
-      }
-      if (this.showThemeExportDialog) {
-        ThemeExportDialog({
-          darkMode: this.appDarkMode,
-          plan: this.exportPlan,
-          onClose: () => {
-            this.showThemeExportDialog = false;
-          },
-          onExport: (options: ThemeExportOptions, share: boolean): Promise<void> => this.runThemeExport(options, share)
-        })
-      }
-      if (this.showThemeImportDialog) {
-        ThemeImportDialog({
-          darkMode: this.appDarkMode,
-          preview: this.importPreview,
-          schemes: this.customSchemes,
-          limit: this.customSchemeLimit,
-          activeSchemeId: this.appThemeId === ThemeIds.CUSTOM ? this.activeCustomSchemeId : '',
-          onClose: () => this.closeThemeImport(),
-          onImport: (replaceSchemeId: string): Promise<void> => this.runThemeImport(replaceSchemeId)
-        })
-      }
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: this.contextMenuX, y: this.contextMenuY })
+        .hitTestBehavior(HitTestMode.None)
+        .bindPopup(this.showCustomThemeActionMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.customThemeActionMenu()
+        }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+          this.showCustomThemeActionMenu = false;
+        }))
     }
     .width('100%')
     .height('100%')
@@ -457,6 +442,59 @@ struct ThemeSettingsPage {
     .onAreaChange((_oldValue: Area, newValue: Area) => {
       this.updateContextViewport(newValue);
     })
+  }
+
+  /** 主题包导出：系统对话框。 */
+  @Builder
+  themeExportDialogContent() {
+    ThemeExportDialog({
+      darkMode: this.appDarkMode,
+      plan: this.exportPlan,
+      onClose: () => {
+        this.showThemeExportDialog = false;
+      },
+      onExport: (options: ThemeExportOptions, share: boolean): Promise<void> => this.runThemeExport(options, share)
+    })
+  }
+
+  /** 主题包导入：系统对话框。 */
+  @Builder
+  themeImportDialogContent() {
+    ThemeImportDialog({
+      darkMode: this.appDarkMode,
+      preview: this.importPreview,
+      schemes: this.customSchemes,
+      limit: this.customSchemeLimit,
+      activeSchemeId: this.appThemeId === ThemeIds.CUSTOM ? this.activeCustomSchemeId : '',
+      onClose: () => this.closeThemeImport(),
+      onImport: (replaceSchemeId: string): Promise<void> => this.runThemeImport(replaceSchemeId)
+    })
+  }
+
+  syncThemeExportDialog(): void {
+    this.themeExportDialogSession.sync(this.getUIContext(), this.showThemeExportDialog, (): void => {
+      this.themeExportDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示主题导出弹窗失败:',
+      onDismiss: (): void => {
+        this.showThemeExportDialog = false;
+      }
+    });
+  }
+
+  syncThemeImportDialog(): void {
+    this.themeImportDialogSession.sync(this.getUIContext(), this.showThemeImportDialog, (): void => {
+      this.themeImportDialogContent();
+    }, {
+      autoCancel: true,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示主题导入弹窗失败:',
+      onDismiss: (): void => {
+        this.closeThemeImport();
+      }
+    });
   }
 
   @Builder
@@ -1043,6 +1081,9 @@ struct ThemeSettingsPage {
       .clip(true)
 
       Row({ space: AppSpacing.SM }) {
+        if (theme.id === ThemeIds.OBSIDIAN_ARCHIVE) {
+          MembershipBadge({ sku: 'SUPER_LIFETIME' })
+        }
         Text(theme.name)
           .fontSize(AppFontSize.BODY)
           .fontWeight(FontWeight.Bold)
@@ -1188,13 +1229,19 @@ struct ThemeSettingsPage {
           .draggable(false)
           .accessibilityText(`${theme.name}桌面图标预览`)
         Column({ space: AppSpacing.XXS }) {
-          Text(theme.name)
-            .fontSize(AppFontSize.SUBTITLE)
-            .fontWeight(FontWeight.Bold)
-            .fontFamily(theme.typography.appFontFamily)
-            .fontColor(this.activeVariant(theme).colors.primaryTextColor)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Row({ space: AppSpacing.XS }) {
+            if (theme.id === ThemeIds.OBSIDIAN_ARCHIVE) {
+              MembershipBadge({ sku: 'SUPER_LIFETIME' })
+            }
+            Text(theme.name)
+              .fontSize(AppFontSize.SUBTITLE)
+              .fontWeight(FontWeight.Bold)
+              .fontFamily(theme.typography.appFontFamily)
+              .fontColor(this.activeVariant(theme).colors.primaryTextColor)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .flexShrink(1)
+          }
           Text(theme.description)
             .fontSize(AppFontSize.CAPTION)
             .fontColor(this.activeVariant(theme).colors.subTextColor)
@@ -1758,6 +1805,7 @@ struct ThemeSettingsPage {
         Text(this.preparingThemeImport ? '读取中' : '导入')
           .fontSize(AppFontSize.CAPTION)
           .fontColor(this.accentColor())
+        MembershipBadge({ sku: 'MONTHLY' })
       }
       .padding({ left: AppSpacing.SM, right: AppSpacing.SM, top: AppSpacing.XXS, bottom: AppSpacing.XXS })
       .borderRadius(12)
@@ -1861,12 +1909,18 @@ struct ThemeSettingsPage {
       .borderRadius(ThemeRuntime.mediumRadius())
       .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
 
-      Text('新建方案')
-        .fontSize(AppFontSize.CAPTION)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(this.canAddCustomScheme() ? this.primaryTextColor() : this.subTextColor())
-        .maxLines(1)
-        .width('100%')
+      Row({ space: AppSpacing.XXS }) {
+        Text('新建方案')
+          .fontSize(AppFontSize.CAPTION)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.canAddCustomScheme() ? this.primaryTextColor() : this.subTextColor())
+          .maxLines(1)
+          .flexShrink(1)
+        if (CustomThemeQuota.minimumForCount(this.customSchemes.length + 1)) {
+          MembershipBadge({ sku: CustomThemeQuota.minimumForCount(this.customSchemes.length + 1) })
+        }
+      }
+      .width('100%')
       Text(this.canAddCustomScheme() ?
         `还可添加 ${this.customSchemeLimit - this.customSchemes.length} 套` :
         (this.addingCustomScheme ? '正在添加' : '已达上限'))
@@ -1950,13 +2004,7 @@ struct ThemeSettingsPage {
 
   @Builder
   customThemeActionMenu() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-        .onClick(() => this.closeCustomThemeActions())
+    Scroll() {
       Column() {
         this.contextActionItem($r('sys.symbol.paintpalette'), '编辑', this.primaryTextColor(), () => {
           const schemeId = this.actionCustomSchemeId;
@@ -1985,323 +2033,264 @@ struct ThemeSettingsPage {
           const schemeId = this.actionCustomSchemeId;
           this.closeCustomThemeActions();
           this.requestThemeExport(schemeId);
-        })
+        }, 'MONTHLY')
         this.contextActionItem($r('sys.symbol.trash'), '删除', ThemeRuntime.dangerColor(this.appDarkMode), () => {
           this.showCustomThemeActionMenu = false;
           this.requestDeleteCustomTheme(this.actionCustomSchemeId);
         })
+
       }
-      .width(148)
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({
-        width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel')
-      })
-      .shadow({
-        radius: ThemeRuntime.glassShadowRadius('panel'),
-        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('panel'),
-        offsetY: ThemeRuntime.glassShadowOffsetY('panel')
-      })
-      .position({
-        x: this.contextMenuLeft(148),
-        y: this.contextMenuTop(246)
-      })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(176)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
-  contextActionItem(icon: Resource, label: string, color: string, action: () => void) {
-    Row({ space: AppSpacing.MD }) {
-      SymbolGlyph(icon)
-        .fontSize(18)
-        .fontColor([color])
-        .width(24)
-      Text(label)
-        .fontSize(AppFontSize.BODY_LARGE)
-        .fontColor(color)
-        .layoutWeight(1)
-    }
-    .width('100%')
-    .height(46)
-    .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-    .alignItems(VerticalAlign.Center)
-    .onClick(action)
+  contextActionItem(icon: Resource, label: string, color: string, action: () => void, minimumMembership: string = '') {
+    PopupMenuAction(icon, label, color, action, true, '', '', minimumMembership)
   }
 
   @Builder
   renameCustomThemeDialog() {
-    Column() {
-      Column({ space: AppSpacing.XL }) {
-        Text('重命名自定义主题')
-          .fontSize(AppFontSize.SUBTITLE)
-          .fontWeight(FontWeight.Bold)
+    Column({ space: AppSpacing.XL }) {
+      Text('重命名自定义主题')
+        .fontSize(AppFontSize.SUBTITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+      TextInput({ placeholder: '输入方案名称', text: this.renameCustomThemeName })
+        .width('100%')
+        .height(42)
+        .fontColor(this.primaryTextColor())
+        .placeholderColor(this.subTextColor())
+        .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
+        .borderRadius(ThemeRuntime.mediumRadius())
+        .onChange((value: string) => {
+          this.renameCustomThemeName = value;
+        })
+      Row({ space: AppSpacing.LG }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(ThemeRuntime.buttonRadius())
+          .backgroundColor(this.cardColor())
           .fontColor(this.primaryTextColor())
-        TextInput({ placeholder: '输入方案名称', text: this.renameCustomThemeName })
+          .onClick(() => this.closeRenameCustomThemeDialog())
+        Button('保存', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(ThemeRuntime.buttonRadius())
+          .backgroundColor(this.accentColor())
+          .fontColor(ThemeRuntime.onAccentColor(this.accentColor()))
+          .enabled(!!this.renameCustomThemeName.trim())
+          .onClick(() => this.renameCustomTheme())
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding(AppSpacing.XXL)
+  }
+
+  syncShowRenameCustomThemeDialog(): void {
+    this.renameCustomThemeDialogSession.sync(this.getUIContext(), this.showRenameCustomThemeDialog, (): void => {
+      this.renameCustomThemeDialog();
+    }, {
+      autoCancel: true,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示重命名主题弹窗失败:',
+      onDismiss: (): void => {
+        this.closeRenameCustomThemeDialog();
+      }
+    });
+  }
+
+  @Builder
+  deleteCustomThemeDialog() {
+    Column({ space: AppSpacing.LG }) {
+      Text('删除自定义主题')
+        .fontSize(AppFontSize.SUBTITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+      Text(`确定删除「${this.actionCustomScheme()?.name || '该方案'}」吗？此操作无法撤销。`)
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.subTextColor())
+        .width('100%')
+      Row({ space: AppSpacing.LG }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(ThemeRuntime.buttonRadius())
+          .backgroundColor(this.cardColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.closeDeleteCustomThemeDialog())
+        Button('删除', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(ThemeRuntime.buttonRadius())
+          .backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode))
+          .fontColor(ThemeRuntime.onAccentColor(ThemeRuntime.dangerColor(this.appDarkMode)))
+          .onClick(() => this.confirmDeleteCustomTheme())
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding(AppSpacing.XXL)
+  }
+
+  syncShowDeleteCustomThemeDialog(): void {
+    this.deleteCustomThemeDialogSession.sync(this.getUIContext(), this.showDeleteCustomThemeDialog, (): void => {
+      this.deleteCustomThemeDialog();
+    }, {
+      autoCancel: true,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示删除主题弹窗失败:',
+      onDismiss: (): void => {
+        this.closeDeleteCustomThemeDialog();
+      }
+    });
+  }
+
+  @Builder
+  startupTextDialog() {
+    Column({ space: AppSpacing.LG }) {
+      Text(`编辑「${BuiltinThemeRegistry.findById(this.startupTextThemeId).name}」启动文案`)
+        .fontSize(AppFontSize.SUBTITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+      Column({ space: AppSpacing.SM }) {
+        Text('主标题')
+          .fontSize(AppFontSize.CAPTION)
+          .fontColor(this.subTextColor())
+          .width('100%')
+        TextInput({ placeholder: '可留空', text: this.startupTextTitle })
           .width('100%')
           .height(42)
+          .maxLength(24)
           .fontColor(this.primaryTextColor())
           .placeholderColor(this.subTextColor())
           .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
           .borderRadius(ThemeRuntime.mediumRadius())
           .onChange((value: string) => {
-            this.renameCustomThemeName = value;
+            this.startupTextTitle = value;
           })
-        Row({ space: AppSpacing.LG }) {
-          Button('取消', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(ThemeRuntime.buttonRadius())
-            .backgroundColor(this.cardColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.closeRenameCustomThemeDialog())
-          Button('保存', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(ThemeRuntime.buttonRadius())
-            .backgroundColor(this.accentColor())
-            .fontColor(ThemeRuntime.onAccentColor(this.accentColor()))
-            .enabled(!!this.renameCustomThemeName.trim())
-            .onClick(() => this.renameCustomTheme())
-        }
-        .width('100%')
       }
-      .width('calc(100% - 48vp)')
-      .constraintSize({ maxWidth: 360 })
-      .padding(AppSpacing.XXL)
-      .borderRadius(ThemeRuntime.glassCornerRadius(18, 'panel'))
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({
-        width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel')
-      })
-      .shadow({
-        radius: ThemeRuntime.glassShadowRadius('panel'),
-        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('panel'),
-        offsetY: ThemeRuntime.glassShadowOffsetY('panel')
-      })
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor(this.appDarkMode ? '#76000000' : '#52000000')
-    .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-  }
-
-  @Builder
-  deleteCustomThemeDialog() {
-    Column() {
-      Column({ space: AppSpacing.LG }) {
-        Text('删除自定义主题')
-          .fontSize(AppFontSize.SUBTITLE)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-        Text(`确定删除「${this.actionCustomScheme()?.name || '该方案'}」吗？此操作无法撤销。`)
-          .fontSize(AppFontSize.BODY)
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      Column({ space: AppSpacing.SM }) {
+        Text('副标题')
+          .fontSize(AppFontSize.CAPTION)
           .fontColor(this.subTextColor())
           .width('100%')
-        Row({ space: AppSpacing.LG }) {
-          Button('取消', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(ThemeRuntime.buttonRadius())
-            .backgroundColor(this.cardColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.closeDeleteCustomThemeDialog())
-          Button('删除', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(ThemeRuntime.buttonRadius())
-            .backgroundColor(ThemeRuntime.dangerColor(this.appDarkMode))
-            .fontColor(ThemeRuntime.onAccentColor(ThemeRuntime.dangerColor(this.appDarkMode)))
-            .onClick(() => this.confirmDeleteCustomTheme())
-        }
-        .width('100%')
+        TextInput({ placeholder: '可留空', text: this.startupTextSubtitle })
+          .width('100%')
+          .height(42)
+          .maxLength(48)
+          .fontColor(this.primaryTextColor())
+          .placeholderColor(this.subTextColor())
+          .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
+          .borderRadius(ThemeRuntime.mediumRadius())
+          .onChange((value: string) => {
+            this.startupTextSubtitle = value;
+          })
       }
-      .width('calc(100% - 48vp)')
-      .constraintSize({ maxWidth: 360 })
-      .padding(AppSpacing.XXL)
-      .borderRadius(ThemeRuntime.glassCornerRadius(18, 'panel'))
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({
-        width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel')
-      })
-      .shadow({
-        radius: ThemeRuntime.glassShadowRadius('panel'),
-        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('panel'),
-        offsetY: ThemeRuntime.glassShadowOffsetY('panel')
-      })
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      Button('恢复默认文案', { type: ButtonType.Normal })
+        .height(34)
+        .borderRadius(ThemeRuntime.buttonRadius())
+        .fontSize(AppFontSize.CAPTION)
+        .fontColor(this.accentColor())
+        .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
+        .onClick(() => {
+          this.startupTextTitle = '开源轻页';
+          this.startupTextSubtitle = StartupCoverTextStore.defaultSubtitle(this.startupTextThemeId);
+        })
+      Row({ space: AppSpacing.LG }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(ThemeRuntime.buttonRadius())
+          .backgroundColor(this.cardColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.closeStartupTextDialog())
+        Button('保存', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(ThemeRuntime.buttonRadius())
+          .backgroundColor(this.accentColor())
+          .fontColor(ThemeRuntime.onAccentColor(this.accentColor()))
+          .onClick(() => this.saveStartupText())
+      }
+      .width('100%')
     }
     .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor(this.appDarkMode ? '#76000000' : '#52000000')
-    .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
+    .padding(AppSpacing.XXL)
   }
 
-  @Builder
-  startupTextDialog() {
-    Column() {
-      Column({ space: AppSpacing.LG }) {
-        Text(`编辑「${BuiltinThemeRegistry.findById(this.startupTextThemeId).name}」启动文案`)
-          .fontSize(AppFontSize.SUBTITLE)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-        Column({ space: AppSpacing.SM }) {
-          Text('主标题')
-            .fontSize(AppFontSize.CAPTION)
-            .fontColor(this.subTextColor())
-            .width('100%')
-          TextInput({ placeholder: '可留空', text: this.startupTextTitle })
-            .width('100%')
-            .height(42)
-            .maxLength(24)
-            .fontColor(this.primaryTextColor())
-            .placeholderColor(this.subTextColor())
-            .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
-            .borderRadius(ThemeRuntime.mediumRadius())
-            .onChange((value: string) => {
-              this.startupTextTitle = value;
-            })
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        Column({ space: AppSpacing.SM }) {
-          Text('副标题')
-            .fontSize(AppFontSize.CAPTION)
-            .fontColor(this.subTextColor())
-            .width('100%')
-          TextInput({ placeholder: '可留空', text: this.startupTextSubtitle })
-            .width('100%')
-            .height(42)
-            .maxLength(48)
-            .fontColor(this.primaryTextColor())
-            .placeholderColor(this.subTextColor())
-            .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
-            .borderRadius(ThemeRuntime.mediumRadius())
-            .onChange((value: string) => {
-              this.startupTextSubtitle = value;
-            })
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        Button('恢复默认文案', { type: ButtonType.Normal })
-          .height(34)
-          .borderRadius(ThemeRuntime.buttonRadius())
-          .fontSize(AppFontSize.CAPTION)
-          .fontColor(this.accentColor())
-          .backgroundColor(ThemeRuntime.inputColor(this.appDarkMode))
-          .onClick(() => {
-            this.startupTextTitle = '开源轻页';
-            this.startupTextSubtitle = StartupCoverTextStore.defaultSubtitle(this.startupTextThemeId);
-          })
-        Row({ space: AppSpacing.LG }) {
-          Button('取消', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(ThemeRuntime.buttonRadius())
-            .backgroundColor(this.cardColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.closeStartupTextDialog())
-          Button('保存', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(ThemeRuntime.buttonRadius())
-            .backgroundColor(this.accentColor())
-            .fontColor(ThemeRuntime.onAccentColor(this.accentColor()))
-            .onClick(() => this.saveStartupText())
-        }
-        .width('100%')
+  syncShowStartupTextDialog(): void {
+    this.startupTextDialogSession.sync(this.getUIContext(), this.showStartupTextDialog, (): void => {
+      this.startupTextDialog();
+    }, {
+      autoCancel: true,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示启动文字弹窗失败:',
+      onDismiss: (): void => {
+        this.closeStartupTextDialog();
       }
-      .width('calc(100% - 48vp)')
-      .constraintSize({ maxWidth: 360 })
-      .padding(AppSpacing.XXL)
-      .borderRadius(ThemeRuntime.glassCornerRadius(18, 'panel'))
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({
-        width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel')
-      })
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor(this.appDarkMode ? '#76000000' : '#52000000')
-    .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
+    });
   }
 
   @Builder
   themeApplyDialog() {
-    Column() {
-      Column({ space: AppSpacing.LG }) {
-        Text(`应用「${this.applyDialogThemeName}」`)
-          .fontSize(AppFontSize.SUBTITLE)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-        Text('选择要随主题一起应用的内容，关闭的选项会保留当前设置。')
-          .fontSize(AppFontSize.BODY)
-          .fontColor(this.subTextColor())
-          .width('100%')
-        this.themeApplyToggleRow('layout')
-        if (this.applyDialogHasCover) {
-          this.themeApplyToggleRow('cover')
-        }
-        this.themeApplyToggleRow('icon')
-        Row({ space: AppSpacing.LG }) {
-          Button('取消', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(ThemeRuntime.buttonRadius())
-            .backgroundColor(this.cardColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => this.cancelThemeApply())
-          Button('应用', { type: ButtonType.Normal })
-            .layoutWeight(1)
-            .height(42)
-            .borderRadius(ThemeRuntime.buttonRadius())
-            .backgroundColor(this.accentColor())
-            .fontColor(ThemeRuntime.onAccentColor(this.accentColor()))
-            .onClick(() => this.confirmThemeApply())
-        }
+    Column({ space: AppSpacing.LG }) {
+      Text(`应用「${this.applyDialogThemeName}」`)
+        .fontSize(AppFontSize.SUBTITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+      Text('选择要随主题一起应用的内容，关闭的选项会保留当前设置。')
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.subTextColor())
         .width('100%')
+      this.themeApplyToggleRow('layout')
+      if (this.applyDialogHasCover) {
+        this.themeApplyToggleRow('cover')
       }
-      .width('calc(100% - 48vp)')
-      .constraintSize({ maxWidth: 360 })
-      .padding(AppSpacing.XXL)
-      .borderRadius(ThemeRuntime.glassCornerRadius(18, 'panel'))
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({
-        width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel')
-      })
-      .shadow({
-        radius: ThemeRuntime.glassShadowRadius('panel'),
-        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('panel'),
-        offsetY: ThemeRuntime.glassShadowOffsetY('panel')
-      })
+      this.themeApplyToggleRow('icon')
+      Row({ space: AppSpacing.LG }) {
+        Button('取消', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(ThemeRuntime.buttonRadius())
+          .backgroundColor(this.cardColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => this.cancelThemeApply())
+        Button('应用', { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(ThemeRuntime.buttonRadius())
+          .backgroundColor(this.accentColor())
+          .fontColor(ThemeRuntime.onAccentColor(this.accentColor()))
+          .onClick(() => this.confirmThemeApply())
+      }
+      .width('100%')
     }
     .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor(this.appDarkMode ? '#76000000' : '#52000000')
-    .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
+    .padding(AppSpacing.XXL)
+  }
+
+  syncShowThemeApplyDialog(): void {
+    this.themeApplyDialogSession.sync(this.getUIContext(), this.showThemeApplyDialog, (): void => {
+      this.themeApplyDialog();
+    }, {
+      autoCancel: true,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示应用主题弹窗失败:',
+      onDismiss: (): void => {
+        this.cancelThemeApply();
+      }
+    });
   }
 
   @Builder
@@ -2393,16 +2382,6 @@ struct ThemeSettingsPage {
     const height = Number(area.height);
     if (Number.isFinite(width) && width > 0) this.contextViewportWidth = width;
     if (Number.isFinite(height) && height > 0) this.contextViewportHeight = height;
-  }
-
-  contextMenuLeft(menuWidth: number): number {
-    return Math.max(12, Math.min(this.contextMenuX - 18, this.contextViewportWidth - menuWidth - 12));
-  }
-
-  contextMenuTop(menuHeight: number): number {
-    const below = this.contextMenuY + 12;
-    if (below + menuHeight <= this.contextViewportHeight - 12) return below;
-    return Math.max(this.statusBarHeight + 8, this.contextMenuY - menuHeight - 12);
   }
 
   closeRenameCustomThemeDialog(): void {
@@ -2550,11 +2529,17 @@ struct ThemeSettingsPage {
           .accessibilityText('当前桌面图标')
 
         Column({ space: AppSpacing.XXS }) {
-          Text(theme.name)
-            .fontSize(AppFontSize.SUBTITLE)
-            .fontWeight(FontWeight.Bold)
-            .fontFamily(theme.typography.appFontFamily)
-            .fontColor(this.activeVariant(theme).colors.primaryTextColor)
+          Row({ space: AppSpacing.XS }) {
+            if (theme.id === ThemeIds.OBSIDIAN_ARCHIVE) {
+              MembershipBadge({ sku: 'SUPER_LIFETIME' })
+            }
+            Text(theme.name)
+              .fontSize(AppFontSize.SUBTITLE)
+              .fontWeight(FontWeight.Bold)
+              .fontFamily(theme.typography.appFontFamily)
+              .fontColor(this.activeVariant(theme).colors.primaryTextColor)
+              .flexShrink(1)
+          }
           Text(theme.description)
             .fontSize(AppFontSize.CAPTION)
             .fontColor(this.activeVariant(theme).colors.subTextColor)

@@ -27,6 +27,7 @@ class ReaderCustomFontData {
 @Entry
 @Component
 struct FontSettingsPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('readerFontFamily') readerFontFamily: string = '';
@@ -310,7 +311,7 @@ struct FontSettingsPage {
       options.push({ value: item.sourceName || item.familyName });
     }
     for (const font of this.remoteFonts()) {
-      options.push({ value: CloudFontMenu.label(font) });
+      options.push(CloudFontMenu.option(font));
     }
     return options;
   }
@@ -552,7 +553,7 @@ struct FontSettingsPage {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => {
           if (index >= this.remoteFontStart()) {
             this.selectRemoteFont(index - this.remoteFontStart(), (customIndex: number) => {

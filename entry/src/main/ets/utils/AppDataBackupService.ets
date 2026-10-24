@@ -136,7 +136,7 @@ export class AppDataBackupService {
     'bookshelf_display_settings',
     'cover_gallery_settings',
     'custom_theme_schemes',
-    'glass_settings',
+    'immersive_light_settings',
     'opds_settings',
     'reader_replace_rules',
     'reader_settings',

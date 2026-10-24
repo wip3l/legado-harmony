@@ -95,6 +95,7 @@ const PREVIEW_PARAGRAPHS: string[] = [
 @Entry
 @Component
 struct ThemeTypographySettingsPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
@@ -658,7 +659,7 @@ struct ThemeTypographySettingsPage {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => onSelect(index))
     }
   }

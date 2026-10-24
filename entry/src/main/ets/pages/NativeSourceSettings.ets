@@ -19,6 +19,7 @@ interface NativeSourceSettingsParams {
 @Entry
 @Component
 struct NativeSourceSettingsPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
@@ -360,7 +361,7 @@ struct NativeSourceSettingsPage {
                     .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
                     .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
                     .menuBackgroundBlurStyle(BlurStyle.NONE)
-                    .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+                    .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
                     .layoutWeight(1)
                     .onSelect((_selected: number, text: string) => {
                       this.setValue(index, text);

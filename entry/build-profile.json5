@@ -1,5 +1,10 @@
 {
   "apiType": "stageMode",
+  "buildOption": {
+    "sourceOption": {
+      "workers": ["./src/main/ets/workers/ComicColorWorker.ets"]
+    }
+  },
   "buildOptionSet": [
     {
       "name": "release",
@@ -16,6 +21,9 @@
     {
       "name": "default",
       "runtimeOS": "HarmonyOS"
+    },
+    {
+      "name": "ohosTest"
     }
   ],
   "buildModeBinder": [

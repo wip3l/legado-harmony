@@ -29,6 +29,7 @@ const TTS_CUSTOM_VOICE_IMPORT_LIMIT_BYTES: number = 2 * 1024 * 1024;
 @Entry
 @Component
 struct TtsSettingsPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('ttsPerson') ttsPerson: number = 0;
   @StorageLink('ttsOnline') ttsOnline: number = 1;
   @StorageLink('ttsStyle') ttsStyle: string = '';
@@ -69,6 +70,7 @@ struct TtsSettingsPage {
   @State downloadProgressText: string = '';
   @State customVoices: HttpTTS[] = [];
   @State showVoiceDropdown: boolean = false;
+  @State voiceSelectorWidth: number = 320;
   @State customVoiceImportUrl: string = '';
   @State isImportingCustomVoices: boolean = false;
   private speedSaveTimerId: number = -1;
@@ -98,9 +100,6 @@ struct TtsSettingsPage {
         this.pageContent()
       } })
 
-      if (this.showVoiceDropdown) {
-        this.voiceDropdownMenu()
-      }
     }
     .width('100%')
     .height('100%')
@@ -312,67 +311,56 @@ struct TtsSettingsPage {
     .onClick(() => {
       this.showVoiceDropdown = !this.showVoiceDropdown;
     })
+    .onAreaChange((_oldValue: Area, newValue: Area) => {
+      const width = Number(newValue.width);
+      if (Number.isFinite(width) && width > 0) this.voiceSelectorWidth = width;
+    })
+    .bindPopup(this.showVoiceDropdown, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+      this.voiceDropdownMenu()
+    }, Placement.Bottom, this.appDarkMode, this.accentColor(), () => {
+      this.showVoiceDropdown = false;
+    }))
   }
 
+  /** 音色下拉：系统弹出层，API 26+ 挂沉浸光感材质。 */
   @Builder
   voiceDropdownMenu() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .onClick(() => {
-          this.showVoiceDropdown = false;
-        })
-
-      Column() {
-        Scroll() {
-          Column() {
-            if (this.cloudVoices.length > 0) {
-              this.voiceDropdownSectionTitle('云端音色')
-              ForEach(this.cloudVoices, (voice: TtsVoiceInfo) => {
-                this.cloudVoiceDropdownOption(voice)
-              }, (voice: TtsVoiceInfo) => `cloud_${voice.id}`)
-            }
-            if (this.enabledCustomVoices().length > 0) {
-              this.voiceDropdownSectionTitle('自定义音色')
-              ForEach(this.enabledCustomVoices(), (voice: HttpTTS) => {
-                this.customVoiceDropdownOption(voice, false)
-              }, (voice: HttpTTS) => `${TtsVoiceCatalog.customVoiceKey(voice)}_enabled`)
-            }
-
-            this.voiceDropdownSectionTitle('系统音色')
-            ForEach(this.voices, (voice: TtsVoiceOption) => {
-              this.systemVoiceDropdownOption(voice)
-            }, (voice: TtsVoiceOption) => TtsVoiceCatalog.voiceKey(voice))
-
-            if (this.disabledCustomVoices().length > 0) {
-              this.voiceDropdownSectionTitle('已禁用')
-              ForEach(this.disabledCustomVoices(), (voice: HttpTTS) => {
-                this.customVoiceDropdownOption(voice, true)
-              }, (voice: HttpTTS) => `${TtsVoiceCatalog.customVoiceKey(voice)}_disabled`)
-            }
+    Column() {
+      Scroll() {
+        Column() {
+          if (this.cloudVoices.length > 0) {
+            this.voiceDropdownSectionTitle('云端音色')
+            ForEach(this.cloudVoices, (voice: TtsVoiceInfo) => {
+              this.cloudVoiceDropdownOption(voice)
+            }, (voice: TtsVoiceInfo) => `cloud_${voice.id}`)
           }
-          .width('100%')
+          if (this.enabledCustomVoices().length > 0) {
+            this.voiceDropdownSectionTitle('自定义音色')
+            ForEach(this.enabledCustomVoices(), (voice: HttpTTS) => {
+              this.customVoiceDropdownOption(voice, false)
+            }, (voice: HttpTTS) => `${TtsVoiceCatalog.customVoiceKey(voice)}_enabled`)
+          }
+
+          this.voiceDropdownSectionTitle('系统音色')
+          ForEach(this.voices, (voice: TtsVoiceOption) => {
+            this.systemVoiceDropdownOption(voice)
+          }, (voice: TtsVoiceOption) => TtsVoiceCatalog.voiceKey(voice))
+
+          if (this.disabledCustomVoices().length > 0) {
+            this.voiceDropdownSectionTitle('已禁用')
+            ForEach(this.disabledCustomVoices(), (voice: HttpTTS) => {
+              this.customVoiceDropdownOption(voice, true)
+            }, (voice: HttpTTS) => `${TtsVoiceCatalog.customVoiceKey(voice)}_disabled`)
+          }
         }
-        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
         .width('100%')
-        .constraintSize({ maxHeight: 420 })
       }
-      .width('calc(100% - 24vp)')
-      .constraintSize({ maxWidth: 560 })
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      // API 6 changed how backdropBlur composites for custom overlays, so the
-      // translucent glass tint let page content bleed through the voice list.
-      // Use the opaque card surface instead, matching the other settings
-      // dropdown menus, so every option stays readable.
-      .backgroundColor(this.cardColor())
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-      .position({ x: 12, y: this.statusBarHeight + 108 })
+      .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+      .width('100%')
+      .constraintSize({ maxHeight: 420 })
     }
-    .width('100%')
-    .height('100%')
+    .width(this.voiceSelectorWidth)
+    .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
   }
 
   @Builder

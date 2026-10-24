@@ -10,6 +10,8 @@ import { BookCover } from '../components/book/BookCover';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { PageScaffold } from '../components/common/PageScaffold';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
+import { PopupMenuAction } from '../components/common/PopupMenuAction';
 
 const STATS_MODES: string[] = ['day', 'week', 'month'];
 const STATS_MODE_LABELS: string[] = ['日', '周', '月'];
@@ -33,6 +35,7 @@ class StatBookItem {
 @Entry
 @Component
 struct ReadingStatsPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageProp('statusBarHeight') statusBarHeight: number = 0;
@@ -138,9 +141,16 @@ struct ReadingStatsPage {
         this.pageContent()
       } })
 
-      if (this.showItemActionMenu) {
-        this.itemActionMenu()
-      }
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: this.contextMenuX, y: this.contextMenuY })
+        .hitTestBehavior(HitTestMode.None)
+        .bindPopup(this.showItemActionMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.itemActionMenu()
+        }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+          this.showItemActionMenu = false;
+        }))
     }
     .width('100%')
     .height('100%')
@@ -384,44 +394,18 @@ struct ReadingStatsPage {
 
   @Builder
   itemActionMenu() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.appDarkMode ? '#38000000' : '#18FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('button', 12))
-        .onClick(() => this.closeItemActions())
+    Scroll() {
       Column() {
-        Row({ space: AppSpacing.MD }) {
-          SymbolGlyph($r('sys.symbol.trash'))
-            .fontSize(18)
-            .fontColor([ThemeRuntime.dangerColor(this.appDarkMode)])
-            .width(24)
-          Text('删除')
-            .fontSize(AppFontSize.BODY_LARGE)
-            .fontColor(ThemeRuntime.dangerColor(this.appDarkMode))
-            .layoutWeight(1)
-        }
-        .width('100%')
-        .height(44)
-        .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-        .alignItems(VerticalAlign.Center)
-        .onClick(() => this.confirmDeleteActionItem())
+        PopupMenuAction($r('sys.symbol.trash'), '删除', ThemeRuntime.dangerColor(this.appDarkMode),
+          () => this.confirmDeleteActionItem())
+
       }
-      .width(148)
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'),
-        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(56) })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(176)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
@@ -509,16 +493,6 @@ struct ReadingStatsPage {
     const height = Number(area.height);
     if (Number.isFinite(width) && width > 0) this.contextViewportWidth = width;
     if (Number.isFinite(height) && height > 0) this.contextViewportHeight = height;
-  }
-
-  contextMenuLeft(menuWidth: number): number {
-    return Math.max(12, Math.min(this.contextMenuX - 18, this.contextViewportWidth - menuWidth - 12));
-  }
-
-  contextMenuTop(menuHeight: number): number {
-    const below = this.contextMenuY + 12;
-    if (below + menuHeight <= this.contextViewportHeight - this.navBarHeight - 12) return below;
-    return Math.max(this.statusBarHeight + 8, this.contextMenuY - menuHeight - 12);
   }
 
   private shiftPeriod(direction: number): void {

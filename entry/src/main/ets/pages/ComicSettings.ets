@@ -25,11 +25,12 @@ import {
 @Entry
 @Component
 struct ComicSettingsPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
-  /** 会员档位变化（开通后返回本页）时刷新漫画超分一行。 */
+  /** 会员档位变化（开通后返回本页）时刷新AI超分一行。 */
   @StorageProp('accountMembershipSku') membershipSku: string = '';
   @State settings: ReaderComicSettings = new ReaderComicSettings();
 
@@ -154,7 +155,7 @@ struct ComicSettingsPage {
     .clip(true)
     .backgroundColor(this.cardColor())
 
-    this.sectionTitle('漫画超分')
+    this.sectionTitle('AI超分')
     Column() {
       this.superResolutionRow()
     }
@@ -175,8 +176,9 @@ struct ComicSettingsPage {
   superResolutionRow() {
     if (this.superResolutionAccess() === ReaderComicSuperResolutionAccess.READY) {
       SettingSwitchRow({
-        title: '漫画超分',
-        description: '会员专享 · 用本机 AI 把低清图片放大变清晰，处理好后自动替换；只处理正在看的图，会多耗一些电',
+        title: 'AI超分',
+        minimumMembership: 'MONTHLY',
+        description: '借助AI把低清图片放大变清晰，处理好后自动替换；只处理正在看的图，会多耗一些电',
         isOn: this.settings.superResolution,
         showDivider: false,
         onChange: (value: boolean) => {
@@ -187,9 +189,10 @@ struct ComicSettingsPage {
       })
     } else if (this.superResolutionAccess() === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED) {
       SettingNavRow({
-        title: '漫画超分',
+        title: 'AI超分',
+        minimumMembership: 'MONTHLY',
         description: this.settings.superResolution ? '会员已到期，续费后自动恢复' :
-          '会员专享 · 用本机 AI 把低清图片放大变清晰',
+          '借助AI把低清图片放大变清晰',
         value: '开通会员',
         showDivider: false,
         onTap: () => {
@@ -198,8 +201,9 @@ struct ComicSettingsPage {
       })
     } else {
       SettingSwitchRow({
-        title: '漫画超分',
-        description: '会员专享 · 当前系统不支持，需要 API 26 及以上且支持图片超分的设备',
+        title: 'AI超分',
+        minimumMembership: 'MONTHLY',
+        description: '当前系统不支持，需要 API 26 及以上且支持图片超分的设备',
         isOn: false,
         switchEnabled: false,
         showDivider: false
@@ -253,7 +257,7 @@ struct ComicSettingsPage {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => {
           onSelect(index);
         })

@@ -1,4 +1,4 @@
-import { router } from '@kit.ArkUI';
+import { router, uiMaterial } from '@kit.ArkUI';
 import { motion } from '@kit.MultimodalAwarenessKit';
 import deviceInfo from '@ohos.deviceInfo';
 import { Book, SearchBook, BookChapter, BookFieldSanitizer, BookTypeSupport, BookUrlResolver } from '@legado/sourceengine';
@@ -31,6 +31,7 @@ import { AppSpacing } from '../theme/AppSpacing';
 @Entry
 @Component
 struct SearchBookDetailPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   /** 顶栏底色与书名渐显所需的滚动距离。 */
   static readonly TITLE_FADE_DISTANCE: number = 120;
   /** 封面氛围背景的高度。 */
@@ -88,7 +89,8 @@ struct SearchBookDetailPage {
   @State pendingAddToShelfBookUrl: string = '';
   @State showAddToShelfOnBackDialog: boolean = false;
   private addToShelfOnBackDialogSession: SystemDialogSession = new SystemDialogSession();
-  @State showChangeSourcePanel: boolean = false;
+  private changeSourceDialogSession: SystemDialogSession = new SystemDialogSession();
+  @State @Watch('syncChangeSourceDialog') showChangeSourcePanel: boolean = false;
   @State changeSourceTarget: Book | null = null;
   @State showCatalogSheet: boolean = false;
   /** 正文滚动距离：顶栏底色与书名随之渐显。 */
@@ -341,18 +343,6 @@ struct SearchBookDetailPage {
         this.readButtonBarWidth = Number(newArea.width);
       })
 
-      if (this.showChangeSourcePanel && this.changeSourceTarget) {
-        BookChangeSourceDialog({
-          targetBook: this.changeSourceTarget,
-          onSwitched: (switched: Book): void => {
-            this.applySwitchedSource(switched);
-          },
-          onClosed: (): void => {
-            this.showChangeSourcePanel = false;
-            this.changeSourceTarget = null;
-          }
-        })
-      }
       BookSourceStageRuntimeHost()
     }
     .width('100%')
@@ -361,25 +351,48 @@ struct SearchBookDetailPage {
     .bindSheet($$this.showCatalogSheet, this.catalogSheet(), this.catalogSheetOptions())
   }
 
-  /** 目录弹层：API 26+ 透明背景挂沉浸光感厚材质，旧系统退回厚磨砂加半透明面板色。 */
+  /** 换源：系统对话框，API 26+ 是沉浸光感表面。 */
+  @Builder
+  changeSourceDialogContent() {
+    BookChangeSourceDialog({
+      targetBook: this.changeSourceTarget,
+      onSwitched: (switched: Book): void => {
+        this.applySwitchedSource(switched);
+      },
+      onClosed: (): void => {
+        this.showChangeSourcePanel = false;
+        this.changeSourceTarget = null;
+      }
+    })
+  }
+
+  syncChangeSourceDialog(): void {
+    this.changeSourceDialogSession.sync(this.getUIContext(), this.showChangeSourcePanel, (): void => {
+      this.changeSourceDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示换源弹窗失败:'
+    });
+  }
+
+  /** 半模态只管理尺寸和关闭；底板由 BookCatalogSheet 复用正文 ReaderMaterialPanel，避免双层材质。 */
   catalogSheetOptions(): SheetOptions {
-    const material = ImmersiveMaterialRuntime.sheetMaterial(this.accentColor());
     const options: SheetOptions = {
       detents: ['67%', SheetSize.LARGE],
-      dragBar: true,
+      dragBar: false,
       showClose: false,
+      backgroundColor: Color.Transparent,
+      blurStyle: BlurStyle.NONE,
+      borderWidth: 0,
+      radius: { topLeft: 28, topRight: 28, bottomLeft: 28, bottomRight: 28 },
+      shadow: { radius: 0, color: Color.Transparent },
       scrollSizeMode: ScrollSizeMode.CONTINUOUS,
       onDisappear: () => {
         this.showCatalogSheet = false;
       }
     };
-    if (material !== undefined) {
-      options.backgroundColor = Color.Transparent;
-      options.systemMaterial = material;
-    } else {
-      options.blurStyle = BlurStyle.COMPONENT_THICK;
-      options.backgroundColor = ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel');
-    }
+    if (ImmersiveMaterialRuntime.supportsHds()) options.systemMaterial = uiMaterial.Material.empty;
     return options;
   }
 

@@ -28,6 +28,7 @@ import { AppSpacing } from '../theme/AppSpacing';
 @Entry
 @Component
 struct Index {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   /** 底部页签切换时新页面滑入的距离和时长。 */
   static readonly TAB_ENTER_DISTANCE: number = 32;
   static readonly TAB_ENTER_DURATION: number = 260;
@@ -512,9 +513,14 @@ struct Index {
           onOpenReader: () => this.openGlobalTtsReader()
         })
       }
-      if (this.globalTtsActive && this.showGlobalTtsPanel && this.showGlobalTtsCatalog) {
-        this.globalTtsCatalogOverlay()
-      }
+      // 朗读目录：系统半模态，挂在 1×1 节点上。
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: 0, y: 0 })
+        .hitTestBehavior(HitTestMode.None)
+        .bindSheet(this.globalTtsActive && this.showGlobalTtsPanel && this.showGlobalTtsCatalog,
+          this.globalTtsCatalogOverlay(), this.ttsCatalogSheetOptions())
       if (this.stageRuntimeMounted && WebRuntimeAvailability.isAvailable()) {
         Web({ src: 'about:blank', controller: this.stageRuntimeController })
           .width(1)
@@ -649,7 +655,6 @@ struct Index {
       primaryTextColor: ThemeRuntime.primaryTextColor(this.appDarkMode),
       subTextColor: ThemeRuntime.subTextColor(this.appDarkMode),
       controlIconColor: ThemeRuntime.primaryTextColor(this.appDarkMode),
-      panelColor: ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'),
       bookName: this.globalTtsBookName,
       bookInitial: this.globalTtsCatalogInitial(),
       cover: this.globalTtsCover,
@@ -663,7 +668,6 @@ struct Index {
         `${ReaderTtsFloatingSession.catalogCount()}`,
       bottomInset: this.navBarHeight,
       viewportHeight: this.globalTtsViewportHeight,
-      zIndexValue: 80,
       scroller: this.globalTtsCatalogScroller,
       source: this.globalTtsCatalogSource,
       isCached: (displayIndex: number): boolean => this.isGlobalTtsCatalogChapterCached(displayIndex),
@@ -671,6 +675,18 @@ struct Index {
       onSelect: (displayIndex: number) => this.selectGlobalTtsCatalog(displayIndex),
       onClose: () => this.closeGlobalTtsCatalog()
     })
+  }
+
+  ttsCatalogSheetOptions(): SheetOptions {
+    return ImmersiveMaterialRuntime.applySheetMaterial(this.immersiveLightLevel, {
+      height: TtsCatalogSheet.sheetHeight(this.globalTtsViewportHeight),
+      dragBar: false,
+      showClose: false,
+      onWillDismiss: (): void => {
+        this.closeGlobalTtsCatalog();
+      },
+      onWillSpringBackWhenDismiss: (): void => {}
+    }, this.appDarkMode, this.tabBarActiveColor());
   }
 
   globalTtsCatalogInitial(): string {
@@ -786,7 +802,7 @@ struct Index {
     .barFloatingStyle({
       systemMaterialEffect: {
         materialType: ImmersiveMaterialRuntime.materialType(),
-        materialLevel: ImmersiveMaterialRuntime.materialLevel()
+        materialLevel: ImmersiveMaterialRuntime.materialLevel(this.immersiveLightLevel)
       },
       barBottomMargin: this.floatingBarBottomMargin(),
       gradientMask: {

@@ -66,6 +66,7 @@ export class ReaderTypographyField {
  */
 @Component
 export struct ReaderTypographyStepper {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   /** 打开时的初始值，顺序见 ReaderTypographyField。 */
   initialValues: number[] = [];
   @Prop dark: boolean = false;
@@ -131,7 +132,7 @@ export struct ReaderTypographyStepper {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
         .menuBackgroundColor(this.menuColor)
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => {
           this.inputVisible = false;
           this.field = Math.max(0, Math.min(index, ReaderTypographyField.COUNT - 1));
@@ -244,6 +245,7 @@ export struct ReaderHeaderFooterSettings {
  */
 @Component
 export struct ReaderHeaderFooterEditor {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @Prop dark: boolean = false;
   @Prop textColor: string = '#202124';
   @Prop subTextColor: string = '#80868B';
@@ -573,7 +575,7 @@ export struct ReaderHeaderFooterEditor {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
         .menuBackgroundColor(this.menuColor)
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => onSelect(index))
     }
     .width(this.cardStyle ? 'calc(100% - 32vp)' : '100%')

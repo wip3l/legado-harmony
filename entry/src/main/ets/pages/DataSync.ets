@@ -307,8 +307,8 @@ struct DataSyncPage {
 
   @Builder
   fileSyncRow(title: string, description: string, books: boolean) {
-    SettingRow({ title: title,
-      description: this.isSuperMember() ? description : '终身超级会员专享 · 请开通或升级',
+    SettingRow({ title: title, minimumMembership: 'SUPER_LIFETIME',
+      description: description,
       onTap: () => {
         if (!this.isSuperMember()) this.promptSuperMembership();
       } }) {

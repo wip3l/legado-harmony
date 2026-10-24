@@ -48,7 +48,7 @@ const CATALOG_COVER_HEIGHT = 68;
  * floating player, the standalone audio-book page and the shelf. It deliberately
  * mirrors the reader's own table of contents
  * (ReadBook.readerFloatingTocPanel / tocPanelSummary / tocChapterList):
- *   - glass panel surface, 28vp corner radius, glass border + shadow
+ *   - shown by the host as a system half-modal sheet (immersive material on API 26+)
  *   - cover + book name (+ optional subtitle) header with a circular close button
  *   - summary row carrying "共 N 章", the order toggle and the chapter progress
  *   - list rows with a `•` / `·` leader, hairline separators and a cache chip
@@ -64,7 +64,6 @@ export struct TtsCatalogSheet {
   @Prop primaryTextColor: string = '#18191C';
   @Prop subTextColor: string = '#8A8A8E';
   @Prop controlIconColor: string = '#FF202124';
-  @Prop panelColor: string = '#FFFFFF';
   @Prop bookName: string = '';
   @Prop bookInitial: string = '书';
   @Prop bookUrl: string = '';
@@ -76,7 +75,6 @@ export struct TtsCatalogSheet {
   @Prop progressText: string = '';
   @Prop bottomInset: number = 0;
   @Prop viewportHeight: number = 720;
-  @Prop zIndexValue: number = 20;
   @State listViewportHeight: number = 0;
   @State firstVisibleIndex: number = 0;
   @State visibleItemCount: number = 1;
@@ -92,46 +90,14 @@ export struct TtsCatalogSheet {
   private lastScrollbarScrollAt: number = 0;
 
   build() {
-    Stack({ alignContent: Alignment.Bottom }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#78000000')
-        .onClick(() => this.onClose())
-
-      Column() {
-        this.catalogHeader()
-        this.catalogSummary()
-        this.catalogChapterList()
-      }
-      .width('100%')
-      .height(this.panelHeight())
-      .padding({ left: 0, right: 0, top: 0, bottom: this.bottomInset + 12 })
-      .borderRadius({ topLeft: this.panelCornerRadius(), topRight: this.panelCornerRadius() })
-      .clip(true)
-      .backgroundColor(this.panelColor)
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({
-        width: {
-          left: ThemeRuntime.glassBorderWidth('panel'),
-          right: ThemeRuntime.glassBorderWidth('panel'),
-          top: ThemeRuntime.glassBorderWidth('panel')
-        },
-        color: ThemeRuntime.glassBorderColor(this.darkMode)
-      })
-      .shadow({
-        radius: ThemeRuntime.glassShadowRadius('panel'),
-        color: ThemeRuntime.glassShadowColor(this.darkMode),
-        offsetX: ThemeRuntime.glassShadowOffsetX('panel'),
-        offsetY: ThemeRuntime.glassShadowOffsetY('panel')
-      })
-      .transition(TransitionEffect.translate({ y: 520 })
-        .combine(TransitionEffect.opacity(0))
-        .animation({ duration: 280, curve: Curve.Friction }))
+    Column() {
+      this.catalogHeader()
+      this.catalogSummary()
+      this.catalogChapterList()
     }
     .width('100%')
     .height('100%')
-    .zIndex(this.zIndexValue)
+    .padding({ left: 0, right: 0, top: 0, bottom: this.bottomInset + 12 })
   }
 
   @Builder
@@ -342,15 +308,12 @@ export struct TtsCatalogSheet {
     }
   }
 
-  panelHeight(): number {
-    const viewport = this.viewportHeight > 0 ? this.viewportHeight : 720;
+  /** 半模态高度：约八成屏高，至少 280。宿主把它传给 bindSheet。 */
+  static sheetHeight(viewportHeight: number): number {
+    const viewport = viewportHeight > 0 ? viewportHeight : 720;
     const availableHeight = Math.max(1, viewport - 12);
     const minimumHeight = Math.min(280, availableHeight);
     return Math.min(availableHeight, Math.max(minimumHeight, viewport * 0.81));
-  }
-
-  panelCornerRadius(): number {
-    return ThemeRuntime.glassCornerRadius(28, 'panel');
   }
 
   canonicalIndex(displayIndex: number): number {

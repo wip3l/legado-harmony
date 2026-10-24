@@ -1,4 +1,5 @@
 import { LocalBookService } from '../../core/book/LocalBookService';
+import { ReaderComicColorSession, ComicColorCandidate } from '../../core/reader/ReaderComicColorSession';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
 import { ReaderImageMarker } from '../../core/book/ReaderImageMarker';
@@ -23,6 +24,26 @@ export class ReaderComicPagedController {
  */
 @Component
 export struct ReaderComicPagedView {
+  colorSession: ReaderComicColorSession | null = null;
+  private colorTimer: number = -1;
+  private colorSpread: string = '';
+
+  private updateColorViewport(): void {
+    if (!this.colorSession?.foreground) return;
+    if (this.animating || this.dragOffset !== 0) this.colorSession.motion();
+    const key = `${this.chapterIndex}_${this.spreadIndex}`;
+    if (key !== this.colorSpread) {
+      this.colorSpread = key;
+      this.colorSession.clearCompare();
+    }
+    const candidates: ComicColorCandidate[] = [];
+    const start = this.spreadIndex * this.spreadSize();
+    for (let i = start; i < Math.min(this.pages.length, start + this.spreadSize() * 3); i++) {
+      candidates.push(new ComicColorCandidate(ReaderComicColorSession.source(this.pages[i]),
+        i < start + this.spreadSize(), i - start, `${i + 1}`));
+    }
+    this.colorSession.update(candidates);
+  }
   controller: ReaderComicPagedController = new ReaderComicPagedController();
   @Prop @Watch('onLayoutChanged') pages: string[] = [];
   @Prop @Watch('onPageIndexChanged') pageIndex: number = 0;
@@ -87,6 +108,7 @@ export struct ReaderComicPagedView {
   private panResync: boolean = false;
 
   aboutToAppear(): void {
+    this.colorTimer = setInterval((): void => this.updateColorViewport(), 250);
     this.spreadIndex = this.spreadOf(this.pageIndex);
     this.controller.turn = (direction: number): void => this.turn(direction);
     this.controller.cancelCross = (): void => {
@@ -96,6 +118,9 @@ export struct ReaderComicPagedView {
   }
 
   aboutToDisappear(): void {
+    clearInterval(this.colorTimer);
+    this.colorSession?.update([]);
+    this.colorSession?.touch(false);
     this.controller.turn = () => {};
     this.controller.cancelCross = () => {};
   }
@@ -301,6 +326,8 @@ export struct ReaderComicPagedView {
   }
 
   private handleTouch(event: TouchEvent): void {
+    if (event.type === TouchType.Down) this.colorSession?.touch(true);
+    if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.colorSession?.touch(false);
     if (event.type === TouchType.Down && event.touches.length <= 1) this.touchDragged = false;
   }
 
@@ -475,6 +502,7 @@ export struct ReaderComicPagedView {
     if (LocalBookService.isEpubImageMarker((pages[pageIndex] || '').trim())) {
       ReaderComicImageItem({
         marker: (pages[pageIndex] || '').trim(),
+        colorSession: this.colorSession,
         viewWidth: boxWidth,
         viewHeight: this.viewH(),
         boxWidth: boxWidth,

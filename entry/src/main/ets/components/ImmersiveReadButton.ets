@@ -9,6 +9,7 @@ export const IMMERSIVE_READ_BUTTON_WIDTH: number = 160;
 /** 与返回按钮共用系统沉浸材质的阅读悬浮胶囊。 */
 @Component
 export struct ImmersiveReadButton {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @Prop label: string = '开始阅读';
   @Prop icon: Resource = $r('sys.symbol.book');
   @Prop darkMode: boolean = false;
@@ -43,7 +44,7 @@ export struct ImmersiveReadButton {
           },
           systemMaterialEffect: {
             materialType: ImmersiveMaterialRuntime.materialType(),
-            materialLevel: ImmersiveMaterialRuntime.materialLevel()
+            materialLevel: ImmersiveMaterialRuntime.materialLevel(this.immersiveLightLevel)
           },
           barSideMargin: 0,
           barBottomMargin: 0,
@@ -66,8 +67,7 @@ export struct ImmersiveReadButton {
           .width(IMMERSIVE_READ_BUTTON_WIDTH)
           .height(56)
           .borderRadius(28)
-          .backgroundColor(ThemeRuntime.glassPanelColor(this.darkMode, '', 'panel'))
-          .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
+          .backgroundColor(ThemeRuntime.cardColor(this.darkMode))
           .border({ width: 1, color: ThemeRuntime.glassBorderColor(this.darkMode, 'panel') })
           .shadow(ThemeRuntime.floatingControlShadow(this.darkMode))
           .hitTestBehavior(HitTestMode.None)
@@ -104,5 +104,7 @@ export struct ImmersiveReadButton {
     }
     .width(IMMERSIVE_READ_BUTTON_WIDTH)
     .height(56)
+    .borderRadius(28)
+    .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.darkMode))
   }
 }

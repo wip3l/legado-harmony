@@ -10,6 +10,15 @@ export class CustomThemeQuota {
     return 5;
   }
 
+  /** 显示新增方案所需的最低档位；免费额度内不显示会员标识。 */
+  static minimumForCount(count: number): string {
+    if (count <= CustomThemeQuota.forSku('')) return '';
+    if (count <= CustomThemeQuota.forSku('MONTHLY')) return 'MONTHLY';
+    if (count <= CustomThemeQuota.forSku('ANNUAL')) return 'ANNUAL';
+    if (count <= CustomThemeQuota.forSku('LIFETIME')) return 'LIFETIME';
+    return 'SUPER_LIFETIME';
+  }
+
   static current(): number {
     return CustomThemeQuota.forSku(AccountSessionStore.activeMembershipSku());
   }

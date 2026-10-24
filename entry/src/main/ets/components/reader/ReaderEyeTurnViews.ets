@@ -140,7 +140,6 @@ export struct ReaderEyeCalibrationPanel {
       .padding(AppSpacing.XXXL)
       .borderRadius(28)
       .backgroundColor(this.panelColor)
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
       .border({ width: 1, color: this.panelBorderColor })
       .margin({ bottom: AppSpacing.XXXL })
 

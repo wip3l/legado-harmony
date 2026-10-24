@@ -39,6 +39,7 @@ import { RecentReadCardUpdater } from '../../utils/RecentReadCardUpdater';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
 import { CloudAutoSync } from '../../account/CloudAutoSync';
+import { PopupMenuAction } from '../common/PopupMenuAction';
 
 const SHELF_FULL_TEXT_CACHE_NOTIFICATION_INTERVAL_MS: number = 5000;
 const SHELF_COVER_INITIAL_PREFETCH_COUNT: number = 16;
@@ -88,6 +89,7 @@ interface ShelfFullTextCacheTask {
 /** 首页"书架"页签：书架展示、分组与排序、封面加载、更新检查、全文缓存与书籍操作。 */
 @Component
 export struct BookshelfPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   /** 标题下方“全部 / 网络 / 本地”胶囊的高度。 */
   static readonly SCOPE_TABS_HEIGHT: number = 44;
   static readonly SCOPE_TABS_PADDING: number = 6;
@@ -146,6 +148,7 @@ export struct BookshelfPage {
   @State privateShelfPasswordInput: string = '';
   @State privateShelfPasswordError: string = '';
   private privateShelfUnlockDialogSession: SystemDialogSession = new SystemDialogSession();
+  private changeSourceDialogSession: SystemDialogSession = new SystemDialogSession();
   @State showShelfSortMenu: boolean = false;
   @State showShelfLayoutMenu: boolean = false;
   @State showShelfFilterMenu: boolean = false;
@@ -220,7 +223,7 @@ export struct BookshelfPage {
   @State customNetworkCoverUrl: string = '';
   @State pendingDeleteBook: Book | null = null;
   @State pendingActionBook: Book | null = null;
-  @State showShelfChangeSourceDialog: boolean = false;
+  @State @Watch('syncChangeSourceDialog') showShelfChangeSourceDialog: boolean = false;
   private shelfChangeSourceTarget: Book | null = null;
   @State contextMenuX: number = 16;
   @State contextMenuY: number = 96;
@@ -915,34 +918,6 @@ export struct BookshelfPage {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  contextMenuLeft(menuWidth: number): number {
-    return Math.max(12, Math.min(this.contextMenuX - 18, this.contextViewportWidth - menuWidth - 12));
-  }
-
-  contextMenuTop(menuHeight: number): number {
-    const topLimit = this.statusBarHeight + 8;
-    const maxTop = Math.max(topLimit,
-      this.contextViewportHeight - this.contextMenuBottomInset() - menuHeight);
-    const below = this.contextMenuY + 12;
-    if (below <= maxTop) return below;
-    return Math.max(topLimit, Math.min(this.contextMenuY - menuHeight - 12, maxTop));
-  }
-
-  bookActionMenuHeight(book: Book): number {
-    const baseHeight = 408;
-    return baseHeight + (LocalBookService.isLocalBook(book) ? 0 : 44) + (book.customCoverUrl ? 44 : 0) +
-      (this.privateShelfEnabled ? 44 : 0);
-  }
-
-  contextMenuBottomInset(): number {
-    if (deviceInfo.sdkApiVersion < 23) {
-      return 12;
-    }
-    const floatingTabHeight = 56;
-    const comfortableGap = 12;
-    return floatingTabHeight + Math.max(this.navBarHeight, 8) + comfortableGap;
-  }
-
   deleteBookCoverCache(book: Book): void {
     const context = getContext(this);
     const covers = [
@@ -1334,333 +1309,37 @@ export struct BookshelfPage {
       .height('100%')
       .backgroundColor(this.pageColor())
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .bindSheet(this.showBookGroupPicker, this.bookGroupPickerDialog(), this.bookGroupPickerSheetOptions())
 
       if (this.books.length > 0 && this.shouldShowShelfRefreshStatus()) {
         this.shelfRefreshStatusOverlay()
       }
 
-      if (this.showActionDialog && this.pendingActionBook) {
-        Stack({ alignContent: Alignment.TopStart }) {
-          Column()
-            .width('100%')
-            .height('100%')
-            .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-            .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-            .onClick(() => this.closeBookActions())
+      // 长按菜单的锚点：放在手指位置的 1×1 节点，弹出层贴着它弹出。
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: this.contextMenuX, y: this.contextMenuY })
+        .hitTestBehavior(HitTestMode.None)
+        .bindPopup(this.showActionDialog, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.bookActionMenu()
+        }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+          if (this.showActionDialog) this.closeBookActions();
+        }))
 
-          Column() {
-            this.contextActionItem($r('sys.symbol.info_circle'), '查看书籍详情', this.primaryTextColor(), () => {
-              if (this.pendingActionBook) {
-                const book = this.pendingActionBook;
-                this.closeBookActions();
-                this.openShelfBookDetail(book);
-              }
-            })
-            this.contextActionItem($r('sys.symbol.pin'), this.pendingActionBook.isPinned ? '取消置顶' : '置顶',
-              this.primaryTextColor(), () => {
-                if (this.pendingActionBook) {
-                  const book = this.pendingActionBook;
-                  this.closeBookActions();
-                  this.toggleBookPinned(book);
-                }
-              })
-            if (!LocalBookService.isLocalBook(this.pendingActionBook)) {
-              this.contextActionItem($r('sys.symbol.arrow_left_arrow_right'), '换源', this.primaryTextColor(), () => {
-                if (this.pendingActionBook) {
-                  const book = this.pendingActionBook;
-                  this.closeBookActions();
-                  this.openShelfChangeSource(book);
-                }
-              })
-            }
-            if (!LocalBookService.isLocalBook(this.pendingActionBook)) {
-              this.contextActionItem($r('sys.symbol.download'), '缓存', this.primaryTextColor(), () => {
-                if (this.pendingActionBook) {
-                  const book = this.pendingActionBook;
-                  this.showActionDialog = false;
-                  setTimeout(() => {
-                    this.openCacheDialog(book);
-                  }, 0);
-                }
-              })
-            }
-            this.contextActionItem($r('sys.symbol.picture_badge_arrow_down'), '获取网络封面', this.primaryTextColor(), () => {
-              if (this.pendingActionBook) {
-                const book = this.pendingActionBook;
-                this.showActionDialog = false;
-                this.pendingActionBook = null;
-                this.openNetworkCoverPicker(book);
-              }
-            })
-            if (this.pendingActionBook.customCoverUrl) {
-              this.contextActionItem($r('sys.symbol.minus_circle'), '恢复默认封面',
-                this.primaryTextColor(), () => {
-                  if (this.pendingActionBook) {
-                    const book = this.pendingActionBook;
-                    this.closeBookActions();
-                    this.restoreDefaultBookCover(book);
-                  }
-                })
-            }
-            if (LocalBookService.isLocalBook(this.pendingActionBook)) {
-              this.contextActionItem($r('sys.symbol.square_and_pencil'), '编辑书籍信息',
-                this.primaryTextColor(), () => {
-                  if (this.pendingActionBook) {
-                    this.editingBookName = this.pendingActionBook.name;
-                    this.editingBookAuthor = this.pendingActionBook.author;
-                    this.showActionDialog = false;
-                    this.openEditBookInfoDialog();
-                  }
-                })
-            }
-            if (LocalBookService.isLocalBook(this.pendingActionBook)) {
-              this.contextActionItem($r('sys.symbol.arrow_right_up_and_square'), '保存源文件',
-                this.primaryTextColor(), () => {
-                  if (this.pendingActionBook) {
-                    const book = this.pendingActionBook;
-                    this.showActionDialog = false;
-                    setTimeout(() => {
-                      this.saveLocalBookSource(book);
-                    }, 0);
-                  }
-                })
-            }
-            this.contextActionItem($r('sys.symbol.folder'), '移动分组', this.primaryTextColor(), () => {
-              if (this.pendingActionBook) {
-                const bookUrl = this.pendingActionBook.bookUrl;
-                this.showActionDialog = false;
-                this.pendingActionBook = null;
-                this.groupPickerSingleBookUrl = bookUrl;
-                this.showBookGroupPicker = true;
-              }
-            })
-            if (this.privateShelfEnabled) {
-              this.contextActionItem(this.pendingActionBook.isPrivate ? $r('sys.symbol.lock_open') : $r('sys.symbol.lock'),
-                this.pendingActionBook.isPrivate ? '取消隐私' : '标记为隐私', this.primaryTextColor(), () => {
-                  if (this.pendingActionBook) {
-                    const book = this.pendingActionBook;
-                    this.closeBookActions();
-                    this.toggleBookPrivate(book);
-                  }
-                })
-            }
-            this.contextActionItem($r('sys.symbol.bookmark'), '自定义标签', this.primaryTextColor(), () => {
-              if (this.pendingActionBook) {
-                this.editingTags = BookDisplayHelper.getBookTags(this.pendingActionBook);
-                this.tagInput = '';
-              }
-              this.showActionDialog = false;
-              this.openTagDialog();
-            })
-            this.contextActionItem($r('sys.symbol.checkmark_circle'), '多选', this.primaryTextColor(), () => {
-              if (this.pendingActionBook) {
-                const bookUrl = this.pendingActionBook.bookUrl;
-                this.closeBookActions();
-                this.enterBookMultiSelect(bookUrl);
-              }
-            })
-            this.contextActionItem($r('sys.symbol.trash'), '移出书架', ThemeRuntime.dangerColor(this.appDarkMode), () => {
-              if (this.pendingActionBook) {
-                const book = this.pendingActionBook;
-                this.closeBookActions();
-                this.showDeleteConfirm(book);
-              }
-            })
-          }
-          .width(158)
-          .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-          .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-          .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-          .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-          .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-          .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-          .position({
-            x: this.contextMenuLeft(158),
-            y: this.contextMenuTop(this.bookActionMenuHeight(this.pendingActionBook))
-          })
-        }
-        .width('100%')
-        .height('100%')
-      }
-
-      if (this.showShelfChangeSourceDialog && this.shelfChangeSourceTarget) {
-        BookChangeSourceDialog({
-          targetBook: this.shelfChangeSourceTarget,
-          onSwitched: (switched: Book): void => {
-            AppStorage.setOrCreate('shelfUpdateTime', Date.now());
-            this.loadBooks();
-          },
-          onClosed: (): void => {
-            this.showShelfChangeSourceDialog = false;
-            this.shelfChangeSourceTarget = null;
-          }
-        })
-      }
-
-      if (this.showNetworkCoverDialog && this.networkCoverTargetBook) {
-        Column() {
-          Blank()
-            .layoutWeight(1)
-            .onClick(() => this.closeNetworkCoverPicker())
-
-          Column() {
-            Row() {
-              Column() {
-                Text('获取网络封面')
-                  .fontSize(AppFontSize.SUBTITLE)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.primaryTextColor())
-                Text(`《${this.networkCoverTargetBook.name}》`)
-                  .fontSize(AppFontSize.BODY)
-                  .fontColor(this.secondaryTextColor())
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .margin({ top: 3 })
-              }
-              .layoutWeight(1)
-              .alignItems(HorizontalAlign.Start)
-
-              Row({ space: AppSpacing.MD }) {
-                Button('自定义链接')
-                  .height(36)
-                  .fontSize(AppFontSize.CAPTION)
-                  .backgroundColor(this.buttonColor())
-                  .fontColor(ThemeRuntime.onAccentColor())
-                  .onClick(() => this.openCustomNetworkCoverDialog())
-                Button('取消')
-                  .height(36)
-                  .backgroundColor(this.inputColor())
-                  .fontColor(this.primaryTextColor())
-                  .onClick(() => this.closeNetworkCoverPicker())
-              }
-            }
-            .width('100%')
-            .alignItems(VerticalAlign.Center)
-
-            Row({ space: AppSpacing.MD }) {
-              if (this.networkCoverSearching) {
-                LoadingProgress()
-                  .width(18)
-                  .height(18)
-              }
-              Text(this.networkCoverStatus || '正在准备搜索...')
-                .fontSize(AppFontSize.CAPTION)
-                .fontColor(this.subTextColor())
-                .maxLines(2)
-                .layoutWeight(1)
-            }
-            .width('100%')
-            .margin({ top: AppSpacing.LG, bottom: 10 })
-
-            if (this.networkCoverCandidates.length === 0 && !this.networkCoverSearching) {
-              Column({ space: 10 }) {
-                SymbolGlyph($r('sys.symbol.square_grid_2x2'))
-                  .fontSize(42)
-                  .fontColor([this.subTextColor()])
-                Text('未找到可用的网络封面')
-                  .fontSize(AppFontSize.BODY)
-                  .fontColor(this.secondaryTextColor())
-              }
-              .width('100%')
-              .height(220)
-              .justifyContent(FlexAlign.Center)
-            } else {
-              Grid() {
-                ForEach(this.networkCoverCandidates, (candidate: SearchBook) => {
-                  GridItem() {
-                    Column() {
-                      Stack() {
-                        Column() {
-                          Text((candidate.name || '书').substring(0, 1))
-                            .fontSize(28)
-                            .fontColor('#FFFFFF')
-                        }
-                        .width('100%')
-                        .aspectRatio(0.72)
-                        .justifyContent(FlexAlign.Center)
-                        .backgroundColor(this.accentColor())
-
-                        Image(this.imageCover(candidate.coverUrl))
-                          .width('100%')
-                          .height('100%')
-                          .objectFit(ImageFit.Cover)
-                      }
-                      .width('100%')
-                      .aspectRatio(0.72)
-                      .borderRadius(7)
-                      .clip(true)
-                      .backgroundColor(this.inputColor())
-
-                      Text(candidate.name || '未知书名')
-                        .fontSize(AppFontSize.CAPTION)
-                        .fontColor(this.primaryTextColor())
-                        .maxLines(1)
-                        .textOverflow({ overflow: TextOverflow.Ellipsis })
-                        .width('100%')
-                        .margin({ top: AppSpacing.SM })
-                      Text(candidate.originName || candidate.author || '启用书源')
-                        .fontSize(AppFontSize.MICRO)
-                        .fontColor(this.subTextColor())
-                        .maxLines(1)
-                        .textOverflow({ overflow: TextOverflow.Ellipsis })
-                        .width('100%')
-                        .margin({ top: AppSpacing.XXS })
-                    }
-                    .width('100%')
-                    .padding(5)
-                    .borderRadius(ThemeRuntime.mediumRadius())
-                    .backgroundColor(this.glassCardColor())
-                    .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
-                    .onClick(() => this.applyNetworkCover(candidate))
-                  }
-                }, (candidate: SearchBook) => candidate.coverUrl)
-                GridItem() {
-                  Column()
-                    .height(68)
-                }
-                .columnStart(0)
-                .columnEnd(this.networkCoverColumnCount() - 1)
-              }
-              .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-              .columnsTemplate(this.networkCoverColumnsTemplate())
-              .columnsGap(this.networkCoverColumnGap())
-              .rowsGap(this.networkCoverRowGap())
-              .layoutWeight(1)
-              .width('100%')
-            }
-          }
-          .width('100%')
-          .height('72%')
-          .padding({ left: AppSpacing.XL, right: AppSpacing.XL, top: 18, bottom: Math.max(this.navBarHeight, 12) + 12 })
-          .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-          .borderRadius({
-            topLeft: ThemeRuntime.glassCornerRadius(22, 'panel'),
-            topRight: ThemeRuntime.glassCornerRadius(22, 'panel')
-          })
-          .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-          .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#66000000')
-      }
-
-
-
-
-
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: this.contextMenuX, y: this.contextMenuY })
+        .hitTestBehavior(HitTestMode.None)
+        .bindPopup(this.showBookGroupActionMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.bookGroupActionMenu()
+        }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+          if (this.showBookGroupActionMenu) this.closeBookGroupActionMenu();
+        }))
 
       if (this.isBookMultiSelect) {
         this.bookMultiSelectBar()
-      }
-      if (this.isBookMultiSelect && this.showMultiSelectMoreMenu) {
-        this.multiSelectMoreMenu()
-      }
-      if (this.showBookGroupPicker) {
-        this.bookGroupPickerDialog()
-      }
-      if (this.showBookGroupActionMenu && this.pendingBookGroup) {
-        this.bookGroupActionMenu()
       }
       if (this.openingBook) {
         this.shelfBookOpeningOverlay(this.openingBook)
@@ -1670,6 +1349,33 @@ export struct BookshelfPage {
     .height('100%')
     .onAreaChange((_oldValue: Area, newValue: Area) => this.updateContextViewport(newValue))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    .bindSheet(this.showNetworkCoverDialog, this.networkCoverSheet(), this.networkCoverSheetOptions())
+  }
+
+  /** 换源：系统对话框，API 26+ 是沉浸光感表面。 */
+  @Builder
+  changeSourceDialogContent() {
+    BookChangeSourceDialog({
+      targetBook: this.shelfChangeSourceTarget,
+      onSwitched: (switched: Book): void => {
+        AppStorage.setOrCreate('shelfUpdateTime', Date.now());
+        this.loadBooks();
+      },
+      onClosed: (): void => {
+        this.showShelfChangeSourceDialog = false;
+        this.shelfChangeSourceTarget = null;
+      }
+    })
+  }
+
+  syncChangeSourceDialog(): void {
+    this.changeSourceDialogSession.sync(this.getUIContext(), this.showShelfChangeSourceDialog, (): void => {
+      this.changeSourceDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示换源弹窗失败:'
+    });
   }
 
   /** 标题即分组切换：显示当前分组名，点开下拉选分组，旁边是当前视图的本数。 */
@@ -1895,6 +1601,11 @@ export struct BookshelfPage {
         .onClick(() => {
           if (this.selectedBookUrls.length > 0) this.showMultiSelectMoreMenu = true;
         })
+        .bindPopup(this.isBookMultiSelect && this.showMultiSelectMoreMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.multiSelectMoreMenu()
+        }, Placement.TopRight, this.appDarkMode, this.accentColor(), () => {
+          this.showMultiSelectMoreMenu = false;
+        }))
     }
     .width('100%')
     .padding({ left: AppSpacing.XL, right: AppSpacing.XL, top: 10, bottom: this.multiSelectBottomPadding() })
@@ -1903,18 +1614,10 @@ export struct BookshelfPage {
     .alignSelf(ItemAlign.End)
   }
 
+  /** 多选底栏“更多”菜单：系统菜单贴着按钮向上弹出。 */
   @Builder
   multiSelectMoreMenu() {
-    Stack({ alignContent: Alignment.BottomEnd }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-        .onClick(() => {
-          this.showMultiSelectMoreMenu = false;
-        })
-
+    Scroll() {
       Column() {
         if (this.privateShelfEnabled) {
           this.contextActionItem(this.shelfScope === 'private' ? $r('sys.symbol.lock_open') : $r('sys.symbol.lock'),
@@ -1930,18 +1633,305 @@ export struct BookshelfPage {
             this.showMultiSelectMoreMenu = false;
             this.openBatchExportDialog();
           })
+
       }
-      .width(158)
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .margin({ right: AppSpacing.XL, bottom: 58 + this.multiSelectBottomPadding() })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
+      .width('100%')
+    }
+    .width(176)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
+  }
+
+  /** 书籍长按菜单：系统菜单，API 26+ 挂沉浸光感材质。 */
+  @Builder
+  bookActionMenu() {
+    Scroll() {
+      Column() {
+        if (this.pendingActionBook) {
+          this.contextActionItem($r('sys.symbol.info_circle'), '查看书籍详情', this.primaryTextColor(), () => {
+            if (this.pendingActionBook) {
+              const book = this.pendingActionBook;
+              this.closeBookActions();
+              this.openShelfBookDetail(book);
+            }
+          })
+          this.contextActionItem($r('sys.symbol.pin'), this.pendingActionBook.isPinned ? '取消置顶' : '置顶',
+            this.primaryTextColor(), () => {
+              if (this.pendingActionBook) {
+                const book = this.pendingActionBook;
+                this.closeBookActions();
+                this.toggleBookPinned(book);
+              }
+            })
+          if (!LocalBookService.isLocalBook(this.pendingActionBook)) {
+            this.contextActionItem($r('sys.symbol.arrow_left_arrow_right'), '换源', this.primaryTextColor(), () => {
+              if (this.pendingActionBook) {
+                const book = this.pendingActionBook;
+                this.closeBookActions();
+                this.openShelfChangeSource(book);
+              }
+            })
+          }
+          if (!LocalBookService.isLocalBook(this.pendingActionBook)) {
+            this.contextActionItem($r('sys.symbol.download'), '缓存', this.primaryTextColor(), () => {
+              if (this.pendingActionBook) {
+                const book = this.pendingActionBook;
+                this.showActionDialog = false;
+                setTimeout(() => {
+                  this.openCacheDialog(book);
+                }, 0);
+              }
+            })
+          }
+          this.contextActionItem($r('sys.symbol.picture_badge_arrow_down'), '获取网络封面', this.primaryTextColor(), () => {
+            if (this.pendingActionBook) {
+              const book = this.pendingActionBook;
+              this.showActionDialog = false;
+              this.pendingActionBook = null;
+              this.openNetworkCoverPicker(book);
+            }
+          })
+          if (this.pendingActionBook.customCoverUrl) {
+            this.contextActionItem($r('sys.symbol.minus_circle'), '恢复默认封面',
+              this.primaryTextColor(), () => {
+                if (this.pendingActionBook) {
+                  const book = this.pendingActionBook;
+                  this.closeBookActions();
+                  this.restoreDefaultBookCover(book);
+                }
+              })
+          }
+          if (LocalBookService.isLocalBook(this.pendingActionBook)) {
+            this.contextActionItem($r('sys.symbol.square_and_pencil'), '编辑书籍信息',
+              this.primaryTextColor(), () => {
+                if (this.pendingActionBook) {
+                  this.editingBookName = this.pendingActionBook.name;
+                  this.editingBookAuthor = this.pendingActionBook.author;
+                  this.showActionDialog = false;
+                  this.openEditBookInfoDialog();
+                }
+              })
+          }
+          if (LocalBookService.isLocalBook(this.pendingActionBook)) {
+            this.contextActionItem($r('sys.symbol.arrow_right_up_and_square'), '保存源文件',
+              this.primaryTextColor(), () => {
+                if (this.pendingActionBook) {
+                  const book = this.pendingActionBook;
+                  this.showActionDialog = false;
+                  setTimeout(() => {
+                    this.saveLocalBookSource(book);
+                  }, 0);
+                }
+              })
+          }
+          this.contextActionItem($r('sys.symbol.folder'), '移动分组', this.primaryTextColor(), () => {
+            if (this.pendingActionBook) {
+              const bookUrl = this.pendingActionBook.bookUrl;
+              this.showActionDialog = false;
+              this.pendingActionBook = null;
+              this.groupPickerSingleBookUrl = bookUrl;
+              this.showBookGroupPicker = true;
+            }
+          })
+          if (this.privateShelfEnabled) {
+            this.contextActionItem(this.pendingActionBook.isPrivate ? $r('sys.symbol.lock_open') : $r('sys.symbol.lock'),
+              this.pendingActionBook.isPrivate ? '取消隐私' : '标记为隐私', this.primaryTextColor(), () => {
+                if (this.pendingActionBook) {
+                  const book = this.pendingActionBook;
+                  this.closeBookActions();
+                  this.toggleBookPrivate(book);
+                }
+              })
+          }
+          this.contextActionItem($r('sys.symbol.bookmark'), '自定义标签', this.primaryTextColor(), () => {
+            if (this.pendingActionBook) {
+              this.editingTags = BookDisplayHelper.getBookTags(this.pendingActionBook);
+              this.tagInput = '';
+            }
+            this.showActionDialog = false;
+            this.openTagDialog();
+          })
+          this.contextActionItem($r('sys.symbol.checkmark_circle'), '多选', this.primaryTextColor(), () => {
+            if (this.pendingActionBook) {
+              const bookUrl = this.pendingActionBook.bookUrl;
+              this.closeBookActions();
+              this.enterBookMultiSelect(bookUrl);
+            }
+          })
+          this.contextActionItem($r('sys.symbol.trash'), '移出书架', ThemeRuntime.dangerColor(this.appDarkMode), () => {
+            if (this.pendingActionBook) {
+              const book = this.pendingActionBook;
+              this.closeBookActions();
+              this.showDeleteConfirm(book);
+            }
+          })
+        }
+
+      }
+      .width('100%')
+    }
+    .width(176)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
+  }
+
+  /** 获取网络封面：半模态弹层，API 26+ 挂沉浸光感材质。 */
+  @Builder
+  networkCoverSheet() {
+    Column() {
+      Row() {
+        Column() {
+          Text('获取网络封面')
+            .fontSize(AppFontSize.SUBTITLE)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
+          Text(`《${this.networkCoverTargetBook?.name || ''}》`)
+            .fontSize(AppFontSize.BODY)
+            .fontColor(this.secondaryTextColor())
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 3 })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        Row({ space: AppSpacing.MD }) {
+          Button('自定义链接')
+            .height(36)
+            .fontSize(AppFontSize.CAPTION)
+            .backgroundColor(this.buttonColor())
+            .fontColor(ThemeRuntime.onAccentColor())
+            .onClick(() => this.openCustomNetworkCoverDialog())
+          Button('取消')
+            .height(36)
+            .backgroundColor(this.inputColor())
+            .fontColor(this.primaryTextColor())
+            .onClick(() => this.closeNetworkCoverPicker())
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Row({ space: AppSpacing.MD }) {
+        if (this.networkCoverSearching) {
+          LoadingProgress()
+            .width(18)
+            .height(18)
+        }
+        Text(this.networkCoverStatus || '正在准备搜索...')
+          .fontSize(AppFontSize.CAPTION)
+          .fontColor(this.subTextColor())
+          .maxLines(2)
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .margin({ top: AppSpacing.LG, bottom: 10 })
+
+      if (this.networkCoverCandidates.length === 0 && !this.networkCoverSearching) {
+        Column({ space: 10 }) {
+          SymbolGlyph($r('sys.symbol.square_grid_2x2'))
+            .fontSize(42)
+            .fontColor([this.subTextColor()])
+          Text('未找到可用的网络封面')
+            .fontSize(AppFontSize.BODY)
+            .fontColor(this.secondaryTextColor())
+        }
+        .width('100%')
+        .height(220)
+        .justifyContent(FlexAlign.Center)
+      } else {
+        Grid() {
+          ForEach(this.networkCoverCandidates, (candidate: SearchBook) => {
+            GridItem() {
+              Column() {
+                Stack() {
+                  Column() {
+                    Text((candidate.name || '书').substring(0, 1))
+                      .fontSize(28)
+                      .fontColor('#FFFFFF')
+                  }
+                  .width('100%')
+                  .aspectRatio(0.72)
+                  .justifyContent(FlexAlign.Center)
+                  .backgroundColor(this.accentColor())
+
+                  Image(this.imageCover(candidate.coverUrl))
+                    .width('100%')
+                    .height('100%')
+                    .objectFit(ImageFit.Cover)
+                }
+                .width('100%')
+                .aspectRatio(0.72)
+                .borderRadius(7)
+                .clip(true)
+                .backgroundColor(this.inputColor())
+
+                Text(candidate.name || '未知书名')
+                  .fontSize(AppFontSize.CAPTION)
+                  .fontColor(this.primaryTextColor())
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .width('100%')
+                  .margin({ top: AppSpacing.SM })
+                Text(candidate.originName || candidate.author || '启用书源')
+                  .fontSize(AppFontSize.MICRO)
+                  .fontColor(this.subTextColor())
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .width('100%')
+                  .margin({ top: AppSpacing.XXS })
+              }
+              .width('100%')
+              .padding(5)
+              .borderRadius(ThemeRuntime.mediumRadius())
+              .backgroundColor(this.glassCardColor())
+              .border({ width: ThemeRuntime.glassBorderWidth(), color: this.glassBorderColor() })
+              .onClick(() => this.applyNetworkCover(candidate))
+            }
+          }, (candidate: SearchBook) => candidate.coverUrl)
+          GridItem() {
+            Column()
+              .height(68)
+          }
+          .columnStart(0)
+          .columnEnd(this.networkCoverColumnCount() - 1)
+        }
+        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+        .columnsTemplate(this.networkCoverColumnsTemplate())
+        .columnsGap(this.networkCoverColumnGap())
+        .rowsGap(this.networkCoverRowGap())
+        .layoutWeight(1)
+        .width('100%')
+      }
     }
     .width('100%')
     .height('100%')
+    .padding({ left: AppSpacing.XL, right: AppSpacing.XL, top: AppSpacing.SM, bottom: Math.max(this.navBarHeight, 12) + 12 })
+  }
+
+  networkCoverSheetOptions(): SheetOptions {
+    return ImmersiveMaterialRuntime.applySheetMaterial(this.immersiveLightLevel, {
+      detents: ['72%', SheetSize.LARGE],
+      dragBar: true,
+      showClose: false,
+      scrollSizeMode: ScrollSizeMode.CONTINUOUS,
+      // 只有下滑、点遮罩或返回才走这里；切到自定义链接弹窗是页面主动收起，不清空目标书籍。
+      onWillDismiss: (): void => this.closeNetworkCoverPicker(),
+      onWillSpringBackWhenDismiss: (): void => {}
+    }, this.appDarkMode, this.accentColor());
+  }
+
+  /** 移动到分组：内容高度的半模态弹层。 */
+  bookGroupPickerSheetOptions(): SheetOptions {
+    return ImmersiveMaterialRuntime.applySheetMaterial(this.immersiveLightLevel, {
+      height: SheetSize.FIT_CONTENT,
+      dragBar: true,
+      showClose: false,
+      onWillDismiss: (): void => this.closeBookGroupPicker(),
+      onWillSpringBackWhenDismiss: (): void => {}
+    }, this.appDarkMode, this.accentColor());
   }
 
   @Builder
@@ -1981,46 +1971,30 @@ export struct BookshelfPage {
 
   @Builder
   bookGroupPickerDialog() {
-    Stack() {
-      Column()
+    Column({ space: AppSpacing.SM }) {
+      Text('移动到分组')
+        .fontSize(AppFontSize.BODY_LARGE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
         .width('100%')
-        .height('100%')
-        .backgroundColor(this.appDarkMode ? '#36000000' : '#18000000')
-        .onClick(() => this.closeBookGroupPicker())
-
-      Column({ space: AppSpacing.SM }) {
-        Text('移动到分组')
-          .fontSize(AppFontSize.BODY_LARGE)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .height(32)
-          .textAlign(TextAlign.Center)
-        Scroll() {
-          Column({ space: AppSpacing.XS }) {
-            this.bookGroupPickerItem('未分组', 0)
-            ForEach(this.shelfGroups, (group: BookGroup) => {
-              this.bookGroupPickerItem(group.groupName, group.groupId)
-            }, (group: BookGroup) => `picker_${group.groupId}`)
-          }
-          .width('100%')
+        .height(32)
+        .textAlign(TextAlign.Center)
+      Scroll() {
+        Column({ space: AppSpacing.XS }) {
+          this.bookGroupPickerItem('未分组', 0)
+          ForEach(this.shelfGroups, (group: BookGroup) => {
+            this.bookGroupPickerItem(group.groupName, group.groupId)
+          }, (group: BookGroup) => `picker_${group.groupId}`)
         }
-        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
         .width('100%')
-        .constraintSize({ maxHeight: 260 })
-        .scrollBar(BarState.Off)
       }
-      .width(230)
-      .padding(10)
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .margin({ right: AppSpacing.XL, bottom: this.bookGroupPickerBottomMargin() })
+      .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+      .width('100%')
+      .constraintSize({ maxHeight: 360 })
+      .scrollBar(BarState.Off)
     }
     .width('100%')
-    .height('100%')
+    .padding({ left: AppSpacing.XL, right: AppSpacing.XL, bottom: Math.max(this.navBarHeight, 12) + 12 })
   }
 
   @Builder
@@ -2076,32 +2050,26 @@ export struct BookshelfPage {
 
   @Builder
   bookGroupActionMenu() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%').height('100%')
-        .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-        .onClick(() => this.closeBookGroupActionMenu())
+    Scroll() {
       Column() {
         this.contextActionItem($r('sys.symbol.square_and_pencil'), '重命名', this.primaryTextColor(), () => {
-            this.renameBookGroupName = this.pendingBookGroup?.groupName || '';
-            this.showBookGroupActionMenu = false;
-            this.openRenameBookGroupDialog();
-          })
+          this.renameBookGroupName = this.pendingBookGroup?.groupName || '';
+          this.showBookGroupActionMenu = false;
+          this.openRenameBookGroupDialog();
+        })
         this.contextActionItem($r('sys.symbol.trash'), '删除', ThemeRuntime.dangerColor(this.appDarkMode), () => {
-            this.pendingDeleteBookGroup = this.pendingBookGroup;
-            this.showBookGroupActionMenu = false;
-            this.openDeleteBookGroupDialog();
-          })
+          this.pendingDeleteBookGroup = this.pendingBookGroup;
+          this.showBookGroupActionMenu = false;
+          this.openDeleteBookGroupDialog();
+        })
+
       }
-      .width(148).padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel')).backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(100) })
+      .width('100%')
     }
-    .width('100%').height('100%')
+    .width(176)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
@@ -4589,29 +4557,7 @@ export struct BookshelfPage {
 
   @Builder
   contextActionItem(icon: Resource, label: string, color: string, action: () => void) {
-    Row({ space: 10 }) {
-      SymbolGlyph(icon)
-        .fontSize(18)
-        .fontColor([color])
-        .width(24)
-      Text(label)
-        .fontSize(AppFontSize.BODY_LARGE)
-        .fontColor(color)
-        .layoutWeight(1)
-    }
-    .width('100%')
-    .height(44)
-    .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-    .alignItems(VerticalAlign.Center)
-    .onClick(action)
-  }
-
-  actionSheetBottomMargin(): number {
-    return 82 + (this.navBarHeight > 0 ? this.navBarHeight : 0);
-  }
-
-  bookGroupPickerBottomMargin(): number {
-    return 68 + Math.max(this.navBarHeight, 8);
+    PopupMenuAction(icon, label, color, action)
   }
 
   multiSelectBottomPadding(): number {
@@ -6995,7 +6941,7 @@ export struct BookshelfPage {
   }
 
   shelfMenuPopupOptions(builder: CustomBuilder, placement: Placement, onHidden: () => void): CustomPopupOptions {
-    return ImmersiveMaterialRuntime.popupMenuOptions(builder, placement, this.appDarkMode, this.accentColor(), onHidden);
+    return ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, builder, placement, this.appDarkMode, this.accentColor(), onHidden);
   }
 
   shelfMenuItemRadius(): number {

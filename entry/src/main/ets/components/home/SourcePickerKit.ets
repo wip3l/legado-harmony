@@ -7,6 +7,8 @@ import { SystemDialogSession } from '../../utils/SystemDialogSession';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
+import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
+import { PopupMenuAction } from '../common/PopupMenuAction';
 
 /**
  * 发现页书源下拉与搜索范围面板共用的书源选择约定：分组名、分组顺序、同名书源的显示名、
@@ -127,21 +129,9 @@ class SourceActionItem {
   danger: boolean = false;
 }
 
-/** 长按书源的操作菜单条目；外层容器（页面浮层或系统长按菜单）由调用方决定。 */
-@Component
-export struct SourceActionMenuList {
-  static readonly WIDTH: number = 132;
-  static readonly ROW_HEIGHT: number = 44;
-  @StorageLink('appDarkMode') appDarkMode: boolean = false;
-  @StorageLink('themeRevision') themeRevision: number = 0;
-  isNative: boolean = false;
-  onAction: (kind: string) => void = (_kind: string): void => {
-  };
-
-  /** 菜单高度，页面浮层按它决定往上还是往下弹。 */
-  static menuHeight(isNative: boolean): number {
-    return SourceActionMenuList.items(isNative).length * SourceActionMenuList.ROW_HEIGHT + AppSpacing.SM * 2;
-  }
+/** 长按书源的操作菜单条目。 */
+export class SourceActionMenuList {
+  static readonly WIDTH: number = 160;
 
   static items(isNative: boolean): SourceActionItem[] {
     const result: SourceActionItem[] = [
@@ -156,32 +146,24 @@ export struct SourceActionMenuList {
     return result;
   }
 
-  build() {
-    Column() {
-      ForEach(SourceActionMenuList.items(this.isNative), (item: SourceActionItem) => {
-        Row() {
-          SymbolGlyph(item.icon)
-            .fontSize(19)
-            .fontColor([this.itemColor(item)])
-            .width(34)
-          Text(item.label)
-            .fontSize(AppFontSize.BODY_LARGE)
-            .fontColor(this.itemColor(item))
-            .layoutWeight(1)
-        }
-        .width('100%')
-        .height(SourceActionMenuList.ROW_HEIGHT)
-        .padding({ left: AppSpacing.MD, right: AppSpacing.MD })
-        .onClick(() => this.onAction(item.kind))
-      }, (item: SourceActionItem): string => item.kind)
-    }
-    .width(SourceActionMenuList.WIDTH)
-    .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
+  static itemColor(item: SourceActionItem, darkMode: boolean): string {
+    return item.danger ? ThemeRuntime.dangerColor(darkMode) : ThemeRuntime.primaryTextColor(darkMode);
   }
+}
 
-  itemColor(item: SourceActionItem): string {
-    return item.danger ? ThemeRuntime.dangerColor(this.appDarkMode) : ThemeRuntime.primaryTextColor(this.appDarkMode);
+/**
+ * 长按书源的操作菜单内容，外层容器（发现页的系统弹出层、搜索范围面板的长按菜单）由调用方决定，
+ * 沉浸光感材质也由外层容器提供。
+ */
+@Builder
+export function SourceActionMenu(isNative: boolean, darkMode: boolean, onAction: (kind: string) => void) {
+  Column() {
+    ForEach(SourceActionMenuList.items(isNative), (item: SourceActionItem) => {
+      PopupMenuAction(item.icon, item.label, SourceActionMenuList.itemColor(item, darkMode), () => onAction(item.kind))
+    }, (item: SourceActionItem): string => item.kind)
   }
+  .width(SourceActionMenuList.WIDTH)
+  .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
 }
 
 export class SourceVariableDialogParams {

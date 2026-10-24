@@ -4,6 +4,8 @@ import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 /** Circular action button with an API 26+ system material surface. */
 @Component
 export struct AdaptiveIconButton {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
+  @StorageProp('appDarkMode') appDarkMode: boolean = false;
   @Prop icon: Resource = $r('sys.symbol.circle');
   @Prop accessibilityLabel: string = '';
   @Prop buttonEnabled: boolean = true;
@@ -58,6 +60,7 @@ export struct AdaptiveIconButton {
           .width(this.buttonSize * 0.72)
           .height(this.buttonSize * 0.72)
           .backgroundColor('#38FFFFFF')
+          .opacity(ImmersiveMaterialRuntime.touchGlowOpacity(this.immersiveLightLevel))
           .borderRadius(this.buttonSize * 0.36)
           .hitTestBehavior(HitTestMode.None)
       }
@@ -65,7 +68,8 @@ export struct AdaptiveIconButton {
     .width(this.buttonSize)
     .height(this.buttonSize)
     .backgroundColor(this.showSurface ? this.fillColor : Color.Transparent)
-    .border({ width: this.showSurface ? 1 : 0, color: this.surfaceBorderColor })
+    .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.appDarkMode,
+      this.showSurface ? 1 : 0, this.surfaceBorderColor))
     .borderRadius(this.buttonSize / 2)
     .shadow({
       radius: this.showSurface ? 8 : 0,
@@ -91,13 +95,13 @@ export struct AdaptiveIconButton {
       .fontColor([this.buttonEnabled ? this.iconColor : this.disabledIconColor])
   }
 
-  private material(): uiMaterial.ImmersiveMaterial {
-    return new uiMaterial.ImmersiveMaterial({
-      style: ImmersiveMaterialRuntime.materialStyle(),
+  private material(): uiMaterial.Material {
+    return ImmersiveMaterialRuntime.componentMaterial({
+      style: ImmersiveMaterialRuntime.materialStyle(this.immersiveLightLevel),
       materialColor: '#2EFFFFFF',
       applyShadow: true,
-      interactive: ImmersiveMaterialRuntime.configuredLightLevel() !== 'weak',
-      lightEffect: ImmersiveMaterialRuntime.lightEffect(this.immersiveLightEffect)
-    });
+      interactive: this.immersiveLightLevel !== 'weak',
+      lightEffect: ImmersiveMaterialRuntime.lightEffect(this.immersiveLightEffect, this.immersiveLightLevel)
+    }, this.immersiveLightLevel);
   }
 }

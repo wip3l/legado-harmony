@@ -70,6 +70,7 @@ struct ThemeColorOption {
 @Entry
 @Component
 struct ThemeColorSettingsPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('appThemeId') appThemeId: string = AppThemeSettingsStore.DEFAULT_THEME_ID;
@@ -602,7 +603,7 @@ struct ThemeColorSettingsPage {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => {
           if (index >= 0 && index < this.availableThemes.length) {
             this.setComponentSource(category, this.availableThemes[index].id);

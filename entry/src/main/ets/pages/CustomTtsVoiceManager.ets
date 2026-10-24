@@ -19,6 +19,9 @@ import { AdaptiveSwitch } from '../components/AdaptiveSwitch';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { CollapsingHeader } from '../utils/CollapsingHeader';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
+import { ImmersiveMaterialSurface } from '../components/ImmersiveMaterialSurface';
+import { PopupMenuAction } from '../components/common/PopupMenuAction';
 
 class VoiceEditFormDraft {
   editingVoiceId: string = '';
@@ -40,6 +43,7 @@ const CUSTOM_TTS_IMPORT_FILE_LIMIT_BYTES: number = 2 * 1024 * 1024;
 @Entry
 @Component
 struct CustomTtsVoiceManagerPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @State headerCollapse: number = 0;
   @StorageLink('ttsCustomVoiceId') ttsCustomVoiceId: string = '';
   @StorageLink('ttsCustomVoices') ttsCustomVoices: string = '';
@@ -65,8 +69,9 @@ struct CustomTtsVoiceManagerPage {
   @State selectedVoiceIds: string[] = [];
   @State showAddDialog: boolean = false;
   private importUrlDialogSession: SystemDialogSession = new SystemDialogSession();
+  private editVoiceDialogSession: SystemDialogSession = new SystemDialogSession();
   @State @Watch('onSystemDialogFlagChanged') showImportUrlDialog: boolean = false;
-  @State showEditDialog: boolean = false;
+  @State @Watch('syncShowEditDialog') showEditDialog: boolean = false;
   @State importUrl: string = '';
   @State isImporting: boolean = false;
   @State isBatchOperating: boolean = false;
@@ -222,23 +227,20 @@ struct CustomTtsVoiceManagerPage {
       .height('100%')
       .backgroundColor(this.pageColor())
 
-      if (!this.selectionMode && !this.showAddDialog && !this.isImporting && !this.isBatchOperating) {
+      if (!this.selectionMode && !this.isImporting && !this.isBatchOperating) {
         this.addVoiceFloatingButton()
       }
 
-      if (this.showAddDialog) {
-        this.addDialog()
-      }
-
-
-
-      if (this.showEditDialog) {
-        this.editVoiceDialog()
-      }
-
-      if (this.showVoiceActionMenu) {
-        this.voiceActionMenu()
-      }
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: this.contextMenuX, y: this.contextMenuY })
+        .hitTestBehavior(HitTestMode.None)
+        .bindPopup(this.showVoiceActionMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.voiceActionMenu()
+        }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+          this.showVoiceActionMenu = false;
+        }))
     }
     .width('100%')
     .height('100%')
@@ -935,16 +937,6 @@ struct CustomTtsVoiceManagerPage {
     this.selectedVoiceIds = [id];
   }
 
-  contextMenuLeft(menuWidth: number): number {
-    return Math.max(12, Math.min(this.contextMenuX - 18, this.contextViewportWidth - menuWidth - 12));
-  }
-
-  contextMenuTop(menuHeight: number): number {
-    const below = this.contextMenuY + 12;
-    if (below + menuHeight <= this.contextViewportHeight - 12) return below;
-    return Math.max(this.statusBarHeight + 8, this.contextMenuY - menuHeight - 12);
-  }
-
   syncBars(): void {
     syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
   }
@@ -1009,22 +1001,32 @@ struct CustomTtsVoiceManagerPage {
 
   @Builder
   addVoiceFloatingButton() {
-    Button({ type: ButtonType.Circle, stateEffect: true }) {
-      SymbolGlyph($r('sys.symbol.plus'))
-        .fontSize(25)
-        .fontColor([this.accentColor()])
+    Stack() {
+      ImmersiveMaterialSurface({
+        surfaceWidth: 52,
+        surfaceHeight: 52,
+        darkMode: this.appDarkMode,
+        fallbackColor: this.cardColor(),
+        glowColor: `#40${this.accentColor().substring(1)}`
+      }) {
+        SymbolGlyph($r('sys.symbol.plus'))
+          .fontSize(25)
+          .fontColor([this.accentColor()])
+      }
     }
     .width(52)
     .height(52)
     .margin({ right: AppSpacing.XXL, bottom: this.navBarHeight + 22 })
-    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor(), 'button'))
-    .backdropBlur(ThemeRuntime.glassBlur('button', 12))
-    .border({ width: ThemeRuntime.glassBorderWidth('button'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'button') })
-    .shadow({ radius: ThemeRuntime.glassShadowRadius('button'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'button'), offsetX: ThemeRuntime.glassShadowOffsetX('button'), offsetY: ThemeRuntime.glassShadowOffsetY('button') })
     .accessibilityText('新增自定义音色')
     .onClick(() => {
       this.showAddDialog = true;
     })
+    .accessibilityRole(AccessibilityRoleType.BUTTON)
+    .bindPopup(this.showAddDialog, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+      this.addDialog()
+    }, Placement.TopRight, this.appDarkMode, this.accentColor(), () => {
+      this.showAddDialog = false;
+    }))
   }
 
   @Builder
@@ -1166,13 +1168,7 @@ struct CustomTtsVoiceManagerPage {
 
   @Builder
   voiceActionMenu() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.appDarkMode ? '#38000000' : '#18FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('button', 12))
-        .onClick(() => this.closeVoiceActions())
+    Scroll() {
       Column() {
         this.voiceContextActionItem($r('sys.symbol.square_and_pencil'), '编辑', this.primaryTextColor(),
           () => this.openActionVoiceEdit())
@@ -1182,37 +1178,19 @@ struct CustomTtsVoiceManagerPage {
         this.voiceContextActionItem($r('sys.symbol.list_bullet'), '多选', this.primaryTextColor(),
           () => this.enterActionVoiceSelection())
         this.voiceContextActionItem($r('sys.symbol.trash'), '删除', ThemeRuntime.dangerColor(this.appDarkMode), () => this.deleteActionVoice())
+
       }
-      .width(148)
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(188) })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(176)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
   voiceContextActionItem(icon: Resource, label: string, color: string, action: () => void) {
-    Row({ space: AppSpacing.MD }) {
-      SymbolGlyph(icon)
-        .fontSize(18)
-        .fontColor([color])
-        .width(24)
-      Text(label)
-        .fontSize(AppFontSize.BODY_LARGE)
-        .fontColor(color)
-        .layoutWeight(1)
-    }
-    .width('100%')
-    .height(44)
-    .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-    .alignItems(VerticalAlign.Center)
-    .onClick(action)
+    PopupMenuAction(icon, label, color, action)
   }
 
   @Builder
@@ -1255,14 +1233,7 @@ struct CustomTtsVoiceManagerPage {
 
   @Builder
   addDialog() {
-    Stack({ alignContent: Alignment.BottomEnd }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .onClick(() => {
-          this.showAddDialog = false;
-        })
-
+    Scroll() {
       Column() {
         this.addVoiceMenuItem('手动新建', () => {
           this.showAddDialog = false;
@@ -1276,42 +1247,21 @@ struct CustomTtsVoiceManagerPage {
         this.addVoiceMenuItem('从文件导入', () => {
           this.showAddDialog = false;
           this.importFromFile();
-        }, false)
+        })
+
       }
-      .width(176)
-      .padding(AppSpacing.SM)
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .margin({ right: AppSpacing.XXL, bottom: this.navBarHeight + 82 })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(176)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
-  addVoiceMenuItem(label: string, action: () => void, showDivider: boolean = true) {
-    Column() {
-      Text(label)
-        .fontSize(AppFontSize.BODY_LARGE)
-        .fontColor(this.primaryTextColor())
-        .width('100%')
-        .height(44)
-        .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-        .textAlign(TextAlign.Start)
-      if (showDivider) {
-        Divider()
-          .strokeWidth(0.5)
-          .color(ThemeRuntime.glassBorderColor(this.appDarkMode))
-          .margin({ left: AppSpacing.LG, right: AppSpacing.LG })
-      }
-    }
-    .width('100%')
-    .onClick(action)
+  addVoiceMenuItem(label: string, action: () => void) {
+    PopupMenuAction(undefined, label, this.primaryTextColor(), action)
   }
-
 
   onSystemDialogFlagChanged(): void {
     if (!this.showImportUrlDialog) this.importUrlDialogSession.close(this.getUIContext());
@@ -1375,102 +1325,101 @@ struct CustomTtsVoiceManagerPage {
   @Builder
   editVoiceDialog() {
     Column() {
-      Column() {
-        Text(this.editingVoiceId ? '编辑自定义音色' : '新建自定义音色')
-          .fontSize(AppFontSize.SUBTITLE)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: AppSpacing.LG })
+      Text(this.editingVoiceId ? '编辑自定义音色' : '新建自定义音色')
+        .fontSize(AppFontSize.SUBTITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ bottom: AppSpacing.LG })
 
-        Scroll() {
-          Column({ space: AppSpacing.MD }) {
-            this.editInput('名称', '音色名称', this.editName, (value: string) => {
-              this.editName = value;
+      Scroll() {
+        Column({ space: AppSpacing.MD }) {
+          this.editInput('名称', '音色名称', this.editName, (value: string) => {
+            this.editName = value;
+          })
+          this.editInput('URL', '请求 URL', this.editUrl, (value: string) => {
+            this.editUrl = value;
+          })
+          this.editInput('请求头', 'header，可留空', this.editHeader, (value: string) => {
+            this.editHeader = value;
+          })
+          this.editInput('内容类型', 'contentType，可留空，如 audio/.*', this.editContentType, (value: string) => {
+            this.editContentType = value;
+          })
+          this.editInput('并发率', 'concurrentRate，可留空', this.editConcurrentRate, (value: string) => {
+            this.editConcurrentRate = value;
+          })
+          this.editInput('登录URL', 'loginUrl，可留空', this.editLoginUrl, (value: string) => {
+            this.editLoginUrl = value;
+          })
+          this.editInput('登录UI', 'loginUi，可留空', this.editLoginUi, (value: string) => {
+            this.editLoginUi = value;
+          })
+          this.editInput('登录检查JS', 'loginCheckJs，可留空', this.editLoginCheckJs, (value: string) => {
+            this.editLoginCheckJs = value;
+          })
+          this.editInput('JS库', 'jsLib，可留空', this.editJsLib, (value: string) => {
+            this.editJsLib = value;
+          })
+          this.editInput('JS引擎', 'jsEngine，兼容旧字段，可留空', this.editJsEngine, (value: string) => {
+            this.editJsEngine = value;
+          })
+          Row() {
+            Text('启用 CookieJar')
+              .fontSize(AppFontSize.BODY_LARGE)
+              .fontColor(this.primaryTextColor())
+              .layoutWeight(1)
+            AdaptiveSwitch({
+              isOn: this.editEnabledCookieJar,
+              onChange: (value: boolean) => {
+                this.editEnabledCookieJar = value;
+                this.saveVoiceEditDraft();
+              }
             })
-            this.editInput('URL', '请求 URL', this.editUrl, (value: string) => {
-              this.editUrl = value;
-            })
-            this.editInput('请求头', 'header，可留空', this.editHeader, (value: string) => {
-              this.editHeader = value;
-            })
-            this.editInput('内容类型', 'contentType，可留空，如 audio/.*', this.editContentType, (value: string) => {
-              this.editContentType = value;
-            })
-            this.editInput('并发率', 'concurrentRate，可留空', this.editConcurrentRate, (value: string) => {
-              this.editConcurrentRate = value;
-            })
-            this.editInput('登录URL', 'loginUrl，可留空', this.editLoginUrl, (value: string) => {
-              this.editLoginUrl = value;
-            })
-            this.editInput('登录UI', 'loginUi，可留空', this.editLoginUi, (value: string) => {
-              this.editLoginUi = value;
-            })
-            this.editInput('登录检查JS', 'loginCheckJs，可留空', this.editLoginCheckJs, (value: string) => {
-              this.editLoginCheckJs = value;
-            })
-            this.editInput('JS库', 'jsLib，可留空', this.editJsLib, (value: string) => {
-              this.editJsLib = value;
-            })
-            this.editInput('JS引擎', 'jsEngine，兼容旧字段，可留空', this.editJsEngine, (value: string) => {
-              this.editJsEngine = value;
-            })
-            Row() {
-              Text('启用 CookieJar')
-                .fontSize(AppFontSize.BODY_LARGE)
-                .fontColor(this.primaryTextColor())
-                .layoutWeight(1)
-              AdaptiveSwitch({
-                isOn: this.editEnabledCookieJar,
-                onChange: (value: boolean) => {
-                  this.editEnabledCookieJar = value;
-                  this.saveVoiceEditDraft();
-                }
-              })
-            }
-            .width('100%')
-            .padding({ top: AppSpacing.XS, bottom: AppSpacing.XS })
           }
           .width('100%')
-        }
-        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-        .width('100%')
-        .height(420)
-
-        Row({ space: AppSpacing.MD }) {
-          Button('取消')
-            .layoutWeight(1)
-            .height(42)
-            .backgroundColor(this.inputColor())
-            .fontColor(this.primaryTextColor())
-            .onClick(() => {
-              this.closeEditDialog();
-            })
-          Button('保存')
-            .layoutWeight(1)
-            .height(42)
-            .backgroundColor(this.buttonColor())
-            .fontColor(ThemeRuntime.onAccentColor())
-            .onClick(() => {
-              this.saveEditedVoice();
-            })
+          .padding({ top: AppSpacing.XS, bottom: AppSpacing.XS })
         }
         .width('100%')
-        .margin({ top: AppSpacing.LG })
       }
-      .width('90%')
-      .padding(AppSpacing.XXL)
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
+      .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+      .width('100%')
+      .height(420)
+
+      Row({ space: AppSpacing.MD }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(42)
+          .backgroundColor(this.inputColor())
+          .fontColor(this.primaryTextColor())
+          .onClick(() => {
+            this.closeEditDialog();
+          })
+        Button('保存')
+          .layoutWeight(1)
+          .height(42)
+          .backgroundColor(this.buttonColor())
+          .fontColor(ThemeRuntime.onAccentColor())
+          .onClick(() => {
+            this.saveEditedVoice();
+          })
+      }
+      .width('100%')
+      .margin({ top: AppSpacing.LG })
     }
     .width('100%')
-    .height('100%')
-    .backgroundColor('#66000000')
-    .justifyContent(FlexAlign.Center)
+    .padding(AppSpacing.XXL)
+  }
+
+  syncShowEditDialog(): void {
+    this.editVoiceDialogSession.sync(this.getUIContext(), this.showEditDialog, (): void => {
+      this.editVoiceDialog();
+    }, {
+      autoCancel: false,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示编辑音色弹窗失败:'
+    });
   }
 
   @Builder

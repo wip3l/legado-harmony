@@ -32,7 +32,8 @@ export struct BookCover {
   @StorageProp('appThemeBookCoverEnabled') @Watch('refreshCovers') themeCoverEnabled: boolean = false;
   @StorageProp('themeRevision') @Watch('refreshCovers') themeRevision: number = 0;
   @StorageProp('shelfUpdateTime') @Watch('onBookChanged') shelfUpdateTime: number = 0;
-  @StorageProp('sourceCoverRevision') @Watch('notifyReadyCover') sourceCoverRevision: number = 0;
+  /** 实际交给 Image 的地址。每个异步任务完成后直接替换数组，避免依赖全局刷新穿透 Builder。 */
+  @State displayCovers: ResourceStr[] = [];
   @State covers: ResourceStr[] = [];
   @State themeFrame: ResourceStr = '';
   @State interval: number = 3500;
@@ -42,6 +43,9 @@ export struct BookCover {
   private loadedUrls: Set<string> = new Set();
   private requestSerial: number = 0;
   private mounted: boolean = false;
+  private coverLoadSerial: number = 0;
+  private retryCounts: Map<number, number> = new Map();
+  private retryTimers: Map<number, number> = new Map();
   onReadyCover: (url: ResourceStr) => void = (_url: ResourceStr): void => {};
 
   aboutToAppear(): void {
@@ -52,6 +56,8 @@ export struct BookCover {
   aboutToDisappear(): void {
     this.mounted = false;
     this.requestSerial++;
+    this.coverLoadSerial++;
+    this.clearCoverRetries();
   }
 
   onBookChanged(): void {
@@ -108,15 +114,75 @@ export struct BookCover {
       this.covers = covers;
       this.activeIndex = 0;
     }
-    this.notifyReadyCover();
+    this.resolveDisplayCovers();
   }
 
-  imageCover(raw: ResourceStr): ResourceStr {
-    return typeof raw === 'string' && this.sourceCoverRevision >= 0 ? BookCoverCache.displayCover(getContext(this), raw) : raw;
+  private clearCoverRetries(): void {
+    this.retryTimers.forEach((timer: number) => clearTimeout(timer));
+    this.retryTimers.clear();
+    this.retryCounts.clear();
+  }
+
+  private resolveDisplayCovers(): void {
+    const serial = ++this.coverLoadSerial;
+    this.clearCoverRetries();
+    this.displayCovers = this.covers.map((raw: ResourceStr): ResourceStr => {
+      if (typeof raw !== 'string' || !/^https?:\/\//i.test(raw)) return raw;
+      return BookCoverCache.resolveCachedCover(getContext(this), raw);
+    });
+    this.notifyReadyCover();
+    if (!this.mounted) return;
+    this.covers.forEach((raw: ResourceStr, index: number) => {
+      if (typeof raw === 'string' && /^https?:\/\//i.test(raw) && !this.displayCovers[index]) {
+        this.loadDisplayCover(raw, index, serial);
+      }
+    });
+  }
+
+  private async loadDisplayCover(raw: string, index: number, serial: number): Promise<void> {
+    try {
+      const resolved = await BookCoverCache.resolveCover(getContext(this), raw);
+      if (!this.mounted || serial !== this.coverLoadSerial) return;
+      // 下载失败时 resolveCover 为旧调用方保留网络地址；这里不再重复交给 Image 发起无头请求。
+      if (!resolved || /^https?:\/\//i.test(resolved)) {
+        this.scheduleCoverRetry(index, serial, false);
+        return;
+      }
+      this.displayCovers = this.displayCovers.map((value: ResourceStr, position: number): ResourceStr =>
+        position === index ? resolved : value);
+      this.notifyReadyCover();
+    } catch (_) {
+      if (this.mounted && serial === this.coverLoadSerial) this.scheduleCoverRetry(index, serial, false);
+    }
+  }
+
+  private scheduleCoverRetry(index: number, serial: number, invalidate: boolean): void {
+    const raw = this.covers[index];
+    if (typeof raw !== 'string' || !/^https?:\/\//i.test(raw) || this.retryTimers.has(index)) return;
+    const count = this.retryCounts.get(index) || 0;
+    if (count >= 2) return;
+    this.retryCounts.set(index, count + 1);
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(index);
+      if (!this.mounted || serial !== this.coverLoadSerial) return;
+      if (invalidate) BookCoverCache.deleteCachedCover(getContext(this), raw);
+      this.loadDisplayCover(raw, index, serial);
+    }, 750 * (count + 1));
+    this.retryTimers.set(index, timer);
+  }
+
+  private markFailed(url: ResourceStr): void {
+    const index = this.displayCovers.indexOf(url);
+    if (!this.mounted || index < 0 || !url) return;
+    this.loadedUrls.delete(JSON.stringify(url));
+    this.displayCovers = this.displayCovers.map((value: ResourceStr, position: number): ResourceStr =>
+      position === index ? '' : value);
+    this.notifyReadyCover();
+    this.scheduleCoverRetry(index, this.coverLoadSerial, true);
   }
 
   activeCover(): ResourceStr {
-    return this.covers.length > 0 ? this.imageCover(this.covers[this.activeIndex] || this.covers[0]) : '';
+    return this.displayCovers[this.activeIndex] || '';
   }
 
   isActiveCoverReady(): boolean {
@@ -147,6 +213,7 @@ export struct BookCover {
       .sourceSize({ width: this.decodeWidth, height: this.decodeHeight })
       .borderRadius(this.cornerRadius)
       .onComplete(() => this.markLoaded(url))
+      .onError(() => this.markFailed(url))
   }
 
   build() {
@@ -163,12 +230,23 @@ export struct BookCover {
         .backgroundColor(this.placeholderColor)
       }
       if (this.covers.length === 1) {
-        this.coverImage(this.imageCover(this.covers[0]))
+        // Builder 的按值参数不能承担异步地址绑定；以实际地址为 key，地址改变时重建对应 Image。
+        ForEach(this.displayCovers, (cover: ResourceStr) => {
+          if (cover) {
+            this.coverImage(cover)
+          }
+        }, (cover: ResourceStr, index: number) => JSON.stringify([index, cover]))
       } else if (this.covers.length > 1) {
         Swiper() {
-          ForEach(this.covers, (cover: ResourceStr) => {
-            this.coverImage(this.imageCover(cover))
-          }, (cover: ResourceStr) => JSON.stringify(cover))
+          ForEach(this.displayCovers, (cover: ResourceStr) => {
+            Stack() {
+              if (cover) {
+                this.coverImage(cover)
+              }
+            }
+            .width('100%')
+            .height('100%')
+          }, (cover: ResourceStr, index: number) => JSON.stringify([index, cover]))
         }
         .width('100%')
         .height('100%')

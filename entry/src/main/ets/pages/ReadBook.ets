@@ -102,11 +102,13 @@ import { ReaderCacheDialogContent } from '../components/reader/ReaderCacheDialog
 import { ReaderTxtCharsetDialogContent, ReaderTxtCharsets } from '../components/reader/ReaderTxtCharsetDialogContent';
 import { ReaderLayoutElementSettingsPanel } from '../components/reader/ReaderLayoutElementSettingsPanel';
 import { ReaderTocPanel, ReaderTocPanelController } from '../components/reader/ReaderTocPanel';
-import { ReaderFloatingMaterialBar } from '../components/reader/ReaderFloatingMaterialBar';
+import { ReaderFloatingMaterialBar, ReaderMaterialPanel } from '../components/reader/ReaderFloatingMaterialBar';
 import { ReaderContinuousDataSource, ReaderScrollItem, ReaderScrollSegment } from '../core/reader/ReaderDataSources';
 import { ReaderComicImageItem, ReaderComicView } from '../components/reader/ReaderComicView';
 import { ReaderComicPagedController, ReaderComicPagedView } from '../components/reader/ReaderComicPagedView';
 import { ReaderComicImageActions } from '../core/reader/ReaderComicImageActions';
+import { ReaderComicColorSession, ComicColorCandidate } from '../core/reader/ReaderComicColorSession';
+import { ComicColorizer } from '../core/reader/ComicColorizer';
 import { ReaderComicStyle } from '../core/reader/ReaderComicStyle';
 import { ReaderNeighborChapterLoader } from '../core/reader/ReaderNeighborChapterLoader';
 import {
@@ -158,6 +160,7 @@ import { AdaptiveSwitch } from '../components/AdaptiveSwitch';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { CloudAutoSync } from '../account/CloudAutoSync';
+import { PopupMenuAction } from '../components/common/PopupMenuAction';
 
 const READER_CURRENT_PAGINATION_AHEAD_PAGE_COUNT = 4;
 const READER_ADJACENT_PAGINATION_PREVIEW_PAGE_COUNT = 2;
@@ -206,6 +209,7 @@ class ReaderCommentNavigationBridge {
 @Entry
 @Component
 struct ReadBookPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @State bookUrl: string = '';
   @State book: Book | null = null;
   @State chapters: BookChapter[] = [];
@@ -225,11 +229,13 @@ struct ReadBookPage {
   // 展开屏上记住用户本次唤起菜单的手指侧：-1 左侧，1 右侧。
   @State readerMenuAnchorSide: number = 1;
   @State showReaderActionMenu: boolean = false;
-  @State showLayoutElementSettings: boolean = false;
+  @State @Watch('syncLayoutElementSettingsDialog') showLayoutElementSettings: boolean = false;
   private txtCharsetDialogSession: SystemDialogSession = new SystemDialogSession();
+  private changeSourceDialogSession: SystemDialogSession = new SystemDialogSession();
   private readerCacheDialogSession: SystemDialogSession = new SystemDialogSession();
   private chapterCacheDialogSession: SystemDialogSession = new SystemDialogSession();
   private tapZoneDialogSession: SystemDialogSession = new SystemDialogSession();
+  private layoutElementDialogSession: SystemDialogSession = new SystemDialogSession();
   @State @Watch('onSystemDialogFlagChanged') showTxtCharsetDialog: boolean = false;
   // Mirrors the charset dialog's "re-parsing" flag so the page does not dismiss it midway.
   private txtCharsetApplying: boolean = false;
@@ -257,7 +263,7 @@ struct ReadBookPage {
   @State loadStatus: string = '正在加载...';
   @State verificationUrl: string = '';
   @State verificationTitle: string = '网页验证';
-  @State showChangeSourceDialog: boolean = false;
+  @State @Watch('syncChangeSourceDialog') showChangeSourceDialog: boolean = false;
   @State pendingSwitchedBook: Book | null = null;
   @State contentPages: string[] = [];
   @State currentPageIndex: number = 0;
@@ -282,6 +288,10 @@ struct ReadBookPage {
   @State readerComicBookMode: string = '';
   /** 本书漫画图片繁→简（书籍变量 readerComicTextConvert = t2s）。 */
   @State readerComicTextConvert: boolean = false;
+  @State readerComicColorEnabled: boolean = false;
+  @State readerComicColorRevision: number = 0;
+  private readerComicColor: ReaderComicColorSession = new ReaderComicColorSession();
+  private readerComicColorUnsubscribe: (() => void) | null = null;
   /** 翻页模式预先切好的相邻章节分页，翻过本话首尾时直接显示；章节号为 -1 表示没有。 */
   @State readerComicPagedPrevPages: string[] = [];
   @State readerComicPagedNextPages: string[] = [];
@@ -829,6 +839,7 @@ struct ReadBookPage {
   }
 
   onPageShow(): void {
+    this.readerComicColor.setForeground(true);
     this.readerPageVisible = true;
     this.syncReaderInfoBarClock();
     readStatsTracker.setReadingActive(this.bookUrl);
@@ -1009,6 +1020,9 @@ struct ReadBookPage {
   }
 
   aboutToDisappear() {
+    this.readerComicColor.setForeground(false);
+    this.readerComicColorUnsubscribe?.();
+    this.readerComicColorUnsubscribe = null;
     AppStorage.setOrCreate<boolean>('shelfReaderDirectTransition', false);
     // 离开阅读页后不再为它在后台补图片；回来时没补完的章节重新获取。
     this.readerEngine().setReaderImagesDeferred(false);
@@ -1107,6 +1121,7 @@ struct ReadBookPage {
   }
 
   onPageHide(): void {
+    this.readerComicColor.setForeground(false);
     this.shortcutRoutingActive = false;
     this.readerPageVisible = false;
     this.syncReaderInfoBarClock();
@@ -2091,6 +2106,7 @@ struct ReadBookPage {
   readerComicSurface() {
     Stack() {
       ReaderComicView({
+        colorSession: this.readerComicColor,
         scroller: this.readerComicScroller,
         dataSource: this.readerComicPageDataSource,
         chapterTitle: (chapterIndex: number): string => this.getChapterTitle(chapterIndex),
@@ -2166,6 +2182,7 @@ struct ReadBookPage {
   readerComicPagedSurface() {
     Stack() {
       ReaderComicPagedView({
+        colorSession: this.readerComicColor,
         controller: this.readerComicPagedController,
         pages: this.contentPages,
         pageIndex: this.currentPageIndex,
@@ -2506,14 +2523,11 @@ struct ReadBookPage {
     .height(40)
     .margin({ left: AppSpacing.MD, right: AppSpacing.MD })
     .borderRadius(20)
-    // With HDS material the capsule shares the round buttons' untinted system glass; older systems keep the
-    // themed glass panel because their round buttons have no surface to match.
-    .backgroundColor(ImmersiveMaterialRuntime.supportsHdsTabs() ? Color.Transparent : this.readerGlassPanelColor())
-    .backdropBlur(ImmersiveMaterialRuntime.supportsHdsTabs() ? 0 : ThemeRuntime.glassBlur('panel', 22))
-    .border({
-      width: ImmersiveMaterialRuntime.supportsHdsTabs() ? 0 : ThemeRuntime.glassBorderWidth('panel'),
-      color: this.readerGlassBorderColor()
-    })
+    // With HDS material the capsule shares the round buttons' untinted system glass; older systems use the
+    // solid reader panel because their round buttons have no surface to match.
+    .backgroundColor(ImmersiveMaterialRuntime.supportsHdsTabs() ? Color.Transparent : this.readerPanelColor())
+    .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.isReaderThemeDark(),
+      ImmersiveMaterialRuntime.supportsHdsTabs() ? 0 : 0.5, this.readerPanelBorderColor()))
     .onAreaChange((_oldArea: Area, newArea: Area) => {
       const width = Math.round(Number(newArea.width));
       if (width !== this.readerComicTitleCapsuleWidth) this.readerComicTitleCapsuleWidth = width;
@@ -2541,7 +2555,7 @@ struct ReadBookPage {
       },
       systemMaterialEffect: {
         materialType: ImmersiveMaterialRuntime.materialType(),
-        materialLevel: ImmersiveMaterialRuntime.materialLevel()
+        materialLevel: ImmersiveMaterialRuntime.materialLevel(this.immersiveLightLevel)
       },
       barSideMargin: 0,
       barBottomMargin: 0,
@@ -2620,7 +2634,8 @@ struct ReadBookPage {
   }
 
   isReaderComicSuperResolutionActive(): boolean {
-    return this.readerComicSettings.superResolution &&
+    const revision = this.readerComicColorRevision;
+    return revision >= 0 && !(this.readerComicColor.active() && ComicColorizer.memberAllowed()) && this.readerComicSettings.superResolution &&
       this.readerComicSuperResolutionAccess() === ReaderComicSuperResolutionAccess.READY;
   }
 
@@ -2636,6 +2651,7 @@ struct ReadBookPage {
   }
 
   setReaderComicTextConvert(enabled: boolean): void {
+    if (enabled && this.readerComicTextConvertAccess() !== ReaderComicSuperResolutionAccess.READY) return;
     if (!this.book || enabled === this.readerComicTextConvert) return;
     this.readerComicTextConvert = enabled;
     this.book.putVariable('readerComicTextConvert', enabled ? 't2s' : '');
@@ -2654,6 +2670,25 @@ struct ReadBookPage {
     });
     if (backgroundChanged) this.enterReaderImmersive();
     this.syncReaderInfoBarClock();
+  }
+
+  readerComicColorAccess(): string {
+    const revision = this.readerComicColorRevision;
+    const sku = this.readerMembershipSku;
+    if (!ComicColorizer.supported()) return ReaderComicSuperResolutionAccess.UNSUPPORTED;
+    return revision >= 0 && sku !== undefined && ComicColorizer.memberAllowed() ?
+      ReaderComicSuperResolutionAccess.READY : ReaderComicSuperResolutionAccess.MEMBER_REQUIRED;
+  }
+
+  setReaderComicColor(enabled: boolean): void {
+    if (!this.book) return;
+    if (enabled && this.readerComicColorAccess() !== ReaderComicSuperResolutionAccess.READY) return;
+    this.readerComicColorEnabled = enabled;
+    this.readerComicColor.setEnabled(enabled);
+    this.book.putVariable('readerComicColorEnabled', enabled ? '1' : '');
+    AppDatabase.getInstance().updateBook(this.book, false).catch((error: Error): void => {
+      console.warn('保存彩色阅读设置失败:', error);
+    });
   }
 
   @Builder
@@ -2701,6 +2736,9 @@ struct ReadBookPage {
   @Builder
   readerComicDisplaySettingsPanel() {
     ReaderComicDisplaySettingsPanel({
+      colorEnabled: this.readerComicColorEnabled,
+      colorAccess: this.readerComicColorAccess(),
+      onColorEnabled: (enabled: boolean): void => this.setReaderComicColor(enabled),
       surface: this.readerComicSettings.background,
       pageGap: this.readerComicSettings.pageGap,
       fit: this.readerComicSettings.fit,
@@ -2967,14 +3005,6 @@ struct ReadBookPage {
         this.readerFloatingTopMenu()
       }
 
-      if (this.showMenu && this.showReaderActionMenu && !this.showToc && !this.showSettings) {
-        this.readerActionMenu()
-      }
-
-      if (this.showLayoutElementSettings) {
-        this.readerLayoutElementSettingsDialog()
-      }
-
       if (this.showMenu && !this.showToc && !this.showSettings && this.chapters.length > 0) {
         if (this.supportsReaderImmersiveMaterial()) {
           this.readerMaterialFloatingBottomMenu()
@@ -3020,38 +3050,26 @@ struct ReadBookPage {
 
       // The catalog overlay serves both panel owners: the reader's own quick player
       // and the floating panel published while another page is in front.
-      if (this.showGlobalTtsCatalog &&
-        (this.showTtsQuickPlayer || (this.globalTtsActive && this.showGlobalTtsQuickPlayer))) {
-        this.globalTtsCatalogOverlay()
-      }
+      // 朗读目录：系统半模态，挂在 1×1 节点上。
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: 0, y: 0 })
+        .hitTestBehavior(HitTestMode.None)
+        .bindSheet(this.showGlobalTtsCatalog &&
+          (this.showTtsQuickPlayer || (this.globalTtsActive && this.showGlobalTtsQuickPlayer)),
+          this.globalTtsCatalogOverlay(), this.ttsCatalogSheetOptions())
 
-      if (this.showBookmarkActionMenu && this.pendingBookmarkAction) {
-        this.bookmarkActionMenu()
-      }
-
-      if (this.showChangeSourceDialog) {
-        BookChangeSourceDialog({
-          targetBook: this.book,
-          markReadOnSwitch: true,
-          onBeforeSwitch: (): Promise<void> => {
-            return this.saveReadingProgress();
-          },
-          onSwitched: (fullBook: Book): void => {
-            this.pendingSwitchedBook = fullBook;
-          },
-          onClosed: (): void => {
-            this.showChangeSourceDialog = false;
-            if (this.pendingSwitchedBook) {
-              const fullBook = this.pendingSwitchedBook;
-              this.pendingSwitchedBook = null;
-              this.bookUrl = fullBook.bookUrl;
-              this.book = fullBook;
-              this.loadBook();
-              this.loadBookmarks();
-            }
-          }
-        })
-      }
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: this.bookmarkActionMenuX, y: this.bookmarkActionMenuY })
+        .hitTestBehavior(HitTestMode.None)
+        .bindPopup(this.showBookmarkActionMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.bookmarkActionMenu()
+        }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+          if (this.showBookmarkActionMenu) this.closeBookmarkActionMenu();
+        }))
 
       if (this.readerEyeTurnEnabled && this.readerInitialPageReady && !this.eyeTurnState.showCalibration &&
         !this.showMenu && !this.showToc && !this.showReaderCommentPanel) {
@@ -3225,9 +3243,16 @@ struct ReadBookPage {
             this.openChangeSourceDialog();
           })
         }
-        this.readerRoundMenuButton($r('sys.symbol.more'), '更多操作', () => {
-          this.showReaderActionMenu = !this.showReaderActionMenu;
-        })
+        Row() {
+          this.readerRoundMenuButton($r('sys.symbol.more'), '更多操作', () => {
+            this.showReaderActionMenu = !this.showReaderActionMenu;
+          })
+        }
+        .bindPopup(this.showMenu && this.showReaderActionMenu && !this.showToc && !this.showSettings, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.readerActionMenu()
+        }, Placement.BottomRight, this.appDarkMode, this.accentColor(), () => {
+          this.showReaderActionMenu = false;
+        }))
       }
     }
     .width('100%')
@@ -3286,7 +3311,9 @@ struct ReadBookPage {
       if (ImmersiveMaterialRuntime.supportsHds()) {
         ReaderFloatingMaterialBar({
           barWidth: this.readerFloatingBarWidth(),
-          tintColor: this.readerFloatingBarTintColor()
+          tintColor: this.readerFloatingBarTintColor(),
+          fallbackColor: this.readerPanelColor(),
+          darkMode: this.isReaderThemeDark()
         }) {
           this.readerHdsProgressBarContent(comicPages)
         }
@@ -3323,7 +3350,7 @@ struct ReadBookPage {
       },
       systemMaterialEffect: {
         materialType: ImmersiveMaterialRuntime.materialType(),
-        materialLevel: ImmersiveMaterialRuntime.materialLevel()
+        materialLevel: ImmersiveMaterialRuntime.materialLevel(this.immersiveLightLevel)
       },
       barSideMargin: 0,
       barBottomMargin: 4,
@@ -3505,7 +3532,9 @@ struct ReadBookPage {
       Stack({ alignContent: Alignment.Center }) {
         ReaderFloatingMaterialBar({
           barWidth: this.readerFloatingBarWidth(),
-          tintColor: this.readerFloatingBarTintColor()
+          tintColor: this.readerFloatingBarTintColor(),
+          fallbackColor: this.readerPanelColor(),
+          darkMode: this.isReaderThemeDark()
         }) {
           this.readerMaterialActionBarContent(fromToc, fromSettings)
         }
@@ -3588,7 +3617,7 @@ struct ReadBookPage {
       },
       systemMaterialEffect: {
         materialType: ImmersiveMaterialRuntime.materialType(),
-        materialLevel: ImmersiveMaterialRuntime.materialLevel()
+        materialLevel: ImmersiveMaterialRuntime.materialLevel(this.immersiveLightLevel)
       },
       barSideMargin: 0,
       barBottomMargin: 4,
@@ -3823,11 +3852,10 @@ struct ReadBookPage {
         .width('100%')
         .height(56)
         .padding({ left: AppSpacing.XS, right: AppSpacing.XS })
-        .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
-        .backgroundColor(this.readerGlassPanelColor())
-        .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-        .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
-        .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
+        .borderRadius(28)
+        .backgroundColor(this.readerPanelColor())
+        .border({ width: 0.5, color: this.readerPanelBorderColor() })
+        .shadow(this.readerPanelShadow())
       }
 
       Row() {
@@ -3845,11 +3873,10 @@ struct ReadBookPage {
       .width('100%')
       .height(56)
       .padding({ left: AppSpacing.MD, right: AppSpacing.MD })
-      .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
-      .backgroundColor(this.readerGlassPanelColor())
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
+      .borderRadius(28)
+      .backgroundColor(this.readerPanelColor())
+      .border({ width: 0.5, color: this.readerPanelBorderColor() })
+      .shadow(this.readerPanelShadow())
     }
     .width(this.readerFloatingBarWidth())
     .padding({ bottom: 14 })
@@ -3887,11 +3914,10 @@ struct ReadBookPage {
     .width('100%')
     .height(56)
     .padding({ left: AppSpacing.XS, right: AppSpacing.XS })
-    .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
-    .backgroundColor(this.readerGlassPanelColor())
-    .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-    .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
-    .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
+    .borderRadius(28)
+    .backgroundColor(this.readerPanelColor())
+    .border({ width: 0.5, color: this.readerPanelBorderColor() })
+    .shadow(this.readerPanelShadow())
   }
 
   @Builder
@@ -3959,10 +3985,10 @@ struct ReadBookPage {
         subTextColor: this.getSubTextColor(),
         accentColor: this.accentColor(),
         swipeButtonColor: this.buttonColor(),
-        panelColor: this.readerGlassPanelColor(),
+        panelColor: this.readerPanelColor(),
         solidPanelColor: this.readerSolidPanelColor(),
-        panelBorderColor: this.readerGlassBorderColor(),
-        panelShadowColor: this.readerGlassShadowColor(),
+        panelBorderColor: this.readerPanelBorderColor(),
+        panelShadowColor: this.readerPanelShadowColor(),
         selectedColor: this.tocSelectedBackgroundColor(),
         panelWidth: this.readerFloatingBarWidth(),
         panelHeight: this.readerTocPanelHeight(),
@@ -4012,11 +4038,10 @@ struct ReadBookPage {
         .width(this.readerFloatingBarWidth())
         .height(56)
         .padding({ left: AppSpacing.MD, right: AppSpacing.MD })
-        .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
-        .backgroundColor(this.readerGlassPanelColor())
-        .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-        .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
-        .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
+        .borderRadius(28)
+        .backgroundColor(this.readerPanelColor())
+        .border({ width: 0.5, color: this.readerPanelBorderColor() })
+        .shadow(this.readerPanelShadow())
         .position({ x: this.readerFloatingBarLeft(), y: '100%' })
         .translate({ y: -70 })
       }
@@ -4027,131 +4052,102 @@ struct ReadBookPage {
 
   @Builder
   readerActionMenu() {
-    Column() {
-      if (this.readerSourceNeedsLogin() || this.readerCanRetry() || !this.isReaderComicModeActive()) {
+    Scroll() {
+      Column() {
+        if (this.readerSourceNeedsLogin() || this.readerCanRetry() || !this.isReaderComicModeActive()) {
+          this.readerActionMenuItem(
+            $r('sys.symbol.bookmark'),
+            this.isCurrentPageBookmarked() ? '删除书签' : '添加书签',
+            () => this.toggleCurrentPageBookmark(),
+            true,
+            true
+          )
+        }
+        if (this.book && !LocalBookService.isLocalBook(this.book)) {
+          this.readerActionMenuItem(
+            $r('sys.symbol.download'),
+            '缓存',
+            () => this.openReaderCacheDialog()
+          )
+        }
+        if (!this.isReaderComicModeActive()) {
+          this.readerActionMenuItem(
+            this.isTtsSpeaking && !this.isTtsPaused ? $r('sys.symbol.pause') : $r('sys.symbol.play'),
+            this.isTtsSpeaking ? (this.isTtsPaused ? '继续朗读' : '暂停朗读') : '开始朗读',
+            () => this.toggleTtsReading()
+          )
+        }
+        if (this.readerSourceNeedsLogin()) {
+          this.readerActionMenuItem(
+            $r('sys.symbol.checkmark_shield'),
+            '登录',
+            () => this.openReaderSourceLogin()
+          )
+        }
+        if (this.readerCanRetry()) {
+          this.readerActionMenuItem(
+            $r('sys.symbol.exclamationmark_circle'),
+            '重试',
+            () => this.retryReaderContent()
+          )
+        }
+        if (!this.isReaderComicModeActive()) {
+          this.readerActionMenuItem(
+            $r('sys.symbol.gearshape'),
+            '阅读设置',
+            () => this.openSettingsPanel()
+          )
+          this.readerActionMenuItem(
+            $r('sys.symbol.speaker_wave_3'),
+            '朗读设置',
+            () => this.openTtsSettingsPanel(),
+            true,
+            true
+          )
+        }
+        if (this.canSelectTxtCharset()) {
+          this.readerActionMenuItem(
+            $r('sys.symbol.textformat'),
+            `字符编码 · ${this.txtCharsetMenuLabel()}`,
+            () => this.openTxtCharsetDialog()
+          )
+        }
         this.readerActionMenuItem(
-          $r('sys.symbol.bookmark'),
-          this.isCurrentPageBookmarked() ? '删除书签' : '添加书签',
-          () => this.toggleCurrentPageBookmark(),
+          this.isReaderComicModeActive() ? $r('sys.symbol.book') : $r('sys.symbol.rectangle_3_group'),
+          this.isReaderComicModeActive() ? '切换为普通阅读' : '切换为漫画阅读',
+          () => this.toggleReaderComicReadingMode()
+        )
+        this.readerActionMenuItem(
+          $r('sys.symbol.square_grid_2x2'),
+          '布局元素设置',
+          () => this.openLayoutElementSettings()
+        )
+        this.readerActionMenuItem(
+          $r('sys.symbol.arrow_left_arrow_right'),
+          '替换净化配置',
+          () => this.openCurrentReaderReplaceRules(),
           true,
-          true
+          false
         )
+
       }
-      if (this.book && !LocalBookService.isLocalBook(this.book)) {
-        this.readerActionMenuItem(
-          $r('sys.symbol.download'),
-          '缓存',
-          () => this.openReaderCacheDialog()
-        )
-      }
-      if (!this.isReaderComicModeActive()) {
-        this.readerActionMenuItem(
-          this.isTtsSpeaking && !this.isTtsPaused ? $r('sys.symbol.pause') : $r('sys.symbol.play'),
-          this.isTtsSpeaking ? (this.isTtsPaused ? '继续朗读' : '暂停朗读') : '开始朗读',
-          () => this.toggleTtsReading()
-        )
-      }
-      if (this.readerSourceNeedsLogin()) {
-        this.readerActionMenuItem(
-          $r('sys.symbol.checkmark_shield'),
-          '登录',
-          () => this.openReaderSourceLogin()
-        )
-      }
-      if (this.readerCanRetry()) {
-        this.readerActionMenuItem(
-          $r('sys.symbol.exclamationmark_circle'),
-          '重试',
-          () => this.retryReaderContent()
-        )
-      }
-      if (!this.isReaderComicModeActive()) {
-        this.readerActionMenuItem(
-          $r('sys.symbol.gearshape'),
-          '阅读设置',
-          () => this.openSettingsPanel()
-        )
-        this.readerActionMenuItem(
-          $r('sys.symbol.speaker_wave_3'),
-          '朗读设置',
-          () => this.openTtsSettingsPanel(),
-          true,
-          true
-        )
-      }
-      if (this.canSelectTxtCharset()) {
-        this.readerActionMenuItem(
-          $r('sys.symbol.textformat'),
-          `字符编码 · ${this.txtCharsetMenuLabel()}`,
-          () => this.openTxtCharsetDialog()
-        )
-      }
-      this.readerActionMenuItem(
-        this.isReaderComicModeActive() ? $r('sys.symbol.book') : $r('sys.symbol.rectangle_3_group'),
-        this.isReaderComicModeActive() ? '切换为普通阅读' : '切换为漫画阅读',
-        () => this.toggleReaderComicReadingMode()
-      )
-      this.readerActionMenuItem(
-        $r('sys.symbol.square_grid_2x2'),
-        '布局元素设置',
-        () => this.openLayoutElementSettings()
-      )
-      this.readerActionMenuItem(
-        $r('sys.symbol.arrow_left_arrow_right'),
-        '替换净化配置',
-        () => this.openCurrentReaderReplaceRules(),
-        true,
-        false
-      )
+      .width('100%')
     }
     .width(220)
-    .padding({ left: AppSpacing.MD, right: AppSpacing.MD, top: AppSpacing.SM, bottom: AppSpacing.SM })
-    .backgroundColor(this.readerGlassPanelColor())
-    .borderRadius(ThemeRuntime.glassCornerRadius(22, 'panel'))
-    .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-    .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
-    .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-    .position({ x: '100%', y: 0 })
-    .translate({ x: -232, y: this.getTopControlSafePadding() + 72 })
-    .onClick(() => {
-    })
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
   readerActionMenuItem(icon: Resource, label: string, action: () => void,
-    enabled: boolean = true, showDivider: boolean = true) {
-    Column() {
-      Row({ space: AppSpacing.LG }) {
-        SymbolGlyph(icon)
-          .fontSize(21)
-          .fontColor([this.getTextColor()])
-          .width(24)
-
-        Text(label)
-          .fontSize(AppFontSize.BODY_LARGE)
-          .fontColor(this.getTextColor())
-          .maxLines(1)
-          .layoutWeight(1)
-      }
-      .width('100%')
-      .height(46)
-      .padding({ left: 10, right: 10 })
-
-      if (showDivider) {
-        Divider()
-          .strokeWidth(0.5)
-          .color(this.readerGlassBorderColor())
-          .margin({ left: 46, right: AppSpacing.MD })
-      }
-    }
-    .width('100%')
-    .opacity(enabled ? 1 : 0.38)
-    .enabled(enabled)
-    .onClick(() => {
+    enabled: boolean = true, _showDivider: boolean = true) {
+    // 系统弹出层跟随应用的日夜模式，文字用应用主题色。
+    PopupMenuAction(icon, label, ThemeRuntime.primaryTextColor(this.appDarkMode), () => {
       if (!enabled) return;
       this.showReaderActionMenu = false;
       action();
-    })
+    }, enabled)
   }
 
   onSystemDialogFlagChanged(): void {
@@ -4355,14 +4351,10 @@ struct ReadBookPage {
   @Builder
   readerLayoutElementSettingsDialog() {
     ReaderLayoutElementSettingsPanel({
-      dark: this.isReaderThemeDark(),
-      textColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      dark: this.appDarkMode,
+      textColor: ThemeRuntime.primaryTextColor(this.appDarkMode),
+      subTextColor: ThemeRuntime.subTextColor(this.appDarkMode),
       accentColor: this.accentColor(),
-      panelColor: this.readerGlassPanelColor(),
-      panelBorderColor: this.readerGlassBorderColor(),
-      panelShadowColor: this.readerGlassShadowColor(),
-      panelWidth: Math.max(1, Math.min(420, this.pageViewWidth - 36)),
       onClose: (): void => {
         this.showLayoutElementSettings = false;
       },
@@ -4370,6 +4362,19 @@ struct ReadBookPage {
         if (!enabled) this.resetMenuChapterPreview();
       }
     })
+  }
+
+  syncLayoutElementSettingsDialog(): void {
+    this.layoutElementDialogSession.sync(this.getUIContext(), this.showLayoutElementSettings, (): void => {
+      this.readerLayoutElementSettingsDialog();
+    }, {
+      autoCancel: true,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示布局元素设置失败:',
+      onDismiss: (): void => {
+        this.showLayoutElementSettings = false;
+      }
+    });
   }
 
   currentReaderSource(): BookSource | null {
@@ -4645,9 +4650,10 @@ struct ReadBookPage {
       subtitle: `${this.currentChapterIndex + 1}/${Math.max(1, this.chapters.length)}章`,
       paused: this.isTtsPaused,
       playbackKey: `tts_capsule_playback_${this.isTtsSpeaking}_${this.isTtsPaused}`,
-      panelColor: this.readerGlassPanelColor(),
-      panelBorderColor: this.readerGlassBorderColor(),
-      panelShadowColor: this.readerGlassShadowColor(),
+      panelColor: this.readerPanelColor(),
+      panelBorderColor: this.readerPanelBorderColor(),
+      panelShadowColor: this.readerPanelShadowColor(),
+      dark: this.isReaderThemeDark(),
       textColor: this.getTextColor(),
       subTextColor: this.getSubTextColor(),
       accentColor: this.accentColor(),
@@ -4678,9 +4684,10 @@ struct ReadBookPage {
       subtitle: this.globalTtsChapterProgress || (this.globalTtsMode === 'audio' ? '后台听书' : '后台朗读'),
       paused: this.globalTtsPaused,
       playbackKey: `global_tts_capsule_playback_${this.globalTtsPaused}`,
-      panelColor: this.readerGlassPanelColor(),
-      panelBorderColor: this.readerGlassBorderColor(),
-      panelShadowColor: this.readerGlassShadowColor(),
+      panelColor: this.readerPanelColor(),
+      panelBorderColor: this.readerPanelBorderColor(),
+      panelShadowColor: this.readerPanelShadowColor(),
+      dark: this.isReaderThemeDark(),
       textColor: this.getTextColor(),
       subTextColor: this.getSubTextColor(),
       accentColor: this.accentColor(),
@@ -4728,7 +4735,7 @@ struct ReadBookPage {
       playButtonColor: this.buttonColor(),
       primaryTextColor: this.getTextColor(),
       subTextColor: this.getSubTextColor(),
-      panelColor: this.readerGlassPanelColor(),
+      panelColor: this.readerPanelColor(),
       backgroundThemeId: this.ttsPanelBackgroundThemeId(),
       topInset: this.statusBarSafeHeight,
       bottomInset: this.navBarHeight,
@@ -4742,12 +4749,12 @@ struct ReadBookPage {
   globalTtsCatalogOverlay() {
     TtsCatalogSheet({
       bookUrl: this.bookUrl,
-      darkMode: this.isReaderThemeDark(),
+      // 系统半模态跟随应用的日夜模式，配色用应用主题而不是阅读主题。
+      darkMode: this.appDarkMode,
       accentColor: this.accentColor(),
-      primaryTextColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
-      controlIconColor: this.readerControlIconColor(),
-      panelColor: this.readerGlassPanelColor(),
+      primaryTextColor: ThemeRuntime.primaryTextColor(this.appDarkMode),
+      subTextColor: ThemeRuntime.subTextColor(this.appDarkMode),
+      controlIconColor: ThemeRuntime.primaryTextColor(this.appDarkMode),
       bookName: this.book?.name || '',
       bookInitial: this.getTocBookInitial(),
       cover: this.getTocCover(),
@@ -4759,7 +4766,6 @@ struct ReadBookPage {
         `${ReaderTtsFloatingSession.catalogCount()}`,
       bottomInset: this.navBarHeight,
       viewportHeight: this.pageViewHeight,
-      zIndexValue: 90,
       scroller: this.globalTtsCatalogScroller,
       source: this.globalTtsCatalogSource,
       isCached: (displayIndex: number): boolean => this.isGlobalTtsCatalogChapterCached(displayIndex),
@@ -4767,6 +4773,18 @@ struct ReadBookPage {
       onSelect: (displayIndex: number) => this.selectGlobalTtsCatalog(displayIndex),
       onClose: () => this.closeGlobalTtsCatalog()
     })
+  }
+
+  ttsCatalogSheetOptions(): SheetOptions {
+    return ImmersiveMaterialRuntime.applySheetMaterial(this.immersiveLightLevel, {
+      height: TtsCatalogSheet.sheetHeight(this.pageViewHeight),
+      dragBar: false,
+      showClose: false,
+      onWillDismiss: (): void => {
+        this.closeGlobalTtsCatalog();
+      },
+      onWillSpringBackWhenDismiss: (): void => {}
+    }, this.appDarkMode, this.accentColor());
   }
 
   ttsCurrentSentence(): string {
@@ -4853,34 +4871,12 @@ struct ReadBookPage {
     this.pendingBookmarkAction = null;
   }
 
-  bookmarkActionMenuLeft(menuWidth: number): number {
-    const viewportWidth = this.pageViewWidth > 0 ? this.pageViewWidth : 360;
-    return Math.max(12, Math.min(this.bookmarkActionMenuX - 18, viewportWidth - menuWidth - 12));
-  }
-
-  bookmarkActionMenuTop(menuHeight: number): number {
-    const viewportHeight = this.pageViewHeight > 0 ? this.pageViewHeight : 720;
-    const below = this.bookmarkActionMenuY + 12;
-    if (below + menuHeight <= viewportHeight - 12) {
-      return below;
-    }
-    return Math.max(this.getReaderTopSafePadding() + 8, this.bookmarkActionMenuY - menuHeight - 12);
-  }
-
   @Builder
   bookmarkActionMenu() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.isReaderThemeDark() ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-        .onClick(() => {
-          this.closeBookmarkActionMenu();
-        })
-
+    Scroll() {
       Column() {
-        this.bookmarkContextActionItem($r('sys.symbol.checkmark_circle'), '多选', this.getTextColor(), () => {
+        this.bookmarkContextActionItem($r('sys.symbol.checkmark_circle'), '多选',
+          ThemeRuntime.primaryTextColor(this.appDarkMode), () => {
           if (this.pendingBookmarkAction) {
             const bookmarkId = this.pendingBookmarkAction.id;
             this.closeBookmarkActionMenu();
@@ -4894,37 +4890,20 @@ struct ReadBookPage {
             this.tocPanelController.deleteBookmark(bookmark);
           }
         })
+
+
       }
-      .width(148)
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(this.readerGlassPanelColor())
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: this.bookmarkActionMenuLeft(148), y: this.bookmarkActionMenuTop(100) })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(220)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
   bookmarkContextActionItem(icon: Resource, label: string, color: string, action: () => void) {
-    Row({ space: AppSpacing.LG }) {
-      SymbolGlyph(icon)
-        .fontSize(21)
-        .fontColor([color])
-        .width(26)
-      Text(label)
-        .fontSize(AppFontSize.BODY_LARGE)
-        .fontColor(color)
-        .layoutWeight(1)
-    }
-    .width('100%')
-    .height(44)
-    .padding({ left: 14, right: 14 })
-    .alignItems(VerticalAlign.Center)
-    .onClick(action)
+    PopupMenuAction(icon, label, color, action)
   }
 
   getTocCover(): ResourceStr {
@@ -5146,6 +5125,12 @@ struct ReadBookPage {
     const bookMode = this.book?.getVariable('readerComicReadingMode') || '';
     this.readerComicBookMode = bookMode ? ReaderComicMode.normalize(bookMode) : '';
     this.readerComicTextConvert = this.book?.getVariable('readerComicTextConvert') === 't2s';
+    this.readerComicColorEnabled = this.book?.getVariable('readerComicColorEnabled') === '1';
+    if (!this.readerComicColorUnsubscribe) {
+      this.readerComicColorUnsubscribe = this.readerComicColor.subscribe((): void => { this.readerComicColorRevision++; });
+    }
+    this.readerComicColor.configure(getContext(this), this.bookUrl, this.readerComicColorEnabled);
+    this.readerComicColor.setForeground(this.readerPageVisible);
     this.readerComicZoomScale = 1;
     if (this.readerComicMode) {
       this.stopTtsReading();
@@ -5485,6 +5470,12 @@ struct ReadBookPage {
         uiContext: (): UIContext => this.getUIContext(),
         abilityContext: (): common.UIAbilityContext => getContext(this) as common.UIAbilityContext,
         accentColor: (): string => this.accentColor(),
+        colorPage: (source: string): boolean => {
+          if (!this.isReaderComicModeActive() || this.readerComicColorAccess() !== ReaderComicSuperResolutionAccess.READY) return false;
+          this.readerComicColor.single(source);
+          HdsFeedback.showToast('本页开始着色，可在画面设置中管理');
+          return true;
+        },
         isLocalBook: (): boolean => !this.book || LocalBookService.isLocalBook(this.book),
         currentChapter: (): number => this.currentChapterIndex,
         busy: (): boolean => this.isLoading || this.readerContinuousCommitChapter >= 0,
@@ -6833,9 +6824,9 @@ struct ReadBookPage {
       .height(40)
       .padding({ left: 14, right: 14 })
       .borderRadius(20)
-      .backgroundColor(this.readerGlassPanelColor())
-      .border({ width: ThemeRuntime.glassBorderWidth(), color: this.readerGlassBorderColor() })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius(), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX(), offsetY: ThemeRuntime.glassShadowOffsetY() })
+      .backgroundColor(this.readerPanelColor())
+      .border({ width: 0.5, color: this.readerPanelBorderColor() })
+      .shadow(this.readerPanelShadow())
     }
     .width('100%')
     .height(40)
@@ -7388,16 +7379,24 @@ struct ReadBookPage {
     return this.appDarkMode ? '#112A6FCC' : '#11007DFF';
   }
 
-  readerGlassPanelColor(): string {
-    return ThemeRuntime.glassPanelColor(this.isReaderThemeDark(), this.getBackgroundColor());
+  /**
+   * 阅读页浮层的实色底：API 26+ 面板由 ReaderMaterialPanel 画系统沉浸光感材质，
+   * 这里只给旧系统兜底和面板内部的小块用。
+   */
+  readerPanelColor(): string {
+    return this.readerSolidPanelColor();
   }
 
-  readerGlassBorderColor(): string {
-    return ThemeRuntime.glassBorderColor(this.isReaderThemeDark());
+  readerPanelBorderColor(): string {
+    return this.isReaderThemeDark() ? '#26FFFFFF' : '#14000000';
   }
 
-  readerGlassShadowColor(): string {
-    return ThemeRuntime.glassShadowColor(this.isReaderThemeDark());
+  readerPanelShadowColor(): string {
+    return this.isReaderThemeDark() ? '#66000000' : '#1F000000';
+  }
+
+  readerPanelShadow(): ShadowOptions {
+    return { radius: 18, color: this.readerPanelShadowColor(), offsetX: 0, offsetY: 6 };
   }
 
   readerSolidPanelColor(): string {
@@ -7474,6 +7473,42 @@ struct ReadBookPage {
     } catch (_) {
       return fallbackHeight;
     }
+  }
+
+  /** 换源：系统对话框，API 26+ 是沉浸光感表面。 */
+  @Builder
+  changeSourceDialogContent() {
+    BookChangeSourceDialog({
+      targetBook: this.book,
+      markReadOnSwitch: true,
+      onBeforeSwitch: (): Promise<void> => {
+        return this.saveReadingProgress();
+      },
+      onSwitched: (fullBook: Book): void => {
+        this.pendingSwitchedBook = fullBook;
+      },
+      onClosed: (): void => {
+        this.showChangeSourceDialog = false;
+        if (this.pendingSwitchedBook) {
+          const fullBook = this.pendingSwitchedBook;
+          this.pendingSwitchedBook = null;
+          this.bookUrl = fullBook.bookUrl;
+          this.book = fullBook;
+          this.loadBook();
+          this.loadBookmarks();
+        }
+      }
+    })
+  }
+
+  syncChangeSourceDialog(): void {
+    this.changeSourceDialogSession.sync(this.getUIContext(), this.showChangeSourceDialog, (): void => {
+      this.changeSourceDialogContent();
+    }, {
+      autoCancel: false,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示换源弹窗失败:'
+    });
   }
 
   getReaderBottomInfoBarBottomInset(): number {
@@ -9337,6 +9372,24 @@ struct ReadBookPage {
 
   @Builder
   settingsPanel() {
+    Column() {
+      ReaderMaterialPanel({
+        panelWidth: this.readerFloatingBarWidth(),
+        panelHeight: this.readerSettingsPanelHeight(),
+        cornerRadius: 28,
+        darkMode: this.isReaderThemeDark(),
+        fallbackColor: this.readerPanelColor()
+      }) {
+        this.settingsPanelContent()
+      }
+    }
+    .position({ x: this.readerFloatingBarLeft(), y: '100%' })
+    .translate({ y: -(this.readerSettingsPanelHeight() + this.readerFloatingPanelBottomInset()) })
+    .transition(this.readerPanelTransition())
+  }
+
+  @Builder
+  settingsPanelContent() {
     Column({ space: AppSpacing.LG }) {
       Row() {
         Text(this.settingsPanelTitle())
@@ -9409,18 +9462,9 @@ struct ReadBookPage {
       .scrollBar(BarState.Auto)
       .scrollBarColor(this.isReaderThemeDark() ? '#668A8F98' : '#667A6F63')
     }
-    .width(this.readerFloatingBarWidth())
-    .height(this.readerSettingsPanelHeight())
+    .width('100%')
+    .height('100%')
     .padding({ left: AppSpacing.XXL, right: this.readerSettingsScrollBarRightInset(), top: AppSpacing.XL, bottom: 0 })
-    .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
-    .clip(true)
-    .backgroundColor(this.readerGlassPanelColor())
-    .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-    .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.readerGlassBorderColor() })
-    .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: this.readerGlassShadowColor(), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-    .position({ x: this.readerFloatingBarLeft(), y: '100%' })
-    .translate({ y: -(this.readerSettingsPanelHeight() + this.readerFloatingPanelBottomInset()) })
-    .transition(this.readerPanelTransition())
   }
 
   settingsPanelTitle(): string {
@@ -9760,9 +9804,9 @@ struct ReadBookPage {
         textColor: this.getTextColor(),
         subTextColor: this.getSubTextColor(),
         accentColor: this.accentColor(),
-        panelColor: this.readerGlassPanelColor(),
-        panelBorderColor: this.readerGlassBorderColor(),
-        panelShadowColor: this.readerGlassShadowColor(),
+        panelColor: this.readerPanelColor(),
+        panelBorderColor: this.readerPanelBorderColor(),
+        panelShadowColor: this.readerPanelShadowColor(),
         selectedColor: this.tocSelectedBackgroundColor(),
         panelWidth: this.readerFloatingBarWidth(),
         panelHeight: this.readerTocPanelHeight(),
@@ -10008,8 +10052,8 @@ struct ReadBookPage {
       textColor: this.getTextColor(),
       subTextColor: this.getSubTextColor(),
       accentColor: this.accentColor(),
-      panelColor: this.readerGlassPanelColor(),
-      panelBorderColor: this.readerGlassBorderColor(),
+      panelColor: this.readerPanelColor(),
+      panelBorderColor: this.readerPanelBorderColor(),
       viewportWidth: this.pageViewWidth,
       viewportHeight: this.pageViewHeight,
       statusBarHeight: this.statusBarSafeHeight,

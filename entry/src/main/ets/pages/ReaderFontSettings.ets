@@ -56,6 +56,7 @@ class ReaderBubbleStyleOption {
 @Entry
 @Component
 struct ReaderFontSettingsPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('appLightAccentColor') appLightAccentColor: string = '#007DFF';
   @StorageLink('appDarkAccentColor') appDarkAccentColor: string = '#4E9BFF';
@@ -413,7 +414,7 @@ struct ReaderFontSettingsPage {
       options.push({ value: item.sourceName || item.familyName || '自定义字体' });
     }
     for (const font of this.remoteFonts()) {
-      options.push({ value: CloudFontMenu.label(font) });
+      options.push(CloudFontMenu.option(font));
     }
     return options;
   }
@@ -611,7 +612,7 @@ struct ReaderFontSettingsPage {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => {
           if (index >= this.remoteFontStart()) {
             this.selectRemoteFont(index - this.remoteFontStart(), (customIndex: number) => {
@@ -1314,7 +1315,7 @@ struct ReaderFontSettingsPage {
           .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
           .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
           .menuBackgroundBlurStyle(BlurStyle.NONE)
-          .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+          .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
           .onSelect((selectedIndex: number) => {
             this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
               target.emphasisMode = this.emphasisModeByIndex(selectedIndex);
@@ -1407,7 +1408,7 @@ struct ReaderFontSettingsPage {
               .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
               .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
               .menuBackgroundBlurStyle(BlurStyle.NONE)
-              .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+              .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
               .onSelect((selectedIndex: number) => {
                 const selectedStyleId = this.bubbleStyleByIndex(selectedIndex);
                 this.updateRegexRule(index, (target: ReaderRegexFontRule) => {
@@ -1480,7 +1481,7 @@ struct ReaderFontSettingsPage {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => {
           if (index >= this.remoteFontStart()) {
             this.selectRemoteFont(index - this.remoteFontStart(), (customIndex: number) => {

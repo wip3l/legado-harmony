@@ -18,6 +18,7 @@ import { AppSpacing } from '../../theme/AppSpacing';
  */
 @Component
 export struct ReaderCustomThemeEditor {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @Prop dark: boolean = false;
   @Prop textColor: string = '#202124';
   @Prop accentColor: string = '#0A59F7';
@@ -203,7 +204,7 @@ export struct ReaderCustomThemeEditor {
           .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
           .menuBackgroundColor(this.menuColor)
           .menuBackgroundBlurStyle(BlurStyle.NONE)
-          .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+          .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
           .onSelect((index: number) => this.select(index))
         Button('新增')
           .height(36)
@@ -253,7 +254,7 @@ export struct ReaderCustomThemeEditor {
           .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
           .menuBackgroundColor(this.menuColor)
           .menuBackgroundBlurStyle(BlurStyle.NONE)
-          .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+          .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
           .onSelect((index: number) => this.setBackgroundType(index))
       }
       .width('100%')
@@ -300,7 +301,7 @@ export struct ReaderCustomThemeEditor {
               .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
               .menuBackgroundColor(this.menuColor)
               .menuBackgroundBlurStyle(BlurStyle.NONE)
-              .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+              .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
               .onSelect((index: number) => this.setImageFit(index))
           }
         }

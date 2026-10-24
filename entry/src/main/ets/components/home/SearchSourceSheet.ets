@@ -2,10 +2,11 @@ import { promptAction } from '@kit.ArkUI';
 import { BookSource, NativeSourceService } from '@legado/sourceengine';
 import { SearchSourceIndexDataSource } from '../../core/book/ShelfDataSources';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
+import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
 import { ImmersiveBackButton } from '../ImmersiveBackButton';
-import { SourceActionKind, SourceActionMenuList, SourceActionRunner, SourceDeleteConfirm, SourceDeleteDialogParams,
+import { SourceActionKind, SourceActionMenu, SourceActionRunner, SourceDeleteConfirm, SourceDeleteDialogParams,
   SourceGroupTag, SourcePickerKit, SourcePickerSearchField, SourceVariableDialogParams, SourceVariableEditor
 } from './SourcePickerKit';
 
@@ -37,6 +38,7 @@ export async function confirmDiscardSearchSourceChanges(): Promise<boolean> {
  */
 @Component
 export struct SearchSourceSheet {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   static readonly ALL_KEY: string = '__all__';
   static readonly SELECTED_KEY: string = '__selected__';
   static readonly GROUP_PANE_WIDTH: number = 124;
@@ -348,18 +350,16 @@ export struct SearchSourceSheet {
     .accessibilityText(this.displayNames[index] || this.sources[index].bookSourceUrl)
     .accessibilitySelected(this.isSelected(this.sources[index].bookSourceUrl))
     .onClick(() => this.toggleSource(index))
-    .bindContextMenu(this.sourceActionMenu(index), ResponseType.LongPress)
+    .bindContextMenu(this.sourceActionMenu(index), ResponseType.LongPress,
+      ImmersiveMaterialRuntime.contextMenuOptions(this.immersiveLightLevel, this.accentColor(), () => {}))
   }
 
   /** 长按书源的操作菜单，条目和执行与发现页书源下拉共用。 */
   @Builder
   sourceActionMenu(index: number) {
-    SourceActionMenuList({
-      isNative: NativeSourceService.isNative(this.sources[index]),
-      onAction: (kind: string): void => {
-        ContextMenu.close();
-        this.runSourceAction(index, kind);
-      }
+    SourceActionMenu(NativeSourceService.isNative(this.sources[index]), this.appDarkMode, (kind: string): void => {
+      ContextMenu.close();
+      this.runSourceAction(index, kind);
     })
   }
 

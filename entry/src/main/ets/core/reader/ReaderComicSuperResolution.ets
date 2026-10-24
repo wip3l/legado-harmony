@@ -7,6 +7,7 @@ import { digestHashHex } from '@legado/sourceengine';
 import { AccountSessionStore } from '../../account/AccountSessionStore';
 import { ReaderCacheBudget } from '../book/ReaderCacheBudget';
 import { ReaderComicImageExport } from './ReaderComicImageExport';
+import { ReaderComicComputeQueue } from './ReaderComicComputeQueue';
 
 /** 漫画超分当前能否使用。 */
 export class ReaderComicSuperResolutionAccess {
@@ -82,7 +83,10 @@ export class ReaderComicSuperResolution {
     const job = ReaderComicSuperResolution.queue.then(async (): Promise<string> => {
       if (!active() || ReaderComicSuperResolution.access() !== ReaderComicSuperResolutionAccess.READY) return '';
       try {
-        return await ReaderComicSuperResolution.process(source, Math.round(targetWidth), active);
+        return await ReaderComicComputeQueue.run(async (): Promise<string> => {
+          if (!active() || ReaderComicSuperResolution.access() !== ReaderComicSuperResolutionAccess.READY) return '';
+          return await ReaderComicSuperResolution.process(source, Math.round(targetWidth), active);
+        });
       } catch (error) {
         console.warn(`[ComicSR] 超分失败，继续显示原图: ${(error as Error)?.message || error}`);
         return '';

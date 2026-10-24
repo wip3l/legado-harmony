@@ -385,8 +385,9 @@ struct MemberBenefitsPage {
   benefitList() {
     Column() {
       this.benefitRow($r('sys.symbol.speaker_wave_2'), '在线朗读优先排队', '高峰期优先 · 已生效', true, undefined)
-      this.benefitRow($r('sys.symbol.picture'), '漫画超分', '漫画阅读 → 画面设置中开启', true, undefined)
-      this.benefitRow($r('sys.symbol.textformat'), '漫画繁→简', '漫画阅读 → 画面设置中按书开启', true, undefined)
+      this.benefitRow($r('sys.symbol.picture'), 'AI超分', '漫画阅读 → 画面设置中开启', true, undefined)
+      this.benefitRow($r('sys.symbol.picture'), 'AI着色', '漫画阅读 → 画面设置 → AI着色', true, undefined)
+      this.benefitRow($r('sys.symbol.textformat'), 'AI翻译', '支持繁→简；日→中、韩→中即将推出', true, undefined)
       this.benefitRow($r('sys.symbol.arrow_2_circlepath'), '超大书源同步', this.largeSourceSyncText(), true, undefined)
       this.benefitRow($r('sys.symbol.star'), '功能尝鲜', '新功能优先试用', true, undefined)
       this.benefitRow($r('sys.symbol.paintpalette'), '自定义主题方案',

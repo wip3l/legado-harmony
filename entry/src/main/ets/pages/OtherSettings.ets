@@ -1,3 +1,4 @@
+import { ImmersiveLightSettingsStore } from '../utils/ImmersiveLightSettingsStore';
 import { promptAction, router } from '@kit.ArkUI';
 import pasteboard from '@ohos.pasteboard';
 import { syncSystemBars } from '../utils/SystemBars';
@@ -33,6 +34,7 @@ struct OtherSettingsPage {
   @State textCacheBytes: number = -1;
   @State comicCacheBytes: number = -1;
   @State cacheClearing: boolean = false;
+  @State savingImmersiveLight: boolean = false;
 
   aboutToAppear(): void {
     this.lanReaderPasswordDraft = this.lanReaderPasswordUnreadable ? '' : this.lanReaderPassword;
@@ -130,13 +132,6 @@ struct OtherSettingsPage {
 
     this.sectionTitle('外观')
     Column() {
-      SettingNavRow({
-        title: '磨砂玻璃',
-        description: '预设、模糊、透明度、边框、阴影',
-        onTap: () => {
-          router.pushUrl({ url: 'pages/GlassSettings' });
-        }
-      })
       SettingRow({ title: '沉浸光感', description: '沉浸材质的光感强度' }) {
         this.immersiveLightLevelSelect()
       }
@@ -222,13 +217,22 @@ struct OtherSettingsPage {
     return index >= 0 ? index : 0;
   }
 
-  setImmersiveLightLevel(index: number): void {
+  async setImmersiveLightLevel(index: number): Promise<void> {
+    if (this.savingImmersiveLight) return;
     const values = this.immersiveLightLevelValues();
     const next = index >= 0 && index < values.length ? values[index] : values[0];
     if (this.immersiveLightLevel === next) return;
-    this.immersiveLightLevel = next;
-    const revision = AppStorage.get<number>('themeRevision') ?? 0;
-    AppStorage.setOrCreate('themeRevision', revision + 1);
+    this.savingImmersiveLight = true;
+    try {
+      await ImmersiveLightSettingsStore.save(getContext(this), next);
+      const revision = AppStorage.get<number>('themeRevision') ?? 0;
+      AppStorage.setOrCreate('themeRevision', revision + 1);
+    } catch (error) {
+      console.warn('保存沉浸光感设置失败:', error);
+      HdsFeedback.showToast('保存失败，请重试');
+    } finally {
+      this.savingImmersiveLight = false;
+    }
   }
 
   @Builder
@@ -422,8 +426,9 @@ struct OtherSettingsPage {
   @Builder
   immersiveLightLevelSelect() {
     Select(this.immersiveLightLevelOptions())
-      .selected(this.immersiveLightLevelSelectedIndex())
-      .value(this.immersiveLightLevelOptions()[this.immersiveLightLevelSelectedIndex()].value)
+      .enabled(!this.savingImmersiveLight)
+      .selected(this.savingImmersiveLight ? -1 : this.immersiveLightLevelSelectedIndex())
+      .value(this.savingImmersiveLight ? '保存中…' : this.immersiveLightLevelOptions()[this.immersiveLightLevelSelectedIndex()].value)
       .font({ size: AppFontSize.BODY })
       .fontColor(this.subTextColor())
       .backgroundColor(Color.Transparent)
@@ -438,7 +443,7 @@ struct OtherSettingsPage {
       .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
       .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
       .menuBackgroundBlurStyle(BlurStyle.NONE)
-      .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+      .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
       .onSelect((index: number) => this.setImmersiveLightLevel(index))
   }
 }

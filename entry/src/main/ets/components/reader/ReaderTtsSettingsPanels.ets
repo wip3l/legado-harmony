@@ -7,6 +7,7 @@ import { ImmersiveBackButton } from '../ImmersiveBackButton';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
+import { ReaderMaterialPanel } from './ReaderFloatingMaterialBar';
 
 /**
  * 阅读设置面板里的"朗读"页：倍速、音色入口、定时、开始/停止。
@@ -220,6 +221,19 @@ export struct ReaderTtsVoicePickerPanel {
   };
 
   build() {
+    ReaderMaterialPanel({
+      panelWidth: this.panelWidth,
+      panelHeight: this.panelHeight,
+      cornerRadius: 28,
+      darkMode: this.dark,
+      fallbackColor: this.panelColor
+    }) {
+      this.panelBody()
+    }
+  }
+
+  @Builder
+  panelBody() {
     Column() {
       Row() {
         Text('朗读音色')
@@ -284,19 +298,9 @@ export struct ReaderTtsVoicePickerPanel {
       .scrollBar(BarState.Auto)
       .scrollBarColor(this.dark ? '#668A8F98' : '#667A6F63')
     }
-    .width(this.panelWidth)
-    .height(this.panelHeight)
-    .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
+    .width('100%')
+    .height('100%')
     .clip(true)
-    .backgroundColor(this.panelColor)
-    .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-    .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.panelBorderColor })
-    .shadow({
-      radius: ThemeRuntime.glassShadowRadius('panel'),
-      color: this.panelShadowColor,
-      offsetX: ThemeRuntime.glassShadowOffsetX('panel'),
-      offsetY: ThemeRuntime.glassShadowOffsetY('panel')
-    })
   }
 
   @Builder

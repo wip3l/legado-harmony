@@ -17,6 +17,7 @@ const SECONDARY_STOP: string = 'stop';
 
 @Component
 export struct ReaderTtsPlayerPanel {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @Prop darkMode: boolean = false;
   @Prop accentColor: ResourceColor = '#5B8F86';
   @Prop playButtonColor: ResourceColor = '#5B8F86';
@@ -95,7 +96,6 @@ export struct ReaderTtsPlayerPanel {
         .width('100%')
         .height('100%')
         .backgroundColor(this.darkMode ? '#52000000' : '#26000000')
-        .backdropBlur(ThemeRuntime.glassBlur('popover', 10))
         .onClick(() => this.close())
 
       Stack({ alignContent: Alignment.TopStart }) {
@@ -643,8 +643,8 @@ export struct ReaderTtsPlayerPanel {
       // an explicit component blur so the frost also works on devices where the
       // immersive menu material is unavailable.
       .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.darkMode, ''))
-      .menuBackgroundBlurStyle(ThemeRuntime.glassEnabled() ? BlurStyle.COMPONENT_THICK : BlurStyle.NONE)
-      .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+      .menuBackgroundBlurStyle(BlurStyle.COMPONENT_THICK)
+      .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
       .onSelect((index: number) => ReaderTtsFloatingSession.selectTtsVoice(index))
   }
 
@@ -719,8 +719,8 @@ export struct ReaderTtsPlayerPanel {
       // an explicit component blur so the frost also works on devices where the
       // immersive menu material is unavailable.
       .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.darkMode, ''))
-      .menuBackgroundBlurStyle(ThemeRuntime.glassEnabled() ? BlurStyle.COMPONENT_THICK : BlurStyle.NONE)
-      .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+      .menuBackgroundBlurStyle(BlurStyle.COMPONENT_THICK)
+      .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
       .onSelect((index: number) => this.selectAudioVoiceOption(index))
   }
 

@@ -1,3 +1,4 @@
+import { MembershipBadge } from '../components/common/MembershipBadge';
 import { promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -197,6 +198,7 @@ struct AccountCenterPage {
         } else {
           this.loginGuide()
         }
+        this.memberSettingsEntry()
         this.serviceHint()
       }
     }
@@ -1386,8 +1388,9 @@ struct AccountCenterPage {
       new BenefitCompareRow('专属主题', '曜金藏书 · 手动领取一年', ['—', '—', '—', '—', '✓']),
       new BenefitCompareRow('每月朗读礼包', '标准 / 精品（字）', ['—', '—', '5000\n2500', '8000\n4000', '12000\n6000']),
       new BenefitCompareRow('在线朗读优先排队', '高峰期优先', ['—', '✓', '✓', '✓', '✓']),
-      new BenefitCompareRow('漫画超分', '本机 AI 让低清漫画更清晰', ['—', '✓', '✓', '✓', '✓']),
-      new BenefitCompareRow('漫画繁→简', '本机把对白繁体字改成简体', ['—', '✓', '✓', '✓', '✓']),
+      new BenefitCompareRow('AI超分', '借助AI让低清漫画更清晰', ['—', '✓', '✓', '✓', '✓']),
+      new BenefitCompareRow('AI着色', '借助AI为黑白漫画着色', ['—', '✓', '✓', '✓', '✓']),
+      new BenefitCompareRow('AI翻译', '繁→简；日→中、韩→中即将推出', ['—', '✓', '✓', '✓', '✓']),
       new BenefitCompareRow('功能尝鲜', '新功能优先试用', ['—', '✓', '✓', '✓', '✓']),
       new BenefitCompareRow('自定义主题方案', '最多保存套数',
         ['', 'MONTHLY', 'ANNUAL', 'LIFETIME', 'SUPER_LIFETIME'].map((sku: string): string =>
@@ -1734,6 +1737,19 @@ struct AccountCenterPage {
   }
 
   @Builder
+  memberSettingsEntry() {
+    Column() {
+      this.serviceRow($r('sys.symbol.gearshape'), '会员设置', '会员身份与功能标识', false, () => {
+        router.pushUrl({ url: 'pages/MemberSettings' });
+      })
+    }
+    .width('100%')
+    .borderRadius(ThemeRuntime.cardRadius())
+    .clip(true)
+    .backgroundColor(this.cardColor())
+  }
+
+  @Builder
   serviceList() {
     Column() {
       this.serviceRow($r('sys.symbol.doc_text'), '会员订单', this.ordersExpanded ? '收起' : '最近 50 笔会员订单',
@@ -2006,11 +2022,15 @@ struct AccountCenterPage {
         .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
-      Text(this.canUseAnimatedAvatar() ? '支持 GIF / WebP 动态头像：2MB 内，最多 120 帧，单帧不超过 1024×1024。'
-        : '终身会员和终身超级会员支持 GIF / WebP 动态头像。')
-        .fontSize(AppFontSize.CAPTION)
-        .fontColor(this.subTextColor())
-        .width('100%')
+      Row({ space: AppSpacing.XS }) {
+        MembershipBadge({ sku: 'LIFETIME' })
+        Text(this.canUseAnimatedAvatar() ? '支持 GIF / WebP 动态头像：2MB 内，最多 120 帧，单帧不超过 1024×1024。'
+          : '终身会员和终身超级会员支持 GIF / WebP 动态头像。')
+          .fontSize(AppFontSize.CAPTION)
+          .fontColor(this.subTextColor())
+          .layoutWeight(1)
+      }
+      .width('100%')
       TextInput({ text: this.profileNameInput, placeholder: '请输入昵称' })
         .width('100%')
         .height(44)

@@ -1,3 +1,4 @@
+import { MembershipBadge } from '../common/MembershipBadge';
 import { AdaptiveSwitch } from '../AdaptiveSwitch';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { AppFontSize } from '../../theme/AppFontSize';
@@ -6,17 +7,24 @@ import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
 
 /** 阅读页设置面板里的一行：标题与说明，右侧放控件。配色用阅读主题，由页面传入。 */
 @Component
-struct ReaderSettingLabel {
+export struct ReaderSettingLabel {
   @Prop title: string = '';
+  @Prop minimumMembership: string = '';
   @Prop description: string = '';
   @Prop textColor: string = '#000000';
   @Prop subTextColor: string = '#666666';
 
   build() {
     Column() {
-      Text(this.title)
-        .fontSize(AppFontSize.BODY_LARGE)
-        .fontColor(this.textColor)
+      Row({ space: AppSpacing.XS }) {
+        Text(this.title)
+          .fontSize(AppFontSize.BODY_LARGE)
+          .fontColor(this.textColor)
+          .flexShrink(1)
+        if (this.minimumMembership) {
+          MembershipBadge({ sku: this.minimumMembership })
+        }
+      }
       Text(this.description)
         .fontSize(AppFontSize.CAPTION)
         .fontColor(this.subTextColor)
@@ -30,6 +38,7 @@ struct ReaderSettingLabel {
 @Component
 export struct ReaderSettingSwitchRow {
   @Prop title: string = '';
+  @Prop minimumMembership: string = '';
   @Prop description: string = '';
   @Prop checked: boolean = false;
   @Prop textColor: string = '#000000';
@@ -40,6 +49,7 @@ export struct ReaderSettingSwitchRow {
     Row() {
       ReaderSettingLabel({
         title: this.title,
+        minimumMembership: this.minimumMembership,
         description: this.description,
         textColor: this.textColor,
         subTextColor: this.subTextColor
@@ -60,7 +70,9 @@ export struct ReaderSettingSwitchRow {
 
 @Component
 export struct ReaderSettingSelectRow {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @Prop title: string = '';
+  @Prop minimumMembership: string = '';
   @Prop description: string = '';
   @Prop options: SelectOption[] = [];
   @Prop selected: number = 0;
@@ -82,6 +94,7 @@ export struct ReaderSettingSelectRow {
     Row() {
       ReaderSettingLabel({
         title: this.title,
+        minimumMembership: this.minimumMembership,
         description: this.description,
         textColor: this.textColor,
         subTextColor: this.subTextColor
@@ -107,7 +120,7 @@ export struct ReaderSettingSelectRow {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
         .menuBackgroundColor(this.menuColor)
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => {
           this.onSelect(index);
         })
@@ -122,6 +135,7 @@ export struct ReaderSettingSelectRow {
 @Component
 export struct ReaderSettingActionRow {
   @Prop title: string = '';
+  @Prop minimumMembership: string = '';
   @Prop description: string = '';
   @Prop actionText: string = '';
   @Prop textColor: string = '#000000';
@@ -134,6 +148,7 @@ export struct ReaderSettingActionRow {
     Row() {
       ReaderSettingLabel({
         title: this.title,
+        minimumMembership: this.minimumMembership,
         description: this.description,
         textColor: this.textColor,
         subTextColor: this.subTextColor

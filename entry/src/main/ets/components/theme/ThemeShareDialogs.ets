@@ -89,32 +89,10 @@ struct ShareDialogSurface {
 
   build() {
     Column() {
-      Column() {
-        this.content()
-      }
-      .width('calc(100% - 48vp)')
-      .constraintSize({ maxWidth: 380 })
-      .padding(AppSpacing.XXL)
-      .borderRadius(ThemeRuntime.glassCornerRadius(18, 'panel'))
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.darkMode, '', 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({
-        width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.darkMode, 'panel')
-      })
-      .shadow({
-        radius: ThemeRuntime.glassShadowRadius('panel'),
-        color: ThemeRuntime.glassShadowColor(this.darkMode, 'panel'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('panel'),
-        offsetY: ThemeRuntime.glassShadowOffsetY('panel')
-      })
+      this.content()
     }
     .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor(this.darkMode ? '#76000000' : '#52000000')
-    .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
+    .padding(AppSpacing.XXL)
   }
 }
 

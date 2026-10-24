@@ -25,6 +25,7 @@ import { SettingNavRow, SettingRow, SettingSwitchRow } from '../components/commo
 @Entry
 @Component
 struct BookshelfSettingsPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('bookshelfShowTags') bookshelfShowTags: boolean = true;
   @StorageLink('bookshelfShowSource') bookshelfShowSource: boolean = true;
   @StorageLink('bookshelfShowIntro') bookshelfShowIntro: boolean = true;
@@ -794,7 +795,7 @@ struct BookshelfSettingsPage {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => {
           onSelect(index);
         })
@@ -833,7 +834,7 @@ struct BookshelfSettingsPage {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onTouch((event: TouchEvent) => {
           if (event.type === TouchType.Down) {
             this.refreshAlbumOptionsForMenu();

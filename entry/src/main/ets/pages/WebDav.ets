@@ -15,10 +15,14 @@ import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { PageScaffold } from '../components/common/PageScaffold';
 import { CollapsingHeader } from '../utils/CollapsingHeader';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
+import { ImmersiveMaterialSurface } from '../components/ImmersiveMaterialSurface';
+import { PopupMenuAction } from '../components/common/PopupMenuAction';
 
 @Entry
 @Component
 struct WebDavPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @State headerCollapse: number = 0;
   private headerScroller: Scroller = new Scroller();
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
@@ -72,9 +76,16 @@ struct WebDavPage {
         this.pageContent()
       } })
 
-      if (this.showConnectionActionMenu) {
-        this.connectionActionMenu()
-      }
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: this.contextMenuX, y: this.contextMenuY })
+        .hitTestBehavior(HitTestMode.None)
+        .bindPopup(this.showConnectionActionMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.connectionActionMenu()
+        }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+          this.showConnectionActionMenu = false;
+        }))
 
       if (!this.showConnectionActionMenu && !this.showConnectionEditorDialog && !this.busy) {
         Stack({ alignContent: Alignment.BottomEnd }) {
@@ -322,13 +333,7 @@ struct WebDavPage {
 
   @Builder
   connectionActionMenu() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.appDarkMode ? '#38000000' : '#18FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('button', 12))
-        .onClick(() => this.closeConnectionActions())
+    Scroll() {
       Column() {
         this.connectionContextActionItem($r('sys.symbol.chevron_right'), '浏览', this.primaryTextColor(),
           () => this.browseActionConnection())
@@ -338,60 +343,44 @@ struct WebDavPage {
           () => this.editActionConnection())
         this.connectionContextActionItem($r('sys.symbol.trash'), '删除', ThemeRuntime.dangerColor(this.appDarkMode),
           () => this.confirmDeleteActionConnection())
+
       }
-      .width(148)
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'),
-        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: this.contextMenuLeft(148), y: this.contextMenuTop(188) })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(176)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
   connectionContextActionItem(icon: Resource, label: string, color: string, action: () => void) {
-    Row({ space: AppSpacing.MD }) {
-      SymbolGlyph(icon)
-        .fontSize(18)
-        .fontColor([color])
-        .width(24)
-      Text(label)
-        .fontSize(AppFontSize.BODY_LARGE)
-        .fontColor(color)
-        .layoutWeight(1)
-    }
-    .width('100%')
-    .height(44)
-    .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-    .alignItems(VerticalAlign.Center)
-    .onClick(action)
+    PopupMenuAction(icon, label, color, action)
   }
 
   @Builder
   addConnectionFloatingButton() {
-    Button({ type: ButtonType.Circle, stateEffect: true }) {
-      SymbolGlyph($r('sys.symbol.plus'))
-        .fontSize(25)
-        .fontColor([this.accentColor()])
+    Stack() {
+      ImmersiveMaterialSurface({
+        surfaceWidth: 52,
+        surfaceHeight: 52,
+        darkMode: this.appDarkMode,
+        fallbackColor: this.cardColor(),
+        glowColor: `#40${this.accentColor().substring(1)}`
+      }) {
+        SymbolGlyph($r('sys.symbol.plus'))
+          .fontSize(25)
+          .fontColor([this.accentColor()])
+      }
     }
     .width(52)
     .height(52)
     .margin({ right: AppSpacing.XXL, bottom: this.navBarHeight + 22 })
-    .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor(), 'button'))
-    .backdropBlur(ThemeRuntime.glassBlur('button', 12))
-    .border({ width: ThemeRuntime.glassBorderWidth('button'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'button') })
-    .shadow({ radius: ThemeRuntime.glassShadowRadius('button'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'button'), offsetX: ThemeRuntime.glassShadowOffsetX('button'), offsetY: ThemeRuntime.glassShadowOffsetY('button') })
     .accessibilityText('添加 WebDAV 服务')
     .onClick(() => {
       this.openAddDialog();
     })
+    .accessibilityRole(AccessibilityRoleType.BUTTON)
   }
 
   @Builder
@@ -724,16 +713,6 @@ struct WebDavPage {
     const height = Number(area.height);
     if (Number.isFinite(width) && width > 0) this.contextViewportWidth = width;
     if (Number.isFinite(height) && height > 0) this.contextViewportHeight = height;
-  }
-
-  contextMenuLeft(menuWidth: number): number {
-    return Math.max(12, Math.min(this.contextMenuX - 18, this.contextViewportWidth - menuWidth - 12));
-  }
-
-  contextMenuTop(menuHeight: number): number {
-    const below = this.contextMenuY + 12;
-    if (below + menuHeight <= this.contextViewportHeight - this.navBarHeight - 12) return below;
-    return Math.max(this.statusBarHeight + 8, this.contextMenuY - menuHeight - 12);
   }
 
   listTopInset(): number {

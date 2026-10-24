@@ -1,6 +1,7 @@
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
+import { ReaderMaterialPanel } from './ReaderFloatingMaterialBar';
 
 /**
  * 朗读/听书悬浮胶囊：本页朗读与后台朗读共用同一外观。
@@ -18,6 +19,7 @@ export struct ReaderTtsCapsule {
   @Prop panelColor: string = '#FFFFFF';
   @Prop panelBorderColor: string = '#22000000';
   @Prop panelShadowColor: string = '#22000000';
+  @Prop dark: boolean = false;
   onOpen: () => void = (): void => {
   };
   onToggle: () => void = (): void => {
@@ -33,6 +35,26 @@ export struct ReaderTtsCapsule {
   static readonly HEIGHT: number = 46;
 
   build() {
+    Column() {
+      ReaderMaterialPanel({
+        panelWidth: ReaderTtsCapsule.WIDTH,
+        panelHeight: ReaderTtsCapsule.HEIGHT,
+        cornerRadius: ReaderTtsCapsule.HEIGHT / 2,
+        darkMode: this.dark,
+        fallbackColor: this.panelColor
+      }) {
+        this.capsuleBody()
+      }
+    }
+    .parallelGesture(
+      PanGesture({ direction: PanDirection.All, distance: 4 })
+        .onActionStart(() => this.onCapsuleDragStart())
+        .onActionUpdate((event: GestureEvent) => this.onCapsuleDragMove(event.offsetX, event.offsetY))
+    )
+  }
+
+  @Builder
+  capsuleBody() {
     Row({ space: AppSpacing.SM }) {
       Row({ space: AppSpacing.SM }) {
         Stack({ alignContent: Alignment.Center }) {
@@ -73,24 +95,8 @@ export struct ReaderTtsCapsule {
         .height(34)
         .onClick(() => this.onClose())
     }
-    .width(ReaderTtsCapsule.WIDTH)
-    .height(ReaderTtsCapsule.HEIGHT)
+    .width('100%')
+    .height('100%')
     .padding({ left: AppSpacing.MD, right: AppSpacing.XS })
-    .borderRadius(23)
-    .clip(true)
-    .backgroundColor(this.panelColor)
-    .backdropBlur(ThemeRuntime.glassBlur('button', 18))
-    .border({ width: ThemeRuntime.glassBorderWidth('button'), color: this.panelBorderColor })
-    .shadow({
-      radius: ThemeRuntime.glassShadowRadius('button'),
-      color: this.panelShadowColor,
-      offsetX: ThemeRuntime.glassShadowOffsetX('button'),
-      offsetY: ThemeRuntime.glassShadowOffsetY('button')
-    })
-    .parallelGesture(
-      PanGesture({ direction: PanDirection.All, distance: 4 })
-        .onActionStart(() => this.onCapsuleDragStart())
-        .onActionUpdate((event: GestureEvent) => this.onCapsuleDragMove(event.offsetX, event.offsetY))
-    )
   }
 }

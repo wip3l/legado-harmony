@@ -1,3 +1,4 @@
+import { ReaderComicTranslationRow } from './ReaderComicTranslationRow';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
@@ -213,6 +214,9 @@ export struct ReaderComicModeSettingsPanel {
 /** 漫画「画面设置」面板。 */
 @Component
 export struct ReaderComicDisplaySettingsPanel {
+  @Prop colorEnabled: boolean = false;
+  @Prop colorAccess: string = '';
+  onColorEnabled: (enabled: boolean) => void = () => {};
   /** 「背景」设置值（组件属性不能叫 background，会与内置属性冲突）。 */
   @Prop surface: string = ReaderComicBackground.BLACK;
   @Prop pageGap: number = 0;
@@ -220,7 +224,7 @@ export struct ReaderComicDisplaySettingsPanel {
   @Prop preloadCount: number = 5;
   @Prop infoBar: boolean = true;
   @Prop doubleTapZoom: boolean = true;
-  /** 「漫画超分」开关的保存值。 */
+  /** 「AI超分」开关的保存值。 */
   @Prop superResolution: boolean = false;
   /** ReaderComicSuperResolutionAccess 的取值。 */
   @Prop superResolutionAccess: string = ReaderComicSuperResolutionAccess.UNSUPPORTED;
@@ -245,8 +249,9 @@ export struct ReaderComicDisplaySettingsPanel {
   superResolutionRow() {
     if (this.superResolutionAccess === ReaderComicSuperResolutionAccess.READY) {
       ReaderSettingSwitchRow({
-        title: '漫画超分',
-        description: '会员专享 · 用本机 AI 把低清图片放大变清晰，处理好后自动替换；只处理正在看的图，会多耗一些电',
+        title: 'AI超分',
+        minimumMembership: 'MONTHLY',
+        description: '借助AI把低清图片放大变清晰，处理好后自动替换；只处理正在看的图，会多耗一些电',
         checked: this.superResolution,
         textColor: this.colors.textColor,
         subTextColor: this.colors.subTextColor,
@@ -254,9 +259,10 @@ export struct ReaderComicDisplaySettingsPanel {
       })
     } else if (this.superResolutionAccess === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED) {
       ReaderSettingActionRow({
-        title: '漫画超分',
+        title: 'AI超分',
+        minimumMembership: 'MONTHLY',
         description: this.superResolution ? '会员已到期，续费后自动恢复' :
-          '会员专享 · 用本机 AI 把低清图片放大变清晰',
+          '借助AI把低清图片放大变清晰',
         actionText: '开通会员',
         textColor: this.colors.textColor,
         subTextColor: this.colors.subTextColor,
@@ -266,8 +272,9 @@ export struct ReaderComicDisplaySettingsPanel {
       })
     } else {
       ReaderSettingActionRow({
-        title: '漫画超分',
-        description: '会员专享 · 当前系统不支持，需要 API 26 及以上且支持图片超分的设备',
+        title: 'AI超分',
+        minimumMembership: 'MONTHLY',
+        description: '当前系统不支持，需要 API 26 及以上且支持图片超分的设备',
         actionText: '',
         textColor: this.colors.textColor,
         subTextColor: this.colors.subTextColor
@@ -276,37 +283,45 @@ export struct ReaderComicDisplaySettingsPanel {
   }
 
   @Builder
-  textConvertRow() {
-    if (this.textConvertAccess === ReaderComicSuperResolutionAccess.READY) {
+  colorRow() {
+    if (this.colorAccess === ReaderComicSuperResolutionAccess.READY) {
       ReaderSettingSwitchRow({
-        title: '本书繁→简',
-        description: '会员专享 · 在本机识别图中繁体字，改写成简体叠在对白上；网点或画面上的字保留原样，长按图片可查看全部文字',
-        checked: this.textConvert,
+        title: 'AI着色',
+        minimumMembership: 'MONTHLY',
+        description: '借助AI为黑白漫画着色，当前画面优先；单张超长图暂不支持。开启后暂停AI超分',
+        checked: this.colorEnabled,
         textColor: this.colors.textColor,
         subTextColor: this.colors.subTextColor,
-        onChange: (checked: boolean): void => this.onTextConvertChange(checked)
+        onChange: (checked: boolean): void => this.onColorEnabled(checked)
       })
-    } else if (this.textConvertAccess === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED) {
+    } else {
       ReaderSettingActionRow({
-        title: '本书繁→简',
-        description: this.textConvert ? '会员已到期，续费后自动恢复' :
-          '会员专享 · 在本机把漫画对白里的繁体字改成简体',
-        actionText: '开通会员',
+        title: 'AI着色',
+        minimumMembership: 'MONTHLY',
+        description: this.colorAccess === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED ?
+          (this.colorEnabled ? '会员已到期，续费后恢复 AI着色' : '借助AI为黑白漫画着色，当前画面优先') : '当前设备不支持本地着色引擎',
+        actionText: this.colorAccess === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED ? '开通会员' : '',
         textColor: this.colors.textColor,
         subTextColor: this.colors.subTextColor,
         buttonColor: this.colors.buttonColor,
         buttonTextColor: this.colors.buttonTextColor,
         onAction: (): void => this.onOpenMembership()
       })
-    } else {
-      ReaderSettingActionRow({
-        title: '本书繁→简',
-        description: '会员专享 · 当前设备不支持系统文字识别',
-        actionText: '',
-        textColor: this.colors.textColor,
-        subTextColor: this.colors.subTextColor
-      })
     }
+  }
+
+  @Builder
+  textConvertRow() {
+    ReaderComicTranslationRow({
+      textConvert: this.textConvert,
+      access: this.textConvertAccess,
+      textColor: this.colors.textColor,
+      subTextColor: this.colors.subTextColor,
+      accentColor: this.colors.accentColor,
+      dark: this.colors.dark,
+      onChange: (enabled: boolean): void => this.onTextConvertChange(enabled),
+      onOpenMembership: (): void => this.onOpenMembership()
+    })
   }
 
   build() {
@@ -353,6 +368,8 @@ export struct ReaderComicDisplaySettingsPanel {
       })
 
       this.superResolutionRow()
+
+      this.colorRow()
 
       this.textConvertRow()
 

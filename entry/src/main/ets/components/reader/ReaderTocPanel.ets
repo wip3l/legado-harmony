@@ -10,6 +10,7 @@ import { ImmersiveBackButton } from '../ImmersiveBackButton';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
+import { ReaderMaterialPanel } from './ReaderFloatingMaterialBar';
 
 const TOC_WINDOW_PAGE_SIZE = 72;
 const TOC_SCROLLBAR_DRAG_UPDATE_INTERVAL_MS = 90;
@@ -692,6 +693,19 @@ export struct ReaderTocPanel {
   // ---------------------------------------------------------------- 界面
 
   build() {
+    ReaderMaterialPanel({
+      panelWidth: this.panelWidth,
+      panelHeight: this.panelHeight,
+      cornerRadius: 28,
+      darkMode: this.dark,
+      fallbackColor: this.panelColor
+    }) {
+      this.panelBody()
+    }
+  }
+
+  @Builder
+  panelBody() {
     Column() {
       Row({ space: AppSpacing.LG }) {
         BookCover({
@@ -766,19 +780,9 @@ export struct ReaderTocPanel {
         this.bookmarkList()
       }
     }
-    .width(this.panelWidth)
-    .height(this.panelHeight)
-    .borderRadius(ThemeRuntime.glassCornerRadius(28, 'panel'))
+    .width('100%')
+    .height('100%')
     .clip(true)
-    .backgroundColor(this.panelColor)
-    .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-    .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: this.panelBorderColor })
-    .shadow({
-      radius: ThemeRuntime.glassShadowRadius('panel'),
-      color: this.panelShadowColor,
-      offsetX: ThemeRuntime.glassShadowOffsetX('panel'),
-      offsetY: ThemeRuntime.glassShadowOffsetY('panel')
-    })
   }
 
   @Builder

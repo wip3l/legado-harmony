@@ -1,13 +1,12 @@
 import { ReaderTypographyField } from '../components/reader/ReaderLayoutSettings';
 import { ReaderFontWeight } from '../core/reader/ReaderFontWeight';
 import { router } from '@kit.ArkUI';
-import { common, ConfigurationConstant } from '@kit.AbilityKit';
+import { common } from '@kit.AbilityKit';
 import { syncSystemBars } from '../utils/SystemBars';
 import { ReaderSettings, ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { ReaderThemeHelper, ReaderThemeItem } from '../utils/ReaderThemeHelper';
 import { ReaderCustomThemeData, ReaderCustomThemeHelper, ReaderCustomThemeScheme } from '../utils/ReaderCustomThemeHelper';
 import { ReaderBackgroundImageStore } from '../utils/ReaderBackgroundImageStore';
-import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { ImmersiveBackButton } from '../components/ImmersiveBackButton';
 import { ReaderHeaderFooterSettings } from '../components/reader/ReaderLayoutSettings';
 import { ReaderFontHelper, ReaderFontItem } from '../utils/ReaderFontHelper';
@@ -41,7 +40,7 @@ class ReaderCustomFontData {
 @Entry
 @Component
 struct SettingsPage {
-  @StorageLink('appThemeMode') appThemeMode: string = 'system';
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('readerFontWeight') readerFontWeight: number = 400;
@@ -121,7 +120,6 @@ struct SettingsPage {
   aboutToAppear() {
     const params = router.getParams() as Record<string, string> | undefined;
     this.section = params?.['section'] === SettingsPage.SECTION_NOVEL ? SettingsPage.SECTION_NOVEL : '';
-    this.loadThemeMode();
   }
 
   isNovelSection(): boolean {
@@ -152,20 +150,6 @@ struct SettingsPage {
     }
   }
 
-  async loadThemeMode(): Promise<void> {
-    try {
-      const mode = await AppThemeModeStore.load(getContext(this));
-      // 启动时已按保存的模式设过颜色模式；没变就别再 setColorMode，那会触发整个应用的配置刷新。
-      if (AppThemeModeStore.normalizeMode(mode) === this.appThemeMode) {
-        return;
-      }
-      this.applyThemeMode(mode, false);
-    } catch (e) {
-      console.warn('读取主题模式失败:', e);
-      this.applyThemeMode(this.appThemeMode, false);
-    }
-  }
-
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
       PageScaffold({ title: this.isNovelSection() ? '小说设置' : '阅读设置', bottomInset: 0, content: () => {
@@ -186,16 +170,6 @@ struct SettingsPage {
   /** 第一层：小说和漫画共用的设置，以及两类书各自的入口。 */
   @Builder
   pageContent() {
-    this.sectionTitle('外观')
-    Column() {
-      this.appThemeOptions()
-    }
-    .width('calc(100% - 24vp)')
-    .margin({ left: AppSpacing.LG, right: AppSpacing.LG })
-    .borderRadius(ThemeRuntime.cardRadius())
-    .clip(true)
-    .backgroundColor(this.cardColor())
-
     this.sectionTitle('操作')
     Column() {
       this.tapZoneSettingItem()
@@ -244,7 +218,7 @@ struct SettingsPage {
       })
       SettingNavRow({
         title: '漫画',
-        description: '阅读方式、画面、漫画超分',
+        description: '阅读方式、画面、AI超分',
         showDivider: false,
         onTap: () => {
           router.pushUrl({ url: 'pages/ComicSettings' });
@@ -389,27 +363,6 @@ struct SettingsPage {
     .borderRadius(ThemeRuntime.buttonRadius())
     .clip(true)
     .margin({ left: AppSpacing.LG, right: AppSpacing.LG, bottom: 32 })
-  }
-
-  applyThemeMode(mode: string, persist: boolean = true) {
-    const normalizedMode = AppThemeModeStore.normalizeMode(mode);
-    this.appThemeMode = normalizedMode;
-    AppStorage.setOrCreate('appThemeMode', normalizedMode);
-    if (persist) {
-      AppThemeModeStore.save(getContext(this), normalizedMode).catch((e: Error) => {
-        console.warn('保存主题模式失败:', e);
-      });
-    }
-    if (normalizedMode === 'dark') {
-      this.appDarkMode = true;
-      getContext(this).getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
-    } else if (normalizedMode === 'light') {
-      this.appDarkMode = false;
-      getContext(this).getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
-    } else {
-      getContext(this).getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
-    }
-    this.syncBars();
   }
 
   async reloadCustomFonts(): Promise<void> {
@@ -960,7 +913,7 @@ struct SettingsPage {
       options.push({ value: item.sourceName || item.familyName });
     }
     for (const font of this.remoteFonts()) {
-      options.push({ value: CloudFontMenu.label(font) });
+      options.push(CloudFontMenu.option(font));
     }
     return options;
   }
@@ -2011,7 +1964,7 @@ struct SettingsPage {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => {
           if (index >= this.remoteFontStart()) {
             this.selectRemoteFont(index - this.remoteFontStart(), (customIndex: number) => {
@@ -2074,51 +2027,6 @@ struct SettingsPage {
         router.pushUrl({ url: 'pages/ReaderReplaceRules' });
       }
     })
-  }
-
-  @Builder
-  appThemeOptions() {
-    Row({ space: AppSpacing.MD }) {
-      Stack({ alignContent: Alignment.Center }) {
-        Text('跟随系统')
-          .fontSize(AppFontSize.BODY)
-          .fontColor(this.appThemeMode === 'system' ? '#FFFFFF' : this.primaryTextColor())
-      }
-        .layoutWeight(1)
-        .height(38)
-        .borderRadius(19)
-        .backgroundColor(this.appThemeMode === 'system' ? this.accentColor() : this.inputColor())
-        .onClick(() => {
-          this.applyThemeMode('system');
-        })
-      Stack({ alignContent: Alignment.Center }) {
-        Text('浅色')
-          .fontSize(AppFontSize.BODY)
-          .fontColor(this.appThemeMode === 'light' ? '#FFFFFF' : this.primaryTextColor())
-      }
-        .layoutWeight(1)
-        .height(38)
-        .borderRadius(19)
-        .backgroundColor(this.appThemeMode === 'light' ? this.accentColor() : this.inputColor())
-        .onClick(() => {
-          this.applyThemeMode('light');
-        })
-      Stack({ alignContent: Alignment.Center }) {
-        Text('深色')
-          .fontSize(AppFontSize.BODY)
-          .fontColor(this.appThemeMode === 'dark' ? '#FFFFFF' : this.primaryTextColor())
-      }
-        .layoutWeight(1)
-        .height(38)
-        .borderRadius(19)
-        .backgroundColor(this.appThemeMode === 'dark' ? this.accentColor() : this.inputColor())
-        .onClick(() => {
-          this.applyThemeMode('dark');
-        })
-    }
-    .width('100%')
-    .padding({ left: AppSpacing.XL, right: AppSpacing.XL, top: AppSpacing.LG, bottom: AppSpacing.LG })
-    .backgroundColor(this.cardColor())
   }
 
   @Builder
@@ -2193,7 +2101,7 @@ struct SettingsPage {
               .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
               .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
               .menuBackgroundBlurStyle(BlurStyle.NONE)
-              .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+              .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
               .onSelect((index: number) => {
                 this.selectCustomTheme(index);
               })
@@ -2253,7 +2161,7 @@ struct SettingsPage {
               .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
               .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
               .menuBackgroundBlurStyle(BlurStyle.NONE)
-              .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+              .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
               .onSelect((index: number) => {
                 this.setCurrentCustomThemeBackgroundType(index);
               })
@@ -2307,7 +2215,7 @@ struct SettingsPage {
                   .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
                   .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
                   .menuBackgroundBlurStyle(BlurStyle.NONE)
-                  .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+                  .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
                   .onSelect((index: number) => {
                     this.setCurrentCustomThemeImageFit(index);
                   })
@@ -2354,7 +2262,7 @@ struct SettingsPage {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => {
           this.showTypographyValueInput = false;
           this.typographySettingIndex = Math.max(0, Math.min(index, this.typographySettingOptions().length - 1));
@@ -2511,7 +2419,7 @@ struct SettingsPage {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
         .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
         .onSelect((index: number) => {
           onSelect(index);
         })

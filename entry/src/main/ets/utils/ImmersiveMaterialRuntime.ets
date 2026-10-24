@@ -1,7 +1,12 @@
 import deviceInfo from '@ohos.deviceInfo';
-import { uiMaterial } from '@kit.ArkUI';
+import { display, uiMaterial } from '@kit.ArkUI';
 import { hdsMaterial } from '@kit.UIDesignKit';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
+
+export interface ImmersiveSurfaceBorder {
+  width: number;
+  color: ResourceColor;
+}
 
 /**
  * Applies the shared dropdown material to a Select. `menuSystemMaterial` only exists from API 26; calling the
@@ -9,9 +14,28 @@ import { ThemeRuntime } from '../theme/ThemeRuntime';
  * which leaves older systems on their platform default.
  */
 export class SelectMenuMaterialModifier implements AttributeModifier<SelectAttribute> {
+  private lightLevel: string;
+
+  constructor(lightLevel: string) {
+    this.lightLevel = lightLevel;
+  }
+
   applyNormalAttribute(instance: SelectAttribute): void {
+    if (deviceInfo.sdkApiVersion >= 20) {
+      instance.menuOutline(ImmersiveMaterialRuntime.surfaceBorder(this.lightLevel,
+        AppStorage.get<boolean>('appDarkMode') || false));
+    }
     if (deviceInfo.sdkApiVersion < 26) return;
-    instance.menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial());
+    instance.menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial(this.lightLevel));
+    if (ImmersiveMaterialRuntime.reducedMaterial(this.lightLevel)) {
+      instance.menuBackgroundColor(ImmersiveMaterialRuntime.surfaceColor(this.lightLevel,
+        AppStorage.get<boolean>('appDarkMode') || false));
+      instance.menuBackgroundBlurStyle(ImmersiveMaterialRuntime.surfaceBlur(this.lightLevel));
+    } else {
+      // 同一个 Select 从弱/均衡切回跟随系统时，清除上次覆盖的底色与模糊。
+      instance.menuBackgroundColor(Color.Transparent);
+      instance.menuBackgroundBlurStyle(BlurStyle.NONE);
+    }
   }
 }
 
@@ -170,8 +194,7 @@ export class ImmersiveMaterialRuntime {
     return ImmersiveMaterialRuntime.resolvedType;
   }
 
-  static materialLevel(): hdsMaterial.MaterialLevel {
-    const configured = ImmersiveMaterialRuntime.configuredLightLevel();
+  static materialLevel(configured: string = ImmersiveMaterialRuntime.configuredLightLevel()): hdsMaterial.MaterialLevel {
     if (configured === 'high') return hdsMaterial.MaterialLevel.EXQUISITE;
     if (configured === 'balanced') return hdsMaterial.MaterialLevel.GENTLE;
     if (configured === 'weak') return hdsMaterial.MaterialLevel.SMOOTH;
@@ -184,11 +207,37 @@ export class ImmersiveMaterialRuntime {
       .trim().toLowerCase();
   }
 
-  /** Maps the app setting to the closest API 26 material style for component-level materials. */
-  static materialStyle(): uiMaterial.ImmersiveStyle {
-    const configured = ImmersiveMaterialRuntime.configuredLightLevel();
+  /** ArkUI 的材质等级由系统决定，厚度/触摸光效不能代替等级。手动降档时显式关闭原材质。 */
+  static reducedMaterial(level: string): boolean {
+    return level === 'weak' || level === 'balanced';
+  }
+
+  static componentMaterial(options: uiMaterial.ImmersiveOptions, level: string): uiMaterial.Material {
+    return ImmersiveMaterialRuntime.reducedMaterial(level) ? uiMaterial.Material.empty :
+      new uiMaterial.ImmersiveMaterial(options);
+  }
+
+  /** 弱档用实色表面；均衡用普通磨砂，不保留系统高档材质的折射和光边。 */
+  static surfaceColor(level: string, darkMode: boolean, fallback: ResourceColor = ''): ResourceColor {
+    if (level === 'weak') return fallback || ThemeRuntime.cardColor(darkMode);
+    if (level === 'balanced') return darkMode ? '#D926272B' : '#D9F5F5F5';
+    return Color.Transparent;
+  }
+
+  static surfaceBlur(level: string): BlurStyle {
+    return level === 'balanced' ? BlurStyle.COMPONENT_THICK : BlurStyle.NONE;
+  }
+
+  /** 弱档没有原生材质光边，统一补一圈内描边；其它档位保留调用方原有边框。 */
+  static surfaceBorder(level: string, darkMode: boolean,
+    fallbackWidth: number = 0, fallbackColor: ResourceColor = Color.Transparent): ImmersiveSurfaceBorder {
+    return level === 'weak' ? { width: 0.75, color: darkMode ? '#40FFFFFF' : '#26000000' } :
+      { width: fallbackWidth, color: fallbackColor };
+  }
+
+  /** 原生材质的厚度；手动弱/均衡由 componentMaterial 关闭原生材质并使用普通表面。 */
+  static materialStyle(configured: string = ImmersiveMaterialRuntime.configuredLightLevel()): uiMaterial.ImmersiveStyle {
     if (configured === 'high') return uiMaterial.ImmersiveStyle.ULTRA_THIN;
-    if (configured === 'weak') return uiMaterial.ImmersiveStyle.THICK;
     return uiMaterial.ImmersiveStyle.REGULAR;
   }
 
@@ -198,16 +247,25 @@ export class ImmersiveMaterialRuntime {
    * Undefined leaves the component-level light feedback unset, while null
    * disables it explicitly.
    */
-  static lightEffect(forceAdaptive: boolean = false): uiMaterial.LightEffectOptions | null | undefined {
-    const configured = ImmersiveMaterialRuntime.configuredLightLevel();
-    if (configured === 'high') return { color: '#88FFFFFF' };
-    if (configured === 'balanced') return { color: '#55FFFFFF' };
+  static lightEffect(forceAdaptive: boolean = false,
+    configured: string = ImmersiveMaterialRuntime.configuredLightLevel(),
+    color: string = '#FFFFFF'): uiMaterial.LightEffectOptions | null | undefined {
     if (configured === 'weak') return null;
+    const rgb = /^#[0-9a-fA-F]{6}$/.test(color) ? color.substring(1) :
+      (/^#[0-9a-fA-F]{8}$/.test(color) ? color.substring(3) : 'FFFFFF');
+    if (configured === 'high') return { color: `#88${rgb}` };
+    if (configured === 'balanced') return { color: `#55${rgb}` };
     // An undefined lightEffect means "do not enable light feedback" for a
     // component-level material. Stepper buttons opt in explicitly so the
     // default follow-system setting still provides the expected touch glow.
-    if (forceAdaptive) return { color: '#55FFFFFF' };
+    if (forceAdaptive) return { color: `#55${rgb}` };
     return undefined;
+  }
+
+  /** The manually drawn touch glow follows the same strength as system material feedback. */
+  static touchGlowOpacity(configured: string): number {
+    if (configured === 'weak') return 0;
+    return configured === 'high' ? 1 : 0.625;
   }
 
   /**
@@ -216,35 +274,49 @@ export class ImmersiveMaterialRuntime {
    * pages. Older devices keep the platform fallback by returning undefined.
    */
   /** A fresh instance per build pass, so a changed light-sense setting is applied again. */
-  static selectMenuModifier(): SelectMenuMaterialModifier {
-    return new SelectMenuMaterialModifier();
+  static selectMenuModifier(lightLevel: string): SelectMenuMaterialModifier {
+    return new SelectMenuMaterialModifier(lightLevel);
   }
 
   /**
    * 下拉弹出菜单（bindPopup）的沉浸光感材质：随光感档位的薄材质、带投影，光感取强调色。
    * API 26 以下返回 undefined，调用方退回磨砂底。
    */
-  static popupMenuMaterial(accentColor: string): uiMaterial.ImmersiveMaterial | undefined {
+  static popupMenuMaterial(accentColor: string,
+    lightLevel: string = ImmersiveMaterialRuntime.configuredLightLevel()): uiMaterial.Material | undefined {
     if (!ImmersiveMaterialRuntime.supportsHds()) return undefined;
-    return new uiMaterial.ImmersiveMaterial({
-      style: ImmersiveMaterialRuntime.materialStyle(),
+    return ImmersiveMaterialRuntime.componentMaterial({
+      style: ImmersiveMaterialRuntime.materialStyle(lightLevel),
       applyShadow: true,
       interactive: false,
-      lightEffect: { color: accentColor }
-    });
+      lightEffect: ImmersiveMaterialRuntime.lightEffect(true, lightLevel, accentColor)
+    }, lightLevel);
+  }
+
+  /** 操作菜单的最大高度：屏高的六成，条目多时在菜单里滚动。 */
+  static popupMenuMaxHeight(): number {
+    try {
+      const screen = display.getDefaultDisplaySync();
+      const density = screen.densityPixels > 0 ? screen.densityPixels : 1;
+      return Math.max(240, Math.floor(screen.height / density * 0.6));
+    } catch (error) {
+      return 420;
+    }
   }
 
   /**
    * 下拉菜单统一用系统弹出层：API 26+ 背景是沉浸光感材质，旧系统退回半透明磨砂；
    * 点菜单外自动收起，收起时回调让调用方复位开关。builder 用箭头函数传入，保证其中的 this 指向页面。
    */
-  static popupMenuOptions(builder: CustomBuilder, placement: Placement, darkMode: boolean, accentColor: string,
+  static popupMenuOptions(lightLevel: string, builder: CustomBuilder, placement: Placement, darkMode: boolean, accentColor: string,
     onHidden: () => void, focusable: boolean = true): CustomPopupOptions {
-    const material = ImmersiveMaterialRuntime.popupMenuMaterial(accentColor);
+    const material = ImmersiveMaterialRuntime.popupMenuMaterial(accentColor, lightLevel);
     const options: CustomPopupOptions = {
       builder: builder,
       placement: placement,
-      popupColor: material !== undefined ? Color.Transparent : ThemeRuntime.glassPanelColor(darkMode, '', 'panel'),
+      popupColor: ImmersiveMaterialRuntime.reducedMaterial(lightLevel) ?
+        ImmersiveMaterialRuntime.surfaceColor(lightLevel, darkMode) :
+        (material !== undefined ? Color.Transparent : ThemeRuntime.glassPanelColor(darkMode, '', 'panel')),
       radius: ImmersiveMaterialRuntime.POPUP_MENU_RADIUS,
       enableArrow: false,
       targetSpace: 8,
@@ -258,34 +330,88 @@ export class ImmersiveMaterialRuntime {
     };
     if (material !== undefined) {
       options.systemMaterial = material;
+      options.backgroundBlurStyle = ImmersiveMaterialRuntime.surfaceBlur(lightLevel);
     } else {
       options.backgroundBlurStyle = BlurStyle.COMPONENT_THICK;
+    }
+    if (lightLevel === 'weak' && deviceInfo.sdkApiVersion >= 20) {
+      const border = ImmersiveMaterialRuntime.surfaceBorder(lightLevel, darkMode);
+      options.borderWidth = border.width;
+      options.borderLinearGradient = { colors: [[border.color, 0], [border.color, 1]] };
     }
     return options;
   }
 
   /**
-   * 半模态弹层（目录等）的沉浸光感材质：固定厚材质保证列表文字清晰，带投影，光感取强调色。
-   * API 26 以下返回 undefined，调用方退回厚磨砂。
+   * 长按触发的系统菜单（bindContextMenu + ResponseType.LongPress）的选项：API 26+ 挂与弹出菜单同一种
+   * 沉浸光感材质，旧系统用系统默认菜单底。由开关控制显隐的 bindContextMenu(isShown) 在真机上弹不出来，
+   * 那类菜单改用 popupMenuOptions。
    */
-  static sheetMaterial(accentColor: string): uiMaterial.ImmersiveMaterial | undefined {
-    if (deviceInfo.sdkApiVersion < 26) return undefined;
-    return new uiMaterial.ImmersiveMaterial({
-      style: uiMaterial.ImmersiveStyle.THICK,
-      applyShadow: true,
-      interactive: false,
-      lightEffect: { color: accentColor }
-    });
+  static contextMenuOptions(lightLevel: string, accentColor: string, onHidden: () => void): ContextMenuOptions {
+    const options: ContextMenuOptions = {
+      enableArrow: false,
+      onDisappear: onHidden
+    };
+    if (lightLevel === 'weak' && deviceInfo.sdkApiVersion >= 20) {
+      const border = ImmersiveMaterialRuntime.surfaceBorder(lightLevel, AppStorage.get<boolean>('appDarkMode') || false);
+      options.outlineWidth = border.width;
+      options.outlineColor = border.color;
+    }
+    const material = ImmersiveMaterialRuntime.popupMenuMaterial(accentColor, lightLevel);
+    if (material !== undefined) {
+      options.systemMaterial = material;
+      if (ImmersiveMaterialRuntime.reducedMaterial(lightLevel)) {
+        options.backgroundColor = ImmersiveMaterialRuntime.surfaceColor(lightLevel,
+          AppStorage.get<boolean>('appDarkMode') || false);
+        options.backgroundBlurStyle = ImmersiveMaterialRuntime.surfaceBlur(lightLevel);
+      }
+    }
+    return options;
   }
 
-  static selectMenuMaterial(): uiMaterial.ImmersiveMaterial | undefined {
+  /**
+   * 给半模态弹层挂沉浸光感材质：API 26+ 按应用档位设置，旧系统退回系统厚模糊加面板色。
+   * 直接改传入的 options 并返回。
+   */
+  static applySheetMaterial(lightLevel: string, options: SheetOptions, darkMode: boolean, accentColor: string): SheetOptions {
+    const border = ImmersiveMaterialRuntime.surfaceBorder(lightLevel, darkMode);
+    options.borderWidth = border.width;
+    options.borderColor = border.color;
+    const material = ImmersiveMaterialRuntime.sheetMaterial(accentColor, lightLevel);
+    if (material !== undefined) {
+      options.backgroundColor = ImmersiveMaterialRuntime.surfaceColor(lightLevel, darkMode);
+      options.blurStyle = ImmersiveMaterialRuntime.surfaceBlur(lightLevel);
+      options.systemMaterial = material;
+    } else {
+      options.blurStyle = BlurStyle.COMPONENT_THICK;
+      options.backgroundColor = ThemeRuntime.glassPanelColor(darkMode, '', 'panel');
+    }
+    return options;
+  }
+
+  /**
+   * 半模态弹层（目录等）的沉浸光感材质：材质与光效均跟随应用档位，带投影，光感取强调色。
+   * API 26 以下返回 undefined，调用方退回厚磨砂。
+   */
+  static sheetMaterial(accentColor: string,
+    lightLevel: string = ImmersiveMaterialRuntime.configuredLightLevel()): uiMaterial.Material | undefined {
     if (!ImmersiveMaterialRuntime.supportsHds()) return undefined;
-    return new uiMaterial.ImmersiveMaterial({
-      style: ImmersiveMaterialRuntime.materialStyle(),
+    return ImmersiveMaterialRuntime.componentMaterial({
+      style: ImmersiveMaterialRuntime.materialStyle(lightLevel),
+      applyShadow: true,
+      interactive: false,
+      lightEffect: ImmersiveMaterialRuntime.lightEffect(true, lightLevel, accentColor)
+    }, lightLevel);
+  }
+
+  static selectMenuMaterial(lightLevel: string): uiMaterial.Material | undefined {
+    if (!ImmersiveMaterialRuntime.supportsHds()) return undefined;
+    return ImmersiveMaterialRuntime.componentMaterial({
+      style: ImmersiveMaterialRuntime.materialStyle(lightLevel),
       materialColor: '#00000000',
       applyShadow: false,
-      interactive: ImmersiveMaterialRuntime.configuredLightLevel() !== 'weak',
-      lightEffect: ImmersiveMaterialRuntime.lightEffect()
-    });
+      interactive: lightLevel !== 'weak',
+      lightEffect: ImmersiveMaterialRuntime.lightEffect(false, lightLevel)
+    }, lightLevel);
   }
 }

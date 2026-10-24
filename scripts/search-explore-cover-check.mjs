@@ -21,14 +21,14 @@ function method(name) {
   return source.slice(start, source.indexOf('\n  }', start) + 4).replace('private ', '');
 }
 const cover = vm.runInContext(stripTypeScriptTypes(`({${[
-  'coverBook', 'rawCoverList', 'refreshCovers', 'activeCover', 'isActiveCoverReady', 'notifyReadyCover', 'markLoaded', 'loadShelfBook'
+  'coverBook', 'rawCoverList', 'refreshCovers', 'resolveDisplayCovers', 'clearCoverRetries', 'activeCover', 'isActiveCoverReady', 'notifyReadyCover', 'markLoaded', 'loadShelfBook'
 ].map(method).join(',')}})`), context);
 Object.assign(cover, {
   bookUrl: 'book-1', origin: 'source', coverUrl: 'source.jpg', shelfBook: null,
   useBookshelfCover: true, appDarkMode: false, applyScope: 'all', targetBooks: '', themeCoverEnabled: false,
   ignoreSource: false, coverMode: 'sequence', lightAlbum: 'light', darkAlbum: 'dark',
   albums: JSON.stringify([{ id: 'light', covers: ['light-1.jpg', 'light-2.jpg'] }, { id: 'dark', covers: ['dark.jpg'] }]),
-  covers: [], activeIndex: 0, loadedRevision: 0, loadedUrls: new Set(), mounted: true,
+  covers: [], displayCovers: [], coverLoadSerial: 0, retryTimers: new Map(), retryCounts: new Map(), activeIndex: 0, loadedRevision: 0, loadedUrls: new Set(), mounted: true,
   imageCover: raw => raw, onReadyCover() {}
 });
 const list = () => Array.from(cover.rawCoverList());

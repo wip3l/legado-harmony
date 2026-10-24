@@ -22,6 +22,7 @@ class ThemeModeOption {
 /** 首页"我的"页签：设置入口列表。 */
 @Component
 export struct SettingsPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @Prop statusBarHeight: number = 0;
   @Prop navBarHeight: number = 0;
   @State headerCollapse: number = 0;
@@ -34,6 +35,7 @@ export struct SettingsPage {
   @StorageLink('accountAvatarUrl') accountAvatarUrl: string = '';
   @StorageLink('accountPoints') accountPoints: number = 0;
   @StorageLink('accountMembershipSku') membershipSku: string = '';
+  @StorageProp('memberIdentityVisible') memberIdentityVisible: boolean = true;
   @StorageLink('cloudSyncEnabled') cloudSyncEnabled: boolean = false;
   @StorageLink('cloudSyncLastSuccessAt') cloudSyncLastSuccessAt: number = 0;
   @StorageLink('cloudSyncPendingCount') cloudSyncPendingCount: number = 0;
@@ -193,7 +195,7 @@ export struct SettingsPage {
     .height(40)
     .justifyContent(FlexAlign.Center)
     .accessibilityText(`显示模式：${this.themeModeLabel()}，切换显示模式`)
-    .bindPopup(this.showThemeModeMenu, ImmersiveMaterialRuntime.popupMenuOptions((): void => {
+    .bindPopup(this.showThemeModeMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
       this.themeModeMenuContent()
     }, Placement.BottomRight, this.appDarkMode, this.accentColor(), () => {
       this.showThemeModeMenu = false;
@@ -309,7 +311,7 @@ export struct SettingsPage {
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .flexShrink(1)
-            if (this.membershipSku) {
+            if (this.membershipSku && this.memberIdentityVisible) {
               Image(MembershipIcons.forSku(this.membershipSku))
                 .width(26)
                 .height(26)

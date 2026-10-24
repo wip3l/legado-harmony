@@ -2,6 +2,7 @@ import fs from '@ohos.file.fs';
 import fileUri from '@ohos.file.fileuri';
 import image from '@ohos.multimedia.image';
 import { LocalBookService } from '../../core/book/LocalBookService';
+import { ReaderComicColorSession, ComicColorCandidate } from '../../core/reader/ReaderComicColorSession';
 import { ReaderImageMarker } from '../../core/book/ReaderImageMarker';
 import { ReaderImageResults } from '../../core/book/ReaderImageResults';
 import { ReaderContinuousDataSource, ReaderScrollItem } from '../../core/reader/ReaderDataSources';
@@ -157,6 +158,11 @@ export struct ReaderComicImageItem {
   /** 在屏幕上时识别图中文字，把繁体改写成简体叠在图上（调用方已判断系统能力）。 */
   @Prop @Watch('onTextConvertChanged') textConvert: boolean = false;
   retryRegistry: ReaderComicRetryRegistry | null = null;
+  colorSession: ReaderComicColorSession | null = null;
+  @State private colorUri: string = '';
+  @State private colorShown: boolean = false;
+  private colorDecoded: boolean = false;
+  private unsubscribeColor: (() => void) | null = null;
   /** 服务器拒绝了这张图（多为签名地址过期）。 */
   onDenied: () => void = () => {};
   @State private ratio: number = 0;
@@ -198,6 +204,8 @@ export struct ReaderComicImageItem {
 
   aboutToAppear(): void {
     this.resetForMarker();
+    this.unsubscribeColor = this.colorSession?.subscribe((): void => this.syncColor()) || null;
+    this.syncColor();
     if (this.retryKey && this.retryRegistry) {
       this.registeredReloadKey = this.retryKey;
       this.retryRegistry.registerReload(this.retryKey, this.reloadHandler);
@@ -205,6 +213,8 @@ export struct ReaderComicImageItem {
   }
 
   aboutToDisappear(): void {
+    this.unsubscribeColor?.();
+    this.unsubscribeColor = null;
     this.visible = false;
     this.releasePending();
     this.enhanceTicket++;
@@ -233,6 +243,13 @@ export struct ReaderComicImageItem {
   onSuperResolutionChanged(): void {
     this.resetEnhancement();
     this.maybeEnhance();
+  }
+
+  private syncColor(): void {
+    const uri = this.colorSession?.uri(this.source) || '';
+    if (uri && this.colorSession?.moving()) return;
+    if (uri !== this.colorUri) { this.colorUri = uri; this.colorShown = false; this.colorDecoded = false; }
+    else if (uri && this.colorDecoded) this.colorShown = true;
   }
 
   private resetEnhancement(): void {
@@ -360,7 +377,10 @@ export struct ReaderComicImageItem {
   }
 
   private applySource(source: string, width: number, height: number): void {
+    this.colorUri = '';
+    this.colorShown = false;
     this.source = source;
+    this.syncColor();
     this.failure = ReaderImageMarker.failureReason(source);
     this.loaded = false;
     this.broken = false;
@@ -516,6 +536,18 @@ export struct ReaderComicImageItem {
             .opacity(this.enhancedBadge ? 1 : 0)
             .animation({ duration: 300, curve: Curve.EaseOut })
             .hitTestBehavior(HitTestMode.None)
+        }
+
+        if (this.colorUri && this.loaded && !this.broken) {
+          Image(this.colorUri)
+            .width(this.boxed() ? '100%' : this.imageWidth())
+            .height(this.boxed() ? '100%' : this.imageHeight() + this.overlap())
+            .objectFit(this.boxed() ? ImageFit.Contain : ImageFit.Fill)
+            .draggable(false)
+            .opacity(this.colorShown ? 1 : 0)
+            .hitTestBehavior(HitTestMode.None)
+            .onComplete(() => { this.colorDecoded = true; this.syncColor(); })
+            .onError(() => { this.colorSession?.failed(this.source); this.colorUri = ''; })
         }
 
         if (this.textPatches.length > 0 && this.loaded && !this.broken) {
@@ -711,6 +743,65 @@ export struct ReaderComicInfoBadge {
  */
 @Component
 export struct ReaderComicView {
+  colorSession: ReaderComicColorSession | null = null;
+  private colorTimer: number = -1;
+  private colorStart: number = 0;
+  private colorEnd: number = 0;
+  private colorOffset: number = 0;
+  private colorDirection: number = 1;
+
+  aboutToAppear(): void {
+    this.colorTimer = setInterval((): void => this.updateColorViewport(), 250);
+  }
+
+  aboutToDisappear(): void {
+    clearInterval(this.colorTimer);
+    this.colorSession?.update([]);
+    this.colorSession?.touch(false);
+  }
+
+  private updateColorViewport(): void {
+    if (!this.colorSession || !this.colorSession.foreground || this.viewWidth <= 0 || this.viewHeight <= 0) return;
+    const offset = this.scroller.currentOffset().yOffset;
+    if (Math.abs(offset - this.colorOffset) > 0.5) {
+      this.colorDirection = offset > this.colorOffset ? 1 : -1;
+      this.colorSession.motion();
+    }
+    this.colorOffset = offset;
+    const candidates: ComicColorCandidate[] = [];
+    const height = Math.max(1, this.viewHeight);
+    let first = this.colorEnd;
+    let last = this.colorStart;
+    for (let index = this.colorStart; index <= this.colorEnd && candidates.length < 32; index++) {
+      const item = this.dataSource.itemAt(index);
+      if (!item?.isPage()) continue;
+      const rect = this.scroller.getItemRect(index);
+      const top = (rect.y - height / 2) * this.zoomScale + height / 2 + this.zoomY;
+      const bottom = top + rect.height * this.zoomScale;
+      if (rect.height <= 0 || bottom <= 0 || top >= height) continue;
+      first = Math.min(first, index);
+      last = Math.max(last, index);
+      const center = (Math.max(0, top) + Math.min(height, bottom)) / 2;
+      candidates.push(new ComicColorCandidate(ReaderComicColorSession.source(item.text), true,
+        Math.abs(center - height / 2), `${item.pageIndex + 1}`));
+    }
+    let ahead = 0;
+    let index = (this.colorDirection > 0 ? last : first) + this.colorDirection;
+    while (index >= 0 && index < this.dataSource.totalCount() && ahead < height * 2 && candidates.length < 32) {
+      const item = this.dataSource.itemAt(index);
+      if (item?.isPage()) {
+        const info = ReaderImageMarker.parse(item.text);
+        const source = ReaderComicColorSession.source(item.text);
+        const ratio = info.width > 0 ? info.height / info.width : ReaderComicImageSizes.ratio(source) || 1.5;
+        const imageHeight = Math.max(120, Math.min(24000, this.viewWidth * ratio));
+        ahead += (this.fitScreen ? Math.min(height, imageHeight) : imageHeight) * this.zoomScale + this.pageGap;
+        candidates.push(new ComicColorCandidate(ReaderComicColorSession.source(item.text), false, ahead,
+          `${item.pageIndex + 1}`));
+      } else ahead += 150;
+      index += this.colorDirection;
+    }
+    this.colorSession.update(candidates);
+  }
   scroller: ListScroller = new ListScroller();
   dataSource: ReaderContinuousDataSource = new ReaderContinuousDataSource();
   /** 网络图片向后预先加载的张数（列表在视口外预先构建的项数）。 */
@@ -849,6 +940,8 @@ export struct ReaderComicView {
 
   /** 点击手势默认不限制移动距离，拖动松手时也会识别成点击；拖过的触摸一律不算点击。 */
   private handleTouch(event: TouchEvent): void {
+    if (event.type === TouchType.Down) this.colorSession?.touch(true);
+    if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.colorSession?.touch(false);
     if (event.type === TouchType.Down && event.touches.length <= 1) this.touchDragged = false;
   }
 
@@ -1117,6 +1210,7 @@ export struct ReaderComicView {
             } else if (this.isImagePage(item.text)) {
               ReaderComicImageItem({
                 marker: item.text.trim(),
+                colorSession: this.colorSession,
                 viewWidth: this.viewWidth,
                 viewHeight: this.viewHeight,
                 fitScreen: this.fitScreen,
@@ -1153,7 +1247,12 @@ export struct ReaderComicView {
       .scale({ x: this.zoomScale, y: this.zoomScale })
       .translate({ x: this.zoomX, y: this.zoomY + this.transitionY })
       .opacity(this.transitionOpacity)
-      .onScrollIndex((start: number, end: number) => this.onVisibleRangeChange(start, end))
+      .onScrollIndex((start: number, end: number) => {
+        this.colorStart = start;
+        this.colorEnd = end;
+        this.updateColorViewport();
+        this.onVisibleRangeChange(start, end);
+      })
       .onReachEnd(() => this.onReachEnd())
       .onAppear(() => this.onListAppear())
 

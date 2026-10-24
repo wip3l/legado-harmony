@@ -1,3 +1,4 @@
+import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { UIContext, promptAction, uiMaterial } from '@kit.ArkUI';
 import deviceInfo from '@ohos.deviceInfo';
 import { ImmersiveMaterialRuntime } from './ImmersiveMaterialRuntime';
@@ -12,7 +13,8 @@ import {
 /** Shows API 26+ immersive-light feedback and lets callers retain their Toast fallback. */
 export class HdsFeedback {
   static show(uiContext: UIContext | null, message: string): boolean {
-    if (uiContext === null || deviceInfo.sdkApiVersion < 26) return false;
+    if (uiContext === null || deviceInfo.sdkApiVersion < 26 ||
+      ImmersiveMaterialRuntime.reducedMaterial(ImmersiveMaterialRuntime.configuredLightLevel())) return false;
     try {
       const snackBar: HdsSnackBar = new HdsSnackBar(uiContext);
       const icon: SnackBarIconOptions = {};
@@ -33,13 +35,21 @@ export class HdsFeedback {
   static showToast(message: string): void {
     try {
       if (deviceInfo.sdkApiVersion >= 26 && uiMaterial.isImmersiveMaterialSupported()) {
-        const material: uiMaterial.ImmersiveMaterial = new uiMaterial.ImmersiveMaterial({
+        const material: uiMaterial.Material = ImmersiveMaterialRuntime.componentMaterial({
           style: ImmersiveMaterialRuntime.materialStyle(),
           applyShadow: true,
           interactive: ImmersiveMaterialRuntime.configuredLightLevel() !== 'weak',
           lightEffect: ImmersiveMaterialRuntime.lightEffect()
-        });
-        promptAction.showToast({ message: message, systemMaterial: material });
+        }, ImmersiveMaterialRuntime.configuredLightLevel());
+        const level = ImmersiveMaterialRuntime.configuredLightLevel();
+        if (ImmersiveMaterialRuntime.reducedMaterial(level)) {
+          promptAction.showToast({ message: message, systemMaterial: material,
+            backgroundColor: ImmersiveMaterialRuntime.surfaceColor(level, AppStorage.get<boolean>('appDarkMode') || false),
+            backgroundBlurStyle: ImmersiveMaterialRuntime.surfaceBlur(level),
+            textColor: ThemeRuntime.primaryTextColor(AppStorage.get<boolean>('appDarkMode') || false) });
+        } else {
+          promptAction.showToast({ message: message, systemMaterial: material });
+        }
         return;
       }
     } catch (error) {

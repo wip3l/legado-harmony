@@ -299,151 +299,134 @@ export struct BookChangeSourceDialog {
   }
 
   build() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .onClick(() => {
-          this.requestClose();
-        })
+    Column() {
+      Row() {
+        Column({ space: AppSpacing.XXS }) {
+          Text('换源')
+            .fontSize(AppFontSize.TITLE)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.primaryTextColor())
+          Text(`《${this.targetBook?.name || ''}》`)
+            .fontSize(AppFontSize.CAPTION)
+            .fontColor(this.subTextColor())
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
 
-      Column() {
-        Row() {
-          Column({ space: AppSpacing.XXS }) {
-            Text('换源')
-              .fontSize(AppFontSize.TITLE)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.primaryTextColor())
-            Text(`《${this.targetBook?.name || ''}》`)
-              .fontSize(AppFontSize.CAPTION)
-              .fontColor(this.subTextColor())
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-
-          if (this.searching) {
-            LoadingProgress()
-              .width(26)
-              .height(26)
-              .margin({ right: AppSpacing.LG })
-          } else {
-            SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-              .fontSize(21)
-              .fontColor([this.primaryTextColor()])
-              .width(40)
-              .height(40)
-              .margin({ right: AppSpacing.XS })
-              .onClick(() => this.refreshResults())
-          }
-          SymbolGlyph($r('sys.symbol.xmark'))
-            .fontSize(20)
+        if (this.searching) {
+          LoadingProgress()
+            .width(26)
+            .height(26)
+            .margin({ right: AppSpacing.LG })
+        } else {
+          SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+            .fontSize(21)
             .fontColor([this.primaryTextColor()])
             .width(40)
             .height(40)
-            .onClick(() => {
-              this.requestClose();
-            })
+            .margin({ right: AppSpacing.XS })
+            .onClick(() => this.refreshResults())
+        }
+        SymbolGlyph($r('sys.symbol.xmark'))
+          .fontSize(20)
+          .fontColor([this.primaryTextColor()])
+          .width(40)
+          .height(40)
+          .onClick(() => {
+            this.requestClose();
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Text(this.status || '将使用当前书名进行全词匹配搜索')
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.subTextColor())
+        .width('100%')
+        .margin({ top: AppSpacing.MD, bottom: AppSpacing.MD })
+
+      if (this.searching && this.results.length === 0) {
+        Column({ space: AppSpacing.MD }) {
+          LoadingProgress().width(36).height(36)
+          Text('正在搜索可用书源...')
+            .fontSize(AppFontSize.BODY)
+            .fontColor(this.subTextColor())
         }
         .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        Text(this.status || '将使用当前书名进行全词匹配搜索')
-          .fontSize(AppFontSize.BODY)
+        .height(260)
+        .justifyContent(FlexAlign.Center)
+      } else if (this.results.length === 0) {
+        Text('暂无可切换书源')
+          .fontSize(AppFontSize.BODY_LARGE)
           .fontColor(this.subTextColor())
           .width('100%')
-          .margin({ top: AppSpacing.MD, bottom: AppSpacing.MD })
-
-        if (this.searching && this.results.length === 0) {
-          Column({ space: AppSpacing.MD }) {
-            LoadingProgress().width(36).height(36)
-            Text('正在搜索可用书源...')
-              .fontSize(AppFontSize.BODY)
-              .fontColor(this.subTextColor())
-          }
-          .width('100%')
           .height(260)
-          .justifyContent(FlexAlign.Center)
-        } else if (this.results.length === 0) {
-          Text('暂无可切换书源')
-            .fontSize(AppFontSize.BODY_LARGE)
-            .fontColor(this.subTextColor())
-            .width('100%')
-            .height(260)
-            .textAlign(TextAlign.Center)
-        } else {
-          List({ space: AppSpacing.MD }) {
-            ForEach(this.results, (book: SearchBook) => {
-              ListItem() {
-                Row() {
-                  Column({ space: AppSpacing.XS }) {
-                    Text(book.originName || book.origin)
-                      .fontSize(AppFontSize.BODY_LARGE)
-                      .fontWeight(FontWeight.Bold)
-                      .fontColor(this.primaryTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(`作者：${book.author || '未知'}`)
-                      .fontSize(AppFontSize.CAPTION)
-                      .fontColor(this.subTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(`最新：${book.latestChapterTitle || '书源未提供'}`)
-                      .fontSize(AppFontSize.CAPTION)
-                      .fontColor(this.subTextColor())
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  }
-                  .layoutWeight(1)
-                  .alignItems(HorizontalAlign.Start)
-
-                  Button(this.switching ? '切换中' : '切换')
-                    .width(68)
-                    .height(32)
-                    .fontSize(AppFontSize.BODY)
-                    .borderRadius(16)
-                    .backgroundColor(this.buttonColor())
-                    .fontColor(ThemeRuntime.onAccentColor())
-                    .enabled(!this.switching)
-                    .onClick(() => this.switchSource(book))
+          .textAlign(TextAlign.Center)
+      } else {
+        List({ space: AppSpacing.MD }) {
+          ForEach(this.results, (book: SearchBook) => {
+            ListItem() {
+              Row() {
+                Column({ space: AppSpacing.XS }) {
+                  Text(book.originName || book.origin)
+                    .fontSize(AppFontSize.BODY_LARGE)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor(this.primaryTextColor())
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(`作者：${book.author || '未知'}`)
+                    .fontSize(AppFontSize.CAPTION)
+                    .fontColor(this.subTextColor())
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(`最新：${book.latestChapterTitle || '书源未提供'}`)
+                    .fontSize(AppFontSize.CAPTION)
+                    .fontColor(this.subTextColor())
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
-                .width('100%')
-                .padding(AppSpacing.LG)
-                .backgroundColor(this.inputColor())
-                .borderRadius(ThemeRuntime.mediumRadius())
-              }
-            }, (book: SearchBook) => `${book.origin}|${book.bookUrl}`)
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
 
-            if (this.searching) {
-              ListItem() {
-                Row({ space: AppSpacing.MD }) {
-                  LoadingProgress().width(20).height(20)
-                  Text('继续加载中...').fontSize(AppFontSize.BODY).fontColor(this.subTextColor())
-                }
-                .width('100%')
-                .height(42)
-                .justifyContent(FlexAlign.Center)
+                Button(this.switching ? '切换中' : '切换')
+                  .width(68)
+                  .height(32)
+                  .fontSize(AppFontSize.BODY)
+                  .borderRadius(16)
+                  .backgroundColor(this.buttonColor())
+                  .fontColor(ThemeRuntime.onAccentColor())
+                  .enabled(!this.switching)
+                  .onClick(() => this.switchSource(book))
               }
+              .width('100%')
+              .padding(AppSpacing.LG)
+              .backgroundColor(this.inputColor())
+              .borderRadius(ThemeRuntime.mediumRadius())
+            }
+          }, (book: SearchBook) => `${book.origin}|${book.bookUrl}`)
+
+          if (this.searching) {
+            ListItem() {
+              Row({ space: AppSpacing.MD }) {
+                LoadingProgress().width(20).height(20)
+                Text('继续加载中...').fontSize(AppFontSize.BODY).fontColor(this.subTextColor())
+              }
+              .width('100%')
+              .height(42)
+              .justifyContent(FlexAlign.Center)
             }
           }
-          .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
-          .width('100%')
-          .height(340)
         }
+        .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+        .width('100%')
+        .height(340)
       }
-      .width('90%')
-      .padding(AppSpacing.XXL)
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .clip(true)
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
     }
     .width('100%')
-    .height('100%')
+    .padding(AppSpacing.XXL)
+    .clip(true)
   }
 
   primaryTextColor(): string {

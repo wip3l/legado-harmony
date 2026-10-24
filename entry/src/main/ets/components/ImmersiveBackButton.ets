@@ -3,6 +3,7 @@ import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 
 @Component
 export struct ImmersiveBackButton {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @Prop icon: Resource = $r('sys.symbol.chevron_left');
   @Prop iconColor: ResourceColor = '#18191C';
   @Prop labelText: string = '';
@@ -34,6 +35,7 @@ export struct ImmersiveBackButton {
         .padding(0)
         .enabled(this.buttonEnabled)
         .backgroundColor(Color.Transparent)
+        .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.darkMode))
         .accessibilityText(this.accessibilityLabel)
         .onClick(() => this.onBack())
       }
@@ -64,7 +66,7 @@ export struct ImmersiveBackButton {
         },
         systemMaterialEffect: {
           materialType: ImmersiveMaterialRuntime.materialType(),
-          materialLevel: ImmersiveMaterialRuntime.materialLevel()
+          materialLevel: ImmersiveMaterialRuntime.materialLevel(this.immersiveLightLevel)
         },
         barSideMargin: 0,
         barBottomMargin: 0,
@@ -96,6 +98,7 @@ export struct ImmersiveBackButton {
     .width(this.materialButtonSize())
     .height(this.materialButtonSize())
     .borderRadius(this.materialButtonSize() / 2, RenderStrategy.OFFSCREEN)
+    .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.darkMode))
     .clip(true)
     .translate({ x: this.startInset * this.normalizedMaterialScale() })
   }

@@ -24,6 +24,7 @@ import { BookSourceAudioWebRuntimeHost } from '../components/BookSourceAudioWebR
 import { WebBookFetchRuntimeHost } from '../components/WebBookFetchRuntimeHost';
 import { HdsFeedback } from '../utils/HdsFeedback';
 import { SystemDialogSession } from '../utils/SystemDialogSession';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 
@@ -66,6 +67,7 @@ class AudioBookAvSessionHolder {
 @Entry
 @Component
 struct AudioBookPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   // 加密的书源封面解密完成后递增，读取它的封面会重新取到本地文件地址。
   @StorageProp('sourceCoverRevision') sourceCoverRevision: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
@@ -229,9 +231,13 @@ struct AudioBookPage {
         }
       })
 
-      if (this.showChapterList) {
-        this.chapterListOverlay()
-      }
+      // 朗读目录：系统半模态，挂在 1×1 节点上。
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: 0, y: 0 })
+        .hitTestBehavior(HitTestMode.None)
+        .bindSheet(this.showChapterList, this.chapterListOverlay(), this.ttsCatalogSheetOptions())
       BookSourceStageRuntimeHost()
       BookSourceAudioWebRuntimeHost()
       WebBookFetchRuntimeHost()
@@ -624,7 +630,6 @@ struct AudioBookPage {
       primaryTextColor: this.primaryTextColor(),
       subTextColor: this.subTextColor(),
       controlIconColor: this.primaryTextColor(),
-      panelColor: ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'),
       bookName: this.book?.name || '',
       bookInitial: this.bookInitial(),
       cover: this.displayCover(),
@@ -635,7 +640,6 @@ struct AudioBookPage {
       progressText: `${this.chapterIndex + 1} / ${this.chapters.length}`,
       bottomInset: this.navBarHeight,
       viewportHeight: this.viewportHeight,
-      zIndexValue: 20,
       scroller: this.chapterScroller,
       source: this.chapterDataSource,
       isCached: (displayIndex: number): boolean =>
@@ -644,6 +648,18 @@ struct AudioBookPage {
       onSelect: (displayIndex: number) => this.selectChapter(this.chapterCanonicalIndex(displayIndex)),
       onClose: () => this.closeChapterList()
     })
+  }
+
+  ttsCatalogSheetOptions(): SheetOptions {
+    return ImmersiveMaterialRuntime.applySheetMaterial(this.immersiveLightLevel, {
+      height: TtsCatalogSheet.sheetHeight(this.viewportHeight),
+      dragBar: false,
+      showClose: false,
+      onWillDismiss: (): void => {
+        this.closeChapterList();
+      },
+      onWillSpringBackWhenDismiss: (): void => {}
+    }, this.appDarkMode, this.accentColor());
   }
 
   async loadBook(): Promise<void> {

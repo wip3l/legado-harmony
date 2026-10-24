@@ -7,8 +7,13 @@ import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
  */
 @Component
 export struct ReaderFloatingMaterialBar {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
+  @Prop darkMode: boolean = false;
+  @Prop fallbackColor: ResourceColor = '';
   @Prop barWidth: number = 320;
   @Prop barHeight: number = 48;
+  /** 圆角；不传（负数）时按胶囊处理，取高度的一半。 */
+  @Prop cornerRadius: number = -1;
   @Prop tintColor: ResourceColor = Color.Transparent;
   @BuilderParam content: () => void = this.emptyContent;
 
@@ -23,20 +28,27 @@ export struct ReaderFloatingMaterialBar {
     }
     .width('100%')
     .height(this.barHeight)
-    .borderRadius(this.barHeight / 2)
+    .borderRadius(this.radius())
     .systemMaterial(this.material())
+    .backgroundColor(ImmersiveMaterialRuntime.surfaceColor(this.immersiveLightLevel, this.darkMode, this.fallbackColor))
+    .backgroundBlurStyle(ImmersiveMaterialRuntime.surfaceBlur(this.immersiveLightLevel))
+    .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.darkMode))
   }
 
-  private material(): uiMaterial.ImmersiveMaterial {
-    return new uiMaterial.ImmersiveMaterial({
-      style: ImmersiveMaterialRuntime.materialStyle(),
+  private radius(): number {
+    return this.cornerRadius >= 0 ? this.cornerRadius : this.barHeight / 2;
+  }
+
+  private material(): uiMaterial.Material {
+    return ImmersiveMaterialRuntime.componentMaterial({
+      style: ImmersiveMaterialRuntime.materialStyle(this.immersiveLightLevel),
       // Reuse the reader's glass tint and opacity instead of adding a white wash.
       materialColor: this.tintColor,
       applyShadow: false,
       // Sliders must not deform the whole capsule while the user drags them.
       interactive: false,
-      lightEffect: ImmersiveMaterialRuntime.lightEffect(true)
-    });
+      lightEffect: ImmersiveMaterialRuntime.lightEffect(true, this.immersiveLightLevel)
+    }, this.immersiveLightLevel);
   }
 
   build() {
@@ -55,7 +67,58 @@ export struct ReaderFloatingMaterialBar {
     .onContentWillChange(() => false)
     .width(this.barWidth)
     .height(this.barHeight)
-    .borderRadius(this.barHeight / 2, RenderStrategy.OFFSCREEN)
+    .borderRadius(this.radius(), RenderStrategy.OFFSCREEN)
     .clip(true)
+  }
+}
+
+/**
+ * 阅读页浮层面板（目录、设置、朗读音色等）的底板：API 26+ 把整块面板放进 ReaderFloatingMaterialBar，
+ * 由系统画沉浸光感材质；旧系统退回实色底加浅投影。面板需要明确的宽高。
+ * 内容用尾随闭包传入；位置、进出场动画加在外面包的一层容器上。
+ */
+@Component
+export struct ReaderMaterialPanel {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
+  @Prop panelWidth: number = 320;
+  @Prop panelHeight: number = 400;
+  @Prop cornerRadius: number = 28;
+  @Prop darkMode: boolean = false;
+  /** 没有系统材质时的实色底。 */
+  @Prop fallbackColor: ResourceColor = '#FFFFFF';
+  @BuilderParam content: () => void = this.emptyContent;
+
+  @Builder
+  emptyContent() {
+  }
+
+  build() {
+    if (ImmersiveMaterialRuntime.supportsHds()) {
+      ReaderFloatingMaterialBar({
+        barWidth: this.panelWidth,
+        barHeight: this.panelHeight,
+        cornerRadius: this.cornerRadius,
+        fallbackColor: this.fallbackColor,
+        darkMode: this.darkMode
+      }) {
+        this.content()
+      }
+    } else {
+      Stack({ alignContent: Alignment.TopStart }) {
+        this.content()
+      }
+      .width(this.panelWidth)
+      .height(this.panelHeight)
+      .borderRadius(this.cornerRadius)
+      .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.darkMode))
+      .clip(true)
+      .backgroundColor(this.fallbackColor)
+      .shadow({
+        radius: 18,
+        color: this.darkMode ? '#66000000' : '#1F000000',
+        offsetX: 0,
+        offsetY: 6
+      })
+    }
   }
 }

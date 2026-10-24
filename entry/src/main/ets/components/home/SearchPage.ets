@@ -33,6 +33,7 @@ class SearchCategoryChip {
 /** 首页"搜索"页签：搜索输入、历史、多源搜索进度与结果。 */
 @Component
 export struct SearchPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   /** 标题行里搜索范围标签、设置按钮，以及搜索框与搜索按钮的高度。 */
   static readonly HEADER_CONTROL_SIZE: number = 40;
   /** 结果分类栏的高度、两侧留白与选中指示条宽度。 */
@@ -308,7 +309,6 @@ export struct SearchPage {
   }
 
   searchSourceSheetOptions(): SheetOptions {
-    const material = ImmersiveMaterialRuntime.sheetMaterial(this.accentColor());
     const options: SheetOptions = {
       detents: ['75%', SheetSize.LARGE],
       dragBar: true,
@@ -338,14 +338,7 @@ export struct SearchPage {
         this.showSearchSourcePicker = false;
       }
     };
-    if (material !== undefined) {
-      options.backgroundColor = Color.Transparent;
-      options.systemMaterial = material;
-    } else {
-      options.blurStyle = BlurStyle.COMPONENT_THICK;
-      options.backgroundColor = ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel');
-    }
-    return options;
+    return ImmersiveMaterialRuntime.applySheetMaterial(this.immersiveLightLevel, options, this.appDarkMode, this.accentColor());
   }
 
   @Builder
@@ -536,7 +529,7 @@ export struct SearchPage {
                     this.showSearchSettingsDialog = !this.showSearchSettingsDialog;
                   })
                 }
-                .bindPopup(this.showSearchSettingsDialog, ImmersiveMaterialRuntime.popupMenuOptions((): void => {
+                .bindPopup(this.showSearchSettingsDialog, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
                   this.searchSettingsContent()
                 }, Placement.BottomRight, this.appDarkMode, this.accentColor(), () => {
                   this.showSearchSettingsDialog = false;
@@ -558,7 +551,10 @@ export struct SearchPage {
                   .height(SearchPage.HEADER_CONTROL_SIZE)
                   .borderRadius(SearchPage.HEADER_CONTROL_SIZE / 2)
                   .systemMaterial(this.searchFieldMaterial())
-                  .border({ width: 1, color: this.glassBorderColor() })
+                  .backgroundColor(ImmersiveMaterialRuntime.surfaceColor(this.immersiveLightLevel, this.appDarkMode))
+                  .backgroundBlurStyle(ImmersiveMaterialRuntime.surfaceBlur(this.immersiveLightLevel))
+                  .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.appDarkMode,
+                    1, this.glassBorderColor()))
                   .alignItems(VerticalAlign.Center)
                 } else {
                   Row() {
@@ -568,6 +564,7 @@ export struct SearchPage {
                   .height(SearchPage.HEADER_CONTROL_SIZE)
                   .borderRadius(SearchPage.HEADER_CONTROL_SIZE / 2)
                   .backgroundColor(this.glassCardColor())
+                  .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.appDarkMode))
                   .shadow(ThemeRuntime.floatingControlShadow(this.appDarkMode))
                   .alignItems(VerticalAlign.Center)
                 }
@@ -587,7 +584,7 @@ export struct SearchPage {
               .opacity(this.searchHeaderRowOpacity(SearchPage.TITLE_ROW_HEIGHT, this.searchFieldRowHeight()))
               .hitTestBehavior(this.searchHeaderRowHitTest(SearchPage.TITLE_ROW_HEIGHT, this.searchFieldRowHeight()))
               .bindPopup(this.showSearchHistoryDropdown && this.showResult && this.searchHistory.length > 0,
-                ImmersiveMaterialRuntime.popupMenuOptions((): void => {
+                ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
                   this.searchHistoryPopupContent()
                 }, Placement.Bottom, this.appDarkMode, this.accentColor(), () => {
                   this.showSearchHistoryDropdown = false;
@@ -1044,14 +1041,14 @@ export struct SearchPage {
     }
   }
 
-  private searchFieldMaterial(): uiMaterial.ImmersiveMaterial {
-    return new uiMaterial.ImmersiveMaterial({
-      style: ImmersiveMaterialRuntime.materialStyle(),
+  private searchFieldMaterial(): uiMaterial.Material {
+    return ImmersiveMaterialRuntime.componentMaterial({
+      style: ImmersiveMaterialRuntime.materialStyle(this.immersiveLightLevel),
       materialColor: this.appDarkMode ? '#351B1D22' : '#35FFFFFF',
       applyShadow: true,
-      interactive: ImmersiveMaterialRuntime.configuredLightLevel() !== 'weak',
-      lightEffect: ImmersiveMaterialRuntime.lightEffect()
-    });
+      interactive: this.immersiveLightLevel !== 'weak',
+      lightEffect: ImmersiveMaterialRuntime.lightEffect(false, this.immersiveLightLevel)
+    }, this.immersiveLightLevel);
   }
 
   searchHistoryPopupPanelWidth(): number {

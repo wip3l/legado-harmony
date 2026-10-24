@@ -11,7 +11,9 @@ for (const [name, hash] of Object.entries({
   'TSCharacters.txt': '6b5a0a799bea2bb22c001f635eaa3fc2904310f0c08addbff275477a80ecf09a',
   'TSPhrases.txt': '504169029c43f7f234b8e2ae470720af3657675c5574ff8aa0feb257e1dc5ce2'
 })) {
-  assert.equal(crypto.createHash('sha256').update(fs.readFileSync(new URL(name, rawfile))).digest('hex'), hash);
+  // Git may check these text resources out with CRLF on Windows; validate their canonical LF content.
+  const text = fs.readFileSync(new URL(name, rawfile), 'utf8').replace(/\r\n/g, '\n');
+  assert.equal(crypto.createHash('sha256').update(text).digest('hex'), hash);
 }
 
 const context = vm.createContext({ Map, Set, Number, Math, Error, Array, Infinity });

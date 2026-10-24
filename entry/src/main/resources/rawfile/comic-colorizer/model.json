@@ -1,0 +1,17 @@
+{
+  "name": "Manga-Colorizer AlacGAN mobile preview",
+  "upstream": "https://github.com/BinitDOX/Manga-Colorizer",
+  "commit": "623f5a2a9dc3bb4fc0c8edbfa2d22de43f8f6ea7",
+  "weights": "https://drive.google.com/file/d/1qmxUEKADkEM4iYLp1fpPLLKnfZ6tcF-t/view",
+  "weightsSha256": "087e6a0bc02770e732a52f33878b71a272a6123c9ac649e9b5bfb75e39e5c1d5",
+  "modelSha256": "c212815a335a006b4bbf336af1c25c6158aaeac077f35f2775af381b83fe9934",
+  "license": "MIT (upstream repository; see LICENSE)",
+  "converter": "MindSpore Lite 2.3.0 Windows x64",
+  "input": "float32 NHWC [1,H,W,5]: grayscale [0,1], four zero hint channels; H/W multiples of 32",
+  "output": "float32 NCHW [1,3,H,W]: RGB [-1,1]; interleave before compositing",
+  "weightsPrecision": "float16 storage; preferred_fp16 CPU execution",
+  "conversion": "preserve dynamic H/W; do not pass a fixed inputShape to converter",
+  "sizing": "aspect fit: short edge <=512, long edge <=768; pad to multiple of 32, min64; no upscaling",
+  "compositing": "restore original high-frequency grayscale detail and black ink; allow white regions to receive color; explicit RGBA source buffer",
+  "bytes": 61596264
+}

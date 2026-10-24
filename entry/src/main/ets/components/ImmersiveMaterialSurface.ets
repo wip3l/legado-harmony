@@ -29,6 +29,7 @@ class ImmersiveSurfaceClip implements AttributeModifier<CommonAttribute> {
  */
 @Component
 export struct ImmersiveMaterialSurface {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @Prop surfaceWidth: number = 40;
   @Prop surfaceHeight: number = 40;
   @Prop darkMode: boolean = false;
@@ -73,7 +74,7 @@ export struct ImmersiveMaterialSurface {
           },
           systemMaterialEffect: {
             materialType: ImmersiveMaterialRuntime.materialType(),
-            materialLevel: ImmersiveMaterialRuntime.materialLevel()
+            materialLevel: ImmersiveMaterialRuntime.materialLevel(this.immersiveLightLevel)
           },
           barSideMargin: 0,
           barBottomMargin: 0,
@@ -109,7 +110,7 @@ export struct ImmersiveMaterialSurface {
           radius: this.surfaceHeight,
           colors: [[this.glowColor, 0], [Color.Transparent, 1]]
         })
-        .opacity(this.touching ? 1 : 0)
+        .opacity(this.touching ? ImmersiveMaterialRuntime.touchGlowOpacity(this.immersiveLightLevel) : 0)
         .animation({ duration: 160, curve: Curve.Friction })
         .hitTestBehavior(HitTestMode.None)
         .accessibilityLevel('no')
@@ -117,6 +118,7 @@ export struct ImmersiveMaterialSurface {
     .width(this.surfaceWidth)
     .height(this.surfaceHeight)
     .attributeModifier(new ImmersiveSurfaceClip(this.surfaceHeight / 2))
+    .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.darkMode))
     .shadow(ImmersiveMaterialRuntime.supportsHdsTabs() ? { radius: 0, color: Color.Transparent } : {
       radius: this.darkMode ? 0 : 12,
       color: this.darkMode ? Color.Transparent : '#14000000',

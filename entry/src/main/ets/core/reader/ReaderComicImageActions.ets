@@ -12,6 +12,8 @@ export interface ReaderComicImageActionsHost {
   uiContext: () => UIContext;
   abilityContext: () => common.UIAbilityContext;
   accentColor: () => string;
+  /** Return true when the reader handled in-place coloring; otherwise use the standalone page. */
+  colorPage?: (source: string) => boolean;
   /** 本地导入的书：图片不会过期，不自动刷新。 */
   isLocalBook: () => boolean;
   currentChapter: () => number;
@@ -79,7 +81,8 @@ export class ReaderComicImageActions {
           { text: '保存到相册', color: color },
           { text: '分享', color: color },
           { text: '重新加载', color: color },
-          { text: '查看本页文字', color: color }
+          { text: '查看本页文字', color: color },
+          { text: '本页着色（会员）', color: color }
         ]
       });
       index = result.index;
@@ -91,13 +94,15 @@ export class ReaderComicImageActions {
       reload();
       return;
     }
-    if (index === 3) {
+    if (index === 3 || index === 4) {
+      if (index === 4 && this.host.colorPage?.(source)) return;
       const requestId = ComicTextRequests.put(source);
       try {
-        await router.pushUrl({ url: 'pages/ComicText', params: { requestId: requestId } });
+        await router.pushUrl({ url: index === 4 ? 'pages/ComicColor' : 'pages/ComicText',
+          params: { requestId: requestId } });
       } catch (_) {
         ComicTextRequests.take(requestId);
-        HdsFeedback.showToast('无法打开文字识别，请重试');
+        HdsFeedback.showToast(index === 4 ? '无法打开本页着色，请重试' : '无法打开文字识别，请重试');
       }
       return;
     }

@@ -13,6 +13,7 @@ class HsvColor {
 
 @Component
 export struct ColorCodePicker {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @Prop value: string = '#007DFF';
   @Prop placeholder: string = '#007DFF';
   @Prop appDarkMode: boolean = false;
@@ -299,7 +300,7 @@ export struct ColorCodePicker {
             .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.appDarkMode))
             .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode))
             .menuBackgroundBlurStyle(BlurStyle.NONE)
-            .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier())
+            .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
             .onSelect((index: number) => {
               if (index === 2) {
                 this.openPicker();

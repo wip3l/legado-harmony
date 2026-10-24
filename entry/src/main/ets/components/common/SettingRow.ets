@@ -1,3 +1,4 @@
+import { MembershipBadge } from './MembershipBadge';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
@@ -11,6 +12,7 @@ import { AdaptiveSwitch } from '../AdaptiveSwitch';
 @Component
 export struct SettingRow {
   @Prop title: string = '';
+  @Prop minimumMembership: string = '';
   @Prop description: string = '';
   /** 行底部的细分隔线；卡片最后一行可以关掉。 */
   @Prop showDivider: boolean = true;
@@ -29,10 +31,16 @@ export struct SettingRow {
   build() {
     Row() {
       Column() {
-        Text(this.title)
-          .fontSize(AppFontSize.BODY_LARGE)
-          .fontColor(this.titleColor !== undefined ? this.titleColor :
-            ThemeRuntime.primaryTextColor(this.appDarkMode))
+        Row({ space: AppSpacing.XS }) {
+          Text(this.title)
+            .fontSize(AppFontSize.BODY_LARGE)
+            .fontColor(this.titleColor !== undefined ? this.titleColor :
+              ThemeRuntime.primaryTextColor(this.appDarkMode))
+            .flexShrink(1)
+          if (this.minimumMembership) {
+            MembershipBadge({ sku: this.minimumMembership })
+          }
+        }
         if (this.description) {
           Text(this.description)
             .fontSize(AppFontSize.CAPTION)
@@ -59,6 +67,7 @@ export struct SettingRow {
 @Component
 export struct SettingSwitchRow {
   @Prop title: string = '';
+  @Prop minimumMembership: string = '';
   @Prop description: string = '';
   @Prop isOn: boolean = false;
   @Prop switchEnabled: boolean = true;
@@ -67,7 +76,7 @@ export struct SettingSwitchRow {
   };
 
   build() {
-    SettingRow({ title: this.title, description: this.description, showDivider: this.showDivider }) {
+    SettingRow({ title: this.title, minimumMembership: this.minimumMembership, description: this.description, showDivider: this.showDivider }) {
       AdaptiveSwitch({
         isOn: this.isOn,
         switchEnabled: this.switchEnabled,
@@ -83,6 +92,7 @@ export struct SettingSwitchRow {
 @Component
 export struct SettingNavRow {
   @Prop title: string = '';
+  @Prop minimumMembership: string = '';
   @Prop description: string = '';
   /** 显示在箭头左侧的当前值，可不传。 */
   @Prop value: string = '';
@@ -94,7 +104,7 @@ export struct SettingNavRow {
   };
 
   build() {
-    SettingRow({ title: this.title, description: this.description, showDivider: this.showDivider,
+    SettingRow({ title: this.title, minimumMembership: this.minimumMembership, description: this.description, showDivider: this.showDivider,
       titleColor: this.titleColor, onTap: () => this.onTap() }) {
       Row({ space: AppSpacing.XS }) {
         if (this.value) {

@@ -17,6 +17,9 @@ import { SystemDialogSession } from '../utils/SystemDialogSession';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { CollapsingHeader } from '../utils/CollapsingHeader';
+import { ImmersiveMaterialRuntime } from '../utils/ImmersiveMaterialRuntime';
+import { ImmersiveMaterialSurface } from '../components/ImmersiveMaterialSurface';
+import { PopupMenuAction, PopupMenuHeader } from '../components/common/PopupMenuAction';
 
 const REPLACE_RULE_IMPORT_FILE_LIMIT_BYTES: number = 5 * 1024 * 1024;
 const REPLACE_RULE_IMPORT_TIMEOUT_MS: number = 20000;
@@ -32,6 +35,7 @@ class ReplaceRuleFormDraft {
 @Entry
 @Component
 struct ReaderReplaceRulesPage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @State headerCollapse: number = 0;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
@@ -49,9 +53,10 @@ struct ReaderReplaceRulesPage {
   @State showRuleMoreDialog: boolean = false;
   @State showAddRuleDialog: boolean = false;
   private importUrlDialogSession: SystemDialogSession = new SystemDialogSession();
+  private importingDialogSession: SystemDialogSession = new SystemDialogSession();
   @State @Watch('onSystemDialogFlagChanged') showImportUrlDialog: boolean = false;
   @State importUrl: string = '';
-  @State isImporting: boolean = false;
+  @State @Watch('syncIsImporting') isImporting: boolean = false;
   @State actionRuleId: number = 0;
   @State contextMenuX: number = 16;
   @State contextMenuY: number = 96;
@@ -308,39 +313,44 @@ struct ReaderReplaceRulesPage {
       .height('100%')
       .backgroundColor(this.pageColor())
 
-      if (!this.editing && !this.selectionMode && !this.showAddRuleDialog && !this.isImporting) {
-        Button({ type: ButtonType.Circle, stateEffect: true }) {
-          SymbolGlyph($r('sys.symbol.plus'))
-            .fontSize(25)
-            .fontColor([this.accentColor()])
+      if (!this.editing && !this.selectionMode && !this.isImporting) {
+        Stack() {
+          ImmersiveMaterialSurface({
+            surfaceWidth: 52,
+            surfaceHeight: 52,
+            darkMode: this.appDarkMode,
+            fallbackColor: this.cardColor(),
+            glowColor: `#40${this.accentColor().substring(1)}`
+          }) {
+            SymbolGlyph($r('sys.symbol.plus'))
+              .fontSize(25)
+              .fontColor([this.accentColor()])
+          }
         }
         .width(52)
         .height(52)
         .margin({ right: AppSpacing.XXL, bottom: this.navBarHeight + 22 })
-        .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor(), 'button'))
-        .backdropBlur(ThemeRuntime.glassBlur('button', 12))
-        .border({ width: ThemeRuntime.glassBorderWidth('button'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'button') })
-        .shadow({ radius: ThemeRuntime.glassShadowRadius('button'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'button'), offsetX: ThemeRuntime.glassShadowOffsetX('button'), offsetY: ThemeRuntime.glassShadowOffsetY('button') })
         .accessibilityText('新增替换净化规则')
+        .accessibilityRole(AccessibilityRoleType.BUTTON)
         .onClick(() => this.showAddRuleDialog = true)
+        .bindPopup(this.showAddRuleDialog, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.addRuleDropdown()
+        }, Placement.TopRight, this.appDarkMode, this.accentColor(), () => {
+          this.showAddRuleDialog = false;
+        }))
       }
 
-      if (this.showAddRuleDialog) {
-        this.addRuleDropdown()
-      }
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: this.contextMenuX, y: this.contextMenuY })
+        .hitTestBehavior(HitTestMode.None)
+        .bindPopup(this.showRuleActionDialog, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.ruleActionDialog()
+        }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+          this.showRuleActionDialog = false;
+        }))
 
-
-      if (this.isImporting) {
-        this.importingOverlay()
-      }
-
-      if (this.showRuleActionDialog) {
-        this.ruleActionDialog()
-      }
-
-      if (this.showRuleMoreDialog) {
-        this.ruleBatchMorePopupMenu()
-      }
     }
     .width('100%')
     .height('100%')
@@ -399,14 +409,7 @@ struct ReaderReplaceRulesPage {
 
   @Builder
   addRuleDropdown() {
-    Stack({ alignContent: Alignment.BottomEnd }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .onClick(() => {
-          this.showAddRuleDialog = false;
-        })
-
+    Scroll() {
       Column() {
         this.ruleAddActionItem($r('sys.symbol.plus'), '新建规则', () => {
           this.showAddRuleDialog = false;
@@ -420,48 +423,21 @@ struct ReaderReplaceRulesPage {
         this.ruleAddActionItem($r('sys.symbol.download'), '从文件导入', () => {
           this.showAddRuleDialog = false;
           this.importRulesFromFile();
-        }, false)
+        })
+
       }
-      .width(188)
-      .padding({ left: AppSpacing.SM, right: AppSpacing.SM, top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, this.cardColor(), 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .margin({ right: AppSpacing.XXL, bottom: this.navBarHeight + 82 })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(188)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
-  ruleAddActionItem(icon: Resource, label: string, action: () => void, showDivider: boolean = true) {
-    Column() {
-      Row({ space: AppSpacing.MD }) {
-        SymbolGlyph(icon)
-          .fontSize(19)
-          .fontColor([this.primaryTextColor()])
-        Text(label)
-          .fontSize(AppFontSize.BODY)
-          .fontColor(this.primaryTextColor())
-          .layoutWeight(1)
-      }
-      .width('100%')
-      .height(42)
-      .padding({ left: AppSpacing.MD, right: AppSpacing.MD })
-      .alignItems(VerticalAlign.Center)
-      .onClick(action)
-      if (showDivider) {
-        Divider()
-          .strokeWidth(0.5)
-          .color(ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel'))
-          .margin({ left: AppSpacing.MD, right: AppSpacing.MD })
-      }
-    }
-    .width('100%')
+  ruleAddActionItem(icon: Resource, label: string, action: () => void) {
+    PopupMenuAction(icon, label, this.primaryTextColor(), action)
   }
-
 
   onSystemDialogFlagChanged(): void {
     if (!this.showImportUrlDialog) this.importUrlDialogSession.close(this.getUIContext());
@@ -527,34 +503,33 @@ struct ReaderReplaceRulesPage {
   @Builder
   importingOverlay() {
     Column() {
-      Column() {
-        LoadingProgress()
-          .width(46)
-          .height(46)
-          .color(this.accentColor())
-        Text('正在导入替换规则...')
-          .fontSize(AppFontSize.BODY_LARGE)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.primaryTextColor())
-          .margin({ top: AppSpacing.LG })
-        Text('请稍候')
-          .fontSize(AppFontSize.BODY)
-          .fontColor(this.subTextColor())
-          .margin({ top: AppSpacing.SM })
-      }
-      .width(210)
-      .padding({ left: AppSpacing.XXXL, right: AppSpacing.XXXL, top: AppSpacing.XXXL, bottom: AppSpacing.XXXL })
-      .backgroundColor(ThemeRuntime.dropdownPanelColor(this.appDarkMode, '', 'overlay'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'overlay'))
-      .backdropBlur(ThemeRuntime.glassBlur('overlay', 28))
-      .border({ width: ThemeRuntime.glassBorderWidth('overlay'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'overlay') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('overlay'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'overlay'), offsetX: ThemeRuntime.glassShadowOffsetX('overlay'), offsetY: ThemeRuntime.glassShadowOffsetY('overlay') })
-      .alignItems(HorizontalAlign.Center)
+      LoadingProgress()
+        .width(46)
+        .height(46)
+        .color(this.accentColor())
+      Text('正在导入替换规则...')
+        .fontSize(AppFontSize.BODY_LARGE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.primaryTextColor())
+        .margin({ top: AppSpacing.LG })
+      Text('请稍候')
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.subTextColor())
+        .margin({ top: AppSpacing.SM })
     }
     .width('100%')
-    .height('100%')
-    .backgroundColor('#80000000')
-    .justifyContent(FlexAlign.Center)
+    .padding({ left: AppSpacing.XXXL, right: AppSpacing.XXXL, top: AppSpacing.XXXL, bottom: AppSpacing.XXXL })
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  syncIsImporting(): void {
+    this.importingDialogSession.sync(this.getUIContext(), this.isImporting, (): void => {
+      this.importingOverlay();
+    }, {
+      autoCancel: false,
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
+      warnTag: '显示导入进度弹窗失败:'
+    });
   }
 
   @Builder
@@ -973,6 +948,11 @@ struct ReaderReplaceRulesPage {
         .backgroundColor(this.inputColor())
         .fontColor(this.primaryTextColor())
         .onClick(() => this.showRuleMoreDialog = true)
+        .bindPopup(this.showRuleMoreDialog, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.ruleBatchMorePopupMenu()
+        }, Placement.TopRight, this.appDarkMode, this.accentColor(), () => {
+          this.showRuleMoreDialog = false;
+        }))
     }
     .width('100%')
     .padding({ left: AppSpacing.XL, right: AppSpacing.XL, top: AppSpacing.MD, bottom: AppSpacing.LG })
@@ -981,36 +961,20 @@ struct ReaderReplaceRulesPage {
 
   @Builder
   ruleBatchMorePopupMenu() {
-    Stack({ alignContent: Alignment.BottomEnd }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .onClick(() => this.showRuleMoreDialog = false)
-
+    Scroll() {
       Column() {
-        Text(`已选择 ${this.selectedRuleIds.length} 条规则`)
-          .fontSize(AppFontSize.CAPTION)
-          .fontColor(this.subTextColor())
-          .width('100%')
-          .height(34)
-          .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-          .textAlign(TextAlign.Start)
+        PopupMenuHeader(`已选择 ${this.selectedRuleIds.length} 条规则`, this.subTextColor())
         this.ruleAddActionItem($r('sys.symbol.download'), '导出 JSON', () => {
           this.showRuleMoreDialog = false;
           this.exportRules();
-        }, false)
+        })
       }
-      .width(188)
-      .padding({ left: AppSpacing.SM, right: AppSpacing.SM, top: AppSpacing.XS, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(16, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .margin({ right: AppSpacing.XL, bottom: this.navBarHeight + 78 })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(188)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
@@ -1232,13 +1196,7 @@ struct ReaderReplaceRulesPage {
 
   @Builder
   ruleActionDialog() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-        .onClick(() => this.closeRuleActions())
+    Scroll() {
       Column() {
         this.contextActionItem($r('sys.symbol.square_and_pencil'), '修改', this.primaryTextColor(), () => {
           const rule = this.actionRule();
@@ -1262,37 +1220,19 @@ struct ReaderReplaceRulesPage {
           this.closeRuleActions();
           if (rule) this.confirmDelete(rule);
         })
+
       }
-      .width(158)
-      .padding({ top: AppSpacing.SM, bottom: AppSpacing.SM })
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'), color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'), color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'), offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: this.contextMenuLeft(158), y: this.contextMenuTop(188) })
+      .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width(188)
+    .constraintSize({ maxHeight: ImmersiveMaterialRuntime.popupMenuMaxHeight() })
+    .scrollBar(BarState.Off)
+    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
   }
 
   @Builder
   contextActionItem(icon: Resource, label: string, color: string, action: () => void) {
-    Row({ space: AppSpacing.MD }) {
-      SymbolGlyph(icon)
-        .fontSize(18)
-        .fontColor([color])
-        .width(24)
-      Text(label)
-        .fontSize(AppFontSize.BODY_LARGE)
-        .fontColor(color)
-        .layoutWeight(1)
-    }
-    .width('100%')
-    .height(44)
-    .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-    .alignItems(VerticalAlign.Center)
-    .onClick(action)
+    PopupMenuAction(icon, label, color, action)
   }
 
   filteredRules(): ReaderReplaceRule[] {
@@ -1648,16 +1588,6 @@ struct ReaderReplaceRulesPage {
     const height = Number(area.height);
     if (Number.isFinite(width) && width > 0) this.contextViewportWidth = width;
     if (Number.isFinite(height) && height > 0) this.contextViewportHeight = height;
-  }
-
-  contextMenuLeft(menuWidth: number): number {
-    return Math.max(12, Math.min(this.contextMenuX - 18, this.contextViewportWidth - menuWidth - 12));
-  }
-
-  contextMenuTop(menuHeight: number): number {
-    const below = this.contextMenuY + 12;
-    if (below + menuHeight <= this.contextViewportHeight - this.navBarHeight - 12) return below;
-    return Math.max(this.statusBarHeight + 8, this.contextMenuY - menuHeight - 12);
   }
 
   async saveDraft(): Promise<void> {

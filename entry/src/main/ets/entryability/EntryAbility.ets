@@ -1,3 +1,4 @@
+import { ImmersiveLightSettingsStore } from '../utils/ImmersiveLightSettingsStore';
 import { AbilityConstant, UIAbility, Want, Configuration, ConfigurationConstant } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { UIContext, window } from '@kit.ArkUI';
@@ -8,7 +9,6 @@ import { SearchExploreSettingsStore } from '../utils/SearchExploreSettingsStore'
 import { ReaderSettingsStore } from '../utils/ReaderSettingsStore';
 import { AppThemeSettingsStore } from '../utils/AppThemeSettingsStore';
 import { CustomThemeSchemeStore } from '../utils/CustomThemeSchemeStore';
-import { GlassSettingsStore } from '../utils/GlassSettingsStore';
 import { AppThemeModeStore } from '../utils/AppThemeModeStore';
 import { AppIconSettingsStore } from '../utils/AppIconSettingsStore';
 import { AppIconManager } from '../utils/AppIconManager';
@@ -20,6 +20,7 @@ import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ThemeIds } from '../theme/ThemeModels';
 import { ThemeTrialManager } from '../utils/ThemeTrialManager';
 import { AccountSessionStore } from '../account/AccountSessionStore';
+import { MemberSettingsStore } from '../account/MemberSettingsStore';
 import { MembershipThemeGuard } from '../account/MembershipThemeGuard';
 import { HuaweiAccountService } from '../account/HuaweiAccountService';
 import { CloudSyncSettingsStore } from '../account/CloudSyncSettingsStore';
@@ -43,6 +44,8 @@ import { ReaderCacheBudget } from '../core/book/ReaderCacheBudget';
 export default class EntryAbility extends UIAbility {
   private appliedColorMode: number = -1;
   private modeDependentThemeKey: string = '';
+  private immersiveLightBootstrapPromise: Promise<void> = Promise.resolve();
+  private memberSettingsBootstrapPromise: Promise<void> = Promise.resolve();
   private themeBootstrapPromise: Promise<void> = Promise.resolve();
   private readerBootstrapPromise: Promise<void> = Promise.resolve();
   private accountBootstrapPromise: Promise<void> = Promise.resolve();
@@ -72,6 +75,9 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('globalTtsCurrentText', '');
     AppStorage.setOrCreate('globalTtsTextAfter', '');
     AccountSessionStore.initializeStorage();
+    this.memberSettingsBootstrapPromise = MemberSettingsStore.load(this.context).catch((error: Error) => {
+      console.warn('恢复会员设置失败:', error);
+    });
     CloudSyncSettingsStore.initializeStorage();
     CloudSyncChangeTracker.initializeStorage();
     readStatsTracker.init(this.context);
@@ -199,6 +205,9 @@ export default class EntryAbility extends UIAbility {
     PersistentStorage.persistProp('appDarkButtonColor', '#3F8CFF');
     // Immersive light strength: adaptive follows the system by default.
     PersistentStorage.persistProp('immersiveLightLevel', 'adaptive');
+    this.immersiveLightBootstrapPromise = ImmersiveLightSettingsStore.load(this.context).catch((error: Error) => {
+      console.warn('恢复沉浸光感设置失败:', error);
+    });
     PersistentStorage.persistProp('appIconId', AppIconSettingsStore.DEFAULT_ICON_ID);
     PersistentStorage.persistProp('explorePlatform', '');
     PersistentStorage.persistProp('exploreSourceUrl', '');
@@ -235,13 +244,8 @@ export default class EntryAbility extends UIAbility {
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Sync app theme settings failed: %{public}s', JSON.stringify(e));
     });
-    const glassPromise = GlassSettingsStore.load(this.context).then((settings) => {
-      GlassSettingsStore.applyToStorage(settings);
-    }).catch((e: Error) => {
-      hilog.warn(0x0000, 'testTag', 'Sync glass settings failed: %{public}s', JSON.stringify(e));
-    });
-    // Theme and glass affect the first frame, but they are independent and can be restored in parallel.
-    this.themeBootstrapPromise = Promise.all([appThemePromise, glassPromise]).then(() => {});
+    // The theme affects the first frame.
+    this.themeBootstrapPromise = appThemePromise.then(() => {});
     Promise.all([this.themeBootstrapPromise, this.accountBootstrapPromise]).then(() => {
       this.membershipThemeTimer = setInterval(() => {
         MembershipThemeGuard.refresh(this.context).catch((error: Error) => console.warn('主题权益检查失败', error.message));
@@ -291,7 +295,8 @@ export default class EntryAbility extends UIAbility {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
     hilog.info(0x0000, 'testTag', 'StartupTrace onWindowStageCreate %{public}d', Date.now());
 
-    this.themeBootstrapPromise.finally(() => {
+    Promise.all([this.themeBootstrapPromise, this.immersiveLightBootstrapPromise,
+      this.memberSettingsBootstrapPromise]).finally(() => {
       this.loadStartupContent(windowStage);
     });
   }

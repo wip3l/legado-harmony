@@ -21,7 +21,7 @@ import { ExploreCategoryItem, ExploreCategorySheet } from './ExploreCategoryShee
 import { ExploreCacheHit, ExploreResultCache } from '../../utils/ExploreResultCache';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { WebBookService } from '../../core/book/WebBookService';
-import { SourceActionKind, SourceActionMenuList, SourceActionRunner, SourceDeleteConfirm, SourceDeleteDialogParams,
+import { SourceActionKind, SourceActionMenu, SourceActionRunner, SourceDeleteConfirm, SourceDeleteDialogParams,
   SourceGroupTag, SourcePickerKit, SourcePickerSearchField, SourceVariableDialogParams, SourceVariableEditor
 } from './SourcePickerKit';
 import { CoverUrlNormalizer } from '../../utils/CoverUrlNormalizer';
@@ -32,6 +32,7 @@ import { AppSpacing } from '../../theme/AppSpacing';
 /** 首页"发现"页签：发现源、筛选条件与结果列表。 */
 @Component
 export struct ExplorePage {
+  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   /** 顶部书源标签、筛选与刷新按钮的高度。 */
   static readonly HEADER_CONTROL_SIZE: number = 40;
   /** 标题下方频道栏的高度。 */
@@ -630,10 +631,17 @@ export struct ExplorePage {
       .backgroundColor(this.pageColor())
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
 
-      if (this.showExploreSourceActionMenu) {
-        this.exploreSourceActionMenu()
-      }
-
+      // 长按书源菜单的锚点：放在手指位置的 1×1 节点，弹出层贴着它弹出。
+      Column()
+        .width(1)
+        .height(1)
+        .position({ x: this.exploreContextMenuX, y: this.exploreContextMenuY })
+        .hitTestBehavior(HitTestMode.None)
+        .bindPopup(this.showExploreSourceActionMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
+          this.exploreSourceActionMenu()
+        }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
+          this.showExploreSourceActionMenu = false;
+        }))
     }
     .width('100%')
     .height('100%')
@@ -654,7 +662,6 @@ export struct ExplorePage {
 
   /** 全部分类面板：与详情页目录同一种半模态，停 60% 与全屏两档。 */
   exploreCategorySheetOptions(): SheetOptions {
-    const material = ImmersiveMaterialRuntime.sheetMaterial(this.accentColor());
     const options: SheetOptions = {
       detents: ['60%', SheetSize.LARGE],
       dragBar: true,
@@ -664,14 +671,7 @@ export struct ExplorePage {
         this.showExploreCategorySheet = false;
       }
     };
-    if (material !== undefined) {
-      options.backgroundColor = Color.Transparent;
-      options.systemMaterial = material;
-    } else {
-      options.blurStyle = BlurStyle.COMPONENT_THICK;
-      options.backgroundColor = ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel');
-    }
-    return options;
+    return ImmersiveMaterialRuntime.applySheetMaterial(this.immersiveLightLevel, options, this.appDarkMode, this.accentColor());
   }
 
   @Builder
@@ -803,36 +803,9 @@ export struct ExplorePage {
 
   @Builder
   exploreSourceActionMenu() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.appDarkMode ? '#52000000' : '#26FFFFFF')
-        .backdropBlur(ThemeRuntime.glassBlur('popover', 18))
-        .onClick(() => this.closeExploreSourceActions())
-
-      Column() {
-        SourceActionMenuList({
-          isNative: this.actionExploreSourceNative,
-          onAction: (kind: string): void => {
-            this.runExploreSourceAction(kind);
-          }
-        })
-      }
-      .backgroundColor(ThemeRuntime.glassPanelColor(this.appDarkMode, '', 'panel'))
-      .borderRadius(ThemeRuntime.glassCornerRadius(14, 'panel'))
-      .backdropBlur(ThemeRuntime.glassBlur('panel', 22))
-      .border({ width: ThemeRuntime.glassBorderWidth('panel'),
-        color: ThemeRuntime.glassBorderColor(this.appDarkMode, 'panel') })
-      .shadow({ radius: ThemeRuntime.glassShadowRadius('panel'),
-        color: ThemeRuntime.glassShadowColor(this.appDarkMode, 'panel'),
-        offsetX: ThemeRuntime.glassShadowOffsetX('panel'), offsetY: ThemeRuntime.glassShadowOffsetY('panel') })
-      .position({ x: this.exploreContextMenuLeft(SourceActionMenuList.WIDTH),
-        y: this.exploreContextMenuTop(SourceActionMenuList.menuHeight(this.actionExploreSourceNative)) })
-    }
-    .width('100%')
-    .height('100%')
-    .zIndex(12)
+    SourceActionMenu(this.actionExploreSourceNative, this.appDarkMode, (kind: string): void => {
+      this.runExploreSourceAction(kind);
+    })
   }
 
   @Builder
@@ -914,7 +887,7 @@ export struct ExplorePage {
       }
     }
     .margin({ left: AppSpacing.MD, right: 10 })
-    .bindPopup(this.showExploreSourcePicker, ImmersiveMaterialRuntime.popupMenuOptions((): void => {
+    .bindPopup(this.showExploreSourcePicker, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
       this.exploreSourcePickerContent()
     }, Placement.BottomRight, this.appDarkMode, this.accentColor(), () => {
       this.showExploreSourcePicker = false;
@@ -983,7 +956,7 @@ export struct ExplorePage {
         })
     }
     .margin({ right: 10 })
-    .bindPopup(this.showExploreFilterPanel, ImmersiveMaterialRuntime.popupMenuOptions((): void => {
+    .bindPopup(this.showExploreFilterPanel, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
       this.exploreFilterPopupContent()
     }, Placement.BottomRight, this.appDarkMode, this.accentColor(), () => {
       this.closeExploreFilterPanel();
@@ -1089,7 +1062,7 @@ export struct ExplorePage {
               .padding({ left: 16, right: 10 })
               .alignItems(VerticalAlign.Center)
               .accessibilityText(`当前模式${this.selectedPlatform}，切换模式`)
-              .bindPopup(this.showExplorePlatformMenu, ImmersiveMaterialRuntime.popupMenuOptions((): void => {
+              .bindPopup(this.showExplorePlatformMenu, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel, (): void => {
                 this.explorePlatformMenuContent()
               }, Placement.BottomLeft, this.appDarkMode, this.accentColor(), () => {
                 this.showExplorePlatformMenu = false;
@@ -1328,7 +1301,7 @@ export struct ExplorePage {
     }
     this.actionExploreSourceUrl = option.sourceUrl;
     this.actionExploreSourceNative = option.isNative === true;
-    // 操作菜单画在页面上，书源弹出层在系统浮层里，先收起弹出层免得挡住菜单。
+    // 先收起书源弹出层，长按菜单再从页面上弹出。
     this.showExploreSourcePicker = false;
     this.showExploreSourceActionMenu = true;
   }
@@ -1378,17 +1351,6 @@ export struct ExplorePage {
         }
       });
     }
-  }
-
-  exploreContextMenuLeft(menuWidth: number): number {
-    return Math.max(12, Math.min(this.exploreContextMenuX - 18,
-      this.exploreViewportWidth - menuWidth - 12));
-  }
-
-  exploreContextMenuTop(menuHeight: number): number {
-    const below = this.exploreContextMenuY + 12;
-    if (below + menuHeight <= this.exploreViewportHeight - 12) return below;
-    return Math.max(this.statusBarHeight + 8, this.exploreContextMenuY - menuHeight - 12);
   }
 
   getFilteredExploreSourceOptions(): ExploreSourceOption[] {

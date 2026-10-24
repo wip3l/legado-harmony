@@ -14,25 +14,6 @@ import {
 import { HexColor } from '../utils/HexColor';
 
 export class ThemeRuntime {
-  static readonly KEY_GLASS_ENABLED: string = 'glassEnabled';
-  static readonly KEY_GLASS_PANEL_BLUR: string = 'glassPanelBlur';
-  static readonly KEY_GLASS_POPOVER_BLUR: string = 'glassPopoverBlur';
-  static readonly KEY_GLASS_BUTTON_BLUR: string = 'glassButtonBlur';
-  static readonly KEY_GLASS_OVERLAY_BLUR: string = 'glassOverlayBlur';
-  static readonly KEY_GLASS_MENU_BLUR: string = 'glassMenuBlur';
-  static readonly KEY_GLASS_LIGHT_TINT_OPACITY: string = 'glassLightTintOpacity';
-  static readonly KEY_GLASS_DARK_TINT_OPACITY: string = 'glassDarkTintOpacity';
-  static readonly KEY_GLASS_LIGHT_BORDER_OPACITY: string = 'glassLightBorderOpacity';
-  static readonly KEY_GLASS_DARK_BORDER_OPACITY: string = 'glassDarkBorderOpacity';
-  static readonly KEY_GLASS_BORDER_WIDTH: string = 'glassBorderWidth';
-  static readonly KEY_GLASS_SHADOW_ENABLED: string = 'glassShadowEnabled';
-  static readonly KEY_GLASS_LIGHT_SHADOW_OPACITY: string = 'glassLightShadowOpacity';
-  static readonly KEY_GLASS_DARK_SHADOW_OPACITY: string = 'glassDarkShadowOpacity';
-  static readonly KEY_GLASS_SHADOW_RADIUS: string = 'glassShadowRadius';
-  static readonly KEY_GLASS_SHADOW_OFFSET_X: string = 'glassShadowOffsetX';
-  static readonly KEY_GLASS_SHADOW_OFFSET_Y: string = 'glassShadowOffsetY';
-  static readonly KEY_GLASS_CORNER_RADIUS: string = 'glassCornerRadius';
-  static readonly KEY_GLASS_LOW_PERFORMANCE: string = 'glassLowPerformance';
   static readonly KEY_THEME_ID: string = 'appThemeId';
   static readonly KEY_THEME_REVISION: string = 'themeRevision';
   static readonly KEY_FONT_FAMILY: string = 'themeFontFamily';
@@ -208,6 +189,9 @@ export class ThemeRuntime {
     return `#${darkMode ? '33' : '1F'}${accent.substring(1)}`;
   }
 
+  /**
+   * 列表卡片等常驻表面的玻璃色调，取当前主题包的玻璃参数（磨砂玻璃设置已移除，浮层面板改用系统沉浸光感材质）。
+   */
   static glassPanelColor(darkMode: boolean, baseColor: string = '', surface: string = 'panel'): string {
     const fallback = ThemeRuntime.cardColor(darkMode);
     const color = ThemeRuntime.normalizeColor(baseColor || fallback, fallback);
@@ -215,10 +199,7 @@ export class ThemeRuntime {
       return color;
     }
     const glass = ThemeRuntime.currentGlass();
-    const opacity = ThemeRuntime.usesThemeGlassDefaults() ?
-      (darkMode ? glass.darkTintOpacity : glass.lightTintOpacity) :
-      ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_TINT_OPACITY :
-        ThemeRuntime.KEY_GLASS_LIGHT_TINT_OPACITY, darkMode ? 78 : 85, 0, 100);
+    const opacity = darkMode ? glass.darkTintOpacity : glass.lightTintOpacity;
     return `#${ThemeRuntime.opacityHex(opacity)}${color.substring(1)}`;
   }
 
@@ -229,19 +210,13 @@ export class ThemeRuntime {
       return color;
     }
     const glass = ThemeRuntime.currentGlass();
-    const panelOpacity = ThemeRuntime.usesThemeGlassDefaults() ?
-      (darkMode ? glass.darkTintOpacity : glass.lightTintOpacity) :
-      ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_TINT_OPACITY :
-        ThemeRuntime.KEY_GLASS_LIGHT_TINT_OPACITY, darkMode ? 78 : 85, 0, 100);
+    const panelOpacity = darkMode ? glass.darkTintOpacity : glass.lightTintOpacity;
     return `#${ThemeRuntime.opacityHex(Math.round(panelOpacity * 0.47))}${color.substring(1)}`;
   }
 
   static glassBorderColor(darkMode: boolean, surface: string = 'panel'): string {
     const glass = ThemeRuntime.currentGlass();
-    const opacity = ThemeRuntime.usesThemeGlassDefaults() ?
-      (darkMode ? glass.darkBorderOpacity : glass.lightBorderOpacity) :
-      ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_BORDER_OPACITY :
-        ThemeRuntime.KEY_GLASS_LIGHT_BORDER_OPACITY, darkMode ? 22 : 65, 0, 100);
+    const opacity = darkMode ? glass.darkBorderOpacity : glass.lightBorderOpacity;
     return `#${ThemeRuntime.opacityHex(opacity)}FFFFFF`;
   }
 
@@ -250,88 +225,44 @@ export class ThemeRuntime {
       return '#00000000';
     }
     const glass = ThemeRuntime.currentGlass();
-    const opacity = ThemeRuntime.usesThemeGlassDefaults() ?
-      (darkMode ? glass.darkShadowOpacity : glass.lightShadowOpacity) :
-      ThemeRuntime.numberFromStorage(darkMode ? ThemeRuntime.KEY_GLASS_DARK_SHADOW_OPACITY :
-        ThemeRuntime.KEY_GLASS_LIGHT_SHADOW_OPACITY, darkMode ? 44 : 17, 0, 100);
+    const opacity = darkMode ? glass.darkShadowOpacity : glass.lightShadowOpacity;
     return `#${ThemeRuntime.opacityHex(opacity)}000000`;
   }
 
   static glassEnabled(): boolean {
-    return ThemeRuntime.currentGlass().enabled &&
-      (AppStorage.get<boolean>(ThemeRuntime.KEY_GLASS_ENABLED) ?? true) &&
-      !(AppStorage.get<boolean>(ThemeRuntime.KEY_GLASS_LOW_PERFORMANCE) ?? false);
+    return ThemeRuntime.currentGlass().enabled;
   }
 
   static glassShadowEnabled(surface: string = 'panel'): boolean {
-    return ThemeRuntime.glassEnabled() &&
-      ThemeRuntime.currentGlass().shadowEnabled &&
-      (AppStorage.get<boolean>(ThemeRuntime.KEY_GLASS_SHADOW_ENABLED) ?? true);
-  }
-
-  static glassBlur(surface: string = 'panel', fallback: number = 22): number {
-    if (!ThemeRuntime.glassEnabled()) {
-      return 0;
-    }
-    if (ThemeRuntime.usesThemeGlassDefaults()) {
-      const glass = ThemeRuntime.currentGlass();
-      return ThemeRuntime.clampNumber(ThemeRuntime.glassSurface(glass, surface).blurRadius * glass.materialScale,
-        0, 40);
-    }
-    return ThemeRuntime.numberFromStorage(ThemeRuntime.glassBlurStorageKey(surface), fallback, 0, 40);
+    return ThemeRuntime.glassEnabled() && ThemeRuntime.currentGlass().shadowEnabled;
   }
 
   static glassBorderWidth(surface: string = 'panel'): number {
-    if (ThemeRuntime.usesThemeGlassDefaults()) {
-      return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().borderWidth, 0, 2);
-    }
-    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_BORDER_WIDTH, 1, 0, 2);
+    return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().borderWidth, 0, 2);
   }
 
   static glassCornerRadius(fallback: number = 16, surface: string = 'panel'): number {
-    if (ThemeRuntime.usesThemeGlassDefaults()) {
-      return ThemeRuntime.clampNumber(ThemeRuntime.glassSurface(ThemeRuntime.currentGlass(), surface).cornerRadius,
-        0, 32);
-    }
-    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_CORNER_RADIUS, fallback, 0, 32);
+    return ThemeRuntime.clampNumber(ThemeRuntime.glassSurface(ThemeRuntime.currentGlass(), surface).cornerRadius,
+      0, 32);
   }
 
   static glassShadowRadius(surface: string = 'panel'): number {
     if (!ThemeRuntime.glassShadowEnabled()) {
       return 0;
     }
-    if (ThemeRuntime.usesThemeGlassDefaults()) {
-      return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().shadowRadius, 0, 30);
-    }
-    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_SHADOW_RADIUS, 18, 0, 30);
+    return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().shadowRadius, 0, 30);
   }
 
   static glassShadowOffsetX(surface: string = 'panel'): number {
-    if (ThemeRuntime.usesThemeGlassDefaults()) {
-      return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().shadowOffsetX, -12, 12);
-    }
-    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_SHADOW_OFFSET_X, 0, -12, 12);
+    return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().shadowOffsetX, -12, 12);
   }
 
   static glassShadowOffsetY(surface: string = 'panel'): number {
-    if (ThemeRuntime.usesThemeGlassDefaults()) {
-      return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().shadowOffsetY, -12, 12);
-    }
-    return ThemeRuntime.numberFromStorage(ThemeRuntime.KEY_GLASS_SHADOW_OFFSET_Y, 6, -12, 12);
-  }
-
-  private static numberFromStorage(key: string, fallback: number, min: number, max: number): number {
-    const value = AppStorage.get<number>(key) ?? fallback;
-    return Math.max(min, Math.min(max, value));
+    return ThemeRuntime.clampNumber(ThemeRuntime.currentGlass().shadowOffsetY, -12, 12);
   }
 
   private static clampNumber(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
-  }
-
-  private static usesThemeGlassDefaults(): boolean {
-    const preset = (AppStorage.get<string>('glassPreset') || 'standard').trim().toLowerCase();
-    return preset === 'standard';
   }
 
   private static currentGlass(): ThemeGlassTokens {
@@ -348,15 +279,6 @@ export class ThemeRuntime {
     if (normalized === 'overlay') return glass.overlay;
     if (normalized === 'menu') return glass.menu;
     return glass.panel;
-  }
-
-  private static glassBlurStorageKey(surface: string): string {
-    const normalized = (surface || '').trim().toLowerCase();
-    if (normalized === 'popover') return ThemeRuntime.KEY_GLASS_POPOVER_BLUR;
-    if (normalized === 'button') return ThemeRuntime.KEY_GLASS_BUTTON_BLUR;
-    if (normalized === 'overlay') return ThemeRuntime.KEY_GLASS_OVERLAY_BLUR;
-    if (normalized === 'menu') return ThemeRuntime.KEY_GLASS_MENU_BLUR;
-    return ThemeRuntime.KEY_GLASS_PANEL_BLUR;
   }
 
   private static opacityHex(opacity: number): string {
