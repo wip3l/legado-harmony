@@ -13,6 +13,8 @@
 
 边界检查允许的依赖只有子库自身的原生合成绑定，仍禁止反向导入主应用和书源内核。CI 必须运行完整 `npm test`，包含模块边界与原生依赖声明检查。若 AI 子库为私有仓库，主仓库 CI 还需配置有权读取它的只读凭据；缺少凭据会在检出子模块阶段失败。
 
+主仓库的 `quality` 工作流使用 Actions Secret `AI_ENGINE_READ_TOKEN` 检出主库和子模块。可创建 fine-grained PAT，仓库范围选择 `qingye-reader`、`harmony-book-ai-engine` 和 `harmony-book-source-engine`，仅授予 `Contents: Read-only`，再将其保存到主仓库的 Settings → Secrets and variables → Actions。检出完成后不保留 Git 凭据。未配置时回退到默认 `github.token`，该令牌无法读取其他私有仓库；来自 fork 的 PR 不会获得此 Secret，仍无法检出私有 AI 子库。不要通过 `pull_request_target` 向不可信 PR 暴露凭据。
+
 共用的 `TextTranslator` 提供小说和漫画文本繁→简入口，并预留 `TextTranslationProvider`。本次不增加小说阅读页面的翻译开关，不实现尚未提供的日韩翻译模型；原漫画功能与入口保持不变。
 
 后续所有新增 AI 实现优先在子库开发，UI 和业务策略在主项目开发。先推送子库提交，再提交主项目 gitlink；构建和发布禁止指向仅存在于本机的子库提交。具体 API、独立构建、测试和开发流程见 [子库 README](../harmony-book-ai-engine/README.md)。
