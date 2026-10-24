@@ -1616,8 +1616,8 @@ struct ReadBookPage {
     }
   }
 
-  /** restorePageIndex：刷新后停留的页（默认回到本章开头）；quiet：不弹“本章已刷新”。 */
-  async refreshCurrentChapter(restorePageIndex: number = 0, quiet: boolean = false): Promise<void> {
+  /** restorePageIndex：刷新后停留的页（默认记录刷新前的当前页，越界时取末页）；quiet：不弹“本章已刷新”。 */
+  async refreshCurrentChapter(restorePageIndex: number = this.currentPageIndex, quiet: boolean = false): Promise<void> {
     if (this.chapters.length === 0) {
       return;
     }
@@ -1632,7 +1632,7 @@ struct ReadBookPage {
     this.isLoading = true;
     this.loadStatus = '正在刷新本章...';
     // Mark the refresh busy before stopping TTS so its delayed sentence checkpoint cannot race the explicit
-    // page-one progress written after the replacement pagination has been published.
+    // restored-page progress written after the replacement pagination has been published.
     this.stopTtsReading();
     this.readerPreparedContentCache.clear();
     try {
