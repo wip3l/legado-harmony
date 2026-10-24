@@ -2,7 +2,7 @@ import { router, window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { webview } from '@kit.ArkWeb';
 import { WebRuntimeAvailability } from '../utils/WebRuntimeAvailability';
-import { HdsTabs, HdsTabsController } from '@kit.UIDesignKit';
+import { HdsAnimationMode, HdsTabs, HdsTabsController } from '@kit.UIDesignKit';
 import { Book, BookChapter, BookSourceStageWebRuntime } from '@legado/sourceengine';
 import { AppDatabase } from '../model/data/AppDatabase';
 import { WebBookFetchRuntimeHost } from '../components/WebBookFetchRuntimeHost';
@@ -49,6 +49,7 @@ struct Index {
   @State bookshelfActiveGroupId: number = 0;
   private immersiveTabsController: HdsTabsController = new HdsTabsController();
   private compatTabsController: TabsController = new TabsController();
+  private immersiveTabBarHidden: boolean = false;
   // 每页单独保存进度，常驻的搜索/发现页不能改变当前页的底栏。
   private tabHeaderCollapseProgress: number[] = [0, 0, 0, 0];
   @State bottomBarCollapseProgress: number = 0;
@@ -215,7 +216,7 @@ struct Index {
     if (this.currentIndex === 0 || this.currentIndex === 3) {
       this.tabHeaderCollapseProgress[this.currentIndex] = 0;
     }
-    this.syncBottomBarCollapse();
+    this.syncBottomBarCollapse(true);
   }
 
   onTabHeaderCollapseChange(index: number, progress: number): void {
@@ -226,14 +227,22 @@ struct Index {
     }
   }
 
-  syncBottomBarCollapse(): void {
+  syncBottomBarCollapse(resetImmersiveState: boolean = false): void {
     this.bottomBarCollapseProgress = this.tabHeaderCollapseProgress[this.currentIndex] || 0;
-    // 只移动导航栏，不改变内容区高度，避免列表在收起/展开时跳动。
     if (this.supportsImmersiveTabs()) {
-      this.immersiveTabsController.setTabBarTranslate({
-        y: (56 + this.floatingBarBottomMargin() + 16) * this.bottomBarCollapseProgress
-      });
+      // 原生滚动动效统一控制位移、透明度和材质，不能再叠加逐帧下移/淡出。
+      // 收起、展开使用不同阈值，避免在临界位置反复启动系统动画。
+      const threshold = !resetImmersiveState && this.immersiveTabBarHidden ? 0.25 : 0.5;
+      const hidden = this.bottomBarCollapseProgress >= threshold;
+      if (!resetImmersiveState && hidden === this.immersiveTabBarHidden) return;
+      this.immersiveTabBarHidden = hidden;
+      if (hidden) {
+        this.immersiveTabsController.applyHideAnimation(HdsAnimationMode.SCROLL_ANIMATION);
+      } else {
+        this.immersiveTabsController.applyShowAnimation(HdsAnimationMode.SCROLL_ANIMATION);
+      }
     } else {
+      // 旧系统只移动导航栏，不改变内容区高度，避免列表跳动。
       this.compatTabsController.setTabBarTranslate({
         y: (56 + this.compatTabSafeHeight()) * this.bottomBarCollapseProgress
       });
@@ -811,10 +820,11 @@ struct Index {
       },
       adaptToHandedness: true,
       thermoCtrl: true,
-      barOpacity: this.bookshelfMultiSelectActive ? 0 : 1 - this.bottomBarCollapseProgress
+      barOpacity: this.bookshelfMultiSelectActive ? 0 : 1
     })
     .scrollable(false)
-    .onAppear(() => this.syncBottomBarCollapse())
+    // 主题/深浅色切换会重建 HdsTabs，新实例需要重新应用显隐状态。
+    .onAppear(() => this.syncBottomBarCollapse(true))
     .onChange((index: number) => {
       this.homeTabEnterOffset = index >= this.currentIndex ? Index.TAB_ENTER_DISTANCE : -Index.TAB_ENTER_DISTANCE;
       this.currentIndex = index;

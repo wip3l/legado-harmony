@@ -78,4 +78,58 @@ for (let c = 1; c <= D; c++) {
   assert(CollapsingHeader.scrimOpacity(c) >= CollapsingHeader.scrimOpacity(c - 1), 'scrim opacity is monotonic');
 }
 
-console.log(`Collapsing header checks passed for ${pages.length} List/Scroll integrations.`);
+// Run the actual Index callbacks: native animations must not restart on every layout frame.
+const indexSource = read('pages/Index');
+const indexMethods = indexSource.slice(indexSource.indexOf('  onCurrentIndexChanged(): void {'),
+  indexSource.indexOf('  onBookSourceExploreRefreshRequested(): void {'));
+const HomeBar = vm.runInNewContext(compile(`class HomeBar { ${indexMethods} }; HomeBar`), {
+  HdsAnimationMode: { SCROLL_ANIMATION: 'scroll' }
+});
+const bar = new HomeBar();
+const animations = [];
+Object.assign(bar, {
+  currentIndex: 0,
+  tabHeaderCollapseProgress: [0, 0, 0, 0],
+  immersiveTabBarHidden: false,
+  supportsImmersiveTabs: () => true,
+  immersiveTabsController: {
+    applyHideAnimation: mode => animations.push(`hide:${mode}`),
+    applyShowAnimation: mode => animations.push(`show:${mode}`),
+    setTabBarTranslate: () => assert.fail('native animation owns translation')
+  }
+});
+for (const progress of [0, 0.1, 0.3, 0.5, 0.7, 1, 0.9, 0.5, 0.49, 0.3]) {
+  bar.onTabHeaderCollapseChange(0, progress);
+}
+assert.deepEqual(animations, ['hide:scroll'], 'one hide across continuous scroll and threshold jitter');
+bar.onTabHeaderCollapseChange(0, 0.2);
+bar.onTabHeaderCollapseChange(0, 0);
+assert.deepEqual(animations, ['hide:scroll', 'show:scroll'], 'reverse scroll restores the bar once');
+bar.onTabHeaderCollapseChange(1, 1);
+bar.onTabHeaderCollapseChange(0, NaN);
+assert.equal(animations.length, 2, 'inactive tabs and invalid measurements cannot animate the active bar');
+bar.currentIndex = 1;
+bar.onCurrentIndexChanged();
+assert.equal(animations.at(-1), 'hide:scroll', 'switching to a collapsed retained tab restores its state');
+const beforeRemount = animations.length;
+bar.syncBottomBarCollapse(true);
+assert.equal(animations.length, beforeRemount + 1, 'a recreated HdsTabs receives its hidden state again');
+assert.equal(animations.at(-1), 'hide:scroll');
+bar.currentIndex = 0;
+bar.onCurrentIndexChanged();
+assert.equal(animations.at(-1), 'show:scroll', 'a recreated shelf restores the visible bar');
+
+let compatY, compatOpacity;
+bar.supportsImmersiveTabs = () => false;
+bar.compatTabSafeHeight = () => 24;
+bar.compatTabsController = {
+  setTabBarTranslate: value => { compatY = value.y; },
+  setTabBarOpacity: value => { compatOpacity = value; }
+};
+const beforeCompat = animations.length;
+bar.onTabHeaderCollapseChange(0, 0.5);
+assert.equal(compatY, 40, 'older systems keep the continuous slide');
+assert.equal(compatOpacity, 0.5, 'older systems keep the continuous fade');
+assert.equal(animations.length, beforeCompat, 'older systems never call HDS animations');
+
+console.log(`Collapsing header checks passed for ${pages.length} List/Scroll integrations and native home bar animations.`);
