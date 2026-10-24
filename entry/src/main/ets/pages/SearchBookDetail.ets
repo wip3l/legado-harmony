@@ -1,4 +1,4 @@
-import { router, uiMaterial } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { motion } from '@kit.MultimodalAwarenessKit';
 import deviceInfo from '@ohos.deviceInfo';
 import { Book, SearchBook, BookChapter, BookFieldSanitizer, BookTypeSupport, BookUrlResolver } from '@legado/sourceengine';
@@ -376,7 +376,7 @@ struct SearchBookDetailPage {
     });
   }
 
-  /** 半模态只管理尺寸和关闭；底板由 BookCatalogSheet 复用正文 ReaderMaterialPanel，避免双层材质。 */
+  /** 半模态直接承载材质和目录内容，避免拖动时反复测量并重排内部的材质 TabBar。 */
   catalogSheetOptions(): SheetOptions {
     const options: SheetOptions = {
       detents: ['67%', SheetSize.LARGE],
@@ -392,8 +392,8 @@ struct SearchBookDetailPage {
         this.showCatalogSheet = false;
       }
     };
-    if (ImmersiveMaterialRuntime.supportsHds()) options.systemMaterial = uiMaterial.Material.empty;
-    return options;
+    return ImmersiveMaterialRuntime.applySheetMaterial(this.immersiveLightLevel, options,
+      this.appDarkMode, this.accentColor());
   }
 
   @Builder

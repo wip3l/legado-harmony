@@ -5,7 +5,6 @@ import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { ImmersiveBackButton } from './ImmersiveBackButton';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
-import { ReaderMaterialPanel } from './reader/ReaderFloatingMaterialBar';
 
 const LOAD_LOADING: string = 'loading';
 const LOAD_READY: string = 'ready';
@@ -74,8 +73,6 @@ export struct BookCatalogSheet {
   @State currentIndex: number = -1;
   @State keyword: string = '';
   @State searchVisible: boolean = false;
-  @State panelWidth: number = 320;
-  @State panelHeight: number = 400;
   private alive: boolean = true;
   private dataSource: CatalogSheetDataSource = new CatalogSheetDataSource();
   private scroller: Scroller = new Scroller();
@@ -92,25 +89,8 @@ export struct BookCatalogSheet {
   }
 
   build() {
-    Column() {
-      ReaderMaterialPanel({
-        panelWidth: this.panelWidth,
-        panelHeight: this.panelHeight,
-        cornerRadius: 28,
-        darkMode: this.appDarkMode,
-        fallbackColor: ThemeRuntime.cardColor(this.appDarkMode)
-      }) {
-        this.panelBody()
-      }
-    }
-    .width('100%')
-    .height('100%')
-    .onAreaChange((_oldArea: Area, area: Area) => {
-      const width = Number(area.width);
-      const height = Number(area.height);
-      if (width > 0 && width !== this.panelWidth) this.panelWidth = width;
-      if (height > 0 && height !== this.panelHeight) this.panelHeight = height;
-    })
+    // 材质交给宿主 bindSheet；内容直接随可用空间布局，拖动时不再测量尺寸并回写状态。
+    this.panelBody()
   }
 
   @Builder

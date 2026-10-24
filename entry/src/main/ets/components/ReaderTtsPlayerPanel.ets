@@ -635,13 +635,8 @@ export struct ReaderTtsPlayerPanel {
       .optionFontColor(this.primaryTextColor)
       .selectedOptionFontColor(this.accentColor)
       .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.darkMode))
-      // This menu floats over the page image, so it needs a genuinely frosted
-      // surface: the opaque card color used by the settings dropdowns hides
-      // the API 26 menu material completely, and the translucent tint alone
-      // reads as see-through. Keep the translucent dropdown tint used by every
-      // other menu (so menuSystemMaterial can frost the page behind it) and add
-      // an explicit component blur so the frost also works on devices where the
-      // immersive menu material is unavailable.
+      // API 26 以下保留这里的半透明底色与显式磨砂；API 26+ 由后面的修饰器接管：
+      // 弱/均衡使用对应底色与模糊，跟随系统/强清除底色和模糊，交给系统材质绘制。
       .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.darkMode, ''))
       .menuBackgroundBlurStyle(BlurStyle.COMPONENT_THICK)
       .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
@@ -711,13 +706,8 @@ export struct ReaderTtsPlayerPanel {
       .optionFontColor(this.primaryTextColor)
       .selectedOptionFontColor(this.accentColor)
       .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.darkMode))
-      // This menu floats over the page image, so it needs a genuinely frosted
-      // surface: the opaque card color used by the settings dropdowns hides
-      // the API 26 menu material completely, and the translucent tint alone
-      // reads as see-through. Keep the translucent dropdown tint used by every
-      // other menu (so menuSystemMaterial can frost the page behind it) and add
-      // an explicit component blur so the frost also works on devices where the
-      // immersive menu material is unavailable.
+      // API 26 以下保留这里的半透明底色与显式磨砂；API 26+ 由后面的修饰器接管：
+      // 弱/均衡使用对应底色与模糊，跟随系统/强清除底色和模糊，交给系统材质绘制。
       .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.darkMode, ''))
       .menuBackgroundBlurStyle(BlurStyle.COMPONENT_THICK)
       .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
