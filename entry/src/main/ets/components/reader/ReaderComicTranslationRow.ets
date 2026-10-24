@@ -1,4 +1,5 @@
 import { ReaderComicSuperResolutionAccess } from '@legado/aiengine';
+import { AiAccessPolicy } from '../../account/AiAccessPolicy';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
 import { PopupMenuAction } from '../common/PopupMenuAction';
@@ -7,6 +8,8 @@ import { ReaderSettingLabel } from './ReaderSettingRows';
 /** 保留现有按书保存的繁→简设置；尚未上线的语言不可选择。 */
 @Component
 export struct ReaderComicTranslationRow {
+  @StorageProp('aiTrialOpen') trialOpen: boolean = false;
+  @StorageProp('accountLoggedIn') loggedIn: boolean = false;
   @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
   @State menuVisible: boolean = false;
   @Prop textConvert: boolean = false;
@@ -20,10 +23,12 @@ export struct ReaderComicTranslationRow {
 
   private description(): string {
     if (this.access === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED) {
-      return this.textConvert ? '会员已到期，续费后恢复繁→简' : '借助AI识别漫画对白，并将繁体字转换为简体';
+      return this.trialOpen && !this.loggedIn ? '登录后免费试用，至 10 月 31 日（北京时间）' :
+        '免费试用已结束，开通会员继续使用';
     }
     if (this.access === ReaderComicSuperResolutionAccess.UNSUPPORTED) return '当前设备不支持系统文字识别';
-    return '借助AI识别并转换漫画对白；日→中、韩→中即将推出';
+    return (this.trialOpen ? `${AiAccessPolicy.TRIAL_LABEL}。` : '') +
+      '借助AI识别并转换漫画对白；日→中、韩→中即将推出';
   }
 
   private selectOption(index: number): void {
@@ -55,7 +60,7 @@ export struct ReaderComicTranslationRow {
     Row() {
       ReaderSettingLabel({
         title: 'AI翻译',
-        minimumMembership: 'MONTHLY',
+        minimumMembership: this.trialOpen ? '' : 'MONTHLY',
         description: this.description(),
         textColor: this.textColor,
         subTextColor: this.subTextColor

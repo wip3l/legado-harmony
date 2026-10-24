@@ -1,4 +1,5 @@
 import { AppAiHost } from '../utils/AppAiHost';
+import { AiAccessPolicy } from '../account/AiAccessPolicy';
 import { ComicColorizer } from '@legado/aiengine';
 import { ImmersiveLightSettingsStore } from '../utils/ImmersiveLightSettingsStore';
 import { AbilityConstant, UIAbility, Want, Configuration, ConfigurationConstant } from '@kit.AbilityKit';
@@ -77,6 +78,7 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('globalTtsCurrentText', '');
     AppStorage.setOrCreate('globalTtsTextAfter', '');
     AccountSessionStore.initializeStorage();
+    AiAccessPolicy.initialize();
     AppAiHost.install();
     this.memberSettingsBootstrapPromise = MemberSettingsStore.load(this.context).catch((error: Error) => {
       console.warn('恢复会员设置失败:', error);
@@ -236,6 +238,7 @@ export default class EntryAbility extends UIAbility {
       hilog.warn(0x0000, 'testTag', 'Sync tts settings failed: %{public}s', JSON.stringify(e));
     });
     this.accountBootstrapPromise = AccountSessionStore.load(this.context).then(() => {
+      AiAccessPolicy.start();
       const userId = AccountSessionStore.isLoggedIn() ? AccountSessionStore.account().userId : '';
       return CloudSyncSettingsStore.load(this.context, userId).then((): void => {});
     }).catch((e: Error) => {
@@ -287,6 +290,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    AiAccessPolicy.stop();
     if (this.membershipThemeTimer >= 0) clearInterval(this.membershipThemeTimer);
     lanReaderServer.stop().catch(() => undefined);
     readStatsTracker.flush();
@@ -381,7 +385,10 @@ export default class EntryAbility extends UIAbility {
     this.syncSystemColorMode(this.context.config);
     this.syncSystemFont(this.context.config, 'foreground');
     this.accountBootstrapPromise
-      .then(() => HuaweiAccountService.renewSession(this.context))
+      .then(() => {
+        AiAccessPolicy.start();
+        return HuaweiAccountService.renewSession(this.context);
+      })
       .then(() => MembershipThemeGuard.refresh(this.context))
       .catch((e: Error) => {
         hilog.warn(0x0000, 'testTag', 'Renew account session failed: %{public}s', JSON.stringify(e));
@@ -428,6 +435,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    AiAccessPolicy.stop();
     ComicColorizer.setAppForeground(false);
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onBackground');
     readStatsTracker.setAppForeground(false);

@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { AiAccessPolicy } from '../account/AiAccessPolicy';
 import { router } from '@kit.ArkUI';
 import { PageScaffold } from '../components/common/PageScaffold';
 import { ThemeRuntime } from '../theme/ThemeRuntime';
@@ -19,6 +20,8 @@ struct ComicColorPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageProp('accountMembershipSku') @Watch('refreshAccess') membershipSku: string = '';
+  @StorageProp('accountEntitlementsRevision') @Watch('refreshAccess') accountRevision: number = 0;
+  @StorageProp('aiTrialOpen') @Watch('refreshAccess') trialOpen: boolean = false;
   @State private memberAllowed: boolean = false;
   @State private source: string = '';
   @State private result: string = '';
@@ -32,6 +35,8 @@ struct ComicColorPage {
   private accessTimer: number = -1;
 
   private refreshAccess(): void {
+    AiAccessPolicy.refresh();
+    const wasAllowed = this.memberAllowed;
     this.memberAllowed = ComicColorizer.memberAllowed();
     if (!this.source || !ComicColorizer.supported()) return;
     if (!this.memberAllowed) {
@@ -39,8 +44,8 @@ struct ComicColorPage {
       else ComicColorizer.releaseIdleWorker();
       this.result = '';
       this.showOriginal = true;
-      this.status = ComicColorizer.MEMBER_REQUIRED;
-    } else if (this.status === ComicColorizer.MEMBER_REQUIRED) {
+      this.status = AiAccessPolicy.blockedMessage();
+    } else if (!wasAllowed) {
       this.status = '点击开始，在本机生成本页彩色预览';
     }
   }
@@ -147,11 +152,17 @@ struct ComicColorPage {
         .fontSize(AppFontSize.CAPTION)
         .fontColor(ThemeRuntime.primaryTextColor(this.appDarkMode))
         .width('100%')
+      if (this.trialOpen && this.memberAllowed) {
+        Text(AiAccessPolicy.TRIAL_LABEL)
+          .fontSize(AppFontSize.CAPTION)
+          .fontColor(ThemeRuntime.subTextColor(this.appDarkMode))
+      }
       if (this.loading) {
         LoadingProgress().width(32).height(32)
         Button('取消着色').onClick(() => { this.cancel(); })
       } else if (this.source && ComicColorizer.supported() && !this.memberAllowed) {
-        Button('开通会员').onClick(() => { router.pushUrl({ url: 'pages/AccountCenter' }); })
+        Button(this.trialOpen ? '登录后免费试用' : '开通会员')
+          .onClick(() => { router.pushUrl({ url: 'pages/AccountCenter' }); })
       } else if (!this.result) {
         Button('开始本地着色')
           .enabled(!!this.source && this.memberAllowed && ComicColorizer.supported())

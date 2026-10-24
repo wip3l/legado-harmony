@@ -109,6 +109,7 @@ import { ReaderComicPagedController, ReaderComicPagedView } from '../components/
 import { ReaderComicImageActions } from '../core/reader/ReaderComicImageActions';
 import { ReaderComicColorSession, ComicColorCandidate } from '@legado/aiengine';
 import { ComicColorizer } from '@legado/aiengine';
+import { AiAccessPolicy } from '../account/AiAccessPolicy';
 import { ReaderComicStyle } from '../core/reader/ReaderComicStyle';
 import { ReaderNeighborChapterLoader } from '../core/reader/ReaderNeighborChapterLoader';
 import {
@@ -313,8 +314,10 @@ struct ReadBookPage {
   @State statusBarSafeHeight: number = 0;
   @StorageProp('statusBarHeight') @Watch('onStoredStatusBarHeightChanged') storedStatusBarHeight: number = 0;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
-  /** 会员档位变化（登录、开通、到期）时刷新漫画超分、繁→简的可用状态。 */
+  /** 会员档位、账号快照和试用截止状态共同驱动三项 AI 权限刷新。 */
   @StorageProp('accountMembershipSku') readerMembershipSku: string = '';
+  @StorageProp('accountEntitlementsRevision') @Watch('onReaderAiAccessChanged') readerAiAccountRevision: number = 0;
+  @StorageProp('aiTrialOpen') @Watch('onReaderAiAccessChanged') readerAiTrialOpen: boolean = false;
   // 加密的书源封面解密完成后递增，朗读面板等处的封面重新取到本地文件地址。
   @StorageProp('sourceCoverRevision') sourceCoverRevision: number = 0;
   @State isTtsSpeaking: boolean = false;
@@ -839,6 +842,7 @@ struct ReadBookPage {
   }
 
   onPageShow(): void {
+    this.onReaderAiAccessChanged();
     this.readerComicColor.setForeground(true);
     this.readerPageVisible = true;
     this.syncReaderInfoBarClock();
@@ -2628,10 +2632,16 @@ struct ReadBookPage {
     });
   }
 
+  onReaderAiAccessChanged(): void {
+    AiAccessPolicy.refresh();
+    this.readerComicColorRevision++;
+  }
+
   readerComicSuperResolutionAccess(): string {
-    // 读取会员档位只为让档位变化时界面重算；是否有效以账号快照按服务端时间推算为准。
+    // 读取状态让权限变化时界面重算；实际授权由宿主统一策略判断。
     const sku = this.readerMembershipSku;
-    return sku !== undefined ? ReaderComicSuperResolution.access() : ReaderComicSuperResolutionAccess.MEMBER_REQUIRED;
+    return this.readerComicColorRevision >= 0 && sku !== undefined ?
+      ReaderComicSuperResolution.access() : ReaderComicSuperResolutionAccess.MEMBER_REQUIRED;
   }
 
   isReaderComicSuperResolutionActive(): boolean {
@@ -2643,7 +2653,8 @@ struct ReadBookPage {
   readerComicTextConvertAccess(): string {
     // 读取会员档位只为让档位变化时界面重算，口径同超分。
     const sku = this.readerMembershipSku;
-    return sku !== undefined ? ComicChineseConverter.access() : ReaderComicSuperResolutionAccess.MEMBER_REQUIRED;
+    return this.readerComicColorRevision >= 0 && sku !== undefined ?
+      ComicChineseConverter.access() : ReaderComicSuperResolutionAccess.MEMBER_REQUIRED;
   }
 
   isReaderComicTextConvertActive(): boolean {
@@ -2783,6 +2794,7 @@ struct ReadBookPage {
         });
       },
       onSuperResolutionChange: (checked: boolean): void => {
+        if (checked && this.readerComicSuperResolutionAccess() !== ReaderComicSuperResolutionAccess.READY) return;
         this.updateReaderComicSettings((settings: ReaderComicSettings): void => {
           settings.superResolution = checked;
         });

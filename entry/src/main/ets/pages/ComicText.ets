@@ -1,4 +1,5 @@
 import { MembershipBadge } from '../components/common/MembershipBadge';
+import { AiAccessPolicy } from '../account/AiAccessPolicy';
 import { common } from '@kit.AbilityKit';
 import { router } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -23,6 +24,8 @@ interface ComicTextParams {
 struct ComicTextPage {
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
+  @StorageProp('accountEntitlementsRevision') @Watch('refreshAccess') accountRevision: number = 0;
+  @StorageProp('aiTrialOpen') @Watch('refreshAccess') trialOpen: boolean = false;
   @State private loading: boolean = false;
   @State private status: string = '';
   @State private failure: string = '';
@@ -43,6 +46,7 @@ struct ComicTextPage {
 
   onPageShow(): void {
     this.visible = true;
+    this.refreshAccess();
     syncSystemBars(getContext(this), this.appDarkMode, ThemeRuntime.pageColor(this.appDarkMode));
     if (!this.original && !this.loading && !this.failure) this.recognize(false);
   }
@@ -98,10 +102,22 @@ struct ComicTextPage {
     }
   }
 
+  private refreshAccess(): void {
+    AiAccessPolicy.refresh();
+    if (!AiAccessPolicy.isAllowed('translation')) {
+      this.showSimplified = false;
+      this.simplified = '';
+    }
+  }
+
   private async simplify(): Promise<void> {
     if (!this.original || this.converting) return;
     if (ComicChineseConverter.access() !== ReaderComicSuperResolutionAccess.READY) {
-      HdsFeedback.showToast('繁→简为会员专享');
+      if (ComicChineseConverter.access() === ReaderComicSuperResolutionAccess.UNSUPPORTED) {
+        HdsFeedback.showToast('当前设备不支持系统文字识别');
+        return;
+      }
+      HdsFeedback.showToast(AiAccessPolicy.blockedMessage());
       router.pushUrl({ url: 'pages/AccountCenter' }).catch((_: Error): void => {});
       return;
     }
@@ -114,6 +130,7 @@ struct ComicTextPage {
     try {
       const converter = await ComicChineseConverter.load(getContext(this) as common.UIAbilityContext);
       if (!this.visible || ticket !== this.generation) return;
+      if (!AiAccessPolicy.isAllowed('translation')) { this.refreshAccess(); return; }
       this.simplified = converter.convert(this.original);
       this.showSimplified = true;
     } catch (_) {
@@ -124,6 +141,7 @@ struct ComicTextPage {
   }
 
   private async copyText(): Promise<void> {
+    this.refreshAccess();
     const value = this.showSimplified ? this.simplified : this.original;
     if (!value) return;
     try {
@@ -151,6 +169,10 @@ struct ComicTextPage {
         .fontSize(AppFontSize.CAPTION)
         .fontColor(ThemeRuntime.subTextColor(this.appDarkMode))
         .width('100%')
+      Text(this.trialOpen ? `${AiAccessPolicy.TRIAL_LABEL}，登录后可使用繁→简` : '繁→简免费试用已结束，会员可继续使用')
+        .fontSize(AppFontSize.CAPTION)
+        .fontColor(ThemeRuntime.subTextColor(this.appDarkMode))
+        .width('100%')
       if (this.loading) {
         LoadingProgress().width(32).height(32)
         Text(this.status).fontColor(ThemeRuntime.primaryTextColor(this.appDarkMode))
@@ -167,12 +189,14 @@ struct ComicTextPage {
             Button('原文').enabled(!this.converting).onClick(() => { this.showSimplified = false; })
             Button() {
               Row({ space: 4 }) {
-                MembershipBadge({ sku: 'MONTHLY' })
+                if (!this.trialOpen) {
+                  MembershipBadge({ sku: 'MONTHLY' })
+                }
                 Text(this.converting ? '转换中…' : '繁→简')
                   .fontColor(Color.White)
               }
             }
-            .accessibilityText('繁→简，月度会员起可用')
+            .accessibilityText(this.trialOpen ? '繁→简，登录后限时免费试用' : '繁→简，月度会员起可用')
             .enabled(!this.converting).onClick(() => { this.simplify(); })
             Button('复制').enabled(!this.converting).onClick(() => { this.copyText(); })
           }

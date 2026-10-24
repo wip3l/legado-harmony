@@ -37,6 +37,7 @@ jobs:
       - run: node --experimental-strip-types scripts/comic-colorizer-check.mjs
       - run: node --experimental-strip-types scripts/comic-text-check.mjs
       - run: node --experimental-strip-types scripts/member-reader-settings-check.mjs
+      - run: node --experimental-strip-types scripts/ai-trial-check.mjs
       # 这些检查会导入 entry 下的 TypeScript 模块，需要 Node 的类型擦除能力。
       - run: node --experimental-strip-types scripts/java-regex-compat-check.mjs
       - run: node --experimental-strip-types scripts/replace-rule-import-check.mjs

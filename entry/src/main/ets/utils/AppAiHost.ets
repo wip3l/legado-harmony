@@ -1,7 +1,7 @@
 import { worker } from '@kit.ArkTS';
 import { AiHost, AiRuntime } from '@legado/aiengine';
 import { digestHashHex } from '@legado/sourceengine';
-import { AccountSessionStore } from '../account/AccountSessionStore';
+import { AiAccessPolicy } from '../account/AiAccessPolicy';
 import { ReaderCacheBudget } from '../core/book/ReaderCacheBudget';
 import { ReaderComicImageExport } from '../core/reader/ReaderComicImageExport';
 import { ReaderImageMarker } from '../core/book/ReaderImageMarker';
@@ -10,7 +10,7 @@ import { ReaderImageResults } from '../core/book/ReaderImageResults';
 /** The app retains membership, network/image source and cache policy. */
 export class AppAiHost implements AiHost {
   static install(): void { AiRuntime.install(new AppAiHost()); }
-  isAllowed(_feature: string): boolean { return AccountSessionStore.activeMembershipSku() !== ''; }
+  isAllowed(feature: string): boolean { return AiAccessPolicy.isAllowed(feature); }
   cacheDir(): string { return AppStorage.get<string>('appCacheDir') || ''; }
   downloadImage(source: string): Promise<Uint8Array> { return ReaderComicImageExport.downloadImage(source); }
   digestHashHex(algorithm: string, value: string): string { return digestHashHex(algorithm, value); }

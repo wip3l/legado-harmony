@@ -1,4 +1,5 @@
 import { ReaderComicTranslationRow } from './ReaderComicTranslationRow';
+import { AiAccessPolicy } from '../../account/AiAccessPolicy';
 import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
@@ -215,6 +216,8 @@ export struct ReaderComicModeSettingsPanel {
 /** 漫画「画面设置」面板。 */
 @Component
 export struct ReaderComicDisplaySettingsPanel {
+  @StorageProp('aiTrialOpen') trialOpen: boolean = false;
+  @StorageProp('accountLoggedIn') loggedIn: boolean = false;
   @Prop colorEnabled: boolean = false;
   @Prop colorAccess: string = '';
   onColorEnabled: (enabled: boolean) => void = () => {};
@@ -246,13 +249,21 @@ export struct ReaderComicDisplaySettingsPanel {
   onTextConvertChange: (checked: boolean) => void = () => {};
   onOpenMembership: () => void = () => {};
 
+  private aiDescription(description: string, access: string): string {
+    if (access === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED) {
+      return this.trialOpen && !this.loggedIn ? '登录后免费试用，至 10 月 31 日（北京时间）' :
+        '免费试用已结束，开通会员继续使用';
+    }
+    return this.trialOpen ? `${AiAccessPolicy.TRIAL_LABEL}。${description}` : description;
+  }
+
   @Builder
   superResolutionRow() {
     if (this.superResolutionAccess === ReaderComicSuperResolutionAccess.READY) {
       ReaderSettingSwitchRow({
         title: 'AI超分',
-        minimumMembership: 'MONTHLY',
-        description: '借助AI把低清图片放大变清晰，处理好后自动替换；只处理正在看的图，会多耗一些电',
+        minimumMembership: this.trialOpen ? '' : 'MONTHLY',
+        description: this.aiDescription('借助AI把低清图片放大变清晰，处理好后自动替换；只处理正在看的图，会多耗一些电', this.superResolutionAccess),
         checked: this.superResolution,
         textColor: this.colors.textColor,
         subTextColor: this.colors.subTextColor,
@@ -261,10 +272,9 @@ export struct ReaderComicDisplaySettingsPanel {
     } else if (this.superResolutionAccess === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED) {
       ReaderSettingActionRow({
         title: 'AI超分',
-        minimumMembership: 'MONTHLY',
-        description: this.superResolution ? '会员已到期，续费后自动恢复' :
-          '借助AI把低清图片放大变清晰',
-        actionText: '开通会员',
+        minimumMembership: this.trialOpen ? '' : 'MONTHLY',
+        description: this.aiDescription('', this.superResolutionAccess),
+        actionText: this.trialOpen && !this.loggedIn ? '登录后免费试用' : '开通会员',
         textColor: this.colors.textColor,
         subTextColor: this.colors.subTextColor,
         buttonColor: this.colors.buttonColor,
@@ -274,7 +284,7 @@ export struct ReaderComicDisplaySettingsPanel {
     } else {
       ReaderSettingActionRow({
         title: 'AI超分',
-        minimumMembership: 'MONTHLY',
+        minimumMembership: this.trialOpen ? '' : 'MONTHLY',
         description: '当前系统不支持，需要 API 26 及以上且支持图片超分的设备',
         actionText: '',
         textColor: this.colors.textColor,
@@ -288,8 +298,8 @@ export struct ReaderComicDisplaySettingsPanel {
     if (this.colorAccess === ReaderComicSuperResolutionAccess.READY) {
       ReaderSettingSwitchRow({
         title: 'AI着色',
-        minimumMembership: 'MONTHLY',
-        description: '借助AI为黑白漫画着色，当前画面优先；单张超长图暂不支持。开启后暂停AI超分',
+        minimumMembership: this.trialOpen ? '' : 'MONTHLY',
+        description: this.aiDescription('借助AI为黑白漫画着色，当前画面优先；单张超长图暂不支持。开启后暂停AI超分', this.colorAccess),
         checked: this.colorEnabled,
         textColor: this.colors.textColor,
         subTextColor: this.colors.subTextColor,
@@ -298,10 +308,11 @@ export struct ReaderComicDisplaySettingsPanel {
     } else {
       ReaderSettingActionRow({
         title: 'AI着色',
-        minimumMembership: 'MONTHLY',
+        minimumMembership: this.trialOpen ? '' : 'MONTHLY',
         description: this.colorAccess === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED ?
-          (this.colorEnabled ? '会员已到期，续费后恢复 AI着色' : '借助AI为黑白漫画着色，当前画面优先') : '当前设备不支持本地着色引擎',
-        actionText: this.colorAccess === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED ? '开通会员' : '',
+          this.aiDescription('', this.colorAccess) : '当前设备不支持本地着色引擎',
+        actionText: this.colorAccess === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED ?
+          (this.trialOpen && !this.loggedIn ? '登录后免费试用' : '开通会员') : '',
         textColor: this.colors.textColor,
         subTextColor: this.colors.subTextColor,
         buttonColor: this.colors.buttonColor,

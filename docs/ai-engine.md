@@ -7,6 +7,10 @@
 
 主程序在 `EntryAbility.onCreate` 安装宿主。`entry/src/main/ets/workers/ComicColorWorker.ets` 只启动子库 Worker；保留此入口以便 HarmonyOS 正确打包 Worker，其路径注册在 entry 构建配置中。HAR 原始资源自动合并，开源许可页仍可通过原 rawfile 路径读取许可证。
 
+上线前 AI 试用由主应用 `account/AiAccessPolicy.ets` 管理，`AppAiHost.isAllowed` 统一接入：北京时间 **2026-11-01 00:00 前**，登录用户可免费使用 AI 超分、AI 着色和 AI 翻译（目前仅繁→简）；未登录用户引导登录。截止时刻起恢复有效会员校验，不修改账号会员身份、服务端权益或设备能力限制。阅读页、单页着色与繁简预览监听账号和活动状态，退出登录或到期时撤销试用，保留阅读开关设置。
+
+试用时间优先复用账号快照的 `membership.serverNow`，没有校准值时使用设备时间；进程内用包含休眠时间的单调时钟推进。前台截止定时器和返回前台检查刷新界面，已确认的活动结束状态在本机持久保存。该方案不增加服务端接口，也不提供防篡改保证：清除应用数据或修改客户端仍可能绕过本地策略。用户需更新到包含此策略的版本，活动到期无需再发布版本。
+
 当前着色链路为 **本地解码 → NNRT 加速／CPU 回退 → C++ 像素合成 → JPEG → 宿主缓存**。AI 子库包含动态 CPU 模型、横竖两个固定尺寸 NPU 模型和 `libcomic_pixels.so` 原生绑定；模型原始体积合计约 176.25 MiB。原生构建包含 arm64-v8a 与 x86_64，宿主执行 `ohpm install --all` 后随 HAR 打包，无需复制 `.so` 或模型。
 
 2026-10-24 已在麒麟 9030 Pro 上验证 NPU：测试页连续着色约 2.1～2.2 秒，首次加载与 CPU 对照约 8.6～8.7 秒。其他设备按 NNRT 能力和实际校验选择后端；`backend=nnrt` 不代表整条流程全部在 NPU 执行。详细测量范围和兼容条件见 [漫画着色](comic-colorizer.md)。
@@ -26,5 +30,6 @@ npm --prefix harmony-book-ai-engine test
 node --experimental-strip-types scripts/comic-colorizer-check.mjs
 node --experimental-strip-types scripts/comic-text-check.mjs
 node --experimental-strip-types scripts/member-reader-settings-check.mjs
+node --experimental-strip-types scripts/ai-trial-check.mjs
 hvigorw --mode module -p module=entry@default -p product=default assembleHap --no-daemon
 ```

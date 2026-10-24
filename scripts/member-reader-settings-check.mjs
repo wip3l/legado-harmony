@@ -20,7 +20,7 @@ test('AI color and translation require active membership, including expiry, rest
     canIUse: () => true
   });
   for (const file of ['account/AccountCommerceModels.ets', 'account/AccountSessionStore.ets',
-    'runtime/AiRuntime.ets', 'utils/AppAiHost.ets', 'core/reader/ReaderComicComputeQueue.ts',
+    'account/AiAccessPolicy.ets', 'runtime/AiRuntime.ets', 'utils/AppAiHost.ets', 'core/reader/ReaderComicComputeQueue.ts',
     'core/reader/ComicColorizer.ets', 'core/reader/ComicChineseConverter.ets']) {
     vm.runInContext(stripTypeScriptTypes(withoutImports(read(file))), sandbox);
   }
