@@ -59,7 +59,7 @@ test('AI color and translation require active membership, including expiry, rest
 
 test('translation menu cannot enable unreleased languages or bypass membership/device checks', () => {
   let source = withoutImports(read('components/reader/ReaderComicTranslationRow.ets'));
-  source = source.slice(0, source.indexOf('  @Builder')) + '}';
+  source = source.slice(0, source.indexOf('  build()')) + '}';
   source = source.replace('@Component', '').replace('struct ReaderComicTranslationRow', 'class ReaderComicTranslationRow')
     .replace(/@(?:State|Prop)\s+|@StorageProp\('[^']+'\)\s+/g, '');
   const sandbox = vm.createContext({ ReaderComicSuperResolutionAccess: access });
@@ -73,19 +73,37 @@ test('translation menu cannot enable unreleased languages or bypass membership/d
   for (const state of Object.values(access)) {
     row.access = state;
     row.textConvert = true;
-    row.menuVisible = true;
     for (const index of [-1, 2, 3, 4]) row.selectOption(index);
     assert.equal(row.textConvert, true, 'upcoming/invalid selections preserve saved conversion');
-    assert.equal(row.menuVisible, true);
     const before = changes.length;
     row.selectOption(0);
     assert.equal(row.textConvert, false, 'off remains available after expiry or capability loss');
-    assert.equal(row.menuVisible, false);
     row.selectOption(1);
     assert.equal(row.textConvert, state === access.READY);
     assert.equal(changes.length - before, state === access.READY ? 2 : 1);
   }
   assert.equal(membershipPrompts, 1);
+});
+
+test('translation Select commits only available choices and preserves its value when access is denied', () => {
+  const source = read('components/reader/ReaderComicTranslationRow.ets');
+  const modifierSource = source.slice(source.indexOf('class TranslationMenuModifier'), source.indexOf('\n@Builder'));
+  const sandbox = vm.createContext({ ReaderComicSuperResolutionAccess: access });
+  vm.runInContext(stripTypeScriptTypes(modifierSource), sandbox);
+  const Modifier = vm.runInContext('TranslationMenuModifier', sandbox);
+  for (const state of Object.values(access)) {
+    const selections = [];
+    let prompts = 0;
+    const modifier = new Modifier(state, '#000000', false, () => prompts++);
+    for (const index of [-1, 0, 1, 2, 3, 4]) {
+      modifier.select({ index, triggerSelect: (selected, value) => selections.push([selected, value]) });
+    }
+    assert.deepEqual(selections, state === access.READY ? [[0, '关闭'], [1, '繁→简']] : [[0, '关闭']]);
+    assert.equal(prompts, state === access.MEMBER_REQUIRED ? 1 : 0);
+    assert.equal(modifier.enabled(2), false);
+    assert.equal(modifier.enabled(3), false);
+    assert.equal(modifier.enabled(1), state !== access.UNSUPPORTED);
+  }
 });
 
 test('new custom theme badge uses the lowest tier that can hold the requested count', () => {

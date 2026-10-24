@@ -83,6 +83,7 @@ export struct ReaderSettingSelectRow {
   @Prop dark: boolean = false;
   /** 下拉菜单底色（随阅读主题）。 */
   @Prop menuColor: string = '#FFFFFF';
+  menuItemModifier: ContentModifier<MenuItemConfiguration> | undefined = undefined;
   onSelect: (index: number) => void = () => {};
 
   private selectedValue(): ResourceStr {
@@ -120,6 +121,7 @@ export struct ReaderSettingSelectRow {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
         .menuBackgroundColor(this.menuColor)
         .menuBackgroundBlurStyle(BlurStyle.NONE)
+        .menuItemContentModifier(this.menuItemModifier)
         .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel, this.dark, this.menuColor))
         .onSelect((index: number) => {
           this.onSelect(index);

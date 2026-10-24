@@ -327,6 +327,7 @@ export struct ReaderComicDisplaySettingsPanel {
     ReaderComicTranslationRow({
       textConvert: this.textConvert,
       access: this.textConvertAccess,
+      menuColor: this.colors.menuColor,
       textColor: this.colors.textColor,
       subTextColor: this.colors.subTextColor,
       accentColor: this.colors.accentColor,

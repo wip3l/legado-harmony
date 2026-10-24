@@ -1,23 +1,21 @@
 import { ReaderComicSuperResolutionAccess } from '@legado/aiengine';
 import { AiAccessPolicy } from '../../account/AiAccessPolicy';
 import { AppFontSize } from '../../theme/AppFontSize';
-import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
-import { PopupMenuAction } from '../common/PopupMenuAction';
-import { ReaderSettingLabel } from './ReaderSettingRows';
+import { ThemeRuntime } from '../../theme/ThemeRuntime';
+import { ReaderSettingSelectRow } from './ReaderSettingRows';
 
 /** 保留现有按书保存的繁→简设置；尚未上线的语言不可选择。 */
 @Component
 export struct ReaderComicTranslationRow {
   @StorageProp('aiTrialOpen') trialOpen: boolean = false;
   @StorageProp('accountLoggedIn') loggedIn: boolean = false;
-  @StorageProp('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
-  @State menuVisible: boolean = false;
   @Prop textConvert: boolean = false;
   @Prop access: string = ReaderComicSuperResolutionAccess.UNSUPPORTED;
   @Prop textColor: string = '#000000';
   @Prop subTextColor: string = '#666666';
   @Prop accentColor: string = '#0A59F7';
   @Prop dark: boolean = false;
+  @Prop menuColor: string = '#FFFFFF';
   onChange: (enabled: boolean) => void = () => {};
   onOpenMembership: () => void = () => {};
 
@@ -34,7 +32,6 @@ export struct ReaderComicTranslationRow {
   private selectOption(index: number): void {
     // 双重保护：未上线的选项既禁用点击，也不能通过回调更改书籍设置。
     if (index !== 0 && index !== 1) return;
-    this.menuVisible = false;
     if (index === 1 && this.access !== ReaderComicSuperResolutionAccess.READY) {
       if (this.access === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED) this.onOpenMembership();
       return;
@@ -42,52 +39,77 @@ export struct ReaderComicTranslationRow {
     this.onChange(index === 1);
   }
 
-  @Builder
-  translationMenu() {
-    Column() {
-      PopupMenuAction(undefined, '关闭', !this.textConvert ? this.accentColor : this.textColor,
-        () => this.selectOption(0))
-      PopupMenuAction(undefined, '繁→简', this.textConvert ? this.accentColor : this.textColor,
-        () => this.selectOption(1), this.access !== ReaderComicSuperResolutionAccess.UNSUPPORTED)
-      PopupMenuAction(undefined, '日→中', this.textColor, () => this.selectOption(2), false, '即将推出')
-      PopupMenuAction(undefined, '韩→中', this.textColor, () => this.selectOption(3), false, '即将推出')
-    }
-    .width(216)
-    .padding(ImmersiveMaterialRuntime.POPUP_MENU_PADDING)
+  build() {
+    ReaderSettingSelectRow({
+      title: 'AI翻译',
+      minimumMembership: this.trialOpen ? '' : 'MONTHLY',
+      description: this.description(),
+      options: [{ value: '关闭' }, { value: '繁→简' }, { value: '日→中' }, { value: '韩→中' }],
+      selected: this.textConvert ? 1 : 0,
+      controlId: 'readerComicTranslationSelect',
+      textColor: this.textColor,
+      subTextColor: this.subTextColor,
+      accentColor: this.accentColor,
+      dark: this.dark,
+      menuColor: this.menuColor,
+      menuItemModifier: new TranslationMenuModifier(this.access, this.textColor, this.dark,
+        () => this.selectOption(1)),
+      onSelect: (index: number): void => this.selectOption(index)
+    })
+  }
+}
+
+/** 使用系统 Select 的弹层，只定制条目以支持禁用语言与“即将推出”提示。 */
+class TranslationMenuModifier implements ContentModifier<MenuItemConfiguration> {
+  access: string;
+  textColor: string;
+  dark: boolean;
+  onAccessRequired: () => void;
+
+  constructor(access: string, textColor: string, dark: boolean, onAccessRequired: () => void) {
+    this.access = access;
+    this.textColor = textColor;
+    this.dark = dark;
+    this.onAccessRequired = onAccessRequired;
   }
 
-  build() {
-    Row() {
-      ReaderSettingLabel({
-        title: 'AI翻译',
-        minimumMembership: this.trialOpen ? '' : 'MONTHLY',
-        description: this.description(),
-        textColor: this.textColor,
-        subTextColor: this.subTextColor
-      })
-      Button({ type: ButtonType.Normal }) {
-        Row({ space: 6 }) {
-          Text(this.textConvert ? '繁→简' : '关闭')
-            .fontSize(AppFontSize.BODY)
-            .fontColor(this.textColor)
-          SymbolGlyph($r('sys.symbol.chevron_down'))
-            .fontSize(14)
-            .fontColor([this.textColor])
-        }
-      }
-      .id('readerComicTranslationSelect')
-      .height(40)
-      .padding({ left: 12, right: 12 })
-      .borderRadius(16)
-      .backgroundColor(this.dark ? '#8030343B' : '#80ECEEF2')
-      .accessibilityText(`AI翻译，当前${this.textConvert ? '繁→简' : '关闭'}`)
-      .onClick(() => { this.menuVisible = !this.menuVisible; })
-      .bindPopup(this.menuVisible, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel,
-        () => this.translationMenu(), Placement.Bottom, this.dark, this.accentColor,
-        () => { this.menuVisible = false; }))
-    }
-    .width('100%')
-    .constraintSize({ minHeight: 56 })
-    .alignItems(VerticalAlign.Center)
+  enabled(index: number): boolean {
+    return index === 0 || (index === 1 && this.access !== ReaderComicSuperResolutionAccess.UNSUPPORTED);
   }
+
+  select(configuration: MenuItemConfiguration): void {
+    if (!this.enabled(configuration.index)) return;
+    if (configuration.index === 1 && this.access !== ReaderComicSuperResolutionAccess.READY) {
+      this.onAccessRequired();
+      return;
+    }
+    configuration.triggerSelect(configuration.index, configuration.index === 0 ? '关闭' : '繁→简');
+  }
+
+  applyContent(): WrappedBuilder<[MenuItemConfiguration]> {
+    return wrapBuilder(translationMenuItem);
+  }
+}
+
+@Builder
+function translationMenuItem(configuration: MenuItemConfiguration) {
+  Row({ space: 12 }) {
+    Text(configuration.value)
+      .fontSize(AppFontSize.BODY_LARGE)
+      .fontColor((configuration.contentModifier as TranslationMenuModifier).textColor)
+      .layoutWeight(1)
+    if (configuration.index > 1) {
+      Text('即将推出')
+        .fontSize(AppFontSize.MICRO)
+        .fontColor((configuration.contentModifier as TranslationMenuModifier).textColor)
+    }
+  }
+  .constraintSize({ minWidth: 176, minHeight: 40 })
+  .padding({ left: 12, right: 12 })
+  .borderRadius(8)
+  .backgroundColor(configuration.selected ?
+    ThemeRuntime.accentSurfaceColor((configuration.contentModifier as TranslationMenuModifier).dark) : Color.Transparent)
+  .opacity((configuration.contentModifier as TranslationMenuModifier).enabled(configuration.index) ? 1 : 0.38)
+  .enabled((configuration.contentModifier as TranslationMenuModifier).enabled(configuration.index))
+  .onClick(() => (configuration.contentModifier as TranslationMenuModifier).select(configuration))
 }
