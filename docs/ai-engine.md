@@ -1,6 +1,8 @@
 # AI 子模块
 
-仓库：[wip3l/harmony-book-ai-engine](https://github.com/wip3l/harmony-book-ai-engine)。
+仓库：[wip3l/harmony-book-ai-engine](https://github.com/wip3l/harmony-book-ai-engine)（私有）。
+
+> AI 引擎子模块承载会员权益功能，不在本仓库开源。没有访问权限时无法检出该子模块，也无法构建依赖它的主应用。
 目录：`harmony-book-ai-engine/`，HarmonyOS HAR 包：`@legado/aiengine`。
 
 着色、OCR、繁简字典、超分、彩色阅读调度、模型和相关测试已经移入子库。主项目保留阅读界面、会员规则、图片下载与缓存预算，`entry/src/main/ets/utils/AppAiHost.ets` 将这些能力注入 AI 库。

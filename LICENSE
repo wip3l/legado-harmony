@@ -619,3 +619,52 @@ Program, unless a warranty or assumption of liability accompanies a
 copy of the Program in return for a fee.
 
                      END OF TERMS AND CONDITIONS
+
+        ADDITIONAL PERMISSION UNDER GNU GPL VERSION 3 SECTION 7
+             (Harmony Book AI Engine Linking Exception 1.0)
+
+  Copyright (c) 2026 李其健
+
+  This additional permission applies to 开源轻页 / qingye-reader and is made under
+section 7 of the GNU General Public License version 3 printed above.
+It is granted by all licensors of the Program, including the contributors
+who have agreed to it.
+
+  If you modify this Program, or any covered work, by linking or
+combining it with Harmony Book AI Engine (or a modified version of that
+library made or authorized by its copyright holder), containing parts
+covered by the terms of the Harmony Book AI Engine Proprietary Software
+License Agreement, the licensors of this Program grant you additional
+permission to convey the resulting work.
+
+  Corresponding Source for a non-source form of such a combination need
+not include the source code for the parts of Harmony Book AI Engine
+used. Those parts are governed by their own license, not by this
+License. All other parts of the combination, including any modifications
+you make to this Program, remain subject to this License, and their
+Corresponding Source must be provided as this License requires.
+
+  This permission does not extend to any other library or program, and
+does not change the license of Harmony Book AI Engine itself. As
+section 7 allows, when you convey a copy of a covered work you may remove
+this additional permission from that copy.
+
+                    附加许可（GPL-3.0 第 7 条）
+            （Harmony Book AI Engine 链接例外 1.0，中文参考译本）
+
+  本附加许可适用于 开源轻页 / qingye-reader，依据上文 GNU 通用公共许可证第 3 版第 7 条作出，
+由本程序的全部许可人（包括已同意本附加许可的贡献者）授予。
+
+  如果你修改本程序或任何受保护的作品，使其与 Harmony Book AI Engine（或由其
+著作权人制作或授权的修改版本）链接或组合，而该库包含受《Harmony Book AI Engine
+专有软件许可协议》约束的部分，本程序的许可人额外许可你传递由此形成的作品。
+
+  此类组合以非源代码形式传递时，其“对应源代码”无需包含所用 Harmony Book AI
+Engine 部分的源代码；这些部分适用其自身的许可，不受本许可证约束。组合中的其他
+所有部分，包括你对本程序所作的任何修改，仍受本许可证约束，并须按本许可证的要求
+提供对应源代码。
+
+  本附加许可不适用于其他任何库或程序，也不改变 Harmony Book AI Engine 本身的
+许可。依据第 7 条，你在传递受保护作品的副本时，可以从该副本中删除本附加许可。
+
+  中英文本如有不一致，以英文本为准。

@@ -81,15 +81,20 @@ struct OpenSourceLicensesPage {
         'Project / 项目：开源轻页 / qingye-reader\n' +
         'Copyright (c) 2026 李其健\n' +
         'Source / 源码：https://github.com/wip3l/qingye-reader\n' +
-        'License / 许可证：GNU General Public License version 3 (GPL-3.0)\n\n';
+        'License / 许可证：GNU General Public License version 3 (GPL-3.0)，附 GPL-3.0 第 7 条附加许可' +
+        '（Harmony Book AI Engine 链接例外，见 GPL 全文之后）\n\n';
       const gplText = util.TextDecoder.create('utf-8').decodeWithStream(gplBytes, { stream: false });
+      const permissionBytes = await context.resourceManager
+        .getRawFileContent('licenses/GPL-3.0-ADDITIONAL-PERMISSION.txt');
+      const permissionText = util.TextDecoder.create('utf-8')
+        .decodeWithStream(permissionBytes, { stream: false });
       const thirdPartyText = util.TextDecoder.create('utf-8')
         .decodeWithStream(thirdPartyBytes, { stream: false });
       const openccBytes = await context.resourceManager.getRawFileContent('opencc/LICENSE');
       const openccText = util.TextDecoder.create('utf-8').decodeWithStream(openccBytes, { stream: false });
       const colorBytes = await context.resourceManager.getRawFileContent('comic-colorizer/LICENSE');
       const colorText = util.TextDecoder.create('utf-8').decodeWithStream(colorBytes, { stream: false });
-      this.licenseText = projectNotice + gplText + '\n\n' + thirdPartyText +
+      this.licenseText = projectNotice + gplText + '\n\n' + permissionText + '\n\n' + thirdPartyText +
         '\n\nOpenCC ver.1.1.9 — TSCharacters / TSPhrases\n' +
         'Authors: BYVoid and OpenCC contributors\n' +
         'https://github.com/BYVoid/OpenCC/tree/ver.1.1.9\n' + openccText +

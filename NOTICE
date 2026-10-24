@@ -2,7 +2,10 @@
 Copyright (c) 2026 李其健
 
 Source code: https://github.com/wip3l/qingye-reader
-License: GNU General Public License version 3 (GPL-3.0)
+License: GNU General Public License version 3 (GPL-3.0), with an additional
+permission under section 7 (Harmony Book AI Engine Linking Exception 1.0)
+that allows linking with and conveying alongside Harmony Book AI Engine,
+which is proprietary and not covered by the GPL. See the end of LICENSE.
 
 This distribution includes third-party open source components licensed under
 MIT and Apache-2.0. Their copyright notices and complete license texts are

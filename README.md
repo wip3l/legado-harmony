@@ -28,7 +28,7 @@
 | 项目 | 信息 |
 | --- | --- |
 | 应用包名 | `io.legado.read` |
-| 当前版本 | `4.3.929`（以 `AppScope/app.json5` 为准） |
+| 当前版本 | `4.4.930`（以 `AppScope/app.json5` 为准） |
 | 支持设备 | `phone`、`tablet`、`2in1` |
 | 最低 / 目标 API | HarmonyOS 6.0.0（API 20）/ API 26 |
 | 开源协议 | GPL-3.0 |
@@ -96,7 +96,7 @@
 - 漫画专用阅读界面：条漫或单页翻页（从左往右、从右往左，宽屏自动双页），阅读方式按书保存；画面设置可调背景、页间距、适应宽度/屏幕、信息条和预加载张数；双击与双指缩放；长按图片保存、分享或重新加载，图片地址过期时自动重新获取本话。支持携带书源请求头、Cookie 或解密规则的远程图片；单张图片下载或解密失败只在原位显示原因，不影响整章。
 - 漫画超分（会员专享，API 26 起）：用系统端侧图片超分把屏幕上的漫画放大到显示宽度的 2 倍，长条漫分块处理后拼接，失败时继续显示原图。
 - 漫画文字识别：长按图片选择“查看本页文字”，在设备本地识别并复制原文；“繁→简”预览与漫画画面设置中的“AI翻译 → 繁→简”为会员功能，纯色气泡内的繁体对白会在原图上覆盖显示简体，复杂背景保留原样。需要设备支持系统 OCR；日文、英文、韩文目前仅识别；AI翻译下拉菜单中的日→中、韩→中标记“即将推出”，暂不可选。
-- 本地漫画着色（会员专享）：阅读器“画面设置 → AI着色”，按书记忆开关。翻页模式优先当前跨页并预取后两跨页；条漫优先可见画面、沿滚动方向预取约两屏。关闭开关恢复原图；长按“本页着色”可单独处理一张。支持的设备和页面自动使用 NNRT 加速，不支持或校验失败时回退 CPU；原生像素合成已接入，麒麟 9030 Pro 的测试页连续着色约 2.1～2.2 秒，首次加载与校验较慢。内置一个 CPU、两个 NPU 专用 AlacGAN 模型，原始资源合计约 176.25 MiB，图片不上传，与漫画超分共用会员规则及串行计算队列。单张超过 4:1 的超长图仍保留原图。测量范围和设备边界见 [漫画着色](docs/comic-colorizer.md)，阅读行为见 [彩色阅读交互](docs/comic-color-interaction.md)。
+- 本地漫画着色（会员专享；北京时间 2026-11-01 00:00 前，AI 着色、AI 超分与 AI 翻译向所有登录用户免费开放）：阅读器“画面设置 → AI着色”，按书记忆开关。翻页模式优先当前跨页并预取后两跨页；条漫优先可见画面、沿滚动方向预取约两屏。关闭开关恢复原图；长按“本页着色”可单独处理一张。支持的设备和页面自动使用 NNRT 加速，不支持或校验失败时回退 CPU；原生像素合成已接入，麒麟 9030 Pro 的测试页连续着色约 2.1～2.2 秒，首次加载与校验较慢。内置一个 CPU、两个 NPU 专用 AlacGAN 模型，原始资源合计约 176.25 MiB，图片不上传，与漫画超分共用会员规则及串行计算队列。单张超过 4:1 的超长图仍保留原图。测量范围和设备边界见 [漫画着色](docs/comic-colorizer.md)，阅读行为见 [彩色阅读交互](docs/comic-color-interaction.md)。
 - 漫画图片逐张下载、解密并显示，优先处理屏幕上的图片；预加载与全文缓存共用有上限的调度队列，单图失败不阻塞其他图片。原生书源图片脚本支持 `image.reorderStrips` 条带重排。
 - 段评与本章说显示为跟随主题的数字气泡；深色模式下的评论网页自动反色。
 - 可选的本地眼动翻页：注视底部后向上看即可翻页，相机画面仅在设备内处理，不上传、不保存。
@@ -193,12 +193,12 @@ qingye-reader/
 │       ├── utils/                    # 设置、缓存、字体、TTS 与音频工具
 │       ├── webdav/                   # WebDAV 书籍浏览与下载
 │       └── widgets/                  # 桌面服务卡片界面
-├── harmony-book-source-engine/       # 子模块：书源解析内核（独立仓库，GPL-3.0）
-├── harmony-book-ai-engine/           # 子模块：着色、OCR、翻译、超分与模型（GPL-3.0）
+├── harmony-book-source-engine/       # 子模块：书源解析内核（独立公开仓库，GPL-3.0）
 │   ├── sourceengine/                 # 内核 HAR，包名 @legado/sourceengine；QuickJS 诊断另由 Diagnostics.ets 导出
 │   │   └── src/main/ets/core/        # book / concurrency / http / nativesource / rule / script
 │   ├── quickjs/                      # 修改版 ohos_quickjs 原生模块
 │   └── scripts/                      # 内核自己的回归检查
+├── harmony-book-ai-engine/           # 子模块：AI 引擎（着色、OCR、翻译、超分与模型）；会员权益，私有仓库，不在本仓库开源
 ├── docs/                             # 开发文档与使用说明书网站（docs/manual）
 └── scripts/                          # 构建前与架构回归检查
 ```
@@ -248,14 +248,19 @@ qingye-reader/
 | 配置 | 值 |
 | --- | --- |
 | 主模块 / 入口 Ability | `entry` / `EntryAbility` |
-| `versionName` | `4.3.929` |
-| `versionCode` / `buildVersion` | `4030929` |
+| `versionName` | `4.4.930` |
+| `versionCode` / `buildVersion` | `4040930` |
 | `minAPIVersion` / `targetAPIVersion` | `20` / `26` |
 | 权限 | `INTERNET`、`GET_NETWORK_INFO`、`KEEP_BACKGROUND_RUNNING`、`CAMERA`（仅在用户启用眼动翻页时请求） |
 
 ### 获取源码
 
-书源解析内核 [harmony-book-source-engine](https://github.com/wip3l/harmony-book-source-engine) 与 AI 能力库 [harmony-book-ai-engine](https://github.com/wip3l/harmony-book-ai-engine) 均通过 Git 子模块接入。AI 着色、OCR、翻译、超分和后续 AI 实现在 AI 子库中开发，接入边界与流程见 [AI 子模块说明](docs/ai-engine.md)。克隆时带上子模块：
+书源解析内核 [harmony-book-source-engine](https://github.com/wip3l/harmony-book-source-engine) 与 AI 能力库 [harmony-book-ai-engine](https://github.com/wip3l/harmony-book-ai-engine) 均通过 Git 子模块接入。AI 着色、OCR、翻译、超分和后续 AI 实现在 AI 子库中开发，接入边界与流程见 [AI 子模块说明](docs/ai-engine.md)。
+
+> [!NOTE]
+> AI 引擎子模块 `harmony-book-ai-engine` 承载会员权益功能（漫画着色、超分、OCR 与翻译），是私有仓库，**不在本仓库开源**。没有访问权限时，克隆和 `git submodule update` 会在这个子模块上失败；主应用的 `entry` 依赖 `@legado/aiengine`，缺少它无法完成构建。
+
+克隆时带上子模块：
 
 ```bash
 git clone --recursive https://github.com/wip3l/qingye-reader.git
@@ -429,7 +434,7 @@ for f in harmony-book-source-engine/scripts/*-check.mjs; do node --experimental-
 
 ## 许可证
 
-本项目采用 [GPL-3.0](LICENSE) 许可证。
+本项目采用 [GPL-3.0](LICENSE) 许可证，并附一条 GPL-3.0 第 7 条附加许可（Harmony Book AI Engine 链接例外，见 [LICENSE](LICENSE) 末尾）：允许本程序与 Harmony Book AI Engine 链接并一起分发，AI 引擎部分不受 GPL 约束。AI 引擎子模块 `harmony-book-ai-engine` 作为会员权益不在本仓库开源，不随本仓库发布源码，按其自身的专有软件许可协议授权。
 
 - 项目名称：开源轻页 / qingye-reader
 - 版权所有：Copyright © 2026 qingye-reader contributors
