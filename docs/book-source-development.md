@@ -48,6 +48,12 @@ Node 检查使用替身，不会验证真机 QuickJS、系统网页控件或实�
 
 ## 轻页的宿主差异
 
+网络选项位于“其他设置 → 兼容与诊断”：HTTP/1.1 兼容模式与图片下载并发（4/8/12，默认 4）均在本机保存。图片并发与脚本 `http.all` 的并发是两套独立限制；提高图片并发不会取消前台保留名额。详见[图片并发真机验证方法](image-concurrency-validation.md)。脚本请求的 `timeout`、`http.all` 选项及 `finalUrl` 语义见公共文档的“脚本阶段”接口表。
+
+本次新增的原生内联评论页使用 `content.comments.page/chapterPage`：点击气泡后才执行页面的附加请求，再在隔离的离线 Web 中显示 HTML 和数据。阅读器支持标题、高度、取消和备用 URL；调试页支持按入口生成并预览。字段、预算、旧宿主兼容与示例见[公共文档的内联评论页](../harmony-book-source-engine/docs/book-source-development.md#内联评论页点击后取数和生成-html)。这些能力以包含相应改动的构建为准，不代表先前同版本安装包已经具备。
+
+可导入[离线示例](../harmony-book-source-engine/docs/examples/native-inline-comments.json)验证交互；该示例无需网络，且仅面向支持 page/chapterPage 的宿主。完整验证命令和平台边界见[实施验证记录](source-capability-validation.md)。
+
 | 能力 | 轻页现状（4.4.930） |
 | --- | --- |
 | 原生书源 | 支持编辑、书源设置（变量、音色、账号登录、动作按钮）、搜索、发现、详情、目录、正文、听书、视频播放与漫画图片解密；书源管理和发现页的长按菜单可进入书源设置 |

@@ -9,8 +9,8 @@ class ReaderImageTicket {
 }
 
 /**
- * 全应用共用的正文图片名额。实测同一图片站同时下载超过 4 张时单张传输明显变慢，
- * 所以当前章、预加载的相邻章和缓存全文共用这 4 个名额：当前章优先；当前章有图片时后台最多占 1 个，
+ * 全应用共用的正文图片名额，默认 4，可在网络设置中选择 8 或 12。
+ * 当前章、预加载的相邻章和缓存全文共用名额：当前章优先；当前章有图片时后台最多占 1 个，
  * 没有时最多占 2 个。
  * 优先级在每次分配名额时重新读取，预加载的章节变成当前章后，剩下的图片随即提前。
  * 小于 BACKGROUND 的都算前台，数值越小越先处理：屏幕上正等着的图片是 VISIBLE，
@@ -21,7 +21,8 @@ export class ReaderImageScheduler {
   static readonly NEAR: number = -1;
   static readonly FOREGROUND: number = 0;
   static readonly BACKGROUND: number = 1;
-  static readonly MAX_ACTIVE: number = 4;
+  static readonly DEFAULT_CONCURRENCY: number = 4;
+  private static maxActive: number = ReaderImageScheduler.DEFAULT_CONCURRENCY;
   static readonly MAX_BACKGROUND: number = 1;
   /** 当前章没有图片在下载或排队时，后台可以多用一个名额；当前章新来的图片先拿其余空着的名额。 */
   static readonly MAX_BACKGROUND_IDLE: number = 2;
@@ -34,6 +35,18 @@ export class ReaderImageScheduler {
   private static purgeTimer: number = -1;
 
   static readonly foreground: () => number = (): number => ReaderImageScheduler.FOREGROUND;
+
+  static normalizeConcurrency(value: number): number {
+    return [4, 8, 12].includes(value) ? value : ReaderImageScheduler.DEFAULT_CONCURRENCY;
+  }
+
+  static get concurrency(): number { return ReaderImageScheduler.maxActive; }
+
+  /** 调低上限只停止发新任务，已启动的下载/解密自然完成；调高后立即分配新空位。 */
+  static setConcurrency(value: number): void {
+    ReaderImageScheduler.maxActive = ReaderImageScheduler.normalizeConcurrency(value);
+    ReaderImageScheduler.pump();
+  }
 
   /** 排到名额后执行 task；排队期间被取消时以 HttpClient.CANCELLED_ERROR 结束，不再执行。 */
   static async run<T>(priority: () => number, cancelled: () => boolean, task: () => Promise<T>): Promise<T> {
@@ -63,7 +76,7 @@ export class ReaderImageScheduler {
 
   private static pump(): void {
     ReaderImageScheduler.purgeCancelled();
-    while (ReaderImageScheduler.active < ReaderImageScheduler.MAX_ACTIVE) {
+    while (ReaderImageScheduler.active < ReaderImageScheduler.maxActive) {
       // 队列按提交顺序排列，各取最早的一张，即本章靠前的图片先处理。
       let firstForeground = -1;
       let foregroundPriority = 0;

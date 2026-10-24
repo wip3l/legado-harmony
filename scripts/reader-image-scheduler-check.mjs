@@ -165,5 +165,39 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(values, [1, 2, 3, 4, 5]);
 }
 
-console.log('reader-image-scheduler-check: ok');
+// Every selectable limit reserves space when background tasks arrive before a visible image.
+for (const limit of [4, 8, 12]) {
+  Scheduler.setConcurrency(limit);
+  const gates = []; const started = []; const jobs = [];
+  for (let i = 0; i < 15; i++) jobs.push(Scheduler.run(BG, never, async () => {
+    started.push('background'); const gate = deferred(); gates.push(gate); await gate.promise;
+  }));
+  jobs.push(Scheduler.run(() => Scheduler.VISIBLE, never, async () => {
+    started.push('visible'); const gate = deferred(); gates.push(gate); await gate.promise;
+  }));
+  await tick();
+  assert.deepEqual(started, ['background', 'background', 'visible']);
+  while (gates.length || started.length < 16) { gates.splice(0).forEach(g => g.resolve()); await tick(); await tick(); }
+  await Promise.all(jobs);
+}
+// Raising the limit starts queued foreground work immediately; lowering it drains without cancelling.
+{
+  Scheduler.setConcurrency(4);
+  const gates = []; let active = 0; let started = 0;
+  const tasks = Array.from({ length: 16 }, () => Scheduler.run(FG, never, async () => {
+    active++; started++; const gate = deferred(); gates.push(gate); await gate.promise; active--;
+  }));
+  await tick(); assert.equal(active, 4);
+  Scheduler.setConcurrency(8); await tick(); assert.equal(active, 8);
+  Scheduler.setConcurrency(12); await tick(); assert.equal(active, 12);
+  Scheduler.setConcurrency(4); await tick(); assert.equal(active, 12, 'already running tasks are retained');
+  gates.splice(0, 8).forEach(g => g.resolve()); await tick(); await tick();
+  assert.equal(active, 4); assert.equal(started, 12, 'no new work until below the lower limit');
+  gates.shift().resolve(); await tick(); await tick();
+  assert.equal(active, 4); assert.equal(started, 13);
+  while (gates.length || active) { gates.splice(0).forEach(g => g.resolve()); await tick(); await tick(); }
+  await Promise.all(tasks);
+}
+Scheduler.setConcurrency(999); assert.equal(Scheduler.concurrency, 4);
+console.log('reader-image-scheduler-check: priorities, cancellation, 4/8/12 reservations and runtime limit changes passed');
 process.exit(0);

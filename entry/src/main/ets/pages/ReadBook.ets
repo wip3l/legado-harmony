@@ -29,6 +29,8 @@ import { WebDavBookService } from '../webdav/WebDavBookService';
 import { BookSourceRuntimeSnapshotStore, BookSourceSettingValue } from '../core/book/BookSourceRuntimeSnapshot';
 import { ReaderInteractionProviderRegistry } from '../core/book/ReaderInteractionProvider';
 import { ReaderCommentWebTheme } from '../core/reader/ReaderCommentWebTheme';
+import { NativeCommentPage } from '@legado/sourceengine';
+import { NativeCommentPageView } from '../components/NativeCommentPageView';
 import { HdsFeedback } from '../utils/HdsFeedback';
 import { RecentReadShortcut } from '../utils/RecentReadShortcut';
 import { RecentReadCardUpdater } from '../utils/RecentReadCardUpdater';
@@ -247,6 +249,9 @@ struct ReadBookPage {
   @State readerCommentPanelLoading: boolean = false;
   @State readerCommentPanelError: boolean = false;
   @State readerCommentPanelHeight: number = 0;
+  @State readerInlinePageMode: boolean = false;
+  @State readerInlinePage: NativeCommentPage = new NativeCommentPage();
+  private readerInlinePageSerial: number = 0;
   private readerCommentPanelHtml: string = '';
   private readerCommentPanelBaseUrl: string = '';
   private readerCommentPanelHtmlLoaded: boolean = false;
@@ -1125,6 +1130,7 @@ struct ReadBookPage {
   }
 
   onPageHide(): void {
+    if (this.readerInlinePageMode) this.closeReaderCommentPanel();
     this.readerComicColor.setForeground(false);
     this.shortcutRoutingActive = false;
     this.readerPageVisible = false;
@@ -3110,10 +3116,11 @@ struct ReadBookPage {
    */
   readerCommentSheetOptions(): SheetOptions {
     return {
-      detents: ['60%', SheetSize.LARGE],
+      height: this.readerInlinePageMode ? `${Math.round(this.readerInlinePage.height * 100)}%` : '60%',
+      detents: [this.readerInlinePageMode ? `${Math.round(this.readerInlinePage.height * 100)}%` : '60%', SheetSize.LARGE],
       // 使用系统拖动条承接弹层手势；普通 Row 命中区不会自动驱动弹层高度。
       dragBar: true,
-      showClose: false,
+      showClose: this.readerInlinePageMode,
       scrollSizeMode: ScrollSizeMode.CONTINUOUS,
       // 底色与评论页一致，拖动到网页尚未铺满的位置时也看不出接缝。
       backgroundColor: this.readerCommentPanelWebBackground(),
@@ -3139,6 +3146,9 @@ struct ReadBookPage {
   @Builder
   readerCommentPanel() {
     Stack({ alignContent: Alignment.Top }) {
+      if (this.readerInlinePageMode) {
+        if (this.readerInlinePage.html) { NativeCommentPageView({ page: this.readerInlinePage }) }
+      } else {
       // 与弹层同步合成，避免独立 Web surface 在连续扩容时底部露出未绘制的白条。
       Web({ src: this.readerCommentPanelUrl, controller: this.readerCommentPanelController,
         renderMode: RenderMode.SYNC_RENDER })
@@ -3188,6 +3198,7 @@ struct ReadBookPage {
         .onErrorReceive((event) => {
           if (event.request.isMainFrame()) this.failReaderCommentPanelLoad();
         })
+      }
 
       if (this.readerCommentPanelLoading) {
         Column({ space: 10 }) {
@@ -13106,6 +13117,10 @@ struct ReadBookPage {
     if (action && source) {
       action.url = ReaderInteractionProviderRegistry.expandAction(source, action.url);
     }
+    if (action && source && NativeCommentPage.isAction(action.url)) {
+      this.openReaderInlinePage(source, action, marker);
+      return;
+    }
     if (action && source && NativeSourceService.isReaderAction(action.url)) {
       // 原生书源正文里的请求按钮：发出书源声明的请求，把结果提示出来。
       this.readerSourceActionOpenedAt = now;
@@ -13256,12 +13271,48 @@ struct ReadBookPage {
     return /\/(?:get_review|get_para_review|para_idea)(?:[/?#]|$)|[?&](?:review|comment)=/i.test(action.url || '');
   }
 
+  async openReaderInlinePage(source: BookSource, action: ReaderActionData, marker: string): Promise<void> {
+    const book = this.book;
+    const chapter = this.chapters[this.currentChapterIndex];
+    if (!book || !chapter) return;
+    const serial = ++this.readerInlinePageSerial;
+    this.readerSourceActionOpenedAt = Date.now();
+    this.readerInlinePage = new NativeCommentPage();
+    this.readerInlinePageMode = true;
+    this.readerCommentPanelMarker = marker;
+    this.readerCommentPanelLoading = true;
+    this.readerCommentPanelError = false;
+    this.showReaderCommentPanel = true;
+    const cancelled = (): boolean => serial !== this.readerInlinePageSerial || !this.showReaderCommentPanel ||
+      this.book !== book || this.chapters[this.currentChapterIndex]?.url !== chapter.url ||
+      this.currentReaderSource()?.bookSourceUrl !== source.bookSourceUrl;
+    try {
+      const page = await NativeSourceService.getCommentPage(source, new HttpClient(10000), book, chapter, action.url, cancelled);
+      if (cancelled()) return;
+      if (!page.html && page.fallbackUrl) {
+        HdsFeedback.showToast(`${page.error}，打开备用评论页`);
+        this.openReaderCommentPanel(page.fallbackUrl, page.title, marker);
+        return;
+      }
+      this.readerInlinePage = page;
+      this.readerCommentPanelLoading = false;
+    } catch (error) {
+      if (cancelled()) return;
+      HdsFeedback.showToast(error instanceof Error ? error.message : '评论页面生成失败');
+      this.readerCommentPanelError = true;
+    } finally {
+      if (serial === this.readerInlinePageSerial && cancelled()) this.closeReaderCommentPanel();
+    }
+  }
+
   openReaderCommentPanel(url: string, title: string, marker: string, sourceHtml: string = ''): void {
     const normalizedUrl = (url || '').trim();
     if (!/^https?:\/\//i.test(normalizedUrl)) {
       HdsFeedback.showToast('评论地址无效');
       return;
     }
+    this.readerInlinePageSerial++;
+    this.readerInlinePageMode = false;
     this.readerSourceActionOpenedAt = Date.now();
     this.readerCommentPanelLoadSerial++;
     if (this.readerCommentPanelReadyTimerId >= 0) {
@@ -13347,6 +13398,12 @@ struct ReadBookPage {
   }
 
   retryReaderCommentPanelLoad(): void {
+    if (this.readerInlinePageMode) {
+      const action = ReaderActionMarker.parse(this.readerCommentPanelMarker);
+      const source = this.currentReaderSource();
+      if (action && source) this.openReaderInlinePage(source, action, this.readerCommentPanelMarker);
+      return;
+    }
     this.readerCommentPanelLoading = true;
     this.readerCommentPanelError = false;
     if (this.readerCommentPanelHtml) {
@@ -13380,6 +13437,7 @@ struct ReadBookPage {
   }
 
   closeReaderCommentPanel(): void {
+    this.readerInlinePageSerial++;
     this.readerCommentPanelLoadSerial++;
     if (this.readerCommentPanelReadyTimerId >= 0) {
       clearTimeout(this.readerCommentPanelReadyTimerId);
@@ -13390,6 +13448,9 @@ struct ReadBookPage {
   }
 
   resetReaderCommentPanelState(): void {
+    this.readerInlinePageSerial++;
+    this.readerInlinePageMode = false;
+    this.readerInlinePage = new NativeCommentPage();
     this.readerCommentPanelLoadSerial++;
     if (this.readerCommentPanelReadyTimerId >= 0) {
       clearTimeout(this.readerCommentPanelReadyTimerId);

@@ -13,10 +13,15 @@ import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { ReaderCacheBudget, ReaderCacheCleanup } from '../core/book/ReaderCacheBudget';
 import { ReaderCacheBudgetPolicy } from '../core/book/ReaderCacheBudgetPolicy';
+import { NetworkSettingsStore } from '../utils/NetworkSettingsStore';
 
 @Entry
 @Component
 struct OtherSettingsPage {
+  @StorageLink('networkForceHttp1') networkForceHttp1: boolean = false;
+  @StorageLink('readerImageConcurrency') readerImageConcurrency: number = 4;
+  @State savingNetwork: boolean = false;
+  @State savingImageConcurrency: boolean = false;
   @StorageLink('appDarkMode') appDarkMode: boolean = false;
   @StorageLink('themeRevision') themeRevision: number = 0;
   @StorageLink('immersiveLightLevel') immersiveLightLevel: string = 'adaptive';
@@ -159,6 +164,22 @@ struct OtherSettingsPage {
 
     this.sectionTitle('兼容与诊断')
     Column() {
+      SettingRow({ title: '图片下载并发', description: '默认 4 张；网络较快时可提高，图片站限流或加载不稳时调回 4 张' }) {
+        Select([{ value: '4 张' }, { value: '8 张' }, { value: '12 张' }])
+          .selected(Math.max(0, [4, 8, 12].indexOf(this.readerImageConcurrency)))
+          .value(`${this.readerImageConcurrency} 张`)
+          .font({ size: AppFontSize.BODY })
+          .fontColor(this.primaryTextColor())
+          .backgroundColor(Color.Transparent)
+          .enabled(!this.savingImageConcurrency)
+          .onSelect((index: number) => { this.saveImageConcurrency([4, 8, 12][index] || 4); })
+      }
+      SettingSwitchRow({
+        title: 'HTTP/1.1 兼容模式',
+        description: '书源连接反复出现传输错误时可尝试开启，对后续原生网络请求生效',
+        isOn: this.networkForceHttp1,
+        onChange: (value: boolean) => { this.saveHttpCompatibility(value); }
+      })
       SettingNavRow({
         title: '脚本引擎迁移',
         description: 'QuickJS 影子校验、灰度路由、自动回退状态',
@@ -177,6 +198,30 @@ struct OtherSettingsPage {
 
   pageColor(): string {
     return ThemeRuntime.pageColor(this.appDarkMode);
+  }
+
+  private async saveHttpCompatibility(value: boolean): Promise<void> {
+    if (this.savingNetwork) return;
+    this.savingNetwork = true;
+    try {
+      await NetworkSettingsStore.save(this.getUIContext().getHostContext()!, value);
+    } catch (_) {
+      HdsFeedback.showToast('网络设置保存失败，请重试');
+    } finally {
+      this.savingNetwork = false;
+    }
+  }
+
+  private async saveImageConcurrency(value: number): Promise<void> {
+    if (this.savingImageConcurrency) return;
+    this.savingImageConcurrency = true;
+    try {
+      await NetworkSettingsStore.saveImageConcurrency(this.getUIContext().getHostContext()!, value);
+    } catch (_) {
+      HdsFeedback.showToast('图片并发设置保存失败，请重试');
+    } finally {
+      this.savingImageConcurrency = false;
+    }
   }
 
   cardColor(): string {

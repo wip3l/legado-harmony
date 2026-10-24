@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 import { ReaderCommentWebTheme } from '../entry/src/main/ets/core/reader/ReaderCommentWebTheme.ts';
+import { NativeCommentPage } from '../harmony-book-source-engine/sourceengine/src/main/ets/core/nativesource/NativeCommentPage.ts';
 
 const source = fs.readFileSync(new URL('../entry/src/main/ets/pages/ReadBook.ets', import.meta.url), 'utf8');
 function method(name) {
@@ -129,6 +130,84 @@ for (const dark of [false, true]) {
   assert(html.indexOf('__LEGADO_COMMENT_INLINE__') < html.indexOf('pageInit()'), 'theme precedes page scripts');
 }
 console.log('PASS comment panel: live resize, painted-theme reveal, stale callbacks, bounded failure/retry, early HTML theme, Web back/close bridge');
+
+function inlineHarness() {
+  const calls = [], toasts = [];
+  const context = vm.createContext({ NativeCommentPage, Error, HttpClient: class {},
+    NativeSourceService: { getCommentPage(...args) {
+      return new Promise((resolve,reject) => calls.push({ args, resolve, reject }));
+    } }, HdsFeedback: { showToast: text => toasts.push(text) } });
+  const page = vm.runInContext(stripTypeScriptTypes(`({${method('openReaderInlinePage')}})`, {mode:'strip'}),context);
+  Object.assign(page, { book:{bookUrl:'book'}, chapters:[{url:'chapter'}], currentChapterIndex:0,
+    readerInlinePageSerial:0, currentReaderSource:()=>({bookSourceUrl:'source'}),
+    closeReaderCommentPanel() { this.readerInlinePageSerial++; this.showReaderCommentPanel=false; },
+    openReaderCommentPanel(url) { this.remote=url; this.readerInlinePageMode=false; } });
+  return {page,calls,toasts,open:()=>page.openReaderInlinePage({bookSourceUrl:'source'},{url:'action'},'marker')};
+}
+{
+  const h=inlineHarness(); const first=h.open();
+  assert(h.page.readerInlinePageMode && h.page.readerCommentPanelLoading);
+  h.page.closeReaderCommentPanel(); assert(h.calls[0].args[5](), 'closing cancels engine requests');
+  h.calls[0].resolve(Object.assign(new NativeCommentPage(),{html:'old'})); await first;
+  assert.equal(h.page.showReaderCommentPanel,false); assert.notEqual(h.page.readerInlinePage.html,'old');
+}
+{
+  const h=inlineHarness(); const first=h.open(); const second=h.open();
+  h.calls[1].resolve(Object.assign(new NativeCommentPage(),{html:'new',height:0.4})); await second;
+  h.calls[0].resolve(Object.assign(new NativeCommentPage(),{html:'old'})); await first;
+  assert.equal(h.page.readerInlinePage.html,'new'); assert.equal(h.page.readerInlinePage.height,0.4);
+  assert.equal(h.page.readerCommentPanelLoading,false);
+}
+{
+  const h=inlineHarness(); const pending=h.open(); h.page.chapters=[{url:'other'}];
+  assert(h.calls[0].args[5]()); h.calls[0].resolve(new NativeCommentPage()); await pending;
+  assert.equal(h.page.showReaderCommentPanel,false,'changed chapter closes stale loading sheet');
+}
+{
+  const h=inlineHarness(); const pending=h.open();
+  h.calls[0].resolve(Object.assign(new NativeCommentPage(),{fallbackUrl:'https://fallback.example',error:'empty'})); await pending;
+  assert.equal(h.page.remote,'https://fallback.example'); assert.equal(h.toasts.length,1);
+}
+{
+  const h=inlineHarness(); const pending=h.open(); h.calls[0].reject(Error('invalid context')); await pending;
+  assert.equal(h.page.readerCommentPanelError,true); assert(h.toasts[0].includes('invalid context'));
+}
+const inlineView=fs.readFileSync(new URL('../entry/src/main/ets/components/NativeCommentPageView.ets',import.meta.url),'utf8');
+for (const required of ['incognitoMode: true','.blockNetwork(true)','.fileAccess(false)', '.domStorageAccess(false)',
+  '.databaseAccess(false)', '.geolocationAccess(false)', '.allowWindowOpenMethod(false)', '.onOverrideUrlLoading', '.onInterceptRequest']) {
+  assert(inlineView.includes(required),required);
+}
+assert(!inlineView.includes('.javaScriptProxy('),'offline view has no native bridge');
+function inlineWebHarness() {
+  const timers=new Map(),loads=[];let id=0,ready='false',stopped=0;
+  const names=['load','clearTimer','scheduleReady','fail','aboutToDisappear'];
+  const methods=names.map(name=>{
+    const start=new RegExp(`^  (?:private )?${name}\\(`,'m').exec(inlineView)?.index;
+    assert.notEqual(start,undefined,name);
+    return inlineView.slice(start,inlineView.indexOf('\n  }',start)+4).replace(/^  private /,'  ');
+  });
+  const context=vm.createContext({NativeCommentPage,Error,setTimeout:(fn,ms)=>{timers.set(++id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id)});
+  const view=vm.runInContext(stripTypeScriptTypes(`({${methods.join(',')}})`,{mode:'strip'}),context);
+  Object.assign(view,{attached:true,serial:0,timer:-1,readyTimer:-1,page:Object.assign(new NativeCommentPage(),{html:'<p>test</p>'}),
+    error:'',controller:{loadData:(...args)=>loads.push(args),runJavaScript:async()=>ready,stop:()=>stopped++}});
+  return {view,timers,loads,ready:value=>{ready=value;},stopped:()=>stopped,async tick(ms){
+    const [key,value]=[...timers].find(([,value])=>value.ms===ms)||[];assert(value,'expected timer');timers.delete(key);value.fn();
+    for(let i=0;i<6;i++) await Promise.resolve();
+  }};
+}
+{
+  const h=inlineWebHarness();h.view.load();assert.equal(h.loads[0][3],'about:blank');assert(h.loads[0][0].includes('__NATIVE_PAGE_GENERATION__=1'));
+  await h.tick(100);assert.equal(h.view.loading,true,'no page-end event is needed for readiness polling');
+  h.ready('true');await h.tick(100);assert.equal(h.view.loading,false);assert.equal(h.timers.size,0);
+}
+{
+  const h=inlineWebHarness();h.view.load();await h.tick(15000);assert.match(h.view.error,/15 秒/);
+  assert.equal(h.view.attached,false);assert.equal(h.timers.size,0);assert.equal(h.stopped(),1);
+}
+{
+  const h=inlineWebHarness();h.view.load();h.view.aboutToDisappear();assert.equal(h.timers.size,0);assert.equal(h.view.attached,false);
+}
+console.log('PASS inline comment panel: click, close cancellation, stale results, chapter changes, fallback and error handling; Web policy wiring');
 
 const panel = source.slice(source.indexOf('  readerCommentPanel()'), source.indexOf('  readerFloatingTopMenu()'));
 assert.match(panel, /scrollForward: NestedScrollMode.SELF_ONLY/);

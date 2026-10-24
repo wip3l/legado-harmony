@@ -43,6 +43,7 @@ import { LanReaderPasswordStore } from '../core/lan/LanReaderPasswordStore';
 import { readStatsTracker } from '../core/stats/ReadStatsTracker';
 import { CloudAutoSync } from '../account/CloudAutoSync';
 import { ReaderCacheBudget } from '../core/book/ReaderCacheBudget';
+import { NetworkSettingsStore } from '../utils/NetworkSettingsStore';
 
 export default class EntryAbility extends UIAbility {
   private appliedColorMode: number = -1;
@@ -51,6 +52,7 @@ export default class EntryAbility extends UIAbility {
   private memberSettingsBootstrapPromise: Promise<void> = Promise.resolve();
   private themeBootstrapPromise: Promise<void> = Promise.resolve();
   private readerBootstrapPromise: Promise<void> = Promise.resolve();
+  private networkBootstrapPromise: Promise<void> = Promise.resolve();
   private accountBootstrapPromise: Promise<void> = Promise.resolve();
   private membershipThemeTimer: number = -1;
   private deferredStartupScheduled: boolean = false;
@@ -61,6 +63,9 @@ export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onCreate');
     AppStorage.setOrCreate('startupT0', Date.now());
+    this.networkBootstrapPromise = NetworkSettingsStore.load(this.context).catch((error: Error) => {
+      console.warn('恢复网络设置失败:', error);
+    });
     AppStorage.setOrCreate('appCacheDir', this.context.cacheDir);
     AppStorage.setOrCreate('appFilesDir', this.context.filesDir);
     AppStorage.setOrCreate('pendingBookSourceImportUri', '');
@@ -303,7 +308,7 @@ export default class EntryAbility extends UIAbility {
     hilog.info(0x0000, 'testTag', 'StartupTrace onWindowStageCreate %{public}d', Date.now());
 
     Promise.all([this.themeBootstrapPromise, this.immersiveLightBootstrapPromise,
-      this.memberSettingsBootstrapPromise]).finally(() => {
+      this.memberSettingsBootstrapPromise, this.networkBootstrapPromise]).finally(() => {
       this.loadStartupContent(windowStage);
     });
   }

@@ -15,6 +15,8 @@ import { HdsFeedback } from '../utils/HdsFeedback';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { PageScaffold } from '../components/common/PageScaffold';
+import { NativeSourceService, NativeCommentPage, HttpClient, ReaderActionMarker, ReaderActionData } from '@legado/sourceengine';
+import { NativeCommentPageView } from '../components/NativeCommentPageView';
 
 class BookSourceDebugExportReport {
   reportVersion: number = 1;
@@ -50,6 +52,15 @@ struct BookSourceDebugPage {
   @State debugContent: string = '';
   @State debugSearchLinks: string[] = [];
   @State debugExploreLinks: string[] = [];
+  @State inlineActions: ReaderActionData[] = [];
+  @State inlineSummary: string = '';
+  @State inlineBusy: boolean = false;
+  @State inlinePreviewVisible: boolean = false;
+  @State inlinePreview: NativeCommentPage = new NativeCommentPage();
+  private inlineBook: Book | null = null;
+  private inlineChapter: BookChapter | null = null;
+  private inlineDebug: BookSourceDebugContext | null = null;
+  private inlineSerial: number = 0;
   private coordinator: SearchCoordinator | null = null;
   private initialized: boolean = false;
   private keyboardWindow: window.Window | null = null;
@@ -84,6 +95,9 @@ struct BookSourceDebugPage {
   }
 
   onPageHide(): void {
+    this.inlineSerial++;
+    this.inlineBusy = false;
+    this.inlinePreviewVisible = false;
     if (this.running) this.coordinator?.cancel();
     this.unregisterKeyboardAvoidance();
   }
@@ -100,6 +114,15 @@ struct BookSourceDebugPage {
     .height('100%')
     .backgroundColor(this.pageColor())
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    .bindSheet($$this.inlinePreviewVisible, this.inlinePreviewContent(), {
+      height: `${Math.round(this.inlinePreview.height * 100)}%`,
+      detents: [`${Math.round(this.inlinePreview.height * 100)}%`, SheetSize.LARGE], showClose: true
+    })
+  }
+
+  @Builder
+  inlinePreviewContent() {
+    NativeCommentPageView({ page: this.inlinePreview })
   }
 
   @Builder
@@ -188,6 +211,18 @@ struct BookSourceDebugPage {
         ForEach(this.debugSearchLinks, (url: string) => {
           this.debugLinkItem(url, SourceRuntimeStage.SEARCH)
         }, (url: string) => `search_${url}`)
+      }
+      if (this.inlineActions.length > 0) {
+        Text(this.inlineSummary || `内联页面入口 ${this.inlineActions.length} 个，点击后生成并预览`)
+          .fontSize(AppFontSize.BODY).fontColor(this.subTextColor())
+        ForEach(this.inlineActions, (action: ReaderActionData, index: number) => {
+          Button(`${index + 1}. ${action.title || action.label} · 预览`)
+            .enabled(!this.running && !this.inlineBusy)
+            .onClick(() => this.previewInlineAction(action))
+        }, (action: ReaderActionData) => action.url)
+        if (this.inlineBusy) {
+          Button('取消页面生成').onClick((): void => { this.inlineSerial++; this.inlineBusy = false; })
+        }
       }
       if (this.debugExploreLinks.length > 0) {
         Text('发现链接（点击填入）').fontSize(AppFontSize.BODY).fontWeight(FontWeight.Medium)
@@ -297,6 +332,7 @@ struct BookSourceDebugPage {
       return;
     }
     if (!this.source.bookSourceUrl) return;
+    this.clearInlineDebug();
     this.running = true;
     this.status = '执行中';
     this.debugContent = '';
@@ -396,6 +432,7 @@ struct BookSourceDebugPage {
     debug.setOutput('正文替换净化规则', this.source.contentRule.replaceRegex || '未配置');
     const content = await new WebBookService().getContent(this.source, book, chapter, null, debug);
     this.debugContent = content;
+    this.collectInlineActions(content, book, chapter, debug);
     debug.setOutput('contentLength', String(content.length));
     debug.finishStep(content.length > 0 ? 'passed' : 'failed', content.length > 0 ? '' : '正文规则返回空结果');
   }
@@ -444,6 +481,7 @@ struct BookSourceDebugPage {
     debug.setOutput('正文替换净化规则', this.source.contentRule.replaceRegex || '未配置');
     const content = await service.getContent(this.source, fullBook, chapters[0], null, debug);
     this.debugContent = content;
+    this.collectInlineActions(content, fullBook, chapters[0], debug);
     debug.setOutput('contentLength', String(content.length));
     debug.finishStep(content.length > 0 ? 'passed' : 'failed', content.length > 0 ? '' : '正文为空');
   }
@@ -481,11 +519,67 @@ struct BookSourceDebugPage {
   }
 
   private clearDebugResult(): void {
+    this.clearInlineDebug();
     this.session = new BookSourceDebugSession();
     this.debugContent = '';
     this.debugSearchLinks = [];
     this.debugExploreLinks = [];
     this.status = '准备就绪';
+  }
+
+  private clearInlineDebug(): void {
+    this.inlineSerial++;
+    this.inlineBusy = false;
+    this.inlineActions = [];
+    this.inlineSummary = '';
+    this.inlinePreviewVisible = false;
+    this.inlineBook = null;
+    this.inlineChapter = null;
+    this.inlineDebug = null;
+  }
+
+  private collectInlineActions(content: string, book: Book, chapter: BookChapter, debug: BookSourceDebugContext): void {
+    const actions: ReaderActionData[] = [];
+    let offset = 0;
+    while (offset < content.length && actions.length < 300) {
+      const match = ReaderActionMarker.findFirst(content, offset);
+      if (!match) break;
+      offset = match.end;
+      if (NativeCommentPage.isAction(match.data.url)) actions.push(match.data);
+    }
+    this.inlineActions = actions;
+    this.inlineBook = book;
+    this.inlineChapter = chapter;
+    this.inlineDebug = debug;
+    if (actions.length) debug.setOutput('内联页面', `${actions.length} 个入口，点击预览后取数并生成 HTML`);
+  }
+
+  private async previewInlineAction(action: ReaderActionData): Promise<void> {
+    if (!this.inlineBook || !this.inlineChapter || this.inlineBusy) return;
+    const serial = ++this.inlineSerial;
+    const debug = this.inlineDebug;
+    this.inlineBusy = true;
+    debug?.beginStep(SourceRuntimeStage.CONTENT, '内联评论页预览');
+    try {
+      const page = await NativeSourceService.getCommentPage(this.source, new HttpClient(10000), this.inlineBook,
+        this.inlineChapter, action.url, (): boolean => serial !== this.inlineSerial, debug);
+      if (serial !== this.inlineSerial) return;
+      this.inlineSummary = page.html ? `HTML ${NativeCommentPage.bytes(page.html)} 字节 / data ${NativeCommentPage.bytes(page.dataJson)} 字节` :
+        `页面生成失败：${page.error}；备用地址：${page.fallbackUrl}`;
+      debug?.setOutput('内联页面结果', this.inlineSummary);
+      debug?.finishStep(page.html ? 'passed' : 'failed', page.error);
+      if (page.html) { this.inlinePreview = page; this.inlinePreviewVisible = true; }
+    } catch (error) {
+      if (serial !== this.inlineSerial) return;
+      this.inlineSummary = error instanceof Error ? error.message : '评论预览失败';
+      debug?.finishStep('failed', this.inlineSummary);
+      HdsFeedback.showToast(this.inlineSummary);
+    } finally {
+      if (serial === this.inlineSerial) {
+        this.inlineBusy = false;
+        if (debug) this.publishSession(debug);
+      }
+    }
   }
 
   private fillDebugLink(url: string, stage: string): void {
