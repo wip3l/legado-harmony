@@ -384,7 +384,10 @@ assert(settingsPageSource.includes('menuItem(icon: Resource, title: string, show
   settingsPageSource.includes('dividerColor()'),
   'Mine page menu items must use official symbols and themed dividers');
 assert(fontBootstrap.includes('ThemeRuntime.fontFamily()'), 'Cold-start font bootstrap ignores the theme font');
-assert(entryAbility.includes('this.themeBootstrapPromise.finally') &&
+// First content now waits for theme + light + member settings together; fonts additionally wait
+// for the theme-dependent reader settings. Do not require the former single-promise spelling.
+assert(/Promise\.all\(\[this\.themeBootstrapPromise,[\s\S]*?\]\)\.finally\(\(\) => \{\s*this\.loadStartupContent\(windowStage\)/.test(entryAbility) &&
+  /this\.readerBootstrapPromise\s*\.then\(\(\) => ReaderFontBootstrap\.registerFromSettings/.test(entryAbility) &&
   entryAbility.includes('this.scheduleDeferredStartupInitialization()') &&
   entryAbility.includes("'ability-after-first-content'"),
   'Theme bootstrap and first content must finish before font bootstrap');
