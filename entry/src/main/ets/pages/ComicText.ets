@@ -7,11 +7,11 @@ import { ThemeRuntime } from '../theme/ThemeRuntime';
 import { AppFontSize } from '../theme/AppFontSize';
 import { syncSystemBars } from '../utils/SystemBars';
 import { HdsFeedback } from '../utils/HdsFeedback';
-import { ComicTextRecognizer } from '../core/reader/ComicTextRecognizer';
-import { ComicTextGeometry, ComicTextResult } from '../core/reader/ComicTextTypes';
-import { ComicChineseConverter } from '../core/reader/ComicChineseConverter';
+import { ComicTextRecognizer } from '@legado/aiengine';
+import { ComicTextGeometry, ComicTextResult } from '@legado/aiengine';
+import { ComicChineseConverter } from '@legado/aiengine';
 import { ComicTextRequests } from '../core/reader/ComicTextRequests';
-import { ReaderComicSuperResolutionAccess } from '../core/reader/ReaderComicSuperResolution';
+import { ReaderComicSuperResolutionAccess } from '@legado/aiengine';
 
 interface ComicTextParams {
   requestId: string;

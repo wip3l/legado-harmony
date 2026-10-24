@@ -1,5 +1,5 @@
 import { LocalBookService } from '../../core/book/LocalBookService';
-import { ReaderComicColorSession, ComicColorCandidate } from '../../core/reader/ReaderComicColorSession';
+import { ReaderComicColorSession, ComicColorCandidate } from '@legado/aiengine';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
 import { ReaderImageMarker } from '../../core/book/ReaderImageMarker';

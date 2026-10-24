@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 
-const read = file => fs.readFileSync(new URL('../entry/src/main/ets/' + file, import.meta.url), 'utf8');
+import { readEtsModule as read } from './lib/ets-module-staging.mjs';
 const withoutImports = source => source.replace(/^import\s[\s\S]*?;\r?\n/gm, '').replace(/^export /gm, '');
 const access = { READY: 'ready', MEMBER_REQUIRED: 'member', UNSUPPORTED: 'unsupported' };
 
@@ -20,11 +20,12 @@ test('AI color and translation require active membership, including expiry, rest
     canIUse: () => true
   });
   for (const file of ['account/AccountCommerceModels.ets', 'account/AccountSessionStore.ets',
-    'core/reader/ComicColorizer.ets', 'core/reader/ComicChineseConverter.ets']) {
+    'runtime/AiRuntime.ets', 'utils/AppAiHost.ets', 'core/reader/ComicColorizer.ets', 'core/reader/ComicChineseConverter.ets']) {
     vm.runInContext(stripTypeScriptTypes(withoutImports(read(file))), sandbox);
   }
   const { session, color, translation } = vm.runInContext(
     '({ session: AccountSessionStore, color: ComicColorizer, translation: ComicChineseConverter })', sandbox);
+  vm.runInContext('AppAiHost.install()', sandbox);
   async function login(sku, options = {}) {
     await session.saveLogin({}, { sessionToken: 'token', account: {
       userId: 'reader', memberVerifiedAt: clock.now, iapDebtPoints: options.debt || 0,

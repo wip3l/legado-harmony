@@ -1,15 +1,16 @@
+import { AppAiHost } from '../../../main/ets/utils/AppAiHost';
 import { TestRunner, abilityDelegatorRegistry } from '@kit.TestKit';
 import { util } from '@kit.ArkTS';
 import { common } from '@kit.AbilityKit';
 import image from '@ohos.multimedia.image';
 import fs from '@ohos.file.fs';
 import fileUri from '@ohos.file.fileuri';
-import { ComicColorizer } from '../../../main/ets/core/reader/ComicColorizer';
-import { ComicColorCodec } from '../../../main/ets/core/reader/ComicColorCodec';
+import { ComicColorizer } from '@legado/aiengine';
+import { ComicColorCodec } from '@legado/aiengine';
 
 /** Device-only smoke test, never included in the release HAP. Uses generated pixels, no user books. */
 export default class ComicColorTestRunner implements TestRunner {
-  onPrepare(): void {}
+  onPrepare(): void { AppAiHost.install(); }
 
   async onRun(): Promise<void> {
     const delegator = abilityDelegatorRegistry.getAbilityDelegator();

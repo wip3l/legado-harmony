@@ -1,3 +1,4 @@
+import { AppAiHost } from '../utils/AppAiHost';
 import { ImmersiveLightSettingsStore } from '../utils/ImmersiveLightSettingsStore';
 import { AbilityConstant, UIAbility, Want, Configuration, ConfigurationConstant } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -75,6 +76,7 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('globalTtsCurrentText', '');
     AppStorage.setOrCreate('globalTtsTextAfter', '');
     AccountSessionStore.initializeStorage();
+    AppAiHost.install();
     this.memberSettingsBootstrapPromise = MemberSettingsStore.load(this.context).catch((error: Error) => {
       console.warn('恢复会员设置失败:', error);
     });

@@ -6,7 +6,7 @@ import { AppFontSize } from '../theme/AppFontSize';
 import { syncSystemBars } from '../utils/SystemBars';
 import { HdsFeedback } from '../utils/HdsFeedback';
 import { ComicTextRequests } from '../core/reader/ComicTextRequests';
-import { ComicColorizer } from '../core/reader/ComicColorizer';
+import { ComicColorizer } from '@legado/aiengine';
 import { ReaderComicImageExport } from '../core/reader/ReaderComicImageExport';
 
 interface ComicColorParams {

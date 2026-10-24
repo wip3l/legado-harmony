@@ -1,7 +1,6 @@
 // 回归脚本把 ArkTS 源码拷到临时目录交给 Node 加载时共用的路径工具。
-// 书源解析内核在子模块 harmony-book-source-engine 的 sourceengine 模块（HAR）里，目录结构与 entry/src/main/ets 一致，
-// 所以两个源码根可以叠成一棵树：同一个相对路径（如 core/rule/RuleContext.ts）先在 entry 找，再在 sourceengine 找。
-// entry 里对 '@legado/sourceengine' 的导入按名字改写成指向定义文件的相对导入，被引用的文件需一并暂存。
+// entry、书源内核和 AI 内核的源码根叠成一棵树。
+// HAR 包名导入按导出名字改写为定义文件的相对导入，被引用的文件需一并暂存。
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,10 +10,12 @@ export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.u
 export const ETS_ROOTS = [
   path.join(projectRoot, 'entry', 'src', 'main', 'ets'),
   path.join(projectRoot, 'harmony-book-source-engine', 'sourceengine', 'src', 'main', 'ets'),
+  path.join(projectRoot, 'harmony-book-ai-engine', 'aiengine', 'src', 'main', 'ets'),
 ];
-const PACKAGE_NAME = '@legado/sourceengine';
-const PACKAGE_INDEXES = ['Index.ts', 'Diagnostics.ets']
-  .map((name) => path.join(projectRoot, 'harmony-book-source-engine', 'sourceengine', name));
+const PACKAGES = [
+  { name: '@legado/sourceengine', root: ETS_ROOTS[1], indexes: ['Index.ts', 'Diagnostics.ets'] },
+  { name: '@legado/aiengine', root: ETS_ROOTS[2], indexes: ['Index.ets'] },
+];
 
 /** 相对 ets 根的路径 → 实际文件路径。 */
 export function locateEtsModule(relative) {
@@ -22,7 +23,7 @@ export function locateEtsModule(relative) {
     const candidate = path.join(root, relative);
     if (fs.existsSync(candidate)) return candidate;
   }
-  throw new Error(`找不到模块 ${relative}（已查找 entry 与 sourceengine）`);
+  throw new Error(`找不到模块 ${relative}（已查找 entry、sourceengine 与 aiengine）`);
 }
 
 export function readEtsModule(relative) {
@@ -35,14 +36,15 @@ let exportOwners = null;
 function packageExportOwners() {
   if (exportOwners) return exportOwners;
   exportOwners = new Map();
-  for (const indexPath of PACKAGE_INDEXES) {
+  for (const pkg of PACKAGES) for (const index of pkg.indexes) {
+    const indexPath = path.resolve(pkg.root, '../../..', index);
     const text = fs.readFileSync(indexPath, 'utf8');
     for (const match of text.matchAll(/export\s*\{([^}]*)\}\s*from\s*'\.\/src\/main\/ets\/([^']+)'/g)) {
       const stem = match[2];
       const file = ['.ts', '.ets'].map((ext) => stem + ext)
-        .find((candidate) => fs.existsSync(path.join(ETS_ROOTS[1], candidate)));
+        .find((candidate) => fs.existsSync(path.join(pkg.root, candidate)));
       for (const name of match[1].split(',').map((part) => part.trim()).filter(Boolean)) {
-        exportOwners.set(name, file);
+        exportOwners.set(`${pkg.name}:${name}`, file);
       }
     }
   }
@@ -57,12 +59,12 @@ export function toNodeModuleSource(text, relative) {
   const owners = packageExportOwners();
   const fromDir = path.posix.dirname(relative.split(path.sep).join('/'));
   return text
-    .replace(new RegExp(`^(import|export)\\s*\\{([^}]*)\\}\\s*from\\s*'${PACKAGE_NAME}';?`, 'gm'), (all, keyword, list) => {
+    .replace(/^(import|export)\s*\{([^}]*)\}\s*from\s*'(@legado\/(?:sourceengine|aiengine))';?/gm, (all, keyword, list, packageName) => {
       const byFile = new Map();
       for (const part of list.split(',').map((item) => item.trim()).filter(Boolean)) {
         const name = part.split(/\s+as\s+/)[0].trim();
-        const owner = owners.get(name);
-        if (!owner) throw new Error(`${relative}: ${PACKAGE_NAME} 没有导出 ${name}`);
+        const owner = owners.get(`${packageName}:${name}`);
+        if (!owner) throw new Error(`${relative}: ${packageName} 没有导出 ${name}`);
         if (!byFile.has(owner)) byFile.set(owner, []);
         byFile.get(owner).push(part);
       }

@@ -194,6 +194,7 @@ qingye-reader/
 │       ├── webdav/                   # WebDAV 书籍浏览与下载
 │       └── widgets/                  # 桌面服务卡片界面
 ├── harmony-book-source-engine/       # 子模块：书源解析内核（独立仓库，GPL-3.0）
+├── harmony-book-ai-engine/           # 子模块：着色、OCR、翻译、超分与模型（GPL-3.0）
 │   ├── sourceengine/                 # 内核 HAR，包名 @legado/sourceengine；QuickJS 诊断另由 Diagnostics.ets 导出
 │   │   └── src/main/ets/core/        # book / concurrency / http / nativesource / rule / script
 │   ├── quickjs/                      # 修改版 ohos_quickjs 原生模块
@@ -254,7 +255,7 @@ qingye-reader/
 
 ### 获取源码
 
-书源解析内核是独立仓库 [harmony-book-source-engine](https://github.com/wip3l/harmony-book-source-engine)，以 git 子模块的形式放在 `harmony-book-source-engine/`。克隆时带上子模块：
+书源解析内核 [harmony-book-source-engine](https://github.com/wip3l/harmony-book-source-engine) 与 AI 能力库 [harmony-book-ai-engine](https://github.com/wip3l/harmony-book-ai-engine) 均通过 Git 子模块接入。AI 着色、OCR、翻译、超分和后续 AI 实现在 AI 子库中开发，接入边界与流程见 [AI 子模块说明](docs/ai-engine.md)。克隆时带上子模块：
 
 ```bash
 git clone --recursive https://github.com/wip3l/qingye-reader.git
@@ -263,10 +264,10 @@ git clone --recursive https://github.com/wip3l/qingye-reader.git
 已经克隆过的仓库补拉子模块：
 
 ```bash
-git submodule update --init
+git submodule update --init --recursive
 ```
 
-修改内核时在 `harmony-book-source-engine/` 里提交并推送到内核仓库，再回到本仓库提交子模块指向的新版本。
+修改内核时在对应的 `harmony-book-source-engine/` 或 `harmony-book-ai-engine/` 内提交并推送，再回到本仓库提交子模块指向的新版本。AI 子库可独立运行 `npm --prefix harmony-book-ai-engine test`。
 
 本项目要求完整推送：用户提出“提交并推送”或“推送”时，默认一并检查和处理主仓库及所有子模块的改动。先提交并推送子模块，确认提交已在远端后，再更新主仓库的子模块指针并提交、推送主仓库；最后核对两边远端提交、子模块指针和工作区状态。签名密码、私钥等敏感材料不得提交。
 

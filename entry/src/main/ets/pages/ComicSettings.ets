@@ -16,7 +16,7 @@ import {
 import {
   ReaderComicSuperResolution,
   ReaderComicSuperResolutionAccess
-} from '../core/reader/ReaderComicSuperResolution';
+} from '@legado/aiengine';
 
 /**
  * 阅读设置 → 漫画：漫画的全局设置。与阅读页「阅读方式」「画面设置」面板读写同一份设置；

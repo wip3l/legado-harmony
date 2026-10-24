@@ -33,7 +33,12 @@
 - 文件：TSCharacters.txt、TSPhrases.txt（未修改）
 - 许可证：Apache-2.0
 - 用途：漫画识别文本的繁→简转换，应用自行实现词组最长匹配适配器，不包含完整 OpenCC 引擎。
-- 字典、来源校验及完整许可证见 `entry/src/main/resources/rawfile/opencc/`，随 HAP 分发，应用开源许可页面显示许可全文。
+- 字典、来源校验及完整许可证见 `harmony-book-ai-engine/aiengine/src/main/resources/rawfile/opencc/`，由 HAR 合并到 HAP，应用开源许可页面显示许可全文。
+
+## Manga-Colorizer 着色模型
+
+- 固定上游来源、权重和转换参数见 [model.json](harmony-book-ai-engine/aiengine/src/main/resources/rawfile/comic-colorizer/model.json)。
+- 上游仓库 MIT 声明及完整许可随模型保存在 [LICENSE](harmony-book-ai-engine/aiengine/src/main/resources/rawfile/comic-colorizer/LICENSE)，由 AI HAR 合并到 HAP。
 
 ## 完整许可文本
 

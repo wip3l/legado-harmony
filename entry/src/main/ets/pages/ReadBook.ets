@@ -107,8 +107,8 @@ import { ReaderContinuousDataSource, ReaderScrollItem, ReaderScrollSegment } fro
 import { ReaderComicImageItem, ReaderComicView } from '../components/reader/ReaderComicView';
 import { ReaderComicPagedController, ReaderComicPagedView } from '../components/reader/ReaderComicPagedView';
 import { ReaderComicImageActions } from '../core/reader/ReaderComicImageActions';
-import { ReaderComicColorSession, ComicColorCandidate } from '../core/reader/ReaderComicColorSession';
-import { ComicColorizer } from '../core/reader/ComicColorizer';
+import { ReaderComicColorSession, ComicColorCandidate } from '@legado/aiengine';
+import { ComicColorizer } from '@legado/aiengine';
 import { ReaderComicStyle } from '../core/reader/ReaderComicStyle';
 import { ReaderNeighborChapterLoader } from '../core/reader/ReaderNeighborChapterLoader';
 import {
@@ -128,8 +128,8 @@ import {
 import {
   ReaderComicSuperResolution,
   ReaderComicSuperResolutionAccess
-} from '../core/reader/ReaderComicSuperResolution';
-import { ComicChineseConverter } from '../core/reader/ComicChineseConverter';
+} from '@legado/aiengine';
+import { ComicChineseConverter } from '@legado/aiengine';
 import { ReaderCustomFontItem, ReaderCustomFontData } from '../core/reader/ReaderSettingsModels';
 import {
   PageTurnPreview,

@@ -2,13 +2,13 @@ import fs from '@ohos.file.fs';
 import fileUri from '@ohos.file.fileuri';
 import image from '@ohos.multimedia.image';
 import { LocalBookService } from '../../core/book/LocalBookService';
-import { ReaderComicColorSession, ComicColorCandidate } from '../../core/reader/ReaderComicColorSession';
+import { ReaderComicColorSession, ComicColorCandidate } from '@legado/aiengine';
 import { ReaderImageMarker } from '../../core/book/ReaderImageMarker';
 import { ReaderImageResults } from '../../core/book/ReaderImageResults';
 import { ReaderContinuousDataSource, ReaderScrollItem } from '../../core/reader/ReaderDataSources';
-import { ReaderComicSuperResolution } from '../../core/reader/ReaderComicSuperResolution';
-import { ComicChineseConverter } from '../../core/reader/ComicChineseConverter';
-import { ComicTextLayer, ComicTextPatch } from '../../core/reader/ComicTextTypes';
+import { ReaderComicSuperResolution } from '@legado/aiengine';
+import { ComicChineseConverter } from '@legado/aiengine';
+import { ComicTextLayer, ComicTextPatch } from '@legado/aiengine';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
 

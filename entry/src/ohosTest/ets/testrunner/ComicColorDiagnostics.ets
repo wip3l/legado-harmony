@@ -3,8 +3,8 @@ import { common } from '@kit.AbilityKit';
 import image from '@ohos.multimedia.image';
 import fs from '@ohos.file.fs';
 import { mindSporeLite } from '@kit.MindSporeLiteKit';
-import { ComicColorPixels } from '../../../main/ets/core/reader/ComicColorPixels';
-import { ComicColorCodec } from '../../../main/ets/core/reader/ComicColorCodec';
+import { ComicColorPixels } from '@legado/aiengine';
+import { ComicColorCodec } from '@legado/aiengine';
 
 /** Test-only stage dumps for locating decoder / inference / composite corruption. */
 export async function diagnoseComicEdges(): Promise<void> {

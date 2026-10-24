@@ -9,6 +9,7 @@
   "license": "GPL-3.0",
   "dependencies": {
     "@devzeng/quickjs": "file:../harmony-book-source-engine/quickjs",
-    "@legado/sourceengine": "file:../harmony-book-source-engine/sourceengine"
+    "@legado/sourceengine": "file:../harmony-book-source-engine/sourceengine",
+    "@legado/aiengine": "file:../harmony-book-ai-engine/aiengine"
   }
 }

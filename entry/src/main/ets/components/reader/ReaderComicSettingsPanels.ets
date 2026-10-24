@@ -8,7 +8,7 @@ import {
   ReaderComicMode,
   ReaderComicOption
 } from '../../core/reader/ReaderComicSettings';
-import { ReaderComicSuperResolutionAccess } from '../../core/reader/ReaderComicSuperResolution';
+import { ReaderComicSuperResolutionAccess } from '@legado/aiengine';
 import { ReaderSettingActionRow, ReaderSettingSelectRow, ReaderSettingSwitchRow } from './ReaderSettingRows';
 
 /** 阅读主题下的设置面板配色，由阅读页传入。 */

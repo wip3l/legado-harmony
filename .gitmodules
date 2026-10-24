@@ -1,3 +1,6 @@
 [submodule "harmony-book-source-engine"]
 	path = harmony-book-source-engine
 	url = https://github.com/wip3l/harmony-book-source-engine.git
+[submodule "harmony-book-ai-engine"]
+	path = harmony-book-ai-engine
+	url = https://github.com/wip3l/harmony-book-ai-engine.git

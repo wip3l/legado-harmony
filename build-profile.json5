@@ -86,6 +86,16 @@
   },
   "modules": [
     {
+      "name": "aiengine",
+      "srcPath": "./harmony-book-ai-engine/aiengine",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": ["default", "release"]
+        }
+      ]
+    },
+    {
       "name": "entry",
       "srcPath": "./entry",
       "targets": [

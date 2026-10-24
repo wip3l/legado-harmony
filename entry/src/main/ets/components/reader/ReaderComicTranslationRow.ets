@@ -1,4 +1,4 @@
-import { ReaderComicSuperResolutionAccess } from '../../core/reader/ReaderComicSuperResolution';
+import { ReaderComicSuperResolutionAccess } from '@legado/aiengine';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
 import { PopupMenuAction } from '../common/PopupMenuAction';
