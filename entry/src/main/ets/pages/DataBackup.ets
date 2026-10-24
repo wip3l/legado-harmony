@@ -29,6 +29,8 @@ struct DataBackupPage {
   @State exportLocalBooks: boolean = true;
   @State exportSettings: boolean = true;
   @State exportSearchHistory: boolean = false;
+  @State exportSummary: string = '';
+  @State exportSkippedBooks: string[] = [];
   @State importSources: boolean = false;
   @State importBookshelf: boolean = false;
   @State importProgress: boolean = false;
@@ -144,6 +146,27 @@ struct DataBackupPage {
           .opacity(this.hasExportSelection() ? 1 : 0.45)
           .backgroundColor(this.accentColor())
           .onClick(() => this.requestExport())
+        if (this.exportSummary) {
+          this.sectionTitle('导出结果')
+          Column({ space: AppSpacing.MD }) {
+            Text(`已导出加密备份：${this.exportSummary}`)
+              .fontSize(AppFontSize.BODY)
+              .fontColor(this.primaryTextColor())
+              .width('100%')
+            if (this.exportSkippedBooks.length > 0) {
+              Text(`以下 ${this.exportSkippedBooks.length} 本本地书因原文件缺失或无法访问，未包含原文件和书籍信息：\n` +
+                this.exportSkippedBooks.join('\n'))
+                .fontSize(AppFontSize.CAPTION)
+                .fontColor(this.subTextColor())
+                .width('100%')
+            }
+          }
+          .padding(AppSpacing.LG)
+          .width('calc(100% - 24vp)')
+          .margin({ left: AppSpacing.LG, right: AppSpacing.LG })
+          .borderRadius(ThemeRuntime.cardRadius())
+          .backgroundColor(this.cardColor())
+        }
       } else {
         this.sectionTitle('选择备份文件')
         Column() {
@@ -203,7 +226,7 @@ struct DataBackupPage {
         AppDataBackupService.CATEGORY_BOOKMARKS)
       this.selectionRow('本地图书', 'TXT/EPUB/MOBI 原文件及本地书籍信息', exporting,
         AppDataBackupService.CATEGORY_LOCAL_BOOKS)
-      this.selectionRow('自定义设置与资源', '阅读、主题、字体、封面、TTS、替换规则等；敏感字段会清除', exporting,
+      this.selectionRow('自定义设置与资源', '阅读、主题方案、字体、封面、TTS、替换规则及 OPDS/WebDAV；不含凭据', exporting,
         AppDataBackupService.CATEGORY_SETTINGS)
       this.selectionRow('搜索历史', '搜索关键词和使用次数', exporting,
         AppDataBackupService.CATEGORY_SEARCH_HISTORY, false)
@@ -237,7 +260,7 @@ struct DataBackupPage {
         .onChange((value: boolean) => this.setSelectionValue(exporting, category, value))
     }
     .width('calc(100% - 28vp)')
-    .height(68)
+    .constraintSize({ minHeight: 68 })
     .padding({ top: AppSpacing.MD, bottom: AppSpacing.MD })
     .margin({ left: 14, right: 14 })
     .border({ width: { bottom: divider ? 0.5 : 0 }, color: this.dividerColor() })
@@ -464,6 +487,8 @@ struct DataBackupPage {
     this.busy = true;
     this.busyText = '请选择备份保存位置...';
     this.busyProgress = 1;
+    this.exportSummary = '';
+    this.exportSkippedBooks = [];
     let archivePath = '';
     try {
       await this.awaitTempCleanup();
@@ -483,7 +508,10 @@ struct DataBackupPage {
       this.busyProgress = 97;
       await this.writeBackupToUri(backup.archivePath, result[0]);
       this.busyProgress = 100;
-      HdsFeedback.showToast('加密备份已导出');
+      this.exportSummary = backup.summary();
+      this.exportSkippedBooks = backup.manifest.skippedLocalBooks;
+      HdsFeedback.showToast(this.exportSkippedBooks.length > 0 ?
+        `备份已导出，跳过 ${this.exportSkippedBooks.length} 本本地书，详见导出结果` : '加密备份已导出');
     } catch (e) {
       console.error('导出应用数据失败:', e);
       HdsFeedback.showToast(`导出失败：${e instanceof Error ? e.message : String(e)}`);
@@ -552,6 +580,10 @@ struct DataBackupPage {
             '旧版未加密备份，可能包含敏感字段');
         this.importDescription = `备份时间：${new Date(manifest.createdAt).toLocaleString()}；${security}；` +
           '可按需取消不想导入的项目。';
+        const skipped = manifest.skippedLocalBooks || [];
+        if (skipped.length > 0) {
+          this.importDescription += `此备份导出时已跳过 ${skipped.length} 本原文件缺失或无法访问的本地书。`;
+        }
       }
     } catch (e) {
       console.error('读取应用备份失败:', e);

@@ -13,7 +13,7 @@ import { BookSourceGroupStore } from './BookSourceGroupStore';
 import { ReaderReplaceRule, ReaderReplaceRuleStore } from './ReaderReplaceRuleStore';
 import { TtsSettingsStore } from './TtsSettingsStore';
 import { BookshelfStateStore } from './BookshelfStateStore';
-import { ReaderSettingsStore } from './ReaderSettingsStore';
+import { ReaderFontHelper } from './ReaderFontHelper';
 
 export class AppDataBackupSelection {
   sources: boolean = true;
@@ -48,6 +48,7 @@ export class AppDataBackupManifest {
   bookmarks: Bookmark[] = [];
   localBooks: Book[] = [];
   localFiles: Record<string, string> = {};
+  skippedLocalBooks: string[] = [];
   preferenceStores: Record<string, string> = {};
   sourceGroupPreferences: string = '';
   searchKeywords: SearchKeyword[] = [];
@@ -57,6 +58,20 @@ export class AppDataBackupManifest {
 export class AppDataBackupExportResult {
   archivePath: string = '';
   manifest: AppDataBackupManifest = new AppDataBackupManifest();
+
+  summary(): string {
+    const manifest = this.manifest;
+    const parts: string[] = [];
+    if (manifest.categories.includes('sources')) parts.push(`书源 ${manifest.sources.length}`);
+    if (manifest.categories.includes('bookshelf')) parts.push(`网络书籍 ${manifest.books.length}`);
+    if (manifest.categories.includes('progress')) parts.push(`进度 ${manifest.progress.length}`);
+    if (manifest.categories.includes('bookmarks')) parts.push(`书签 ${manifest.bookmarks.length}`);
+    if (manifest.categories.includes('localBooks')) parts.push(`本地图书 ${manifest.localBooks.length}`);
+    if (manifest.bookGroups.length > 0) parts.push(`书架分组 ${manifest.bookGroups.length}`);
+    if (manifest.categories.includes('settings')) parts.push('自定义设置与资源');
+    if (manifest.categories.includes('searchHistory')) parts.push(`搜索记录 ${manifest.searchKeywords.length}`);
+    return parts.join('、');
+  }
 }
 
 export class AppDataBackupImportSession {
@@ -120,7 +135,9 @@ export class AppDataBackupService {
     'app_theme_settings',
     'bookshelf_display_settings',
     'cover_gallery_settings',
+    'custom_theme_schemes',
     'glass_settings',
+    'opds_settings',
     'reader_replace_rules',
     'reader_settings',
     'search_explore_settings',
@@ -128,8 +145,6 @@ export class AppDataBackupService {
     'tts_settings',
     'webdav_settings'
   ];
-  private static readonly READER_SETTINGS_STORE: string = 'reader_settings';
-  private static readonly READER_THEME_PROFILE_PREFIX: string = 'readerThemeProfileV1_';
 
   private static readonly ASSET_DIRS: string[] = [
     'reader_fonts',
@@ -225,20 +240,21 @@ export class AppDataBackupService {
       AppDataBackupService.reportProgress(onProgress, '正在整理本地图书...', 22);
       manifest.categories.push(AppDataBackupService.CATEGORY_LOCAL_BOOKS);
       const localSourceBooks = allBooks.filter((book: Book): boolean => LocalBookService.isPhysicalLocalBook(book));
-      manifest.localBooks = localSourceBooks
-        .map((book: Book): Book => AppDataBackupService.sanitizeBook(book));
       const localRoot = `${payloadRoot}/local_books`;
       await AppDataBackupService.ensureDir(localRoot);
-      for (let index = 0; index < manifest.localBooks.length; index++) {
+      for (let index = 0; index < localSourceBooks.length; index++) {
         const book = localSourceBooks[index];
         const sourcePath = book.getVariable('localFilePath');
-        if (!sourcePath || !AppDataBackupService.exists(sourcePath)) continue;
+        if (!sourcePath || !AppDataBackupService.exists(sourcePath)) {
+          manifest.skippedLocalBooks.push(book.name || '未命名本地书');
+          continue;
+        }
         const format = book.getVariable('localFormat') || (book.type === LocalBookService.TYPE_EPUB ? 'epub' : 'txt');
         const archiveName = `${index}.${format}`;
         await AppDataBackupService.copyFile(sourcePath, `${localRoot}/${archiveName}`);
         manifest.localFiles[book.bookUrl] = archiveName;
-        const progress = manifest.localBooks.length > 0 ?
-          22 + Math.floor((index + 1) * 13 / manifest.localBooks.length) : 35;
+        manifest.localBooks.push(AppDataBackupService.sanitizeBook(book));
+        const progress = 22 + Math.floor((index + 1) * 13 / localSourceBooks.length);
         AppDataBackupService.reportProgress(onProgress, '正在整理本地图书...', progress);
       }
     }
@@ -477,7 +493,10 @@ export class AppDataBackupService {
       for (const raw of manifest.localBooks || []) {
         const archiveName = (manifest.localFiles || {})[raw.bookUrl] || '';
         const archivePath = archiveName ? `${session.rootPath}/local_books/${archiveName}` : '';
-        if (!archivePath || !AppDataBackupService.exists(archivePath)) continue;
+        if (!archivePath || !AppDataBackupService.exists(archivePath)) {
+          result.skippedLocalBooks++;
+          continue;
+        }
         const book = AppDataBackupService.hydrateBook(raw, manifest.sourceFilesDir, context.filesDir);
         const id = book.bookUrl.startsWith('local://') ? book.bookUrl.substring('local://'.length) :
           `${Math.abs(AppDataBackupService.hashText(book.bookUrl))}`;
@@ -524,10 +543,12 @@ export class AppDataBackupService {
           await AppDataBackupService.copyDirectory(source, `${context.filesDir}/${dirName}`);
         }
       }
-      const stores = manifest.preferenceStores || {};
+      const stores = AppDataBackupService.restoreFontReferences(manifest.preferenceStores || {},
+        manifest.sourceFilesDir, context.filesDir);
       for (const storeName of Object.keys(stores)) {
-        await AppDataBackupService.restorePreferenceStore(context, storeName, stores[storeName],
-          manifest.sourceFilesDir);
+        if (!AppDataBackupService.SETTINGS_STORES.includes(storeName)) continue;
+        // Paths have already been rebased together with the font IDs above.
+        await AppDataBackupService.restorePreferenceStore(context, storeName, stores[storeName], '');
         result.settings++;
       }
     }
@@ -1283,6 +1304,11 @@ export class AppDataBackupService {
       const source = value as Record<string, Object>;
       const result: Record<string, Object> = {};
       for (const key of Object.keys(source)) {
+        // This is a user preference, not a stored credential (OPDS/WebDAV).
+        if (key === 'rememberPassword' && typeof source[key] === 'boolean') {
+          result[key] = source[key];
+          continue;
+        }
         result[key] = AppDataBackupService.isSensitiveKey(key) ? '' :
           AppDataBackupService.sanitizeValue(source[key]);
       }
@@ -1321,15 +1347,8 @@ export class AppDataBackupService {
   private static async restorePreferenceStore(context: Context, storeName: string, raw: string,
     oldRoot: string): Promise<void> {
     const store = await preferences.getPreferences(context, storeName);
-    let localValues: Record<string, preferences.ValueType> = {};
-    if (storeName === AppDataBackupService.READER_SETTINGS_STORE) {
-      localValues = await store.getAll() as Record<string, preferences.ValueType>;
-    }
     const values = JSON.parse(AppDataBackupService.replaceRoot(raw || '{}', oldRoot, context.filesDir)) as
       Record<string, preferences.ValueType>;
-    if (storeName === AppDataBackupService.READER_SETTINGS_STORE) {
-      AppDataBackupService.preserveLocalGlobalFontSettings(values, localValues);
-    }
     await store.clear();
     for (const key of Object.keys(values)) {
       await store.put(key, values[key]);
@@ -1337,51 +1356,79 @@ export class AppDataBackupService {
     await store.flush();
   }
 
-  private static preserveLocalGlobalFontSettings(
-    incoming: Record<string, preferences.ValueType>,
-    local: Record<string, preferences.ValueType>
-  ): void {
-    const fontFamily = AppDataBackupService.preferenceString(local, 'readerFontFamily', '');
-    const fontFilePath = AppDataBackupService.preferenceString(local, 'readerFontFilePath', '');
-    const fontSourceName = AppDataBackupService.preferenceString(local, 'readerFontSourceName', '系统默认');
-    const fontMode = AppDataBackupService.preferenceString(local, 'readerFontMode', ReaderSettingsStore.FONT_MODE_DEVICE);
-    const systemFontFamily = AppDataBackupService.preferenceString(local, 'readerSystemFontFamily', '');
-    const customFontsRaw = AppDataBackupService.preferenceString(local, 'readerCustomFontsRaw', '');
-
-    incoming['readerFontFamily'] = fontFamily;
-    incoming['readerFontFilePath'] = fontFilePath;
-    incoming['readerFontSourceName'] = fontSourceName;
-    incoming['readerFontMode'] = fontMode;
-    incoming['readerSystemFontFamily'] = systemFontFamily;
-    incoming['readerCustomFontsRaw'] = customFontsRaw;
-
-    for (const key of Object.keys(incoming)) {
-      if (!key.startsWith(AppDataBackupService.READER_THEME_PROFILE_PREFIX) ||
-        typeof incoming[key] !== 'string') {
-        continue;
+  // Font family IDs contain a hash of the full path. Rebase both files and all
+  // references (global, theme profiles, title/body and regex rules) together.
+  private static restoreFontReferences(stores: Record<string, string>, oldRoot: string,
+    newRoot: string): Record<string, string> {
+    const restored: Record<string, string> = {};
+    const families = new Map<string, string>();
+    for (const name of Object.keys(stores)) {
+      if (!AppDataBackupService.SETTINGS_STORES.includes(name)) continue;
+      restored[name] = AppDataBackupService.replaceRoot(stores[name], oldRoot, newRoot);
+      if (name === 'reader_settings') {
+        AppDataBackupService.collectFontFamilies(JSON.parse(restored[name]) as Object, families);
       }
+    }
+    for (const name of Object.keys(restored)) {
+      restored[name] = JSON.stringify(AppDataBackupService.remapFontFamilies(
+        JSON.parse(restored[name]) as Object, families));
+    }
+    return restored;
+  }
+
+  private static collectFontFamilies(value: Object, families: Map<string, string>): void {
+    if (typeof value === 'string') {
       try {
-        const profile = JSON.parse(incoming[key] as string) as Record<string, Object>;
-        profile['fontFamily'] = fontFamily;
-        profile['fontFilePath'] = fontFilePath;
-        profile['fontSourceName'] = fontSourceName;
-        profile['fontMode'] = fontMode;
-        profile['systemFontFamily'] = systemFontFamily;
-        profile['customFontsRaw'] = customFontsRaw;
-        incoming[key] = JSON.stringify(profile);
-      } catch (_) {
-        // Invalid profiles are ignored by ReaderSettingsStore as well.
-      }
+        const parsed = JSON.parse(value) as Object;
+        if (parsed !== null && typeof parsed === 'object') {
+          AppDataBackupService.collectFontFamilies(parsed, families);
+        }
+      } catch (_) {}
+    } else if (Array.isArray(value)) {
+      for (const item of value as Object[]) AppDataBackupService.collectFontFamilies(item, families);
+    } else if (value !== null && typeof value === 'object') {
+      const record = value as Record<string, Object>;
+      AppDataBackupService.collectFontFamily(record, 'familyName', 'filePath', families);
+      AppDataBackupService.collectFontFamily(record, 'fontFamily', 'fontFilePath', families);
+      AppDataBackupService.collectFontFamily(record, 'readerFontFamily', 'readerFontFilePath', families);
+      for (const key of Object.keys(record)) AppDataBackupService.collectFontFamilies(record[key], families);
     }
   }
 
-  private static preferenceString(
-    values: Record<string, preferences.ValueType>,
-    key: string,
-    fallback: string
-  ): string {
-    const value = values[key];
-    return typeof value === 'string' ? value : fallback;
+  private static collectFontFamily(record: Record<string, Object>, familyKey: string, pathKey: string,
+    families: Map<string, string>): void {
+    const family = record[familyKey];
+    const path = record[pathKey];
+    if (typeof family === 'string' && family && typeof path === 'string' && path) {
+      families.set(family, ReaderFontHelper.stableFontFamily(path));
+    }
+  }
+
+  private static remapFontFamilies(value: Object, families: Map<string, string>): Object {
+    if (typeof value === 'string') {
+      const family = families.get(value);
+      if (family) return family;
+      try {
+        const parsed = JSON.parse(value) as Object;
+        if (parsed !== null && typeof parsed === 'object') {
+          return JSON.stringify(AppDataBackupService.remapFontFamilies(parsed, families));
+        }
+      } catch (_) {}
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return (value as Object[]).map((item: Object): Object =>
+        AppDataBackupService.remapFontFamilies(item, families));
+    }
+    if (value !== null && typeof value === 'object') {
+      const record = value as Record<string, Object>;
+      const result: Record<string, Object> = {};
+      for (const key of Object.keys(record)) {
+        result[key] = AppDataBackupService.remapFontFamilies(record[key], families);
+      }
+      return result;
+    }
+    return value;
   }
 
   private static replaceRoot(value: string, oldRoot: string, newRoot: string): string {

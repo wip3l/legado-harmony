@@ -1256,6 +1256,7 @@ footer { font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--lin
           <li>点“数据导出”，勾选要备份的内容。</li>
           <li>点“选择保存位置并导出”，设置备份密码并再输入一次（至少 8 个字符）。</li>
           <li>选择保存位置，得到一个 <code>.qingyebak</code> 文件。</li>
+          <li>查看“导出结果”中的实际数量；原文件缺失或无法访问的本地书会列出书名，不会计入已备份的本地图书。</li>
         </ol>
         <div class="tw"><table>
           <tr><th>可备份的内容</th><th>包含什么</th></tr>
@@ -1263,8 +1264,8 @@ footer { font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--lin
           <tr><td>书架</td><td>网络书籍、书架分组、标签和单书配置。</td></tr>
           <tr><td>阅读进度</td><td>当前章节、页码、阅读时间及单书状态。</td></tr>
           <tr><td>书签</td><td>章节位置和书签正文。</td></tr>
-          <tr><td>本地图书</td><td>TXT/EPUB 原文件及本地书籍信息。书多时备份文件会比较大。</td></tr>
-          <tr><td>自定义设置与资源</td><td>阅读、主题、字体、封面、朗读音色、替换规则等，敏感字段会清除。</td></tr>
+          <tr><td>本地图书</td><td>TXT/EPUB/MOBI 原文件及本地书籍信息。书多时备份文件会比较大。</td></tr>
+          <tr><td>自定义设置与资源</td><td>阅读、多个自定义主题方案及当前方案、字体、封面、朗读音色、替换规则、OPDS 和 WebDAV 配置；不含登录凭据。</td></tr>
           <tr><td>搜索历史</td><td>搜索关键词和使用次数。</td></tr>
         </table></div>
         <ul>
@@ -1281,6 +1282,7 @@ footer { font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--lin
         </ol>
         <ul>
           <li>导入是合并，不会先清空现有数据。相同的书籍、书源和设置以备份里的内容更新。</li>
+          <li>勾选“自定义设置与资源”会恢复备份中的字体库、字体选择和主题方案。换机时会同时迁移正文、标题及正则样式的字体引用；OPDS/WebDAV 的密码需要重新输入。旧备份未包含的配置保持现状。</li>
           <li>导入设置和自定义资源后，建议重启应用让设置完全生效。</li>
           <li>书源的登录状态不在备份里，恢复后需要重新登录。</li>
         </ul>
