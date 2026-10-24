@@ -197,8 +197,8 @@ struct AccountCenterPage {
           this.accountActions()
         } else {
           this.loginGuide()
+          this.memberSettingsEntry()
         }
-        this.memberSettingsEntry()
         this.serviceHint()
       }
     }
@@ -1795,6 +1795,9 @@ struct AccountCenterPage {
           .color(this.dividerColor())
           .margin({ left: 56, right: AppSpacing.XL })
       }
+      this.serviceRow($r('sys.symbol.gearshape'), '会员设置', '会员身份与功能标识', true, () => {
+        router.pushUrl({ url: 'pages/MemberSettings' });
+      })
       this.serviceRow($r('sys.symbol.info_circle'), '会员权益与购买说明', '开通、续费、礼包与云空间规则', false, () => {
         this.showPurchaseTerms();
       })
