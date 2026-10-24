@@ -3,8 +3,11 @@ import { common } from '@kit.AbilityKit';
 import image from '@ohos.multimedia.image';
 import fs from '@ohos.file.fs';
 import { mindSporeLite } from '@kit.MindSporeLiteKit';
+import { MessageEvents } from '@kit.ArkTS';
+import { AppAiHost } from '../../../main/ets/utils/AppAiHost';
 import { ComicColorPixels } from '@legado/aiengine';
 import { ComicColorCodec } from '@legado/aiengine';
+import { ComicColorInference, ComicColorJob, ComicColorMessage } from '@legado/aiengine';
 
 /** Test-only stage dumps for locating decoder / inference / composite corruption. */
 export async function diagnoseComicEdges(): Promise<void> {
@@ -28,11 +31,13 @@ export async function diagnoseComicEdges(): Promise<void> {
   if (fs.accessSync(`${prefix}-height.txt`)) size.height = Math.max(size.height, Number(fs.readTextSync(`${prefix}-height.txt`).trim()));
   let precision = 'enforce_fp32';
   let threads = 4;
+  let backend = 'auto';
   if (fs.accessSync(`${prefix}-config.txt`)) {
     const config = fs.readTextSync(`${prefix}-config.txt`).trim().split(',');
     size.width = Number(config[0]); size.height = Number(config[1]);
     smallSize.width = Number(config[2]); smallSize.height = Number(config[3]);
     threads = Number(config[4]) || 4; precision = config[5] || precision;
+    backend = config[6] || backend;
   }
   const small = await source.createPixelMap({ desiredSize: smallSize, desiredPixelFormat: image.PixelMapFormat.RGBA_8888 });
   const smallInfo = await small.getImageInfo();
@@ -44,15 +49,79 @@ export async function diagnoseComicEdges(): Promise<void> {
   write('model.ms', (await context.resourceManager.getRawFileContent('comic-colorizer/alac.ms')).buffer as ArrayBuffer);
   const started = Date.now();
   const modelPath = fs.accessSync(`${prefix}-custom.ms`) ? `${prefix}-custom.ms` : `${prefix}-model.ms`;
-  const model = await mindSporeLite.loadModelFromFile(modelPath, {
+  if (backend === 'auto' || backend === 'worker') {
+    const job = new ComicColorJob();
+    job.modelPath = `${prefix}-model.ms`;
+    for (const orientation of ['portrait', 'landscape']) {
+      write(`${orientation}.ms`, (await context.resourceManager.getRawFileContent(`comic-colorizer/alac-npu-${orientation}.ms`)).buffer as ArrayBuffer);
+    }
+    job.npuPortraitPath = `${prefix}-portrait.ms`;
+    job.npuLandscapePath = `${prefix}-landscape.ms`;
+    const report = (message: ComicColorMessage): void => {
+      if (message.backendProfile) job.backendProfiles.push(message.backendProfile);
+      if (message.accelerationDisabled) job.disableAcceleration = true;
+      console.info(`[ComicAcceleration] ${message.backendReason || message.status}`);
+    };
+    if (backend === 'worker') {
+      const thread = new AppAiHost().createColorWorker();
+      try {
+        for (let pass = 0; pass < 3; pass++) {
+          const file = fs.openSync(`${context.cacheDir}/comic-color-visual-fixture.jpg`, fs.OpenMode.READ_ONLY);
+          job.imageBytes = new ArrayBuffer(fs.statSync(file.fd).size);
+          try { fs.readSync(file.fd, job.imageBytes); } finally { fs.closeSync(file); }
+          if (pass === 2) job.disableAcceleration = true;
+          const passStart = Date.now();
+          const result = await new Promise<ComicColorMessage>((resolve, reject): void => {
+            thread.onmessage = (event: MessageEvents): void => {
+              const message = event.data as ComicColorMessage;
+              report(message);
+              if (message.error) reject(new Error(message.error));
+              else if (message.jpeg?.byteLength > 0) resolve(message);
+            };
+            thread.onerror = (): void => reject(new Error('worker failed'));
+            thread.postMessage(job, [job.imageBytes]);
+          });
+          write(`worker-${pass}.jpg`, result.jpeg);
+          await delegator.print(`[ComicAcceleration] worker pass=${pass} backend=${result.backend} device=${result.deviceName} inference=${result.inferenceMs}ms total=${Date.now()-passStart}ms output=${result.width}x${result.height}\n`);
+          if (result.backend !== (pass === 2 ? 'cpu' : 'nnrt')) throw new Error('Unexpected selected backend');
+        }
+      } finally { thread.terminate(); }
+    } else {
+      for (let pass = 0; pass < 2; pass++) {
+        const passStart = Date.now();
+        const prediction = await ComicColorInference.predict(job, input, size.width, size.height, (): void => {}, report);
+        write('output.bin', prediction.colors.buffer as ArrayBuffer);
+        await delegator.print(`[ComicAcceleration] pass=${pass} backend=${prediction.backend} device=${prediction.deviceName} ` +
+          `inference=${prediction.inferenceMs}ms total=${Date.now() - passStart}ms\n`);
+        if (prediction.backend !== 'nnrt') throw new Error('NNRT not selected');
+      }
+    }
+    await small.release(); await source.release(); await full.release();
+    return;
+  }
+  let modelContext: mindSporeLite.Context = {
     target: ['cpu'], cpu: { threadNum: threads, precisionMode: precision }
-  });
+  };
+  if (backend === 'nnrt') {
+    const devices = mindSporeLite.getAllNNRTDeviceDescriptions();
+    const device = devices.find((item: mindSporeLite.NNRTDeviceDescription): boolean =>
+      item.deviceType() === mindSporeLite.NNRTDeviceType.NNRTDEVICE_ACCELERATOR);
+    if (!device) throw new Error('No accelerator');
+    modelContext = { target: ['nnrt', 'cpu'], cpu: { threadNum: threads, precisionMode: precision },
+      nnrt: { deviceID: device.deviceID(), performanceMode: mindSporeLite.PerformanceMode.PERFORMANCE_HIGH } };
+  }
+  const model = await mindSporeLite.loadModelFromFile(modelPath, modelContext);
   const loaded = Date.now();
-  model.resize(model.getInputs(), [[1, size.height, size.width, 5]]);
+  await delegator.print(`[ComicEdge] backend=${backend} initial=${model.getInputs()[0].shape.join(',')} load=${loaded-started}ms\n`);
+  if (model.getInputs()[0].shape.join(',') !== `1,${size.height},${size.width},5`) {
+    if (!model.resize(model.getInputs(), [[1, size.height, size.width, 5]])) throw new Error('resize failed');
+  }
   const inputs = model.getInputs();
   inputs[0].setData(input.buffer);
   const predictedAt = Date.now();
   const output = await model.predict(inputs);
+  if (!output) throw new Error('predict returned undefined');
+  await delegator.print(`[ComicEdge] output=${output[0].shape.join(',')}\n`);
   const predicted = Date.now();
   const colors = new Float32Array(output[0].getData());
   const owned = colors.slice();

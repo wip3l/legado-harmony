@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 
 import '../harmony-book-ai-engine/scripts/comic-colorizer-check.mjs';
+import '../harmony-book-ai-engine/scripts/comic-color-backend-check.mjs';
 // Exercise the actual long-press dispatch: new action retains the existing indices and only routes a short ID.
 let selected = 4, routed, reloaded = 0;
 const menu = vm.createContext({ Map, Set, Error,
