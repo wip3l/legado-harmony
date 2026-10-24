@@ -251,7 +251,7 @@ export struct ReaderComicDisplaySettingsPanel {
 
   private aiDescription(description: string, access: string): string {
     if (access === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED) {
-      return this.trialOpen && !this.loggedIn ? '登录后免费试用，至 10 月 31 日（北京时间）' :
+      return this.trialOpen && !this.loggedIn ? '登录后免费试用，至 11 月 10 日（北京时间）' :
         '免费试用已结束，开通会员继续使用';
     }
     return this.trialOpen ? `${AiAccessPolicy.TRIAL_LABEL}。${description}` : description;

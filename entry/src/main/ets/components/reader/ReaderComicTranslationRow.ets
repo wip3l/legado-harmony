@@ -21,7 +21,7 @@ export struct ReaderComicTranslationRow {
 
   private description(): string {
     if (this.access === ReaderComicSuperResolutionAccess.MEMBER_REQUIRED) {
-      return this.trialOpen && !this.loggedIn ? '登录后免费试用，至 10 月 31 日（北京时间）' :
+      return this.trialOpen && !this.loggedIn ? '登录后免费试用，至 11 月 10 日（北京时间）' :
         '免费试用已结束，开通会员继续使用';
     }
     if (this.access === ReaderComicSuperResolutionAccess.UNSUPPORTED) return '当前设备不支持系统文字识别';

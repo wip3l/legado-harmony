@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 import { readEtsModule as read } from './lib/ets-module-staging.mjs';
 
-const end = Date.parse('2026-11-01T00:00:00+08:00');
+const end = Date.parse('2026-11-11T00:00:00+08:00');
 const features = ['super-resolution', 'colorization', 'translation'];
 const withoutImports = source => source.replace(/^import\s[\s\S]*?;\r?\n/gm, '').replace(/^export /gm, '');
 
@@ -47,10 +47,10 @@ function fixture({ now = end - 10000, persisted = new Map() } = {}) {
   return { ...api, sandbox, clock, values, timers, persisted, login, advance };
 }
 
-test('only logged-in users get the three AI features before the Beijing launch deadline', async () => {
+test('only logged-in users get the three AI features before the Beijing trial deadline', async () => {
   const f = fixture();
   f.policy.start();
-  assert.equal(f.policy.ENDS_AT, Date.parse('2026-10-31T16:00:00Z'));
+  assert.equal(f.policy.ENDS_AT, Date.parse('2026-11-10T16:00:00Z'));
   for (const feature of features) assert.equal(f.runtime.isAllowed(feature), false);
   assert.equal(f.policy.actionText(), '登录后免费试用');
   await f.login();
@@ -71,6 +71,17 @@ test('only logged-in users get the three AI features before the Beijing launch d
   await assert.rejects(f.color.colorize({}, 'image', () => true, () => {}), /会员专享/);
   await f.login();
   for (const feature of features) assert.equal(f.runtime.isAllowed(feature), true);
+});
+
+test('extended trial reopens after the old deadline even when the previous campaign was closed', async () => {
+  const f = fixture({ now: Date.parse('2026-11-01T00:00:00+08:00'),
+    persisted: new Map([['aiLaunchTrial20261101Ended', true]]) });
+  f.policy.start();
+  for (const feature of features) assert.equal(f.runtime.isAllowed(feature), false);
+  await f.login();
+  for (const feature of features) assert.equal(f.runtime.isAllowed(feature), true);
+  assert.equal(f.values.get('aiTrialOpen'), true);
+  assert.match(f.policy.TRIAL_LABEL, /11 月 10 日/);
 });
 
 test('exact expiry refreshes open pages, persists closure and preserves paid access', async () => {

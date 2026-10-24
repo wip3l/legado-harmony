@@ -1,11 +1,11 @@
 import systemDateTime from '@ohos.systemDateTime';
 import { AccountSessionStore } from './AccountSessionStore';
 
-/** 上线前的 AI 体验活动只影响这三项端侧能力，不授予会员身份。 */
+/** AI 限时体验活动只影响这三项端侧能力，不授予会员身份。 */
 export class AiAccessPolicy {
-  static readonly ENDS_AT: number = Date.parse('2026-11-01T00:00:00+08:00');
-  static readonly TRIAL_LABEL: string = '限时免费 · 至 10 月 31 日（北京时间）';
-  private static readonly ENDED_KEY: string = 'aiLaunchTrial20261101Ended';
+  static readonly ENDS_AT: number = Date.parse('2026-11-11T00:00:00+08:00');
+  static readonly TRIAL_LABEL: string = '限时免费 · 至 11 月 10 日（北京时间）';
+  private static readonly ENDED_KEY: string = 'aiLaunchTrial20261111Ended';
   private static initialized: boolean = false;
   private static running: boolean = false;
   private static timer: number = -1;
@@ -58,7 +58,7 @@ export class AiAccessPolicy {
   }
 
   static blockedMessage(): string {
-    return AiAccessPolicy.trialOpen() ? '登录后免费试用，至 10 月 31 日（北京时间）' :
+    return AiAccessPolicy.trialOpen() ? '登录后免费试用，至 11 月 10 日（北京时间）' :
       '免费试用已结束，开通会员继续使用';
   }
 
