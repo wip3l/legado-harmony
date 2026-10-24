@@ -331,11 +331,35 @@ struct BookSourcePage {
   }
 
   async refreshSources(): Promise<void> {
-    await this.loadSources();
+    const hadSources = this.sources.length > 0;
+    const firstIndex = this.sourceFirstVisibleIndex;
+    const firstSourceUrl = this.sources[firstIndex]?.bookSourceUrl;
+    const visibleCount = this.sourceVisibleItemCount;
+    const scrollOffset = hadSources ? this.sourceListScroller.currentOffset().yOffset : 0;
+    const headerCollapse = this.sourceHeaderCollapse;
+    await this.loadSources(true);
+    if (!hadSources || this.sources.length === 0) return;
+
+    // 编辑可能改变排序或筛选结果，优先定位原来的首个可见书源，移除时退回相邻位置。
+    const anchorIndex = this.sources.findIndex((source: BookSource) => source.bookSourceUrl === firstSourceUrl);
+    const targetIndex = anchorIndex >= 0 ? anchorIndex : Math.min(firstIndex, this.sources.length - 1);
+    this.sourceFirstVisibleIndex = targetIndex;
+    this.sourceVisibleItemCount = visibleCount;
+    this.sourceHeaderCollapse = headerCollapse;
+    setTimeout(() => {
+      if (!this.pageVisible || this.sources.length === 0) return;
+      if (anchorIndex === firstIndex) {
+        // 顺序未变时保留像素偏移，避免首行被截断的部分在返回后跳动。
+        this.sourceListScroller.scrollTo({ xOffset: 0, yOffset: scrollOffset, animation: false });
+      } else {
+        this.sourceListScroller.scrollToIndex(targetIndex + this.sourceListLaneCount(), false, ScrollAlign.START);
+      }
+    }, 0);
   }
 
-  async loadSources() {
-    this.isLoading = true;
+  async loadSources(preserveViewport: boolean = false) {
+    // 返回页面时原位刷新，避免加载占位销毁 List 及其滚动状态。
+    this.isLoading = !preserveViewport || this.sources.length === 0;
     try {
       const db = AppDatabase.getInstance();
       await db.initWithContext(getContext(this));
