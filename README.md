@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 ![HarmonyOS](https://img.shields.io/badge/HarmonyOS-6.0.0%20(API%2020)%2B-black.svg)
 ![ArkTS](https://img.shields.io/badge/ArkTS-ArkUI-orange.svg)
-![Devices](https://img.shields.io/badge/devices-phone%20%7C%20tablet%20%7C%202in1-lightgrey.svg)
+![Devices](https://img.shields.io/badge/devices-phone%20%7C%20tablet%20%7C%202in1%20%7C%20pc-lightgrey.svg)
 
 开源轻页（qingye-reader）是一款使用 ArkTS / ArkUI 开发的 HarmonyOS NEXT 原生阅读应用，使用自有的原生书源格式并兼容 Legado（阅读）书源规则，面向手机、平板和 PC/2in1，提供书架、搜索、发现、书源管理、正文阅读、漫画、有声书、视频、朗读与个性化设置。
 
@@ -29,7 +29,7 @@
 | --- | --- |
 | 应用包名 | `io.legado.read` |
 | 当前版本 | `4.4.930`（以 `AppScope/app.json5` 为准） |
-| 支持设备 | `phone`、`tablet`、`2in1` |
+| 支持设备 | `phone`、`tablet`、`2in1`、`pc` |
 | 最低 / 目标 API | HarmonyOS 6.0.0（API 20）/ API 26 |
 | 开源协议 | GPL-3.0 |
 
