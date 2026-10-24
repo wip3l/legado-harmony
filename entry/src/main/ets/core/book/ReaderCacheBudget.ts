@@ -26,6 +26,12 @@ export class ReaderCacheBudget {
   private static chain: Promise<void> = Promise.resolve();
   private static textTimer: number = -1;
   private static comicTimer: number = -1;
+  private static comicIndex: Map<string, CacheBudgetItem> = new Map();
+  private static comicIndexDir: string = '';
+  private static comicIndexAt: number = 0;
+  private static readonly COMIC_RESCAN_MS: number = 5 * 60 * 1000;
+  // Updated immediately, including while a directory scan is awaiting IO.
+  private static comicRecentUses: Map<string, number> = new Map();
 
   /** 阅读引擎登记正在打开的书，清理时跳过这些书的正文。 */
   static setProtectedBooksProvider(provider: () => string[]): void {
@@ -40,7 +46,28 @@ export class ReaderCacheBudget {
     }, ReaderCacheBudget.TRIM_DELAY_MS);
   }
 
-  static noteComicWrite(): void {
+  static noteComicWrite(path?: string): void {
+    if (path) ReaderCacheBudget.comicRecentUses.set(path, Date.now());
+    ReaderCacheBudget.enqueue(async (): Promise<void> => {
+      const dir = ReaderCacheBudget.comicDir();
+      if (!path || !ReaderCacheBudget.isComicFile(path, dir)) {
+        ReaderCacheBudget.comicIndexAt = 0;
+        return;
+      }
+      // An initial scan will discover writes made before the index is ready.
+      if (!ReaderCacheBudget.comicIndexAt || ReaderCacheBudget.comicIndexDir !== dir) return;
+      try {
+        const stat = await fs.stat(path);
+        if (!stat.isFile()) { ReaderCacheBudget.comicIndexAt = 0; return; }
+        const item = new CacheBudgetItem();
+        item.id = path;
+        item.bytes = stat.size;
+        item.usedAt = Math.max(stat.mtime * 1000, ReaderCacheBudget.comicRecentUses.get(path) || 0);
+        ReaderCacheBudget.comicIndex.set(path, item);
+      } catch (_) {
+        ReaderCacheBudget.comicIndexAt = 0;
+      }
+    }).catch(() => {});
     if (ReaderCacheBudget.comicTimer >= 0) return;
     ReaderCacheBudget.comicTimer = setTimeout(() => {
       ReaderCacheBudget.comicTimer = -1;
@@ -60,8 +87,12 @@ export class ReaderCacheBudget {
 
   /** 命中漫画图片缓存时刷新修改时间，清理按最久未用的先删。 */
   static touchComicFile(path: string): void {
+    const now = Date.now();
+    ReaderCacheBudget.comicRecentUses.set(path, now);
+    const item = ReaderCacheBudget.comicIndex.get(path);
+    if (item) item.usedAt = now;
     try {
-      fs.utimes(path, Date.now());
+      fs.utimes(path, now);
     } catch (_) {
     }
   }
@@ -76,7 +107,7 @@ export class ReaderCacheBudget {
   static async comicUsageBytes(): Promise<number> {
     return await ReaderCacheBudget.enqueueValue(async (): Promise<number> => {
       let total = 0;
-      for (const item of await ReaderCacheBudget.listComicFiles()) total += item.bytes;
+      for (const item of await ReaderCacheBudget.listComicFiles(true)) total += item.bytes;
       return total;
     });
   }
@@ -95,7 +126,7 @@ export class ReaderCacheBudget {
   static async clearComic(): Promise<ReaderCacheCleanup> {
     return await ReaderCacheBudget.enqueueValue(async (): Promise<ReaderCacheCleanup> => {
       const now = Date.now();
-      const items = await ReaderCacheBudget.listComicFiles();
+      const items = await ReaderCacheBudget.listComicFiles(true);
       const plan = ReaderCacheBudgetPolicy.planClear(items,
         (item: CacheBudgetItem): boolean => now - item.usedAt < ReaderCacheBudget.RECENT_PROTECT_MS);
       return ReaderCacheBudget.applyComicPlan(plan);
@@ -177,12 +208,20 @@ export class ReaderCacheBudget {
     const result = new ReaderCacheCleanup();
     result.protectedCount = plan.protectedCount;
     for (const id of plan.removeIds) {
+      // A cache hit or completed write may have arrived while the scan was suspended.
+      if (Date.now() - (ReaderCacheBudget.comicRecentUses.get(id) || 0) < ReaderCacheBudget.RECENT_PROTECT_MS) {
+        result.protectedCount++;
+        continue;
+      }
       try {
         const size = fs.statSync(id).size;
         fs.unlinkSync(id);
+        ReaderCacheBudget.comicIndex.delete(id);
+        ReaderCacheBudget.comicRecentUses.delete(id);
         result.removed++;
         result.releasedBytes += size;
       } catch (_) {
+        ReaderCacheBudget.comicIndexAt = 0;
         result.failed++;
       }
     }
@@ -194,10 +233,25 @@ export class ReaderCacheBudget {
     return cacheDir ? `${cacheDir}/${ReaderCacheBudget.COMIC_DIR_NAME}` : '';
   }
 
-  private static async listComicFiles(): Promise<CacheBudgetItem[]> {
+  private static isComicFile(path: string, dir: string): boolean {
+    if (!dir || !path.startsWith(`${dir}/`)) return false;
+    const name = path.substring(dir.length + 1);
+    return name.length > 0 && name !== '.' && name !== '..' && !/[\\/]/.test(name) && !/\.(tmp|part)$/.test(name);
+  }
+
+  private static async listComicFiles(force: boolean = false): Promise<CacheBudgetItem[]> {
     const items: CacheBudgetItem[] = [];
     const dir = ReaderCacheBudget.comicDir();
     if (!dir) return items;
+    const now = Date.now();
+    for (const [path, usedAt] of ReaderCacheBudget.comicRecentUses) {
+      if (now - usedAt >= ReaderCacheBudget.RECENT_PROTECT_MS) ReaderCacheBudget.comicRecentUses.delete(path);
+    }
+    if (!force && ReaderCacheBudget.comicIndexDir === dir && ReaderCacheBudget.comicIndexAt > 0 &&
+      now >= ReaderCacheBudget.comicIndexAt && now - ReaderCacheBudget.comicIndexAt < ReaderCacheBudget.COMIC_RESCAN_MS) {
+      return Array.from(ReaderCacheBudget.comicIndex.values());
+    }
+    ReaderCacheBudget.comicIndexAt = 0;
     let names: string[] = [];
     try {
       if (!fs.accessSync(dir)) return items;
@@ -207,6 +261,7 @@ export class ReaderCacheBudget {
     }
     for (const name of names) {
       const path = `${dir}/${name}`;
+      if (!ReaderCacheBudget.isComicFile(path, dir)) continue;
       try {
         const stat = await fs.stat(path);
         if (!stat.isFile()) continue;
@@ -214,11 +269,14 @@ export class ReaderCacheBudget {
         item.id = path;
         item.bytes = stat.size;
         // mtime 是秒。
-        item.usedAt = stat.mtime * 1000;
+        item.usedAt = Math.max(stat.mtime * 1000, ReaderCacheBudget.comicRecentUses.get(path) || 0);
         items.push(item);
       } catch (_) {
       }
     }
+    ReaderCacheBudget.comicIndex = new Map(items.map((item: CacheBudgetItem): [string, CacheBudgetItem] => [item.id, item]));
+    ReaderCacheBudget.comicIndexDir = dir;
+    ReaderCacheBudget.comicIndexAt = now;
     return items;
   }
 

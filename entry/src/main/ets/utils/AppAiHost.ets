@@ -15,7 +15,7 @@ export class AppAiHost implements AiHost {
   downloadImage(source: string): Promise<Uint8Array> { return ReaderComicImageExport.downloadImage(source); }
   digestHashHex(algorithm: string, value: string): string { return digestHashHex(algorithm, value); }
   touchComicFile(path: string): void { ReaderCacheBudget.touchComicFile(path); }
-  noteComicWrite(): void { ReaderCacheBudget.noteComicWrite(); }
+  noteComicWrite(path?: string): void { ReaderCacheBudget.noteComicWrite(path); }
   resolveImageSource(marker: string): string {
     const value = ReaderImageMarker.parse(marker).source;
     const pending = ReaderImageMarker.pendingRaw(value);

@@ -451,8 +451,8 @@ export default class EntryAbility extends UIAbility {
     });
   }
 
-  onMemoryLevel(_level: AbilityConstant.MemoryLevel): void {
-    ComicColorizer.onMemoryPressure();
+  onMemoryLevel(level: AbilityConstant.MemoryLevel): void {
+    ComicColorizer.onMemoryPressure(level);
   }
 
   onConfigurationUpdate(newConfig: Configuration): void {

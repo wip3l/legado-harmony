@@ -24,7 +24,9 @@ try {
     digestHashHex: (algorithm, text) => crypto.createHash(algorithm).update(text).digest('hex'),
     HttpClient: { CANCELLED_ERROR: '书源请求已取消' },
     AppStorage: { get: () => '/cache' },
-    ReaderCacheBudget: { touchComicFile() { budget.touched++; }, noteComicWrite() { budget.writes++; } },
+    ReaderCacheBudget: { touchComicFile() { budget.touched++; }, noteComicWrite(path) {
+      assert.ok(files.has(path), 'register only the completed image path'); budget.writes++;
+    } },
     fs: { OpenMode: { CREATE: 1, WRITE_ONLY: 2, TRUNC: 4 }, mkdirSync() {},
       accessSync: path => files.has(path), openSync: path => ({ fd: path }), closeSync() {},
       writeSync: (fd, data) => files.set(fd, Buffer.from(data)) },

@@ -34,6 +34,8 @@ jobs:
       - run: node scripts/neutral-source-engine-check.mjs
       - run: node scripts/log-policy-check.mjs
       - run: npm --prefix harmony-book-ai-engine test
+      - run: node --experimental-strip-types scripts/ai-host-runtime-check.mjs
+      - run: node --experimental-strip-types scripts/reader-cache-budget-check.mjs
       - run: node --experimental-strip-types scripts/comic-colorizer-check.mjs
       - run: node --experimental-strip-types scripts/comic-text-check.mjs
       - run: node --experimental-strip-types scripts/member-reader-settings-check.mjs

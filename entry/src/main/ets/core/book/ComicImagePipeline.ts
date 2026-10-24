@@ -215,7 +215,7 @@ export class ComicImagePipeline {
     } finally {
       fs.closeSync(file);
     }
-    ReaderCacheBudget.noteComicWrite();
+    ReaderCacheBudget.noteComicWrite(path);
     return path;
 
   }
