@@ -191,6 +191,8 @@ struct ReaderFontSettingsPage {
 
   @Builder
   pageContent() {
+    this.customFontEntryItem()
+
     this.sectionTitle('正文字体设置')
     Column() {
       this.fontModeItem('字体类型', this.readerBodyFontMode, this.readerBodyFontFamily, (mode: string, family: string) => {
@@ -577,6 +579,33 @@ struct ReaderFontSettingsPage {
    */
   syncBars(): void {
     syncSystemBars(getContext(this), this.appDarkMode, this.pageColor());
+  }
+
+  @Builder
+  customFontEntryItem() {
+    Row() {
+      Text('自定义字体')
+        .fontSize(AppFontSize.BODY_LARGE)
+        .fontColor(this.primaryTextColor())
+        .layoutWeight(1)
+      Text('上传 / 删除')
+        .fontSize(AppFontSize.BODY)
+        .fontColor(this.subTextColor())
+        .margin({ right: AppSpacing.MD })
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(18)
+        .fontColor([this.subTextColor()])
+    }
+    .width('calc(100% - 24vp)')
+    .constraintSize({ minHeight: 56 })
+    .padding({ left: AppSpacing.XL, right: AppSpacing.XL, top: AppSpacing.LG, bottom: AppSpacing.LG })
+    .margin({ left: AppSpacing.LG, right: AppSpacing.LG, top: AppSpacing.LG })
+    .borderRadius(ThemeRuntime.cardRadius())
+    .backgroundColor(this.cardColor())
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      router.pushUrl({ url: 'pages/CustomFontManager' });
+    })
   }
 
   @Builder
