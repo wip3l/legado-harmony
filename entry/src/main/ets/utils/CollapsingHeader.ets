@@ -43,6 +43,20 @@ export class CollapsingHeader {
     return Math.max(0, 1 - collapse / (CollapsingHeader.DISTANCE * 0.6));
   }
 
+  /** 状态栏遮罩在状态栏下沿之外继续渐隐的高度。 */
+  static readonly SCRIM_FADE_HEIGHT: number = 16;
+
+  /**
+   * 状态栏渐变遮罩的不透明度：标题行内容快淡完时才开始显现，完全收起前到位，
+   * 两段过渡首尾相接，滚进状态栏的内容下面始终衬着页面底色。
+   */
+  static scrimOpacity(collapse: number, distance: number = CollapsingHeader.DISTANCE): number {
+    if (!(distance > 0) || !Number.isFinite(collapse)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(1, (collapse / distance - 0.3) / 0.6));
+  }
+
   static acceptsTouch(collapse: number): boolean {
     return collapse < CollapsingHeader.DISTANCE / 2;
   }

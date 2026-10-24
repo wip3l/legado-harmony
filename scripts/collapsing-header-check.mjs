@@ -64,4 +64,19 @@ for (const [file, scrollerName, isList] of pages) {
   }
 }
 
+// 状态栏遮罩：标题行内容快淡完才显现，完全收起前到位，滚到顶部时消失。
+const CollapsingHeader = vm.runInContext('CollapsingHeader', context);
+const D = CollapsingHeader.DISTANCE;
+assert.equal(CollapsingHeader.scrimOpacity(0), 0, 'scrim hidden while header is expanded');
+assert.equal(CollapsingHeader.scrimOpacity(D * 0.3), 0, 'scrim waits for header content to fade');
+assert.equal(CollapsingHeader.scrimOpacity(D * 0.9), 1, 'scrim fully shown before header fully collapses');
+assert.equal(CollapsingHeader.scrimOpacity(D), 1, 'scrim fully shown when header is collapsed');
+assert.equal(CollapsingHeader.scrimOpacity(120, 120), 1, 'custom collapse distance reaches full scrim');
+assert.equal(CollapsingHeader.scrimOpacity(10, 0), 0, 'zero distance never shows scrim');
+assert(CollapsingHeader.contentOpacity(D * 0.5) < 0.2 && CollapsingHeader.scrimOpacity(D * 0.5) > 0,
+  'scrim starts as header content is nearly gone');
+for (let c = 1; c <= D; c++) {
+  assert(CollapsingHeader.scrimOpacity(c) >= CollapsingHeader.scrimOpacity(c - 1), 'scrim opacity is monotonic');
+}
+
 console.log(`Collapsing header checks passed for ${pages.length} List/Scroll integrations.`);

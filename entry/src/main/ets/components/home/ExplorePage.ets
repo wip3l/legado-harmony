@@ -12,6 +12,7 @@ import { SearchBookResultList } from '../../components/book/SearchBookResultList
 import { ImmersiveMaterialSurface } from '../../components/ImmersiveMaterialSurface';
 import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
 import { CollapsingHeader } from '../../utils/CollapsingHeader';
+import { StatusBarScrim } from '../common/StatusBarScrim';
 import { HdsFeedback } from '../../utils/HdsFeedback';
 import { SearchBookShelfHelper } from '../../utils/SearchBookShelfHelper';
 import { SearchExploreSettingsStore } from '../../utils/SearchExploreSettingsStore';
@@ -516,6 +517,12 @@ export struct ExplorePage {
         .width('100%')
         .position({ x: 0, y: 0 })
         .zIndex(4)
+
+      StatusBarScrim({ statusBarHeight: this.statusBarHeight, pageColor: this.pageColor(),
+        scrimOpacity: CollapsingHeader.scrimOpacity(this.exploreHeaderCollapseValue()) })
+        .width('100%')
+        .position({ x: 0, y: 0 })
+        .zIndex(3)
 
       if (this.isLoading) {
         Column() {

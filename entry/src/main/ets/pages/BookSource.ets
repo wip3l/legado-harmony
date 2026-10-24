@@ -39,6 +39,7 @@ import { AdaptiveSwitch } from '../components/AdaptiveSwitch';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { CollapsingHeader } from '../utils/CollapsingHeader';
+import { StatusBarScrim } from '../components/common/StatusBarScrim';
 
 const BOOK_SOURCE_IMPORT_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 const BOOK_SOURCE_IMPORT_MAX_FILES = 50;
@@ -649,6 +650,12 @@ struct BookSourcePage {
       .height('100%')
       .padding({ top: 56 + this.statusBarHeight })
       .backgroundColor(this.pageColor())
+
+      StatusBarScrim({ statusBarHeight: this.statusBarHeight, pageColor: this.pageColor(),
+        scrimOpacity: CollapsingHeader.scrimOpacity(this.sourceHeaderCollapseValue(),
+          this.sourceHeaderCollapsibleHeight()) })
+        .width('100%')
+        .position({ x: 0, y: 0 })
 
       if (!this.selectionMode) {
         Column() {

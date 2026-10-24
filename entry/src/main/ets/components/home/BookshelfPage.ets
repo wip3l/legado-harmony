@@ -14,6 +14,7 @@ import { ImmersiveBackButton } from '../../components/ImmersiveBackButton';
 import { ImmersiveMaterialSurface } from '../../components/ImmersiveMaterialSurface';
 import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
 import { CollapsingHeader } from '../../utils/CollapsingHeader';
+import { StatusBarScrim } from '../common/StatusBarScrim';
 import { HdsFeedback } from '../../utils/HdsFeedback';
 import { BookDisplayHelper } from '../../utils/BookDisplayHelper';
 import { BookCoverCache } from '../../utils/BookCoverCache';
@@ -1151,6 +1152,12 @@ export struct BookshelfPage {
         .width('100%')
         .position({ x: 0, y: 0 })
         .zIndex(4)
+
+        StatusBarScrim({ statusBarHeight: this.statusBarHeight, pageColor: this.pageColor(),
+          scrimOpacity: CollapsingHeader.scrimOpacity(this.shelfHeaderCollapseValue()) })
+          .width('100%')
+          .position({ x: 0, y: 0 })
+          .zIndex(3)
 
         if (this.isLoading) {
           Column() {

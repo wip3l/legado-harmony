@@ -9,6 +9,7 @@ import { SourcePickerKit } from './SourcePickerKit';
 import { ImmersiveMaterialSurface } from '../../components/ImmersiveMaterialSurface';
 import { GlassTagModifier, ImmersiveMaterialRuntime, ImmersiveTagModifier } from '../../utils/ImmersiveMaterialRuntime';
 import { CollapsingHeader } from '../../utils/CollapsingHeader';
+import { StatusBarScrim } from '../common/StatusBarScrim';
 import { HdsFeedback } from '../../utils/HdsFeedback';
 import { SearchBookShelfHelper } from '../../utils/SearchBookShelfHelper';
 import { SearchExploreSettings, SearchExploreSettingsStore } from '../../utils/SearchExploreSettingsStore';
@@ -643,6 +644,12 @@ export struct SearchPage {
         .width('100%')
         .position({ x: 0, y: 0 })
         .zIndex(4)
+
+        StatusBarScrim({ statusBarHeight: this.statusBarHeight, pageColor: this.pageColor(),
+          scrimOpacity: CollapsingHeader.scrimOpacity(this.searchHeaderCollapseValue(), this.searchCollapsibleHeight()) })
+          .width('100%')
+          .position({ x: 0, y: 0 })
+          .zIndex(3)
 
         if (this.showResult && this.displayedSearchResults.length > 0) {
           SearchBookResultList({

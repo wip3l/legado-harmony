@@ -3,6 +3,7 @@ import { ThemeRuntime } from '../../theme/ThemeRuntime';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { ImmersiveBackButton } from '../ImmersiveBackButton';
 import { CollapsingHeader } from '../../utils/CollapsingHeader';
+import { StatusBarScrim } from './StatusBarScrim';
 
 /**
  * 二级页面的统一骨架：页面底色、沉浸式顶栏（返回、标题、右侧操作）和状态栏/导航条的留白。
@@ -87,6 +88,12 @@ export struct PageScaffold {
       }
 
       if (this.collapsible) {
+        // 只有内容会滚进状态栏时才需要遮罩；普通 List 页的内容区本来就从状态栏下面开始。
+        if (this.scrollable || this.edgeToEdge) {
+          StatusBarScrim({ statusBarHeight: this.statusBarHeight, pageColor: ThemeRuntime.pageColor(this.appDarkMode),
+            scrimOpacity: CollapsingHeader.scrimOpacity(this.collapseAmount()) })
+            .width('100%')
+        }
         Column() {
           this.titleBar()
         }

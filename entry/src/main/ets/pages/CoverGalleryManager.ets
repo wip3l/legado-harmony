@@ -15,6 +15,7 @@ import { SystemDialogSession } from '../utils/SystemDialogSession';
 import { AppFontSize } from '../theme/AppFontSize';
 import { AppSpacing } from '../theme/AppSpacing';
 import { CollapsingHeader } from '../utils/CollapsingHeader';
+import { StatusBarScrim } from '../components/common/StatusBarScrim';
 
 class CoverGalleryExportResult {
   zipPath: string = '';
@@ -99,6 +100,10 @@ struct CoverGalleryManagerPage {
           });
         }
       })
+
+      StatusBarScrim({ statusBarHeight: this.statusBarHeight, pageColor: this.pageColor(),
+        scrimOpacity: CollapsingHeader.scrimOpacity(this.headerCollapse) })
+        .width('100%')
 
       // 顶栏随列表上滑跟手收起、下滑展开，与其他二级页面一致。
       Column() {

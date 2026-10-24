@@ -7,6 +7,7 @@ import { CloudSyncSettingsStore } from '../../account/CloudSyncSettingsStore';
 import { AppFontSize } from '../../theme/AppFontSize';
 import { AppSpacing } from '../../theme/AppSpacing';
 import { CollapsingHeader } from '../../utils/CollapsingHeader';
+import { StatusBarScrim } from '../common/StatusBarScrim';
 import { CommunityGroup } from '../../utils/CommunityGroup';
 import { MembershipIcons } from '../../account/MembershipIcons';
 import { AppThemeModeStore } from '../../utils/AppThemeModeStore';
@@ -146,6 +147,10 @@ export struct SettingsPage {
           });
         }
       })
+
+      StatusBarScrim({ statusBarHeight: this.statusBarHeight, pageColor: this.pageColor(),
+        scrimOpacity: CollapsingHeader.scrimOpacity(this.headerCollapse) })
+        .width('100%')
 
       Column() {
         Row() {
