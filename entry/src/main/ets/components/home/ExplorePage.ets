@@ -8,6 +8,7 @@ import {
   ExploreFilterGroup,
   ExploreSourceOption
 } from '../../core/book/ExploreCoordinator';
+import { CategorySwipePager } from './CategorySwipePager';
 import { SearchBookResultList } from '../../components/book/SearchBookResultList';
 import { ImmersiveMaterialSurface } from '../../components/ImmersiveMaterialSurface';
 import { ImmersiveMaterialRuntime } from '../../utils/ImmersiveMaterialRuntime';
@@ -73,6 +74,9 @@ export struct ExplorePage {
   @State exploreViewportWidth: number = 360;
   @State exploreViewportHeight: number = 720;
   @State books: SearchBook[] = [];
+  /** 保留最近离开的页面，滑动期间旧页继续显示封面，不跳成加载占位。 */
+  @State exploreSwipePreviews: Map<string, SearchBook[]> = new Map();
+  private exploreBooksPageKey: string = '';
   @State shelfBookKeys: string[] = [];
   @State addingShelfBookKeys: string[] = [];
   @State isLoading: boolean = false;
@@ -181,6 +185,7 @@ export struct ExplorePage {
   }
 
   async loadEntries(platformOverride: string = '', forceRefresh: boolean = false) {
+    this.exploreSwipePreviews.clear();
     const loadVersion = this.beginExploreLoad();
     const previousActiveEntries = this.getActiveEntries();
     const previousEntry = previousActiveEntries.length > 0 ?
@@ -277,6 +282,8 @@ export struct ExplorePage {
 
   async loadBooks(loadVersion?: number, forceRefresh: boolean = false) {
     const currentLoadVersion = loadVersion ?? this.beginExploreLoad();
+    // 离开的页面已保存为翻页预览；新分类请求失败时不能把旧分类的书当成新结果。
+    this.books = [];
     this.exploreContentLoadedAt = 0;
     this.explorePage = 1;
     this.hasMoreExploreBooks = true;
@@ -410,6 +417,7 @@ export struct ExplorePage {
 
   async applyExploreBooks(books: SearchBook[], entry: ExploreEntry, loadVersion: number,
     fromCache: boolean): Promise<void> {
+    this.exploreBooksPageKey = this.explorePageKeys()[this.selectedIndex] || '';
     this.books = books;
     const shelfStatusVersion = this.shelfStatusVersion;
     const shelfKeys = await this.loadExploreShelfKeys(books);
@@ -525,105 +533,22 @@ export struct ExplorePage {
         .position({ x: 0, y: 0 })
         .zIndex(3)
 
-      if (this.isLoading) {
-        Column() {
-          LoadingProgress()
-            .width(36)
-            .height(36)
-          Text('加载中...')
-            .fontSize(AppFontSize.BODY)
-            .fontColor(this.subTextColor())
-            .margin({ top: AppSpacing.MD })
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .padding({ top: this.exploreTopOverlayHeight() })
-        .justifyContent(FlexAlign.Center)
-      } else if (this.books.length > 0) {
-        SearchBookResultList({
-          books: this.books,
-          layoutMode: this.exploreResultLayout,
-          shelfBookKeys: this.shelfBookKeys,
-          busyBookKeys: this.addingShelfBookKeys,
-          showLoadingMore: this.isLoadingMore,
-          showKind: true,
-          showResultCover: this.searchExploreShowResultCover,
-          showResultCoverBackground: this.searchExploreShowResultCoverBackground,
-          useBookshelfCoverGallery: this.searchExploreUseBookshelfCoverGallery,
-          showResultTags: this.searchExploreShowResultTags,
-          showSourceLine: false,
-          pageColor: this.pageColor(),
-          cardColor: this.glassCardColor(),
-          itemBorderColor: this.glassBorderColor(),
-          itemBorderWidth: 1,
-          shadowColor: this.glassShadowColor(),
-          primaryTextColor: this.primaryTextColor(),
-          secondaryTextColor: this.secondaryTextColor(),
-          subTextColor: this.subTextColor(),
-          topPadding: this.exploreTopOverlayHeight(),
-          bottomPadding: this.resultListBottomInset(),
-          onOpenBook: (book: SearchBook) => {
-            this.openSearchBookDetail(book);
+      if (this.usesExploreCategoryPager()) {
+        CategorySwipePager({
+          topInset: this.exploreTopOverlayHeight() - this.exploreHeaderCollapseValue(),
+          pageKeys: this.explorePageKeys(),
+          selectedIndex: this.selectedIndex,
+          onSelect: (key: string): void => {
+            const index = this.explorePageKeys().indexOf(key);
+            if (index >= 0 && index !== this.selectedIndex) this.selectExploreEntry(index);
           },
-          onReadBook: (book: SearchBook) => {
-            this.readSearchBook(book);
-          },
-          onToggleShelf: (book: SearchBook) => {
-            this.toggleSearchBookShelf(book);
-          },
-          onNeedMetadata: (book: SearchBook) => {
-            this.requestExploreMetadata(book);
-          },
-          onReachEnd: () => {
-            this.loadMoreExploreBooks();
-          },
-          onListScroll: (delta: number, offset: number) => {
-            this.onExploreListScroll(delta, offset);
-          },
-          onListScrollStop: (offset: number) => {
-            this.onExploreListScrollStop(offset);
+          pageContent: (key: string) => {
+            this.exploreResultContent(key)
           }
         })
-      } else {
-        Column() {
-          Text('没有发现内容')
-            .fontSize(AppFontSize.BODY_LARGE)
-            .fontColor(this.subTextColor())
-          Text(this.verificationUrl ? '当前书源可能需要网页验证' : '请切换书源或网站，或检查已启用书源的发现地址')
-            .fontSize(AppFontSize.BODY)
-            .fontColor(this.subTextColor())
-            .margin({ top: AppSpacing.MD })
-            .textAlign(TextAlign.Center)
-            .padding({ left: 32, right: 32 })
-          if (this.verificationUrl) {
-            Button('去验证')
-              .height(36)
-              .fontSize(AppFontSize.BODY)
-              .borderRadius(18)
-              .margin({ top: AppSpacing.LG })
-              .backgroundColor(this.buttonColor())
-              .fontColor(ThemeRuntime.onAccentColor())
-              .onClick(() => {
-                this.openVerification();
-              })
-          }
-          if (this.shouldOfferExploreSourceLogin()) {
-            Button(this.exploreSourceLoginButtonLabel())
-              .height(36)
-              .fontSize(AppFontSize.BODY)
-              .borderRadius(18)
-              .margin({ top: AppSpacing.LG })
-              .backgroundColor(this.buttonColor())
-              .fontColor(ThemeRuntime.onAccentColor())
-              .onClick(() => {
-                this.openExploreSourceLogin();
-              })
-          }
-        }
-        .width('100%')
         .layoutWeight(1)
-        .padding({ top: this.exploreTopOverlayHeight() })
-        .justifyContent(FlexAlign.Center)
+      } else {
+        this.exploreResultContent(this.explorePageKeys()[this.selectedIndex] || '')
       }
       }
       .width('100%')
@@ -1151,7 +1076,143 @@ export struct ExplorePage {
     })
   }
 
+  explorePageKeys(): string[] {
+    return this.getActiveEntries().map((entry: ExploreEntry, index: number): string =>
+      JSON.stringify([entry.sourceUrl, this.selectedPlatform, entry.title, entry.url, index]));
+  }
+
+  isCurrentExplorePage(key: string): boolean {
+    return key === (this.explorePageKeys()[this.selectedIndex] || '');
+  }
+
+  explorePageLoading(key: string): boolean {
+    return !this.exploreSwipePreviews.has(key) && (!this.isCurrentExplorePage(key) || this.isLoading);
+  }
+
+  explorePageBooks(key: string): SearchBook[] {
+    // 返回最近访问的分类时，保留滑入的预览，直到缓存或网络结果准备好。
+    return this.isCurrentExplorePage(key) && !this.isLoading ? this.books :
+      (this.exploreSwipePreviews.get(key) || []);
+  }
+
+  @Builder
+  exploreResultContent(key: string) {
+    if (this.explorePageLoading(key)) {
+      Column() {
+        LoadingProgress()
+          .width(36)
+          .height(36)
+        Text('加载中...')
+          .fontSize(AppFontSize.BODY)
+          .fontColor(this.subTextColor())
+          .margin({ top: AppSpacing.MD })
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .padding({ top: this.exploreResultTopPadding() })
+      .justifyContent(FlexAlign.Center)
+    } else if (this.explorePageBooks(key).length > 0) {
+      SearchBookResultList({
+        books: this.explorePageBooks(key),
+        layoutMode: this.exploreResultLayout,
+        shelfBookKeys: this.shelfBookKeys,
+        busyBookKeys: this.addingShelfBookKeys,
+        showLoadingMore: this.isCurrentExplorePage(key) && this.isLoadingMore,
+        showKind: true,
+        showResultCover: this.searchExploreShowResultCover,
+        showResultCoverBackground: this.searchExploreShowResultCoverBackground,
+        useBookshelfCoverGallery: this.searchExploreUseBookshelfCoverGallery,
+        showResultTags: this.searchExploreShowResultTags,
+        showSourceLine: false,
+        pageColor: this.pageColor(),
+        cardColor: this.glassCardColor(),
+        itemBorderColor: this.glassBorderColor(),
+        itemBorderWidth: 1,
+        shadowColor: this.glassShadowColor(),
+        primaryTextColor: this.primaryTextColor(),
+        secondaryTextColor: this.secondaryTextColor(),
+        subTextColor: this.subTextColor(),
+        topPadding: this.exploreResultTopPadding(),
+        userScrollOnly: this.usesExploreCategoryPager(),
+        bottomPadding: this.resultListBottomInset(),
+        onOpenBook: (book: SearchBook) => {
+          this.openSearchBookDetail(book);
+        },
+        onReadBook: (book: SearchBook) => {
+          this.readSearchBook(book);
+        },
+        onToggleShelf: (book: SearchBook) => {
+          this.toggleSearchBookShelf(book);
+        },
+        onNeedMetadata: (book: SearchBook) => {
+          if (this.isCurrentExplorePage(key) && !this.isLoading) this.requestExploreMetadata(book);
+        },
+        onReachEnd: () => {
+          if (this.isCurrentExplorePage(key)) this.loadMoreExploreBooks();
+        },
+        onListScroll: (delta: number, offset: number) => {
+          if (this.isCurrentExplorePage(key)) this.onExploreListScroll(delta, offset);
+        },
+        onListScrollStop: (offset: number) => {
+          if (this.isCurrentExplorePage(key)) this.onExploreListScrollStop(offset);
+        }
+      })
+    } else {
+      Column() {
+        Text('没有发现内容')
+          .fontSize(AppFontSize.BODY_LARGE)
+          .fontColor(this.subTextColor())
+        Text(this.isCurrentExplorePage(key) && this.verificationUrl ?
+          '当前书源可能需要网页验证' : '请切换书源或网站，或检查已启用书源的发现地址')
+          .fontSize(AppFontSize.BODY)
+          .fontColor(this.subTextColor())
+          .margin({ top: AppSpacing.MD })
+          .textAlign(TextAlign.Center)
+          .padding({ left: 32, right: 32 })
+        if (this.isCurrentExplorePage(key) && this.verificationUrl) {
+          Button('去验证')
+            .height(36)
+            .fontSize(AppFontSize.BODY)
+            .borderRadius(18)
+            .margin({ top: AppSpacing.LG })
+            .backgroundColor(this.buttonColor())
+            .fontColor(ThemeRuntime.onAccentColor())
+            .onClick(() => {
+              this.openVerification();
+            })
+        }
+        if (this.isCurrentExplorePage(key) && this.shouldOfferExploreSourceLogin()) {
+          Button(this.exploreSourceLoginButtonLabel())
+            .height(36)
+            .fontSize(AppFontSize.BODY)
+            .borderRadius(18)
+            .margin({ top: AppSpacing.LG })
+            .backgroundColor(this.buttonColor())
+            .fontColor(ThemeRuntime.onAccentColor())
+            .onClick(() => {
+              this.openExploreSourceLogin();
+            })
+        }
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .padding({ top: this.exploreResultTopPadding() })
+      .justifyContent(FlexAlign.Center)
+    }
+  }
+
   selectExploreEntry(index: number): void {
+    if (!this.isLoading) {
+      const previousKey = this.explorePageKeys()[this.selectedIndex];
+      if (previousKey && previousKey === this.exploreBooksPageKey) {
+        this.exploreSwipePreviews.delete(previousKey);
+        this.exploreSwipePreviews.set(previousKey, this.books);
+        // 最多保留三个最近访问的分类，避免在大量分类间滑动后占用持续增长。
+        while (this.exploreSwipePreviews.size > 3) {
+          this.exploreSwipePreviews.delete(Array.from(this.exploreSwipePreviews.keys())[0]);
+        }
+      }
+    }
     this.selectedIndex = index;
     const entry = this.getActiveEntries()[index];
     if (entry) {
@@ -1824,20 +1885,32 @@ export struct ExplorePage {
     return names;
   }
 
-  /** 实际生效的标题行收起量：没有可滚动的列表时标题行始终完整显示。 */
+  usesExploreCategoryPager(): boolean {
+    return this.exploreResultLayout === 'grid' && this.getActiveEntries().length > 0;
+  }
+
+  exploreResultTopPadding(): number {
+    return this.usesExploreCategoryPager() ? 0 : this.exploreTopOverlayHeight();
+  }
+
+  /** 平铺分类共享顶栏状态，分类加载中或为空时保持原来的收起量。 */
   exploreHeaderCollapseValue(): number {
-    return !this.isLoading && this.books.length > 0 ? this.exploreHeaderCollapse : 0;
+    return this.usesExploreCategoryPager() || (!this.isLoading && this.books.length > 0) ?
+      this.exploreHeaderCollapse : 0;
   }
 
   onExploreListScroll(delta: number, offset: number): void {
-    const next = CollapsingHeader.next(this.exploreHeaderCollapse, delta, offset);
+    if (this.usesExploreCategoryPager() && offset <= 0 && delta >= 0) return;
+    const next = CollapsingHeader.next(this.exploreHeaderCollapse, delta,
+      this.usesExploreCategoryPager() ? CollapsingHeader.DISTANCE : offset);
     if (next !== this.exploreHeaderCollapse) {
       this.exploreHeaderCollapse = next;
     }
   }
 
   onExploreListScrollStop(offset: number): void {
-    const target = CollapsingHeader.settle(this.exploreHeaderCollapse, offset);
+    const target = CollapsingHeader.settle(this.exploreHeaderCollapse,
+      this.usesExploreCategoryPager() ? CollapsingHeader.DISTANCE : offset);
     if (target !== this.exploreHeaderCollapse) {
       animateTo({ duration: 200, curve: Curve.FastOutSlowIn }, () => {
         this.exploreHeaderCollapse = target;

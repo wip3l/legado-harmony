@@ -65,6 +65,9 @@ export struct SearchBookResultList {
   @Prop bottomPadding: number = 12;
   /** 'list' 为卡片列表，'grid' 为封面平铺（列数随宽度自适应）。 */
   @Prop layoutMode: string = 'list';
+  /** 分类翻页的顶栏只响应真实纵向滚动，忽略新页布局、回顶等产生的空闲滚动回调。 */
+  @Prop userScrollOnly: boolean = false;
+  private gridUserScrolled: boolean = false;
   scroller: ListScroller = new ListScroller();
   private dataSource: SearchBookResultDataSource = new SearchBookResultDataSource();
   private tagCache: Map<string, string[]> = new Map<string, string[]>();
@@ -131,10 +134,14 @@ export struct SearchBookResultList {
     .onReachEnd(() => {
       this.onReachEnd();
     })
-    .onDidScroll((delta: number) => {
+    .onDidScroll((delta: number, state: ScrollState) => {
+      if (this.userScrollOnly && (state === ScrollState.Idle || delta === 0)) return;
+      this.gridUserScrolled = true;
       this.onListScroll(delta, this.scroller.currentOffset().yOffset);
     })
     .onScrollStop(() => {
+      if (this.userScrollOnly && !this.gridUserScrolled) return;
+      this.gridUserScrolled = false;
       this.onListScrollStop(this.scroller.currentOffset().yOffset);
     })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])

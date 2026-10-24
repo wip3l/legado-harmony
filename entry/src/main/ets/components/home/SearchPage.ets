@@ -3,6 +3,7 @@ import deviceInfo from '@ohos.deviceInfo';
 import { BookSource, SearchBook, SearchKeyword, BookTypeSupport } from '@legado/sourceengine';
 import { AppDatabase } from '../../model/data/AppDatabase';
 import { SearchCoordinator, SearchCallback, SearchProgress } from '../../core/book/SearchCoordinator';
+import { CategorySwipePager } from './CategorySwipePager';
 import { SearchBookResultList } from '../../components/book/SearchBookResultList';
 import { SearchSourceSheet, SearchSourceSheetSession, confirmDiscardSearchSourceChanges } from './SearchSourceSheet';
 import { SourcePickerKit } from './SourcePickerKit';
@@ -101,6 +102,7 @@ export struct SearchPage {
   private pendingShelfSyncBooks: SearchBook[] = [];
   private searchResultKeySet: Set<string> = new Set<string>();
   private searchResultScroller: ListScroller = new ListScroller();
+  private searchCategoryScrollers: Map<string, ListScroller> = new Map();
   /** 分类栏以上（标题行、搜索框、状态行）的收起量，0 为完整显示；结果分类栏不收起。 */
   @State searchHeaderCollapse: number = 0;
   onHeaderCollapseChange: (progress: number) => void = () => {};
@@ -231,7 +233,9 @@ export struct SearchPage {
     if (category === this.effectiveSearchCategory()) return;
     this.searchResultCategory = category;
     this.applySearchResultsSnapshot(this.searchResults);
-    this.searchResultScroller.scrollToIndex(0);
+    const scroller = this.searchResultLayout === 'grid' ?
+      this.searchCategoryScrollers.get(category) : this.searchResultScroller;
+    scroller?.scrollToIndex(0);
   }
 
   openSearchBookOrGroup(book: SearchBook): void {
@@ -648,70 +652,20 @@ export struct SearchPage {
           .position({ x: 0, y: 0 })
           .zIndex(3)
 
-        if (this.showResult && this.displayedSearchResults.length > 0) {
-          SearchBookResultList({
-            books: this.displayedSearchResults,
-            scroller: this.searchResultScroller,
-            layoutMode: this.searchResultLayout,
-            shelfBookKeys: this.shelfBookKeys,
-            busyBookKeys: this.addingShelfBookKeys,
-            showLoadingMore: this.isSearching,
-            showResultCover: this.searchExploreShowResultCover,
-            showResultCoverBackground: this.searchExploreShowResultCoverBackground,
-            useBookshelfCoverGallery: this.searchExploreUseBookshelfCoverGallery,
-            showResultTags: this.searchExploreShowResultTags,
-            pageColor: this.pageColor(),
-            cardColor: this.glassCardColor(),
-            itemBorderColor: this.glassBorderColor(),
-            itemBorderWidth: 1,
-            shadowColor: this.glassShadowColor(),
-            primaryTextColor: this.primaryTextColor(),
-            secondaryTextColor: this.secondaryTextColor(),
-            subTextColor: this.subTextColor(),
-            topPadding: this.searchTopOverlayHeight(),
-            bottomPadding: this.resultListBottomInset(),
-            onOpenBook: (book: SearchBook) => {
-              this.openSearchBookOrGroup(book);
-            },
-            onReadBook: (book: SearchBook) => {
-              this.readSearchBook(book);
-            },
-            onToggleShelf: (book: SearchBook) => {
-              this.toggleSearchBookShelf(book);
-            },
-            onListScroll: (delta: number, offset: number) => {
-              this.onSearchListScroll(delta, offset);
-            },
-            onListScrollStop: (offset: number) => {
-              this.onSearchListScrollStop(offset);
+        if (this.usesSearchCategoryPager()) {
+          CategorySwipePager({
+            topInset: this.searchTopOverlayHeight() - this.searchHeaderCollapseValue(),
+            pageKeys: this.searchCategoryChips().map((chip: SearchCategoryChip): string => chip.key),
+            selectedIndex: this.searchCategoryChips().findIndex((chip: SearchCategoryChip): boolean =>
+              chip.key === this.effectiveSearchCategory()),
+            onSelect: (key: string): void => this.selectSearchCategory(key),
+            pageContent: (key: string) => {
+              this.searchResultContent(key)
             }
           })
-        } else if (this.isSearching) {
-          Column() {
-            LoadingProgress()
-              .width(40)
-              .height(40)
-            Text('搜索中...')
-              .fontSize(AppFontSize.BODY)
-              .fontColor(this.subTextColor())
-              .margin({ top: AppSpacing.MD })
-          }
-          .width('100%')
           .layoutWeight(1)
-          .padding({ top: this.searchTopOverlayHeight() })
-          .justifyContent(FlexAlign.Center)
-        } else if (this.showResult && this.displayedSearchResults.length === 0) {
-          Column() {
-            Text(this.searchResults.length > 0 ? '该类型下没有结果' : '未找到相关书籍')
-              .fontSize(AppFontSize.BODY_LARGE)
-              .fontColor(this.subTextColor())
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .padding({ top: this.searchTopOverlayHeight() })
-          .justifyContent(FlexAlign.Center)
         } else {
-          this.searchIdleContent()
+          this.searchResultContent('')
         }
       }
       .width('100%')
@@ -732,6 +686,92 @@ export struct SearchPage {
       }
     })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  searchBooksForCategory(category: string): SearchBook[] {
+    if (!category || category === this.effectiveSearchCategory()) return this.displayedSearchResults;
+    const books = SearchResultAggregationStore.filterByCategory(this.searchResults, category);
+    return this.searchExploreAggregateResults ? SearchResultAggregationStore.aggregate(books) : books;
+  }
+
+  searchCategoryScroller(category: string): ListScroller {
+    let scroller = this.searchCategoryScrollers.get(category);
+    if (!scroller) {
+      scroller = new ListScroller();
+      this.searchCategoryScrollers.set(category, scroller);
+    }
+    return scroller;
+  }
+
+  @Builder
+  searchResultContent(category: string) {
+    // Builder 只接收稳定的页标识；动态结果在 UI 更新闭包内读取，持续搜索时相邻页也会刷新。
+    if (this.showResult && this.searchBooksForCategory(category).length > 0) {
+      SearchBookResultList({
+        books: this.searchBooksForCategory(category),
+        scroller: category ? this.searchCategoryScroller(category) : this.searchResultScroller,
+        layoutMode: this.searchResultLayout,
+        shelfBookKeys: this.shelfBookKeys,
+        busyBookKeys: this.addingShelfBookKeys,
+        showLoadingMore: this.isSearching,
+        showResultCover: this.searchExploreShowResultCover,
+        showResultCoverBackground: this.searchExploreShowResultCoverBackground,
+        useBookshelfCoverGallery: this.searchExploreUseBookshelfCoverGallery,
+        showResultTags: this.searchExploreShowResultTags,
+        pageColor: this.pageColor(),
+        cardColor: this.glassCardColor(),
+        itemBorderColor: this.glassBorderColor(),
+        itemBorderWidth: 1,
+        shadowColor: this.glassShadowColor(),
+        primaryTextColor: this.primaryTextColor(),
+        secondaryTextColor: this.secondaryTextColor(),
+        subTextColor: this.subTextColor(),
+        topPadding: this.searchResultTopPadding(),
+        userScrollOnly: this.usesSearchCategoryPager(),
+        bottomPadding: this.resultListBottomInset(),
+        onOpenBook: (book: SearchBook) => {
+          this.openSearchBookOrGroup(book);
+        },
+        onReadBook: (book: SearchBook) => {
+          this.readSearchBook(book);
+        },
+        onToggleShelf: (book: SearchBook) => {
+          this.toggleSearchBookShelf(book);
+        },
+        onListScroll: (delta: number, offset: number) => {
+          if (!category || category === this.effectiveSearchCategory()) this.onSearchListScroll(delta, offset);
+        },
+        onListScrollStop: (offset: number) => {
+          if (!category || category === this.effectiveSearchCategory()) this.onSearchListScrollStop(offset);
+        }
+      })
+    } else if (this.isSearching) {
+      Column() {
+        LoadingProgress()
+          .width(40)
+          .height(40)
+        Text('搜索中...')
+          .fontSize(AppFontSize.BODY)
+          .fontColor(this.subTextColor())
+          .margin({ top: AppSpacing.MD })
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .padding({ top: this.searchResultTopPadding() })
+      .justifyContent(FlexAlign.Center)
+    } else if (this.showResult && this.searchBooksForCategory(category).length === 0) {
+      Column() {
+        Text(this.searchResults.length > 0 ? '该类型下没有结果' : '未找到相关书籍')
+          .fontSize(AppFontSize.BODY_LARGE)
+          .fontColor(this.subTextColor())
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .padding({ top: this.searchResultTopPadding() })
+      .justifyContent(FlexAlign.Center)
+    } else {
+      this.searchIdleContent()
+    }
   }
 
   onSearchButtonTap(): void {
@@ -1708,9 +1748,17 @@ export struct SearchPage {
     return `#${this.appDarkMode ? '33' : '1A'}${normalized.substring(1)}`;
   }
 
-  /** 实际生效的收起量：没有可滚动的列表时完整显示；状态行消失后收起区变矮，收起量随之收紧。 */
+  usesSearchCategoryPager(): boolean {
+    return this.searchResultLayout === 'grid' && this.showSearchCategoryBar();
+  }
+
+  searchResultTopPadding(): number {
+    return this.usesSearchCategoryPager() ? 0 : this.searchTopOverlayHeight();
+  }
+
+  /** 平铺分类共享收起状态，切到暂时没有结果的分类也不展开。 */
   searchHeaderCollapseValue(): number {
-    return this.showResult && this.displayedSearchResults.length > 0 ?
+    return this.showResult && (this.usesSearchCategoryPager() || this.displayedSearchResults.length > 0) ?
       Math.min(this.searchHeaderCollapse, this.searchCollapsibleHeight()) : 0;
   }
 
@@ -1736,7 +1784,10 @@ export struct SearchPage {
   }
 
   onSearchListScroll(delta: number, offset: number): void {
-    const next = CollapsingHeader.next(this.searchHeaderCollapseValue(), delta, offset,
+    // 翻页内容已放在顶栏下面，收起量不再受各分类独立的纵向位置限制。
+    if (this.usesSearchCategoryPager() && offset <= 0 && delta >= 0) return;
+    const next = CollapsingHeader.next(this.searchHeaderCollapseValue(), delta,
+      this.usesSearchCategoryPager() ? this.searchCollapsibleHeight() : offset,
       this.searchCollapsibleHeight());
     if (next !== this.searchHeaderCollapse) {
       this.searchHeaderCollapse = next;
@@ -1744,7 +1795,8 @@ export struct SearchPage {
   }
 
   onSearchListScrollStop(offset: number): void {
-    const target = CollapsingHeader.settle(this.searchHeaderCollapseValue(), offset,
+    const target = CollapsingHeader.settle(this.searchHeaderCollapseValue(),
+      this.usesSearchCategoryPager() ? this.searchCollapsibleHeight() : offset,
       this.searchCollapsibleHeight());
     if (target !== this.searchHeaderCollapse) {
       animateTo({ duration: 200, curve: Curve.FastOutSlowIn }, () => {
