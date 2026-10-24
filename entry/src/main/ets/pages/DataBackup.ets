@@ -493,7 +493,7 @@ struct DataBackupPage {
     try {
       await this.awaitTempCleanup();
       const options = new picker.DocumentSaveOptions();
-      options.newFileNames = [`legado_harmony_${this.timestamp()}.qingyebak`];
+      options.newFileNames = [`qingye-backup-${this.timestamp()}.qingyebak`];
       options.fileSuffixChoices = ['应用数据备份|.qingyebak'];
       const result = await new picker.DocumentViewPicker(getContext(this)).save(options);
       if (!result || result.length === 0) return;
@@ -649,7 +649,7 @@ struct DataBackupPage {
   timestamp(): string {
     const date = new Date();
     const pad = (value: number): string => value < 10 ? `0${value}` : `${value}`;
-    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_` +
+    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-` +
       `${pad(date.getHours())}${pad(date.getMinutes())}`;
   }
 

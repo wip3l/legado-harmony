@@ -6480,7 +6480,7 @@ struct BookSourcePage {
     let file: fs.File | null = null;
     try {
       const options: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
-      options.newFileNames = [`legado_book_sources_${this.exportTimestamp()}.json`];
+      options.newFileNames = [`qingye-book-source-${this.exportTimestamp()}.json`];
       options.fileSuffixChoices = ['JSON 文件|.json'];
       const result = await new picker.DocumentViewPicker(getContext(this)).save(options);
       if (!result || result.length === 0) {
@@ -6522,7 +6522,7 @@ struct BookSourcePage {
   exportTimestamp(): string {
     const date = new Date();
     const pad = (value: number): string => value < 10 ? `0${value}` : `${value}`;
-    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_` +
+    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-` +
       `${pad(date.getHours())}${pad(date.getMinutes())}`;
   }
 

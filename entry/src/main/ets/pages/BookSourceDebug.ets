@@ -550,7 +550,7 @@ struct BookSourceDebugPage {
     this.exporting = true;
     try {
       const options: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
-      options.newFileNames = [`legado_book_source_debug_${this.exportTimestamp()}.json`];
+      options.newFileNames = [`qingye-book-source-debug-${this.exportTimestamp()}.json`];
       options.fileSuffixChoices = ['JSON 文件|.json'];
       const result = await new picker.DocumentViewPicker(getContext(this)).save(options);
       if (!result || result.length === 0) return;
@@ -584,7 +584,7 @@ struct BookSourceDebugPage {
   private exportTimestamp(): string {
     const now = new Date();
     const pad = (value: number): string => value.toString().padStart(2, '0');
-    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_` +
+    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-` +
       `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   }
 
