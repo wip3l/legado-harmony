@@ -7,6 +7,7 @@ import fs from '@ohos.file.fs';
 import fileUri from '@ohos.file.fileuri';
 import { ComicColorizer } from '@legado/aiengine';
 import { ComicColorCodec } from '@legado/aiengine';
+import { openComicTestContext } from './ComicTestContext';
 
 /** Device-only smoke test, never included in the release HAP. Uses generated pixels, no user books. */
 export default class ComicColorTestRunner implements TestRunner {
@@ -15,6 +16,7 @@ export default class ComicColorTestRunner implements TestRunner {
   async onRun(): Promise<void> {
     const delegator = abilityDelegatorRegistry.getAbilityDelegator();
     try {
+      await openComicTestContext();
       await this.verify();
       await delegator.finishTest('PASS ComicColor', 0);
     } catch (error) {

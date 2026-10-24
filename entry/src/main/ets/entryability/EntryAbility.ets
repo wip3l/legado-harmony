@@ -1,4 +1,5 @@
 import { AppAiHost } from '../utils/AppAiHost';
+import { ComicColorizer } from '@legado/aiengine';
 import { ImmersiveLightSettingsStore } from '../utils/ImmersiveLightSettingsStore';
 import { AbilityConstant, UIAbility, Want, Configuration, ConfigurationConstant } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -367,6 +368,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    ComicColorizer.setAppForeground(true);
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onForeground');
     readStatsTracker.setAppForeground(true);
     AppStorage.setOrCreate<number>('appLifecycleForegroundRevision', Date.now());
@@ -426,6 +428,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    ComicColorizer.setAppForeground(false);
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onBackground');
     readStatsTracker.setAppForeground(false);
     // Page.onPageShow is shared by real route returns and a simple Home/lock-screen resume. Publish a
@@ -438,6 +441,10 @@ export default class EntryAbility extends UIAbility {
     }).catch((e: Error) => {
       hilog.warn(0x0000, 'testTag', 'Background cloud sync failed: %{public}s', JSON.stringify(e));
     });
+  }
+
+  onMemoryLevel(_level: AbilityConstant.MemoryLevel): void {
+    ComicColorizer.onMemoryPressure();
   }
 
   onConfigurationUpdate(newConfig: Configuration): void {

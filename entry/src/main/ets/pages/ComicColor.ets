@@ -36,6 +36,7 @@ struct ComicColorPage {
     if (!this.source || !ComicColorizer.supported()) return;
     if (!this.memberAllowed) {
       if (this.loading) this.cancel();
+      else ComicColorizer.releaseIdleWorker();
       this.result = '';
       this.showOriginal = true;
       this.status = ComicColorizer.MEMBER_REQUIRED;
@@ -81,6 +82,7 @@ struct ComicColorPage {
 
   private cancel(): void {
     this.generation++;
+    ComicColorizer.releaseIdleWorker();
     if (this.loading) this.status = '已取消着色';
     this.loading = false;
   }

@@ -4,6 +4,17 @@
     "type": "feature",
     "deviceTypes": ["phone", "tablet", "2in1"],
     "deliveryWithInstall": true,
-    "installationFree": false
+    "installationFree": false,
+    "mainElement": "ComicColorTestAbility",
+    "abilities": [
+      {
+        "name": "ComicColorTestAbility",
+        "srcEntry": "./ets/testability/ComicColorTestAbility.ets",
+        "startWindowIcon": "$media:layered_image",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": false
+      }
+    ],
+    "extensionAbilities": []
   }
 }
