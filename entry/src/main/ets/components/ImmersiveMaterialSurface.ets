@@ -99,7 +99,14 @@ export struct ImmersiveMaterialSurface {
           .hitTestBehavior(HitTestMode.None)
       }
 
-      this.content()
+      Stack({ alignContent: Alignment.Center }) {
+        this.content()
+      }
+      .width(this.surfaceWidth - 2)
+      .height(this.surfaceHeight - 2)
+      .borderRadius(Math.max(0, this.surfaceHeight / 2 - 1))
+      .backgroundColor(ImmersiveMaterialRuntime.surfaceColor(this.immersiveLightLevel,
+        this.darkMode, this.fallbackColor, true))
 
       Row()
         .width(this.surfaceHeight * 2)

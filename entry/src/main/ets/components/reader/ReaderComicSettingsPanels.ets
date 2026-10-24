@@ -53,7 +53,8 @@ export struct ReaderComicOptionGroup {
             }
             Text(option.label)
               .fontSize(AppFontSize.BODY)
-              .fontColor(this.selected === option.value ? this.colors.accentColor : this.colors.textColor)
+              .fontColor(this.colors.textColor)
+              .fontWeight(this.selected === option.value ? FontWeight.Bold : FontWeight.Regular)
               .maxLines(1)
           }
           .layoutWeight(1)
@@ -125,7 +126,7 @@ export struct ReaderComicModeSettingsPanel {
 
       Text(this.defaultMode === this.mode ? '已是默认' : '设为默认')
         .fontSize(AppFontSize.BODY)
-        .fontColor(this.defaultMode === this.mode ? this.colors.subTextColor : this.colors.accentColor)
+        .fontColor(this.defaultMode === this.mode ? this.colors.subTextColor : this.colors.textColor)
         .padding({ left: AppSpacing.LG, right: AppSpacing.LG, top: AppSpacing.SM, bottom: AppSpacing.SM })
         .borderRadius(16)
         .backgroundColor(this.defaultMode === this.mode ? Color.Transparent :

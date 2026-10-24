@@ -2,6 +2,9 @@ import { UIContext, promptAction } from '@kit.ArkUI';
 import { ImmersiveMaterialRuntime } from './ImmersiveMaterialRuntime';
 
 export interface SystemDialogOptions {
+  /** 阅读主题可独立于应用主题；底色必须与弹窗内容的文字使用同一种配色。 */
+  darkMode?: boolean;
+  backgroundColor?: ResourceColor;
   /** 点蒙层/返回键是否直接关闭；蒙层带副作用的确认框应传 false，仅用按钮关闭。 */
   autoCancel: boolean;
   maskColor: string;
@@ -43,14 +46,16 @@ export class SystemDialogSession {
         if (options.onDismiss) options.onDismiss();
       }
     };
-    const material = ImmersiveMaterialRuntime.sheetMaterial('#FFFFFF');
+    const level = ImmersiveMaterialRuntime.configuredLightLevel();
+    const darkMode = options.darkMode !== undefined ? options.darkMode :
+      AppStorage.get<boolean>('appDarkMode') || false;
+    const backgroundColor = options.backgroundColor || '';
+    dialogOptions.backgroundColor = ImmersiveMaterialRuntime.systemSurfaceBackgroundColor(level, darkMode, backgroundColor);
+    const material = ImmersiveMaterialRuntime.sheetMaterial('#FFFFFF', level, darkMode, backgroundColor);
     if (material !== undefined) {
       dialogOptions.systemMaterial = material;
-      const level = ImmersiveMaterialRuntime.configuredLightLevel();
-      dialogOptions.backgroundColor = ImmersiveMaterialRuntime.surfaceColor(level,
-        AppStorage.get<boolean>('appDarkMode') || false);
       dialogOptions.backgroundBlurStyle = ImmersiveMaterialRuntime.surfaceBlur(level);
-      const border = ImmersiveMaterialRuntime.surfaceBorder(level, AppStorage.get<boolean>('appDarkMode') || false);
+      const border = ImmersiveMaterialRuntime.surfaceBorder(level, darkMode);
       dialogOptions.borderWidth = border.width;
       dialogOptions.borderColor = border.color;
     }

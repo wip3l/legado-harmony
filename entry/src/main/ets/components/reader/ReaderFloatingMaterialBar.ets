@@ -14,7 +14,7 @@ export struct ReaderFloatingMaterialBar {
   @Prop barHeight: number = 48;
   /** 圆角；不传（负数）时按胶囊处理，取高度的一半。 */
   @Prop cornerRadius: number = -1;
-  @Prop tintColor: ResourceColor = Color.Transparent;
+  @Prop denseContent: boolean = false;
   @BuilderParam content: () => void = this.emptyContent;
 
   @Builder
@@ -24,13 +24,21 @@ export struct ReaderFloatingMaterialBar {
   @Builder
   materialContent() {
     Stack({ alignContent: Alignment.Center }) {
-      this.content()
+      // 内容侧的底色不会被系统材质覆盖；留出细边显示原生折射与高光。
+      Stack({ alignContent: Alignment.Center }) {
+        this.content()
+      }
+      .width('calc(100% - 2vp)')
+      .height(this.barHeight - 2)
+      .borderRadius(Math.max(0, this.radius() - 1))
+      .backgroundColor(ImmersiveMaterialRuntime.surfaceColor(this.immersiveLightLevel,
+        this.darkMode, this.fallbackColor, !this.denseContent))
+      .clip(true)
     }
     .width('100%')
     .height(this.barHeight)
     .borderRadius(this.radius())
     .systemMaterial(this.material())
-    .backgroundColor(ImmersiveMaterialRuntime.surfaceColor(this.immersiveLightLevel, this.darkMode, this.fallbackColor))
     .backgroundBlurStyle(ImmersiveMaterialRuntime.surfaceBlur(this.immersiveLightLevel))
     .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.darkMode))
   }
@@ -42,8 +50,8 @@ export struct ReaderFloatingMaterialBar {
   private material(): uiMaterial.Material {
     return ImmersiveMaterialRuntime.componentMaterial({
       style: ImmersiveMaterialRuntime.materialStyle(this.immersiveLightLevel),
-      // Reuse the reader's glass tint and opacity instead of adding a white wash.
-      materialColor: this.tintColor,
+      // 材质保留边缘光感，可读性由内容底板保障。
+      materialColor: Color.Transparent,
       applyShadow: false,
       // Sliders must not deform the whole capsule while the user drags them.
       interactive: false,
@@ -99,7 +107,8 @@ export struct ReaderMaterialPanel {
         barHeight: this.panelHeight,
         cornerRadius: this.cornerRadius,
         fallbackColor: this.fallbackColor,
-        darkMode: this.darkMode
+        darkMode: this.darkMode,
+        denseContent: true
       }) {
         this.content()
       }

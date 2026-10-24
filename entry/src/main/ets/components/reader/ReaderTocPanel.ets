@@ -293,7 +293,8 @@ export struct ReaderTocPanel {
   }
 
   private titleColor(chapter: BookChapter, index: number): string {
-    if (index === this.currentChapterIndex) return this.accentColor;
+    // 主题强调色可能是浅金色；选中行靠底色、字重和标记识别，标题仍保持可读。
+    if (index === this.currentChapterIndex) return this.textColor;
     if (chapter.cacheDate > 0) return this.dark ? '#DDEFE5' : '#244B35';
     return this.dark ? '#B8BDC7' : '#333333';
   }

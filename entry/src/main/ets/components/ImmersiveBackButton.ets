@@ -34,7 +34,8 @@ export struct ImmersiveBackButton {
         .height(this.materialButtonSize())
         .padding(0)
         .enabled(this.buttonEnabled)
-        .backgroundColor(Color.Transparent)
+        .backgroundColor(ImmersiveMaterialRuntime.surfaceColor(this.immersiveLightLevel, this.darkMode,
+          this.darkMode ? '#191B1F' : '#FFFFFF', true))
         .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.darkMode))
         .accessibilityText(this.accessibilityLabel)
         .onClick(() => this.onBack())
@@ -90,7 +91,8 @@ export struct ImmersiveBackButton {
       .height(this.materialButtonSize())
       .padding(0)
       .enabled(this.buttonEnabled)
-      .backgroundColor(Color.Transparent)
+      .backgroundColor(ImmersiveMaterialRuntime.surfaceColor(this.immersiveLightLevel, this.darkMode,
+        this.darkMode ? '#191B1F' : '#FFFFFF', true))
       .hitTestBehavior(HitTestMode.Transparent)
       .accessibilityText(this.accessibilityLabel)
       .onClick(() => this.onBack())

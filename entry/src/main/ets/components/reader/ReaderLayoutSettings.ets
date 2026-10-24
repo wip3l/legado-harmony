@@ -132,7 +132,7 @@ export struct ReaderTypographyStepper {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
         .menuBackgroundColor(this.menuColor)
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel, this.dark, this.menuColor))
         .onSelect((index: number) => {
           this.inputVisible = false;
           this.field = Math.max(0, Math.min(index, ReaderTypographyField.COUNT - 1));
@@ -575,7 +575,7 @@ export struct ReaderHeaderFooterEditor {
         .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
         .menuBackgroundColor(this.menuColor)
         .menuBackgroundBlurStyle(BlurStyle.NONE)
-        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
+        .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel, this.dark, this.menuColor))
         .onSelect((index: number) => onSelect(index))
     }
     .width(this.cardStyle ? 'calc(100% - 32vp)' : '100%')

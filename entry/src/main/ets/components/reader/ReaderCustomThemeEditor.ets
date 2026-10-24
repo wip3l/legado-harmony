@@ -204,7 +204,7 @@ export struct ReaderCustomThemeEditor {
           .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
           .menuBackgroundColor(this.menuColor)
           .menuBackgroundBlurStyle(BlurStyle.NONE)
-          .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
+          .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel, this.dark, this.menuColor))
           .onSelect((index: number) => this.select(index))
         Button('新增')
           .height(36)
@@ -254,7 +254,7 @@ export struct ReaderCustomThemeEditor {
           .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
           .menuBackgroundColor(this.menuColor)
           .menuBackgroundBlurStyle(BlurStyle.NONE)
-          .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
+          .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel, this.dark, this.menuColor))
           .onSelect((index: number) => this.setBackgroundType(index))
       }
       .width('100%')
@@ -301,7 +301,7 @@ export struct ReaderCustomThemeEditor {
               .selectedOptionBgColor(ThemeRuntime.accentSurfaceColor(this.dark))
               .menuBackgroundColor(this.menuColor)
               .menuBackgroundBlurStyle(BlurStyle.NONE)
-              .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
+              .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel, this.dark, this.menuColor))
               .onSelect((index: number) => this.setImageFit(index))
           }
         }

@@ -15,27 +15,27 @@ export interface ImmersiveSurfaceBorder {
  */
 export class SelectMenuMaterialModifier implements AttributeModifier<SelectAttribute> {
   private lightLevel: string;
+  private darkMode: boolean;
+  private backgroundColor: ResourceColor;
 
-  constructor(lightLevel: string) {
+  constructor(lightLevel: string, darkMode: boolean, backgroundColor: ResourceColor) {
     this.lightLevel = lightLevel;
+    this.darkMode = darkMode;
+    this.backgroundColor = backgroundColor;
   }
 
   applyNormalAttribute(instance: SelectAttribute): void {
     if (deviceInfo.sdkApiVersion >= 20) {
       instance.menuOutline(ImmersiveMaterialRuntime.surfaceBorder(this.lightLevel,
-        AppStorage.get<boolean>('appDarkMode') || false));
+        this.darkMode));
     }
     if (deviceInfo.sdkApiVersion < 26) return;
-    instance.menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial(this.lightLevel));
-    if (ImmersiveMaterialRuntime.reducedMaterial(this.lightLevel)) {
-      instance.menuBackgroundColor(ImmersiveMaterialRuntime.surfaceColor(this.lightLevel,
-        AppStorage.get<boolean>('appDarkMode') || false));
-      instance.menuBackgroundBlurStyle(ImmersiveMaterialRuntime.surfaceBlur(this.lightLevel));
-    } else {
-      // 同一个 Select 从弱/均衡切回跟随系统时，清除上次覆盖的底色与模糊。
-      instance.menuBackgroundColor(Color.Transparent);
-      instance.menuBackgroundBlurStyle(BlurStyle.NONE);
-    }
+    instance.menuSystemMaterial(ImmersiveMaterialRuntime.selectMenuMaterial(this.lightLevel,
+      this.darkMode, this.backgroundColor));
+    // 切换光感档位只改变光效，不撤掉菜单的可读性底色。
+    instance.menuBackgroundColor(ImmersiveMaterialRuntime.systemSurfaceBackgroundColor(this.lightLevel,
+      this.darkMode, this.backgroundColor));
+    instance.menuBackgroundBlurStyle(ImmersiveMaterialRuntime.surfaceBlur(this.lightLevel));
   }
 }
 
@@ -115,8 +115,8 @@ export class GlassTagModifier implements AttributeModifier<CommonAttribute> {
     instance.linearGradient({
       direction: GradientDirection.Bottom,
       colors: this.darkMode ?
-        [['#2EFFFFFF', 0], ['#1FFFFFFF', 0.5], ['#1AFFFFFF', 1]] :
-        [['#D9FFFFFF', 0], ['#A6FFFFFF', 0.5], ['#99FFFFFF', 1]]
+        [['#8033363D', 0], ['#8026272B', 0.5], ['#8026272B', 1]] :
+        [['#80FFFFFF', 0], ['#80FFFFFF', 0.5], ['#80FFFFFF', 1]]
     });
     instance.border({ width: 0.5, color: this.darkMode ? '#26FFFFFF' : '#E6FFFFFF' });
     instance.shadow({ radius: 4, color: this.darkMode ? '#33000000' : '#1A000000', offsetX: 0, offsetY: 1 });
@@ -217,11 +217,21 @@ export class ImmersiveMaterialRuntime {
       new uiMaterial.ImmersiveMaterial(options);
   }
 
-  /** 弱档用实色表面；均衡用普通磨砂，不保留系统高档材质的折射和光边。 */
-  static surfaceColor(level: string, darkMode: boolean, fallback: ResourceColor = ''): ResourceColor {
-    if (level === 'weak') return fallback || ThemeRuntime.cardColor(darkMode);
-    if (level === 'balanced') return darkMode ? '#D926272B' : '#D9F5F5F5';
-    return Color.Transparent;
+  /** 面板和紧凑控件统一叠加 50% 底色，保留透色；弱档沿用实色。 */
+  static surfaceColor(level: string, darkMode: boolean, fallback: ResourceColor = '',
+    _compact: boolean = false): ResourceColor {
+    const base = fallback || ThemeRuntime.cardColor(darkMode);
+    if (typeof base !== 'string' || !/^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(base)) return base;
+    const rgb = base.substring(base.length - 6);
+    // 统一替换旧 alpha，避免沿用上次过厚的底色。
+    return level === 'weak' ? `#${rgb}` : `#80${rgb}`;
+  }
+
+  /** 原生材质已通过 materialColor 着色，背景不再重复叠色，避免两个 50% 合成 75%。 */
+  static systemSurfaceBackgroundColor(level: string, darkMode: boolean,
+    fallback: ResourceColor = ''): ResourceColor {
+    return ImmersiveMaterialRuntime.supportsHds() && !ImmersiveMaterialRuntime.reducedMaterial(level) ?
+      Color.Transparent : ImmersiveMaterialRuntime.surfaceColor(level, darkMode, fallback);
   }
 
   static surfaceBlur(level: string): BlurStyle {
@@ -236,8 +246,8 @@ export class ImmersiveMaterialRuntime {
   }
 
   /** 原生材质的厚度；手动弱/均衡由 componentMaterial 关闭原生材质并使用普通表面。 */
-  static materialStyle(configured: string = ImmersiveMaterialRuntime.configuredLightLevel()): uiMaterial.ImmersiveStyle {
-    if (configured === 'high') return uiMaterial.ImmersiveStyle.ULTRA_THIN;
+  static materialStyle(_configured: string = ImmersiveMaterialRuntime.configuredLightLevel()): uiMaterial.ImmersiveStyle {
+    // 强档通过 lightEffect 增强光感，不再降低文字底板的厚度。
     return uiMaterial.ImmersiveStyle.REGULAR;
   }
 
@@ -274,8 +284,10 @@ export class ImmersiveMaterialRuntime {
    * pages. Older devices keep the platform fallback by returning undefined.
    */
   /** A fresh instance per build pass, so a changed light-sense setting is applied again. */
-  static selectMenuModifier(lightLevel: string): SelectMenuMaterialModifier {
-    return new SelectMenuMaterialModifier(lightLevel);
+  static selectMenuModifier(lightLevel: string,
+    darkMode: boolean = AppStorage.get<boolean>('appDarkMode') || false,
+    backgroundColor: ResourceColor = ''): SelectMenuMaterialModifier {
+    return new SelectMenuMaterialModifier(lightLevel, darkMode, backgroundColor);
   }
 
   /**
@@ -283,10 +295,12 @@ export class ImmersiveMaterialRuntime {
    * API 26 以下返回 undefined，调用方退回磨砂底。
    */
   static popupMenuMaterial(accentColor: string,
-    lightLevel: string = ImmersiveMaterialRuntime.configuredLightLevel()): uiMaterial.Material | undefined {
+    lightLevel: string = ImmersiveMaterialRuntime.configuredLightLevel(),
+    darkMode: boolean = AppStorage.get<boolean>('appDarkMode') || false): uiMaterial.Material | undefined {
     if (!ImmersiveMaterialRuntime.supportsHds()) return undefined;
     return ImmersiveMaterialRuntime.componentMaterial({
       style: ImmersiveMaterialRuntime.materialStyle(lightLevel),
+      materialColor: ImmersiveMaterialRuntime.surfaceColor(lightLevel, darkMode),
       applyShadow: true,
       interactive: false,
       lightEffect: ImmersiveMaterialRuntime.lightEffect(true, lightLevel, accentColor)
@@ -310,13 +324,11 @@ export class ImmersiveMaterialRuntime {
    */
   static popupMenuOptions(lightLevel: string, builder: CustomBuilder, placement: Placement, darkMode: boolean, accentColor: string,
     onHidden: () => void, focusable: boolean = true): CustomPopupOptions {
-    const material = ImmersiveMaterialRuntime.popupMenuMaterial(accentColor, lightLevel);
+    const material = ImmersiveMaterialRuntime.popupMenuMaterial(accentColor, lightLevel, darkMode);
     const options: CustomPopupOptions = {
       builder: builder,
       placement: placement,
-      popupColor: ImmersiveMaterialRuntime.reducedMaterial(lightLevel) ?
-        ImmersiveMaterialRuntime.surfaceColor(lightLevel, darkMode) :
-        (material !== undefined ? Color.Transparent : ThemeRuntime.glassPanelColor(darkMode, '', 'panel')),
+      popupColor: ImmersiveMaterialRuntime.systemSurfaceBackgroundColor(lightLevel, darkMode),
       radius: ImmersiveMaterialRuntime.POPUP_MENU_RADIUS,
       enableArrow: false,
       targetSpace: 8,
@@ -360,11 +372,9 @@ export class ImmersiveMaterialRuntime {
     const material = ImmersiveMaterialRuntime.popupMenuMaterial(accentColor, lightLevel);
     if (material !== undefined) {
       options.systemMaterial = material;
-      if (ImmersiveMaterialRuntime.reducedMaterial(lightLevel)) {
-        options.backgroundColor = ImmersiveMaterialRuntime.surfaceColor(lightLevel,
-          AppStorage.get<boolean>('appDarkMode') || false);
-        options.backgroundBlurStyle = ImmersiveMaterialRuntime.surfaceBlur(lightLevel);
-      }
+      options.backgroundColor = ImmersiveMaterialRuntime.systemSurfaceBackgroundColor(lightLevel,
+        AppStorage.get<boolean>('appDarkMode') || false);
+      options.backgroundBlurStyle = ImmersiveMaterialRuntime.surfaceBlur(lightLevel);
     }
     return options;
   }
@@ -377,14 +387,14 @@ export class ImmersiveMaterialRuntime {
     const border = ImmersiveMaterialRuntime.surfaceBorder(lightLevel, darkMode);
     options.borderWidth = border.width;
     options.borderColor = border.color;
-    const material = ImmersiveMaterialRuntime.sheetMaterial(accentColor, lightLevel);
+    const material = ImmersiveMaterialRuntime.sheetMaterial(accentColor, lightLevel, darkMode);
     if (material !== undefined) {
-      options.backgroundColor = ImmersiveMaterialRuntime.surfaceColor(lightLevel, darkMode);
+      options.backgroundColor = ImmersiveMaterialRuntime.systemSurfaceBackgroundColor(lightLevel, darkMode);
       options.blurStyle = ImmersiveMaterialRuntime.surfaceBlur(lightLevel);
       options.systemMaterial = material;
     } else {
       options.blurStyle = BlurStyle.COMPONENT_THICK;
-      options.backgroundColor = ThemeRuntime.glassPanelColor(darkMode, '', 'panel');
+      options.backgroundColor = ImmersiveMaterialRuntime.surfaceColor(lightLevel, darkMode);
     }
     return options;
   }
@@ -394,21 +404,26 @@ export class ImmersiveMaterialRuntime {
    * API 26 以下返回 undefined，调用方退回厚磨砂。
    */
   static sheetMaterial(accentColor: string,
-    lightLevel: string = ImmersiveMaterialRuntime.configuredLightLevel()): uiMaterial.Material | undefined {
+    lightLevel: string = ImmersiveMaterialRuntime.configuredLightLevel(),
+    darkMode: boolean = AppStorage.get<boolean>('appDarkMode') || false,
+    backgroundColor: ResourceColor = ''): uiMaterial.Material | undefined {
     if (!ImmersiveMaterialRuntime.supportsHds()) return undefined;
     return ImmersiveMaterialRuntime.componentMaterial({
       style: ImmersiveMaterialRuntime.materialStyle(lightLevel),
+      materialColor: ImmersiveMaterialRuntime.surfaceColor(lightLevel, darkMode, backgroundColor),
       applyShadow: true,
       interactive: false,
       lightEffect: ImmersiveMaterialRuntime.lightEffect(true, lightLevel, accentColor)
     }, lightLevel);
   }
 
-  static selectMenuMaterial(lightLevel: string): uiMaterial.Material | undefined {
+  static selectMenuMaterial(lightLevel: string,
+    darkMode: boolean = AppStorage.get<boolean>('appDarkMode') || false,
+    backgroundColor: ResourceColor = ''): uiMaterial.Material | undefined {
     if (!ImmersiveMaterialRuntime.supportsHds()) return undefined;
     return ImmersiveMaterialRuntime.componentMaterial({
       style: ImmersiveMaterialRuntime.materialStyle(lightLevel),
-      materialColor: '#00000000',
+      materialColor: ImmersiveMaterialRuntime.surfaceColor(lightLevel, darkMode, backgroundColor),
       applyShadow: false,
       interactive: lightLevel !== 'weak',
       lightEffect: ImmersiveMaterialRuntime.lightEffect(false, lightLevel)

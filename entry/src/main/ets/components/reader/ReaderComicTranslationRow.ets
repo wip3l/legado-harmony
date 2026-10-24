@@ -64,16 +64,17 @@ export struct ReaderComicTranslationRow {
         Row({ space: 6 }) {
           Text(this.textConvert ? '繁→简' : '关闭')
             .fontSize(AppFontSize.BODY)
-            .fontColor(this.subTextColor)
+            .fontColor(this.textColor)
           SymbolGlyph($r('sys.symbol.chevron_down'))
             .fontSize(14)
-            .fontColor([this.subTextColor])
+            .fontColor([this.textColor])
         }
       }
       .id('readerComicTranslationSelect')
       .height(40)
-      .padding({ left: 12, right: 0 })
-      .backgroundColor(Color.Transparent)
+      .padding({ left: 12, right: 12 })
+      .borderRadius(16)
+      .backgroundColor(this.dark ? '#8030343B' : '#80ECEEF2')
       .accessibilityText(`AI翻译，当前${this.textConvert ? '繁→简' : '关闭'}`)
       .onClick(() => { this.menuVisible = !this.menuVisible; })
       .bindPopup(this.menuVisible, ImmersiveMaterialRuntime.popupMenuOptions(this.immersiveLightLevel,

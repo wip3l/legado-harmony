@@ -97,7 +97,7 @@ export struct ImmersiveReadButton {
       .width(IMMERSIVE_READ_BUTTON_WIDTH)
       .height(56)
       .padding({ left: AppSpacing.LG, right: AppSpacing.LG })
-      .backgroundColor(Color.Transparent)
+      .backgroundColor(ImmersiveMaterialRuntime.surfaceColor(this.immersiveLightLevel, this.darkMode, '', true))
       .enabled(!this.busy)
       .accessibilityText(this.label)
       .onClick(() => this.onRead())

@@ -27,7 +27,7 @@ function harness(api = 26, supported = true) {
       MaterialType: { IMMERSIVE: 'immersive', NONE: 'none', ADAPTIVE: 'adaptive' },
       MaterialLevel: { EXQUISITE: 'high', GENTLE: 'balanced', SMOOTH: 'weak', ADAPTIVE: 'adaptive' }
     },
-    ThemeRuntime: { glassPanelColor: () => 'fallback-panel', cardColor: dark => dark ? '#222222' : '#FFFFFF' },
+    ThemeRuntime: { glassPanelColor: () => '#80FFFFFF', cardColor: dark => dark ? '#222222' : '#FFFFFF' },
     Color: { Transparent: 'transparent' },
     BlurStyle: { COMPONENT_THICK: 'blur', NONE: 'none' },
     DialogAlignment: { Center: 'center' }
@@ -55,7 +55,7 @@ test('manual weak/balanced disable native refraction across every popup, sheet, 
       menuBackgroundColor: value => { color = value; }, menuBackgroundBlurStyle: value => { blur = value; } });
     for (const material of [popup.systemMaterial, context.systemMaterial, sheet.systemMaterial, select,
       runtime.componentMaterial({ interactive: true }, level)]) assert.equal(material, empty);
-    const expectedColor = level === 'weak' ? '#FFFFFF' : '#D9F5F5F5';
+    const expectedColor = level === 'weak' ? '#FFFFFF' : '#80FFFFFF';
     for (const surface of [popup.popupColor, context.backgroundColor, sheet.backgroundColor, color]) {
       assert.equal(surface, expectedColor);
     }
@@ -76,9 +76,9 @@ test('follow-system and high restore native materials after leaving a manual red
     if (runtime.reducedMaterial(level)) assert.equal(material, empty);
     else {
       assert.notEqual(material, empty);
-      assert.equal(material.style, level === 'high' ? 'thin' : 'regular');
+      assert.equal(material.style, 'regular');
       assert.equal(material.lightEffect.color, level === 'high' ? '#88123456' : '#55123456');
-      assert.equal(runtime.surfaceColor(level, false), 'transparent');
+      assert.equal(runtime.surfaceColor(level, false), '#80FFFFFF');
       assert.equal(runtime.surfaceBlur(level), 'none');
     }
   }
@@ -93,7 +93,8 @@ test('follow-system and high restore native materials after leaving a manual red
   };
   for (const level of ['weak', 'balanced', 'adaptive']) runtime.selectMenuModifier(level).applyNormalAttribute(select);
   assert.notEqual(selectState.material, empty);
-  assert.equal(selectState.color, 'transparent', 'switching back clears the old solid menu background');
+  assert.equal(selectState.color, 'transparent', 'native material owns the tint without a second background layer');
+  assert.equal(selectState.material.materialColor, '#80FFFFFF');
   assert.equal(selectState.blur, 'none');
   assert.equal(runtime.lightEffect(true, 'weak'), null);
   assert.equal(runtime.touchGlowOpacity('weak'), 0);
@@ -106,8 +107,8 @@ test('older systems and unsupported devices keep non-material popup/sheet fallba
     const sheet = runtime.applySheetMaterial('adaptive', {}, false, '#123456');
     assert.equal(popup.systemMaterial, undefined);
     assert.equal(sheet.systemMaterial, undefined);
-    assert.equal(popup.popupColor, 'fallback-panel');
-    assert.equal(sheet.backgroundColor, 'fallback-panel');
+    assert.equal(popup.popupColor, '#80FFFFFF');
+    assert.equal(sheet.backgroundColor, '#80FFFFFF');
     assert.equal(sheet.blurStyle, 'blur');
     if (api < 23) assert.equal(runtime.materialType(), 'none');
     else assert.equal(runtime.materialLevel('balanced'), 'balanced');
@@ -152,7 +153,7 @@ test('custom dialogs use the latest light level when opened and preserve dismiss
     session.open(uiContext, () => {}, options);
     await Promise.resolve();
     const dialog = state.opened.at(-1);
-    if (level === 'high') assert.equal(dialog.systemMaterial.style, 'thin');
+    if (level === 'high') assert.equal(dialog.systemMaterial.style, 'regular');
     else assert.equal(dialog.systemMaterial, empty);
     if (level === 'weak') assert.equal(dialog.backgroundBlurStyle, 'none');
     dialog.onWillDismiss({ dismiss: () => {} });
@@ -162,7 +163,7 @@ test('custom dialogs use the latest light level when opened and preserve dismiss
   const fallback = harness(25);
   new fallback.SystemDialogSession().open(fallback.uiContext, () => {}, options);
   assert.equal(fallback.state.opened[0].systemMaterial, undefined);
-  assert.equal(fallback.state.opened[0].backgroundColor, undefined);
+  assert.equal(fallback.state.opened[0].backgroundColor, '#80FFFFFF');
 });
 
 test('each UI material consumer subscribes directly and passes the reactive light level', () => {
@@ -185,4 +186,63 @@ test('each UI material consumer subscribes directly and passes the reactive ligh
   }
   walk(root);
   assert.ok(consumers > 30, `checked ${consumers} components`);
+});
+
+// Check the combined tint, not just one colour property: two half-opacity layers would become 75%.
+function opacity(color) {
+  if (color === 'transparent') return 0;
+  return color.length === 9 ? parseInt(color.slice(1, 3), 16) / 255 : 1;
+}
+function combinedOpacity(background, material) {
+  return 1 - (1 - opacity(background)) * (1 - opacity(material?.materialColor || 'transparent'));
+}
+
+test('native and fallback overlays preserve half the backdrop across dark/light modes and level changes', () => {
+  for (const [api, supported] of [[22, true], [25, true], [26, false], [26, true]]) {
+    const { ImmersiveMaterialRuntime: runtime, SystemDialogSession: Session, state, uiContext } = harness(api, supported);
+    for (const dark of [false, true]) {
+      const base = dark ? '#191B1F' : '#FFFFFF';
+      for (const level of ['weak', 'balanced', 'adaptive', 'high', 'balanced', 'adaptive']) {
+        state.level = level;
+        const expected = level === 'weak' ? 1 : 128 / 255;
+        const popup = runtime.popupMenuOptions(level, () => {}, 'bottom', dark, '#123456', () => {});
+        const sheet = runtime.applySheetMaterial(level, {}, dark, '#123456');
+        const context = runtime.contextMenuOptions(level, '#123456', () => {});
+        new Session().open(uiContext, () => {}, { autoCancel: true, maskColor: '#66000000', warnTag: 'test',
+          darkMode: dark, backgroundColor: base });
+        const dialog = state.opened.at(-1);
+        for (const [background, material] of [[popup.popupColor, popup.systemMaterial],
+          [sheet.backgroundColor, sheet.systemMaterial], [dialog.backgroundColor, dialog.systemMaterial]]) {
+          assert.ok(Math.abs(combinedOpacity(background, material) - expected) < 0.001);
+        }
+        // Older context menus keep the platform default; supported menus must not double the tint.
+        if (context.systemMaterial !== undefined) {
+          assert.ok(Math.abs(combinedOpacity(context.backgroundColor, context.systemMaterial) - expected) < 0.001);
+        }
+        for (const compact of [false, true]) {
+          const surface = runtime.surfaceColor(level, dark, base, compact);
+          assert.ok(Math.abs(opacity(surface) - expected) < 0.001);
+        }
+      }
+    }
+  }
+});
+
+test('select and dialog palettes can follow a dark reader inside a light app', () => {
+ const { ImmersiveMaterialRuntime: runtime, SystemDialogSession: Session, state, uiContext } = harness();
+ const select = {};
+ const attributes = { menuOutline() {}, menuSystemMaterial: v => select.material = v,
+  menuBackgroundColor: v => select.color = v, menuBackgroundBlurStyle() {} };
+ for (const level of ['weak', 'balanced', 'high', 'adaptive']) {
+  runtime.selectMenuModifier(level, true, '#191B1F').applyNormalAttribute(attributes);
+  assert.equal(select.color, runtime.reducedMaterial(level) ?
+    (level === 'weak' ? '#191B1F' : '#80191B1F') : 'transparent');
+  if (!runtime.reducedMaterial(level)) assert.equal(select.material.materialColor, '#80191B1F');
+ }
+ new Session().open(uiContext, () => {}, { autoCancel: true, maskColor: '#66000000', warnTag: 'test',
+  darkMode: true, backgroundColor: '#191B1F' });
+ assert.equal(state.opened[0].backgroundColor, 'transparent');
+ assert.equal(state.opened[0].systemMaterial.materialColor, '#80191B1F');
+ assert.equal(runtime.surfaceColor('adaptive', true, '#11191B1F'), '#80191B1F', 'old alpha cannot weaken a menu');
+ assert.equal(runtime.surfaceColor('weak', true, '#11191B1F'), '#191B1F');
 });

@@ -639,7 +639,7 @@ export struct ReaderTtsPlayerPanel {
       // 弱/均衡使用对应底色与模糊，跟随系统/强清除底色和模糊，交给系统材质绘制。
       .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.darkMode, ''))
       .menuBackgroundBlurStyle(BlurStyle.COMPONENT_THICK)
-      .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
+      .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel, this.darkMode, this.panelColor))
       .onSelect((index: number) => ReaderTtsFloatingSession.selectTtsVoice(index))
   }
 
@@ -710,7 +710,7 @@ export struct ReaderTtsPlayerPanel {
       // 弱/均衡使用对应底色与模糊，跟随系统/强清除底色和模糊，交给系统材质绘制。
       .menuBackgroundColor(ThemeRuntime.dropdownPanelColor(this.darkMode, ''))
       .menuBackgroundBlurStyle(BlurStyle.COMPONENT_THICK)
-      .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel))
+      .attributeModifier(ImmersiveMaterialRuntime.selectMenuModifier(this.immersiveLightLevel, this.darkMode, this.panelColor))
       .onSelect((index: number) => this.selectAudioVoiceOption(index))
   }
 

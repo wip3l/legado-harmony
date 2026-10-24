@@ -2501,19 +2501,21 @@ struct ReadBookPage {
         Text(this.getChapterTitle())
           .fontSize(AppFontSize.BODY)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.getTextColor())
+          .fontColor(this.readerPanelTextColor())
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         if (this.book?.name) {
           Text(this.book.name)
             .fontSize(AppFontSize.MICRO + 1)
-            .fontColor(this.getSubTextColor())
+            .fontColor(this.readerPanelSubTextColor())
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
       }
       .width('100%')
       .height('100%')
+      .borderRadius(20)
+      .backgroundColor(this.readerFloatingBarTintColor())
       .padding({ left: 14, right: 14 })
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Start)
@@ -2523,8 +2525,6 @@ struct ReadBookPage {
     .height(40)
     .margin({ left: AppSpacing.MD, right: AppSpacing.MD })
     .borderRadius(20)
-    // With HDS material the capsule shares the round buttons' untinted system glass; older systems use the
-    // solid reader panel because their round buttons have no surface to match.
     .backgroundColor(ImmersiveMaterialRuntime.supportsHdsTabs() ? Color.Transparent : this.readerPanelColor())
     .border(ImmersiveMaterialRuntime.surfaceBorder(this.immersiveLightLevel, this.isReaderThemeDark(),
       ImmersiveMaterialRuntime.supportsHdsTabs() ? 0 : 0.5, this.readerPanelBorderColor()))
@@ -2583,9 +2583,10 @@ struct ReadBookPage {
       .height('100%')
   }
 
-  /** Floating bottom bars use the same untinted material as the top round buttons in every reading mode. */
+  /** API 23–25 的 HDS 栏与 API 26 内容底板保持相同遮挡强度。 */
   readerFloatingBarTintColor(): ResourceColor {
-    return Color.Transparent;
+    return ImmersiveMaterialRuntime.surfaceColor(this.immersiveLightLevel, this.isReaderThemeDark(),
+      this.readerSolidPanelColor(), true);
   }
 
   readerComicSurfaceColor(): string {
@@ -2796,11 +2797,11 @@ struct ReadBookPage {
 
   readerComicPanelColors(): ReaderComicPanelColors {
     const colors = new ReaderComicPanelColors();
-    colors.textColor = this.getTextColor();
-    colors.subTextColor = this.getSubTextColor();
+    colors.textColor = this.readerPanelTextColor();
+    colors.subTextColor = this.readerPanelSubTextColor();
     colors.accentColor = this.accentColor();
     colors.dark = this.isReaderThemeDark();
-    colors.menuColor = ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor());
+    colors.menuColor = this.readerSolidPanelColor();
     colors.buttonColor = this.buttonColor();
     colors.buttonTextColor = ThemeRuntime.onAccentColor();
     return colors;
@@ -3311,7 +3312,6 @@ struct ReadBookPage {
       if (ImmersiveMaterialRuntime.supportsHds()) {
         ReaderFloatingMaterialBar({
           barWidth: this.readerFloatingBarWidth(),
-          tintColor: this.readerFloatingBarTintColor(),
           fallbackColor: this.readerPanelColor(),
           darkMode: this.isReaderThemeDark()
         }) {
@@ -3421,7 +3421,7 @@ struct ReadBookPage {
     Stack({ alignContent: Alignment.Center }) {
       SymbolGlyph(direction < 0 ? $r('sys.symbol.chevron_left') : $r('sys.symbol.chevron_right'))
         .fontSize(25)
-        .fontColor([this.canStepReaderComicChapter(direction) ? this.getTextColor() : this.getSubTextColor()])
+        .fontColor([this.canStepReaderComicChapter(direction) ? this.readerPanelTextColor() : this.readerPanelSubTextColor()])
     }
     .width(46)
     .height(48)
@@ -3462,7 +3462,7 @@ struct ReadBookPage {
         SymbolGlyph($r('sys.symbol.chevron_left'))
           .fontSize(25)
           .fontColor([this.currentChapterIndex > 0 && !this.isLoading ?
-            this.getTextColor() : this.getSubTextColor()])
+            this.readerPanelTextColor() : this.readerPanelSubTextColor()])
       }
         .width(46)
         .height(48)
@@ -3494,7 +3494,7 @@ struct ReadBookPage {
         SymbolGlyph($r('sys.symbol.chevron_right'))
           .fontSize(25)
           .fontColor([this.currentChapterIndex < this.chapters.length - 1 && !this.isLoading ?
-            this.getTextColor() : this.getSubTextColor()])
+            this.readerPanelTextColor() : this.readerPanelSubTextColor()])
       }
         .width(46)
         .height(48)
@@ -3532,7 +3532,6 @@ struct ReadBookPage {
       Stack({ alignContent: Alignment.Center }) {
         ReaderFloatingMaterialBar({
           barWidth: this.readerFloatingBarWidth(),
-          tintColor: this.readerFloatingBarTintColor(),
           fallbackColor: this.readerPanelColor(),
           darkMode: this.isReaderThemeDark()
         }) {
@@ -3796,7 +3795,7 @@ struct ReadBookPage {
         Row() {
         SymbolGlyph($r('sys.symbol.chevron_left'))
           .fontSize(24)
-          .fontColor([this.currentChapterIndex > 0 && !this.isLoading ? this.getTextColor() : this.getSubTextColor()])
+          .fontColor([this.currentChapterIndex > 0 && !this.isLoading ? this.readerPanelTextColor() : this.readerPanelSubTextColor()])
           .width(46)
           .height(54)
           .enabled(this.currentChapterIndex > 0 && !this.isLoading)
@@ -3808,13 +3807,13 @@ struct ReadBookPage {
           Row() {
             Text(this.getChapterTitle(this.getMenuChapterDisplayIndex()))
               .fontSize(AppFontSize.CAPTION)
-              .fontColor(this.getSubTextColor())
+              .fontColor(this.readerPanelSubTextColor())
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .layoutWeight(1)
             Text(`${this.getMenuChapterDisplayIndex() + 1}/${this.chapters.length}`)
               .fontSize(AppFontSize.CAPTION)
-              .fontColor(this.getSubTextColor())
+              .fontColor(this.readerPanelSubTextColor())
               .margin({ left: AppSpacing.MD })
           }
           .width('100%')
@@ -3841,7 +3840,7 @@ struct ReadBookPage {
         SymbolGlyph($r('sys.symbol.chevron_right'))
           .fontSize(24)
           .fontColor([this.currentChapterIndex < this.chapters.length - 1 && !this.isLoading ?
-            this.getTextColor() : this.getSubTextColor()])
+            this.readerPanelTextColor() : this.readerPanelSubTextColor()])
           .width(46)
           .height(54)
           .enabled(this.currentChapterIndex < this.chapters.length - 1 && !this.isLoading)
@@ -3892,13 +3891,13 @@ struct ReadBookPage {
         Row() {
           Text(this.getChapterTitle())
             .fontSize(AppFontSize.CAPTION)
-            .fontColor(this.getSubTextColor())
+            .fontColor(this.readerPanelSubTextColor())
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
           Text(`${this.comicMenuPageIndex() + 1}/${this.readerComicTotalPageCount()}`)
             .fontSize(AppFontSize.CAPTION)
-            .fontColor(this.getSubTextColor())
+            .fontColor(this.readerPanelSubTextColor())
             .margin({ left: AppSpacing.MD })
         }
         .width('100%')
@@ -3981,8 +3980,8 @@ struct ReadBookPage {
         reverseOrder: $tocReverseOrder,
         currentChapterIndex: this.currentChapterIndex,
         dark: this.isReaderThemeDark(),
-        textColor: this.getTextColor(),
-        subTextColor: this.getSubTextColor(),
+        textColor: this.readerPanelTextColor(),
+        subTextColor: this.readerPanelSubTextColor(),
         accentColor: this.accentColor(),
         swipeButtonColor: this.buttonColor(),
         panelColor: this.readerPanelColor(),
@@ -4163,7 +4162,7 @@ struct ReadBookPage {
       this.tapZoneSettingsContent();
     }, {
       autoCancel: false,
-      maskColor: ThemeRuntime.scrimColor(this.isReaderThemeDark()),
+      maskColor: ThemeRuntime.scrimColor(this.appDarkMode),
       warnTag: '显示点击区域设置弹窗失败:'
     });
   }
@@ -4654,8 +4653,8 @@ struct ReadBookPage {
       panelBorderColor: this.readerPanelBorderColor(),
       panelShadowColor: this.readerPanelShadowColor(),
       dark: this.isReaderThemeDark(),
-      textColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      textColor: this.readerPanelTextColor(),
+      subTextColor: this.readerPanelSubTextColor(),
       accentColor: this.accentColor(),
       onCapsuleDragStart: (): void => this.beginTtsMiniPlayerDrag(),
       onCapsuleDragMove: (offsetX: number, offsetY: number): void => this.moveTtsMiniPlayer(offsetX, offsetY),
@@ -4688,8 +4687,8 @@ struct ReadBookPage {
       panelBorderColor: this.readerPanelBorderColor(),
       panelShadowColor: this.readerPanelShadowColor(),
       dark: this.isReaderThemeDark(),
-      textColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      textColor: this.readerPanelTextColor(),
+      subTextColor: this.readerPanelSubTextColor(),
       accentColor: this.accentColor(),
       onCapsuleDragStart: (): void => this.beginTtsMiniPlayerDrag(),
       onCapsuleDragMove: (offsetX: number, offsetY: number): void => this.moveTtsMiniPlayer(offsetX, offsetY),
@@ -4733,8 +4732,8 @@ struct ReadBookPage {
       darkMode: this.isReaderThemeDark(),
       accentColor: this.accentColor(),
       playButtonColor: this.buttonColor(),
-      primaryTextColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      primaryTextColor: this.readerPanelTextColor(),
+      subTextColor: this.readerPanelSubTextColor(),
       panelColor: this.readerPanelColor(),
       backgroundThemeId: this.ttsPanelBackgroundThemeId(),
       topInset: this.statusBarSafeHeight,
@@ -7374,9 +7373,9 @@ struct ReadBookPage {
   tocSelectedBackgroundColor(): string {
     const color = this.accentColor();
     if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
-      return `#11${color.substring(1)}`;
+      return `#${this.isReaderThemeDark() ? '40' : '29'}${color.substring(1)}`;
     }
-    return this.appDarkMode ? '#112A6FCC' : '#11007DFF';
+    return this.isReaderThemeDark() ? '#402A6FCC' : '#29007DFF';
   }
 
   /**
@@ -7397,6 +7396,15 @@ struct ReadBookPage {
 
   readerPanelShadow(): ShadowOptions {
     return { radius: 18, color: this.readerPanelShadowColor(), offsetX: 0, offsetY: 6 };
+  }
+
+  /** 浮层使用独立配色，不继承正文的自定义文字色。 */
+  readerPanelTextColor(): string {
+    return this.isReaderThemeDark() ? '#F2F3F5' : '#202124';
+  }
+
+  readerPanelSubTextColor(): string {
+    return this.isReaderThemeDark() ? '#BCC1CA' : '#535963';
   }
 
   readerSolidPanelColor(): string {
@@ -9395,7 +9403,7 @@ struct ReadBookPage {
         Text(this.settingsPanelTitle())
           .fontSize(AppFontSize.TITLE)
           .fontWeight(FontWeight.Bold)
-          .fontColor(this.getTextColor())
+          .fontColor(this.readerPanelTextColor())
 
         Blank()
           .layoutWeight(1)
@@ -9503,7 +9511,7 @@ struct ReadBookPage {
 
       ReaderSettingSwitchRow({
         title: '正文扩展至状态栏', description: '隐藏状态栏，正文延伸到屏幕顶部',
-        checked: this.readerExtendToStatusBar, textColor: this.getTextColor(), subTextColor: this.getSubTextColor(),
+        checked: this.readerExtendToStatusBar, textColor: this.readerPanelTextColor(), subTextColor: this.readerPanelSubTextColor(),
         onChange: (checked: boolean) => {
           this.setReaderExtendToStatusBar(checked);
         }
@@ -9541,11 +9549,11 @@ struct ReadBookPage {
     ReaderTypographyStepper({
       initialValues: this.readerTypographyInitialValues(),
       dark: this.isReaderThemeDark(),
-      textColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      textColor: this.readerPanelTextColor(),
+      subTextColor: this.readerPanelSubTextColor(),
       accentColor: this.accentColor(),
       inputColor: this.readerSolidPanelColor(),
-      menuColor: ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()),
+      menuColor: this.readerSolidPanelColor(),
       onChange: (values: number[]): void => this.onReaderTypographyDraftChange(values)
     })
   }
@@ -9554,11 +9562,11 @@ struct ReadBookPage {
   readerHeaderFooterSettingsPanel() {
     ReaderHeaderFooterSettings({
       dark: this.isReaderThemeDark(),
-      textColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      textColor: this.readerPanelTextColor(),
+      subTextColor: this.readerPanelSubTextColor(),
       accentColor: this.accentColor(),
       switchColor: this.buttonColor(),
-      menuColor: ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()),
+      menuColor: this.readerSolidPanelColor(),
       onChanged: (headerEnabled: boolean, footerEnabled: boolean, infoBarConfig: string): void => {
         this.saveReaderChromeSettings(headerEnabled, footerEnabled, infoBarConfig);
       }
@@ -9687,9 +9695,9 @@ struct ReadBookPage {
       if (this.currentReaderThemeIndex() === ReaderThemeHelper.CUSTOM_THEME_INDEX) {
         ReaderCustomThemeEditor({
           dark: this.isReaderThemeDark(),
-          textColor: this.getTextColor(),
+          textColor: this.readerPanelTextColor(),
           accentColor: this.accentColor(),
-          menuColor: ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()),
+          menuColor: this.readerSolidPanelColor(),
           onChanged: (): void => {
             this.saveReadConfig();
           }
@@ -9707,17 +9715,17 @@ struct ReadBookPage {
       Column() {
         Text('阅读字体')
           .fontSize(AppFontSize.BODY_LARGE)
-          .fontColor(this.getTextColor())
+          .fontColor(this.readerPanelTextColor())
         Text('正文、标题、正则样式')
           .fontSize(AppFontSize.CAPTION)
-          .fontColor(this.getSubTextColor())
+          .fontColor(this.readerPanelSubTextColor())
           .margin({ top: AppSpacing.XS })
       }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
       SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(18)
-        .fontColor([this.getSubTextColor()])
+        .fontColor([this.readerPanelSubTextColor()])
     }
     .width('100%')
     .constraintSize({ minHeight: 56 })
@@ -9733,10 +9741,10 @@ struct ReadBookPage {
       Column() {
         Text('替换净化')
           .fontSize(AppFontSize.BODY_LARGE)
-          .fontColor(this.getTextColor())
+          .fontColor(this.readerPanelTextColor())
         Text('正文与章节标题的替换规则')
           .fontSize(AppFontSize.CAPTION)
-          .fontColor(this.getSubTextColor())
+          .fontColor(this.readerPanelSubTextColor())
           .margin({ top: AppSpacing.XS })
       }
       .layoutWeight(1)
@@ -9744,7 +9752,7 @@ struct ReadBookPage {
 
       SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(18)
-        .fontColor([this.getSubTextColor()])
+        .fontColor([this.readerPanelSubTextColor()])
     }
     .width('100%')
     .constraintSize({ minHeight: 56 })
@@ -9765,8 +9773,8 @@ struct ReadBookPage {
       sleepTimerRemainingSeconds: this.ttsSleepTimerRemainingSeconds,
       speaking: this.isTtsSpeaking,
       dark: this.isReaderThemeDark(),
-      textColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      textColor: this.readerPanelTextColor(),
+      subTextColor: this.readerPanelSubTextColor(),
       accentColor: this.accentColor(),
       actionColor: this.buttonColor(),
       onSpeedChange: (speed: number): void => this.applyTtsSpeed(speed),
@@ -9801,8 +9809,8 @@ struct ReadBookPage {
         systemVoices: this.selectableSystemTtsVoices(),
         selectedKey: this.currentTtsVoiceKey(),
         dark: this.isReaderThemeDark(),
-        textColor: this.getTextColor(),
-        subTextColor: this.getSubTextColor(),
+        textColor: this.readerPanelTextColor(),
+        subTextColor: this.readerPanelSubTextColor(),
         accentColor: this.accentColor(),
         panelColor: this.readerPanelColor(),
         panelBorderColor: this.readerPanelBorderColor(),
@@ -9957,8 +9965,8 @@ struct ReadBookPage {
       title: '点击区域动作',
       description: this.tapZoneSummaryText(),
       actionText: '配置',
-      textColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      textColor: this.readerPanelTextColor(),
+      subTextColor: this.readerPanelSubTextColor(),
       buttonColor: this.buttonColor(),
       buttonTextColor: ThemeRuntime.onAccentColor(),
       onAction: (): void => this.presentTapZoneSettings()
@@ -9974,11 +9982,11 @@ struct ReadBookPage {
       options: options,
       selected: selected,
       controlId: controlId,
-      textColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      textColor: this.readerPanelTextColor(),
+      subTextColor: this.readerPanelSubTextColor(),
       accentColor: this.accentColor(),
       dark: this.isReaderThemeDark(),
-      menuColor: ThemeRuntime.dropdownPanelColor(this.isReaderThemeDark(), this.getBackgroundColor()),
+      menuColor: this.readerSolidPanelColor(),
       onSelect: onSelect
     })
   }
@@ -9997,8 +10005,8 @@ struct ReadBookPage {
       title: title,
       description: description,
       checked: checked,
-      textColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      textColor: this.readerPanelTextColor(),
+      subTextColor: this.readerPanelSubTextColor(),
       onChange: onChange
     })
   }
@@ -10008,8 +10016,8 @@ struct ReadBookPage {
     ReaderEyeTurnCalibrationSettingItem({
       state: this.eyeTurnState,
       coordinator: this.eyeTurn(),
-      textColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      textColor: this.readerPanelTextColor(),
+      subTextColor: this.readerPanelSubTextColor(),
       accentColor: this.accentColor()
     })
   }
@@ -10049,8 +10057,8 @@ struct ReadBookPage {
       state: this.eyeTurnState,
       coordinator: this.eyeTurn(),
       dark: this.isReaderThemeDark(),
-      textColor: this.getTextColor(),
-      subTextColor: this.getSubTextColor(),
+      textColor: this.readerPanelTextColor(),
+      subTextColor: this.readerPanelSubTextColor(),
       accentColor: this.accentColor(),
       panelColor: this.readerPanelColor(),
       panelBorderColor: this.readerPanelBorderColor(),
@@ -10109,10 +10117,10 @@ struct ReadBookPage {
         Column() {
           Text('预缓存设置')
             .fontSize(AppFontSize.BODY_LARGE)
-            .fontColor(this.getTextColor())
+            .fontColor(this.readerPanelTextColor())
           Text('阅读时提前缓存后续章节')
             .fontSize(AppFontSize.CAPTION)
-            .fontColor(this.getSubTextColor())
+            .fontColor(this.readerPanelSubTextColor())
             .margin({ top: AppSpacing.XS })
         }
         .layoutWeight(1)

@@ -209,9 +209,8 @@ export class ThemeRuntime {
     if (!ThemeRuntime.glassEnabled()) {
       return color;
     }
-    const glass = ThemeRuntime.currentGlass();
-    const panelOpacity = darkMode ? glass.darkTintOpacity : glass.lightTintOpacity;
-    return `#${ThemeRuntime.opacityHex(Math.round(panelOpacity * 0.47))}${color.substring(1)}`;
+    // 菜单与沉浸面板统一为 50% 底色。
+    return `#80${color.substring(1)}`;
   }
 
   static glassBorderColor(darkMode: boolean, surface: string = 'panel'): string {
