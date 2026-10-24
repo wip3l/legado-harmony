@@ -1,5 +1,5 @@
 import { abilityDelegatorRegistry } from '@kit.TestKit';
-import { ComicColorComposite, ComicColorPixels } from '@legado/aiengine';
+import { ComicColorComposite, ComicColorPixels, ComicColorSize } from '@legado/aiengine';
 
 /** Compare every channel with the existing ArkTS formula, including padding, alpha and subarray offsets. */
 export async function verifyComicComposite(): Promise<void> {
@@ -44,4 +44,33 @@ export async function verifyComicComposite(): Promise<void> {
     tested += actual.length;
   }
   await abilityDelegatorRegistry.getAbilityDelegator().print(`[ComicComposite] cases=${shapes.length} channels=${tested} maxError=${maxError}/255; alpha, stride, offsets, borders and invalid buffers passed\n`);
+  let canvasValues = 0;
+  for (const shape of [[512,736,512,768], [736,512,768,512], [512,768,512,768], [33,65,64,96]]) {
+    const w = shape[0], h = shape[1], cw = shape[2], ch = shape[3];
+    const canvas: ComicColorSize = { width: cw, height: ch };
+    const input = new Float32Array(w * h * 5 + 7).subarray(7);
+    for (let i = 0; i < input.length; i++) input[i] = (i % 53) / 52;
+    const padded = ComicColorComposite.nativePad(input, w, h, canvas);
+    for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) for (let c = 0; c < 5; c++) {
+      const expected = y < h && x < w ? input[(y * w + x) * 5 + c] : c === 0 ? 1 : 0;
+      if (padded[(y * cw + x) * 5 + c] !== expected) throw new Error('Native padding changed a value');
+      canvasValues++;
+    }
+    const colors = new Float32Array(cw * ch * 3 + 9).subarray(9);
+    for (let i = 0; i < colors.length; i++) colors[i] = (i % 73) / 36 - 1;
+    const cropped = ComicColorComposite.nativeCrop(colors, w, h, canvas);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let c = 0; c < 3; c++) {
+      if (cropped[(y * w + x) * 3 + c] !== colors[(y * cw + x) * 3 + c]) throw new Error('Native crop changed a value');
+      canvasValues++;
+    }
+    for (const operation of ['pad', 'crop']) {
+      let rejected = false;
+      try {
+        if (operation === 'pad') ComicColorComposite.nativePad(input.subarray(1), w, h, canvas);
+        else ComicColorComposite.nativeCrop(colors.subarray(1), w, h, canvas);
+      } catch (_) { rejected = true; }
+      if (!rejected) throw new Error('Native canvas accepted a short buffer');
+    }
+  }
+  await abilityDelegatorRegistry.getAbilityDelegator().print(`[ComicCanvas] values=${canvasValues} maxError=0; portrait, landscape, padding, offsets and invalid buffers passed\n`);
 }

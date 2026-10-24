@@ -15,7 +15,10 @@ export async function verifyComicWarmup(): Promise<void> {
   const source = `${fixtureDir}/comic-color-visual-fixture.jpg`;
   if (!fs.accessSync(source)) throw new Error('Install the explicit comic-color-visual-fixture.jpg first');
   const config = `${fixtureDir}/comic-warmup-mode.txt`;
-  const mode = fs.accessSync(config) ? fs.readTextSync(config).trim() : 'smoke';
+  const parameters = abilityDelegatorRegistry.getArguments().parameters;
+  const mode = parameters['-s warmupMode'] || parameters['warmupMode'] ||
+    (fs.accessSync(config) ? fs.readTextSync(config).trim() : 'smoke');
+  if (!['smoke', 'cold', 'restart', 'soak'].includes(mode)) throw new Error('Invalid warmup test mode');
   const reportPath = `${fixtureDir}/comic-warmup-${mode}.txt`;
   let report = '';
   const log = async (line: string): Promise<void> => {
